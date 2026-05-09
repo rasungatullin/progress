@@ -4,9 +4,19 @@ import (
 	"context"
 
 	"github.com/rasungatullin/progress/internal/execution"
+	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/logging"
 	"github.com/spf13/cobra"
 )
+
+const defaultLaunchModel = "openai/gpt-5.4"
+
+type launchFlags struct {
+	directory string
+	runner    string
+	model     string
+	prompt    string
+}
 
 func newExecutionCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -27,12 +37,14 @@ func newExecutionCommand() *cobra.Command {
 }
 
 func newExecutionStartCommand() *cobra.Command {
-	return &cobra.Command{
+	flags := newLaunchFlags()
+
+	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Полный запуск контура исполнения",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			result, err := service.Start(context.Background(), execution.Invocation{})
+			result, err := service.Start(context.Background(), invocationFromLaunchFlags(flags))
 			if err != nil {
 				return err
 			}
@@ -41,6 +53,9 @@ func newExecutionStartCommand() *cobra.Command {
 			return nil
 		},
 	}
+
+	bindLaunchFlags(cmd, flags)
+	return cmd
 }
 
 func newExecutionDispatcherCommand() *cobra.Command {
@@ -129,29 +144,16 @@ func newExecutionWorkplaceCommand() *cobra.Command {
 }
 
 func newExecutionLaunchCommand() *cobra.Command {
-	return &cobra.Command{
+	flags := newLaunchFlags()
+
+	cmd := &cobra.Command{
 		Use:   "launch",
 		Short: "Пуск задачи после завершения аллокаций",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			in := execution.Invocation{}
+			in := invocationFromLaunchFlags(flags)
 
-			profile, err := service.ResolveProfile(context.Background(), in)
-			if err != nil {
-				return err
-			}
-
-			allocation, err := service.AllocateResources(context.Background(), in, profile)
-			if err != nil {
-				return err
-			}
-
-			workplace, err := service.PrepareWorkplace(context.Background(), in, profile, allocation)
-			if err != nil {
-				return err
-			}
-
-			result, err := service.Launch(context.Background(), in, profile, allocation, workplace)
+			result, err := service.LaunchDirect(context.Background(), in)
 			if err != nil {
 				return err
 			}
@@ -160,8 +162,38 @@ func newExecutionLaunchCommand() *cobra.Command {
 			return nil
 		},
 	}
+
+	bindLaunchFlags(cmd, flags)
+	return cmd
 }
 
 func newExecutionService(cmd *cobra.Command) *execution.Service {
 	return execution.NewService(logging.New(cmd.ErrOrStderr()))
+}
+
+func newLaunchFlags() *launchFlags {
+	return &launchFlags{
+		runner: launch.RunnerOpenCode,
+		model:  defaultLaunchModel,
+	}
+}
+
+func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
+	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
+	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
+	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
+	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
+	_ = cmd.MarkFlagRequired("dir")
+	_ = cmd.MarkFlagRequired("prompt")
+}
+
+func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
+	return execution.Invocation{
+		Launch: execution.LaunchSpec{
+			Directory: flags.directory,
+			Runner:    flags.runner,
+			Model:     flags.model,
+			Prompt:    flags.prompt,
+		},
+	}
 }

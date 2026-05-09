@@ -2,34 +2,22 @@ package execution
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"strings"
+
+	"github.com/rasungatullin/progress/internal/execution/dispatcher"
+	"github.com/rasungatullin/progress/internal/execution/launch"
+	"github.com/rasungatullin/progress/internal/execution/model"
+	"github.com/rasungatullin/progress/internal/execution/profile"
+	"github.com/rasungatullin/progress/internal/execution/resources"
+	"github.com/rasungatullin/progress/internal/execution/workplace"
 )
 
-type Invocation struct {
-	Task string
-}
-
-type Profile struct {
-	Name string
-	Mode string
-}
-
-type Allocation struct {
-	Resource string
-	Reserved bool
-}
-
-type Workplace struct {
-	Name  string
-	Ready bool
-}
-
-type LaunchResult struct {
-	Status  string
-	Summary string
-}
+type Invocation = model.Invocation
+type LaunchSpec = model.LaunchSpec
+type Profile = model.Profile
+type Allocation = model.Allocation
+type Workplace = model.Workplace
+type LaunchResult = model.LaunchResult
 
 type ProfileResolver interface {
 	Resolve(context.Context, Invocation) (Profile, error)
@@ -53,43 +41,39 @@ type Service struct {
 	resources  ResourceProvider
 	workplaces WorkplaceManager
 	launcher   Launcher
+	dispatcher *dispatcher.Service
 }
 
 func NewService(logger *log.Logger) *Service {
+	profiles := profile.NewService()
+	resources := resources.NewService()
+	workplaces := workplace.NewService()
+	launcher := launch.NewService()
+
 	return &Service{
 		logger:     logger,
-		profiles:   stubProfileResolver{},
-		resources:  stubResourceProvider{},
-		workplaces: stubWorkplaceManager{},
-		launcher:   stubLauncher{},
+		profiles:   profiles,
+		resources:  resources,
+		workplaces: workplaces,
+		launcher:   launcher,
+		dispatcher: dispatcher.NewService(logger),
 	}
 }
 
 func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error) {
-	s.logger.Printf("Контур исполнения принят к пуску: задача=%q", in.Task)
-
-	profile, err := s.ResolveProfile(ctx, in)
-	if err != nil {
-		return LaunchResult{}, err
-	}
-
-	allocation, err := s.AllocateResources(ctx, in, profile)
-	if err != nil {
-		return LaunchResult{}, err
-	}
-
-	workplace, err := s.PrepareWorkplace(ctx, in, profile, allocation)
-	if err != nil {
-		return LaunchResult{}, err
-	}
-
-	return s.Launch(ctx, in, profile, allocation, workplace)
+	return s.dispatcher.Run(ctx, in, s)
 }
 
-func (s *Service) Dispatch(_ context.Context, in Invocation) []string {
-	stages := []string{"profile", "resources", "workplace", "launch"}
-	s.logger.Printf("Диспетчер сформировал маршрут: задача=%q стадии=%s", in.Task, strings.Join(stages, " -> "))
-	return stages
+func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
+	return s.dispatcher.Plan(ctx, in)
+}
+
+func (s *Service) LaunchDirect(ctx context.Context, in Invocation) (LaunchResult, error) {
+	profile := Profile{Name: "direct-launch", Mode: "manual"}
+	allocation := Allocation{Resource: "external-launch", Reserved: true}
+	workplace := Workplace{Name: in.Launch.Directory, Ready: true}
+
+	return s.Launch(ctx, in, profile, allocation, workplace)
 }
 
 func (s *Service) ResolveProfile(ctx context.Context, in Invocation) (Profile, error) {
@@ -123,48 +107,13 @@ func (s *Service) PrepareWorkplace(ctx context.Context, in Invocation, profile P
 }
 
 func (s *Service) Launch(ctx context.Context, in Invocation, profile Profile, allocation Allocation, workplace Workplace) (LaunchResult, error) {
+	s.logger.Printf("Запуск выполнения начат: каталог=%q runner=%q модель=%q", in.Launch.Directory, in.Launch.Runner, in.Launch.Model)
+
 	result, err := s.launcher.Launch(ctx, in, profile, allocation, workplace)
 	if err != nil {
 		return LaunchResult{}, err
 	}
 
-	s.logger.Printf("Пуск задачи завершён: задача=%q состояние=%q", in.Task, result.Status)
+	s.logger.Printf("Запуск выполнения завершён: каталог=%q состояние=%q", in.Launch.Directory, result.Status)
 	return result, nil
-}
-
-type stubProfileResolver struct{}
-
-func (stubProfileResolver) Resolve(_ context.Context, in Invocation) (Profile, error) {
-	return Profile{Name: "local-default", Mode: "manual"}, nil
-}
-
-type stubResourceProvider struct{}
-
-func (stubResourceProvider) Allocate(_ context.Context, _ Invocation, profile Profile) (Allocation, error) {
-	return Allocation{Resource: "local-slot:" + profile.Name, Reserved: true}, nil
-}
-
-type stubWorkplaceManager struct{}
-
-func (stubWorkplaceManager) Prepare(_ context.Context, in Invocation, profile Profile, _ Allocation) (Workplace, error) {
-	name := fmt.Sprintf("workspace/%s/%s", profile.Name, sanitizeName(in.Task))
-	return Workplace{Name: name, Ready: true}, nil
-}
-
-type stubLauncher struct{}
-
-func (stubLauncher) Launch(_ context.Context, in Invocation, profile Profile, allocation Allocation, workplace Workplace) (LaunchResult, error) {
-	summary := fmt.Sprintf("profile=%s resource=%s workplace=%s", profile.Name, allocation.Resource, workplace.Name)
-	return LaunchResult{Status: "completed", Summary: summary}, nil
-}
-
-func sanitizeName(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, " ", "-")
-	value = strings.ReplaceAll(value, "/", "-")
-	if value == "" {
-		return "unnamed"
-	}
-
-	return value
 }
