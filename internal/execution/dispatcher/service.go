@@ -47,5 +47,9 @@ func (s *Service) Run(ctx context.Context, in model.Invocation, exec executor) (
 		return model.LaunchResult{}, err
 	}
 
+	if strings.TrimSpace(in.Launch.Directory) == "" {
+		in.Launch.Directory = workplace.Name
+	}
+
 	return exec.Launch(ctx, in, profile, allocation, workplace)
 }

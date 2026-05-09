@@ -14,6 +14,7 @@ import (
 
 type Invocation = model.Invocation
 type LaunchSpec = model.LaunchSpec
+type WorkplaceSpec = model.WorkplaceSpec
 type Profile = model.Profile
 type Allocation = model.Allocation
 type Workplace = model.Workplace

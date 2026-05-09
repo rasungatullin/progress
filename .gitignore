@@ -59,3 +59,6 @@ debug/
 # Runtime
 *.pid
 *.pid.lock
+
+# Progress local workplaces
+.progress/

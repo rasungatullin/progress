@@ -13,6 +13,7 @@ const defaultLaunchModel = "openai/gpt-5.4"
 
 type launchFlags struct {
 	directory string
+	name      string
 	runner    string
 	model     string
 	prompt    string
@@ -54,7 +55,7 @@ func newExecutionStartCommand() *cobra.Command {
 		},
 	}
 
-	bindLaunchFlags(cmd, flags)
+	bindStartFlags(cmd, flags)
 	return cmd
 }
 
@@ -115,24 +116,16 @@ func newExecutionResourcesCommand() *cobra.Command {
 }
 
 func newExecutionWorkplaceCommand() *cobra.Command {
-	return &cobra.Command{
+	flags := &launchFlags{}
+
+	cmd := &cobra.Command{
 		Use:   "workplace",
 		Short: "Подготовка исполнительного рабочего места",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			in := execution.Invocation{}
+			in := invocationFromWorkplaceFlags(flags)
 
-			profile, err := service.ResolveProfile(context.Background(), in)
-			if err != nil {
-				return err
-			}
-
-			allocation, err := service.AllocateResources(context.Background(), in, profile)
-			if err != nil {
-				return err
-			}
-
-			workplace, err := service.PrepareWorkplace(context.Background(), in, profile, allocation)
+			workplace, err := service.PrepareWorkplace(context.Background(), in, execution.Profile{}, execution.Allocation{})
 			if err != nil {
 				return err
 			}
@@ -141,6 +134,9 @@ func newExecutionWorkplaceCommand() *cobra.Command {
 			return nil
 		},
 	}
+
+	bindWorkplaceFlags(cmd, flags)
+	return cmd
 }
 
 func newExecutionLaunchCommand() *cobra.Command {
@@ -187,13 +183,35 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 	_ = cmd.MarkFlagRequired("prompt")
 }
 
+func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
+	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
+	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
+	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
+	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
+	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
+	_ = cmd.MarkFlagRequired("prompt")
+}
+
+func bindWorkplaceFlags(cmd *cobra.Command, flags *launchFlags) {
+	cmd.Flags().StringVar(&flags.directory, "dir", "", "Существующий рабочий каталог")
+	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
+}
+
 func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 	return execution.Invocation{
+		Workplace: execution.WorkplaceSpec{Name: flags.name},
 		Launch: execution.LaunchSpec{
 			Directory: flags.directory,
 			Runner:    flags.runner,
 			Model:     flags.model,
 			Prompt:    flags.prompt,
 		},
+	}
+}
+
+func invocationFromWorkplaceFlags(flags *launchFlags) execution.Invocation {
+	return execution.Invocation{
+		Workplace: execution.WorkplaceSpec{Name: flags.name},
+		Launch:    execution.LaunchSpec{Directory: flags.directory},
 	}
 }
