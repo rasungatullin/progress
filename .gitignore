@@ -1,0 +1,61 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Go
+bin/
+dist/
+build/
+coverage.out
+*.test
+*.prof
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Workspace / dependencies
+vendor/
+go.work.sum
+
+# Logs
+*.log
+logs/
+
+# Environment / local config
+.env
+.env.*
+*.local
+config.local.*
+.local/
+
+# Node / frontend tooling
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+
+# Python tooling
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Temporary / cache / artifacts
+tmp/
+temp/
+.cache/
+artifacts/
+out/
+release/
+debug/
+
+# Runtime
+*.pid
+*.pid.lock
