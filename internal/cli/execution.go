@@ -12,12 +12,14 @@ import (
 const defaultLaunchModel = "openai/gpt-5.4"
 
 type launchFlags struct {
-	directory string
-	name      string
-	profile   string
-	runner    string
-	model     string
-	prompt    string
+	directory     string
+	name          string
+	profile       string
+	runner        string
+	model         string
+	prompt        string
+	commitPush    bool
+	commitMessage string
 }
 
 func newExecutionCommand() *cobra.Command {
@@ -192,6 +194,8 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
 	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
+	cmd.Flags().BoolVar(&flags.commitPush, "commit-push", false, "После успешного запуска выполнить git commit и git push")
+	cmd.Flags().StringVar(&flags.commitMessage, "commit-message", launch.DefaultCommitMessage, "Текст git commit при использовании --commit-push")
 	_ = cmd.MarkFlagRequired("dir")
 	_ = cmd.MarkFlagRequired("prompt")
 }
@@ -220,10 +224,12 @@ func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 		Profile:   flags.profile,
 		Workplace: execution.WorkplaceSpec{Name: flags.name},
 		Launch: execution.LaunchSpec{
-			Directory: flags.directory,
-			Runner:    flags.runner,
-			Model:     flags.model,
-			Prompt:    flags.prompt,
+			Directory:     flags.directory,
+			Runner:        flags.runner,
+			Model:         flags.model,
+			Prompt:        flags.prompt,
+			CommitPush:    flags.commitPush,
+			CommitMessage: flags.commitMessage,
 		},
 	}
 }

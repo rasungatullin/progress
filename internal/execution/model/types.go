@@ -1,10 +1,12 @@
 package model
 
 type LaunchSpec struct {
-	Directory string
-	Runner    string
-	Model     string
-	Prompt    string
+	Directory     string
+	Runner        string
+	Model         string
+	Prompt        string
+	CommitPush    bool
+	CommitMessage string
 }
 
 type WorkplaceSpec struct {
