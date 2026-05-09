@@ -7,9 +7,14 @@ type LaunchSpec struct {
 	Prompt    string
 }
 
+type WorkplaceSpec struct {
+	Name string
+}
+
 type Invocation struct {
-	Task   string
-	Launch LaunchSpec
+	Task      string
+	Workplace WorkplaceSpec
+	Launch    LaunchSpec
 }
 
 type Profile struct {
