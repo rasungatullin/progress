@@ -13,13 +13,15 @@ type WorkplaceSpec struct {
 
 type Invocation struct {
 	Task      string
+	Profile   string
 	Workplace WorkplaceSpec
 	Launch    LaunchSpec
 }
 
 type Profile struct {
-	Name string
-	Mode string
+	Name  string
+	Mode  string
+	Model string
 }
 
 type Allocation struct {

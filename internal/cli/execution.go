@@ -14,6 +14,7 @@ const defaultLaunchModel = "openai/gpt-5.4"
 type launchFlags struct {
 	directory string
 	name      string
+	profile   string
 	runner    string
 	model     string
 	prompt    string
@@ -38,7 +39,7 @@ func newExecutionCommand() *cobra.Command {
 }
 
 func newExecutionStartCommand() *cobra.Command {
-	flags := newLaunchFlags()
+	flags := newStartFlags()
 
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -75,20 +76,25 @@ func newExecutionDispatcherCommand() *cobra.Command {
 }
 
 func newExecutionProfileCommand() *cobra.Command {
-	return &cobra.Command{
+	flags := &launchFlags{}
+
+	cmd := &cobra.Command{
 		Use:   "profile",
 		Short: "Выбор исполнительного профиля",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			profile, err := service.ResolveProfile(context.Background(), execution.Invocation{})
+			profile, err := service.ResolveProfile(context.Background(), invocationFromProfileFlags(flags))
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("profile=%s\nmode=%s\n", profile.Name, profile.Mode)
+			cmd.Printf("profile=%s\nmode=%s\nmodel=%s\n", profile.Name, profile.Mode, profile.Model)
 			return nil
 		},
 	}
+
+	bindProfileFlags(cmd, flags)
+	return cmd
 }
 
 func newExecutionResourcesCommand() *cobra.Command {
@@ -174,6 +180,13 @@ func newLaunchFlags() *launchFlags {
 	}
 }
 
+func newStartFlags() *launchFlags {
+	return &launchFlags{
+		profile: "default",
+		runner:  launch.RunnerOpenCode,
+	}
+}
+
 func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
@@ -186,10 +199,15 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
 	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
+	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Тип исполнительного профиля")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
 	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
 	_ = cmd.MarkFlagRequired("prompt")
+}
+
+func bindProfileFlags(cmd *cobra.Command, flags *launchFlags) {
+	cmd.Flags().StringVar(&flags.profile, "profile", "default", "Тип исполнительного профиля")
 }
 
 func bindWorkplaceFlags(cmd *cobra.Command, flags *launchFlags) {
@@ -199,6 +217,7 @@ func bindWorkplaceFlags(cmd *cobra.Command, flags *launchFlags) {
 
 func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 	return execution.Invocation{
+		Profile:   flags.profile,
 		Workplace: execution.WorkplaceSpec{Name: flags.name},
 		Launch: execution.LaunchSpec{
 			Directory: flags.directory,
@@ -207,6 +226,10 @@ func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 			Prompt:    flags.prompt,
 		},
 	}
+}
+
+func invocationFromProfileFlags(flags *launchFlags) execution.Invocation {
+	return execution.Invocation{Profile: flags.profile}
 }
 
 func invocationFromWorkplaceFlags(flags *launchFlags) execution.Invocation {
