@@ -23,6 +23,11 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 			"default": {
 				"description": "Cloud profile"
 			},
+			"coder": {
+				"description": "Coder profile",
+				"model": "openai/gpt-5.3-codex-spark",
+				"commit-push": true
+			},
 			"local": {
 				"description": "Local profile",
 				"model": "ollama/qwen3.5:2b"
@@ -67,6 +72,24 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	}
 	if localProfile.CommitPush {
 		t.Fatal("local profile commit-push must inherit false")
+	}
+
+	coderProfile, err := service.Resolve(context.Background(), model.Invocation{Profile: "coder"})
+	if err != nil {
+		t.Fatalf("resolve coder profile: %v", err)
+	}
+
+	if coderProfile.Description != "Coder profile" {
+		t.Fatalf("unexpected coder description: %q", coderProfile.Description)
+	}
+	if coderProfile.Mode != "manual" {
+		t.Fatalf("unexpected coder mode: %q", coderProfile.Mode)
+	}
+	if coderProfile.Model != "openai/gpt-5.3-codex-spark" {
+		t.Fatalf("unexpected coder model: %q", coderProfile.Model)
+	}
+	if !coderProfile.CommitPush {
+		t.Fatal("coder profile commit-push must override defaults to true")
 	}
 }
 
