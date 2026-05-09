@@ -90,7 +90,7 @@ func newExecutionProfileCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("profile=%s\nmode=%s\nmodel=%s\n", profile.Name, profile.Mode, profile.Model)
+			cmd.Printf("profile=%s\nmode=%s\nmodel=%s\ncommit-push=%t\n", profile.Name, profile.Mode, profile.Model, profile.CommitPush)
 			return nil
 		},
 	}

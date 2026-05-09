@@ -35,6 +35,43 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	}
 }
 
+func TestLaunchCommitPushEnabledByProfile(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain":
+				return "", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfileWithCommitPush(true), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !strings.Contains(result.Summary, "git=no-changes branch=feature/test") {
+		t.Fatalf("unexpected summary: %q", result.Summary)
+	}
+
+	expectedCalls := [][]string{{"rev-parse", "--is-inside-work-tree"}, {"branch", "--show-current"}, {"status", "--porcelain"}}
+	if !reflect.DeepEqual(calls, expectedCalls) {
+		t.Fatalf("unexpected git calls: %#v", calls)
+	}
+}
+
 func TestLaunchCommitPushNoChanges(t *testing.T) {
 	t.Parallel()
 
@@ -208,7 +245,11 @@ func validInvocation(t *testing.T, commitPush bool) model.Invocation {
 }
 
 func validProfile() model.Profile {
-	return model.Profile{Name: "default", Model: "openai/gpt-5.4"}
+	return validProfileWithCommitPush(false)
+}
+
+func validProfileWithCommitPush(commitPush bool) model.Profile {
+	return model.Profile{Name: "default", Model: "openai/gpt-5.4", CommitPush: commitPush}
 }
 
 func validAllocation() model.Allocation {

@@ -25,9 +25,9 @@ func NewService() *Service {
 func (s *Service) Resolve(_ context.Context, in model.Invocation) (model.Profile, error) {
 	switch strings.TrimSpace(in.Profile) {
 	case "", ProfileDefault:
-		return model.Profile{Name: ProfileDefault, Mode: "manual", Model: defaultModel}, nil
+		return model.Profile{Name: ProfileDefault, Mode: "manual", Model: defaultModel, CommitPush: false}, nil
 	case ProfileLocal:
-		return model.Profile{Name: ProfileLocal, Mode: "manual", Model: localModel}, nil
+		return model.Profile{Name: ProfileLocal, Mode: "manual", Model: localModel, CommitPush: false}, nil
 	default:
 		return model.Profile{}, fmt.Errorf("unknown execution profile: %s", in.Profile)
 	}

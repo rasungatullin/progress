@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution/launch"
@@ -64,5 +66,25 @@ func TestNewLaunchFlagsDefaults(t *testing.T) {
 	}
 	if invocation.Launch.CommitMessage != launch.DefaultCommitMessage {
 		t.Fatalf("unexpected default commit message: %q", invocation.Launch.CommitMessage)
+	}
+}
+
+func TestExecutionProfileCommandPrintsCommitPush(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "profile", "--profile", "default"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute profile command: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "commit-push=false\n") {
+		t.Fatalf("profile output must include commit-push flag, got %q", output)
 	}
 }
