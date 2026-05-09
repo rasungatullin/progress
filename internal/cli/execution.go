@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/execution/launch"
@@ -53,7 +54,7 @@ func newExecutionStartCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("state=%s\nsummary=%s\n", result.Status, result.Summary)
+			printLaunchResult(cmd, result)
 			return nil
 		},
 	}
@@ -162,7 +163,7 @@ func newExecutionLaunchCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("state=%s\nsummary=%s\n", result.Status, result.Summary)
+			printLaunchResult(cmd, result)
 			return nil
 		},
 	}
@@ -242,5 +243,23 @@ func invocationFromWorkplaceFlags(flags *launchFlags) execution.Invocation {
 	return execution.Invocation{
 		Workplace: execution.WorkplaceSpec{Name: flags.name},
 		Launch:    execution.LaunchSpec{Directory: flags.directory},
+	}
+}
+
+func printLaunchResult(cmd *cobra.Command, result execution.LaunchResult) {
+	cmd.Printf("state=%s\nsummary=%s\n", result.Status, result.Summary)
+	printLaunchResultSection(cmd, "critical-remark", result.CriticalRemarks)
+	printLaunchResultSection(cmd, "minor-remark", result.MinorRemarks)
+	printLaunchResultSection(cmd, "question", result.Questions)
+}
+
+func printLaunchResultSection(cmd *cobra.Command, key string, values []string) {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		cmd.Printf("%s=%s\n", key, value)
 	}
 }

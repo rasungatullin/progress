@@ -2,6 +2,7 @@ package launch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,10 @@ import (
 const RunnerOpenCode = "opencode"
 
 const DefaultCommitMessage = "Apply task result"
+
+const structuredOutputStart = "<progress-structured-output>"
+
+const structuredOutputEnd = "</progress-structured-output>"
 
 type Service struct {
 	runRunner    func(context.Context, model.Invocation) (string, error)
@@ -37,6 +42,8 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		return model.LaunchResult{}, err
 	}
 
+	plainRunnerOutput, structuredOutput, hasStructuredOutput := parseStructuredOutput(runnerOutput)
+
 	commitPush := in.Launch.CommitPush || profile.CommitPush
 
 	gitSummary := "git=disabled"
@@ -59,7 +66,60 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		gitSummary,
 	)
 
-	return model.LaunchResult{Status: "completed", Summary: summary + "\n" + strings.TrimSpace(runnerOutput)}, nil
+	result := model.LaunchResult{Status: "completed", Summary: joinSummary(summary, plainRunnerOutput)}
+	if hasStructuredOutput {
+		result.CriticalRemarks = structuredOutput.CriticalRemarks
+		result.MinorRemarks = structuredOutput.MinorRemarks
+		result.Questions = structuredOutput.Questions
+	}
+
+	return result, nil
+}
+
+type structuredOutput struct {
+	CriticalRemarks []string `json:"critical_remarks"`
+	MinorRemarks    []string `json:"minor_remarks"`
+	Questions       []string `json:"questions"`
+}
+
+func parseStructuredOutput(output string) (string, structuredOutput, bool) {
+	start := strings.Index(output, structuredOutputStart)
+	if start == -1 {
+		return output, structuredOutput{}, false
+	}
+
+	end := strings.Index(output[start+len(structuredOutputStart):], structuredOutputEnd)
+	if end == -1 {
+		return output, structuredOutput{}, false
+	}
+
+	end += start + len(structuredOutputStart)
+	rawPayload := strings.TrimSpace(output[start+len(structuredOutputStart) : end])
+	if rawPayload == "" {
+		return output, structuredOutput{}, false
+	}
+
+	var parsed structuredOutput
+	if err := json.Unmarshal([]byte(rawPayload), &parsed); err != nil {
+		return output, structuredOutput{}, false
+	}
+
+	plainOutput := strings.TrimSpace(output[:start] + output[end+len(structuredOutputEnd):])
+	return plainOutput, parsed, true
+}
+
+func joinSummary(parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		filtered = append(filtered, part)
+	}
+
+	return strings.Join(filtered, "\n")
 }
 
 func validateLaunch(in model.Invocation, workplace model.Workplace) error {

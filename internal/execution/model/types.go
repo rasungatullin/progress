@@ -57,6 +57,9 @@ type Workplace struct {
 }
 
 type LaunchResult struct {
-	Status  string
-	Summary string
+	Status          string
+	Summary         string
+	CriticalRemarks []string
+	MinorRemarks    []string
+	Questions       []string
 }

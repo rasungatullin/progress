@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/spf13/cobra"
 )
@@ -92,5 +93,59 @@ func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
 	}
 	if !strings.Contains(output, "commit-push=false\n") {
 		t.Fatalf("profile output must include commit-push flag, got %q", output)
+	}
+}
+
+func TestPrintLaunchResultWithoutStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "launch"}
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+
+	printLaunchResult(cmd, execution.LaunchResult{
+		Status:  "completed",
+		Summary: "profile=default git=disabled\nApplied the requested changes.",
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, "state=completed\n") {
+		t.Fatalf("output must include state: %q", output)
+	}
+	if !strings.Contains(output, "summary=profile=default git=disabled\nApplied the requested changes.\n") {
+		t.Fatalf("output must include summary: %q", output)
+	}
+	if strings.Contains(output, "critical-remark=") || strings.Contains(output, "minor-remark=") || strings.Contains(output, "question=") {
+		t.Fatalf("output must omit empty structured sections: %q", output)
+	}
+}
+
+func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "launch"}
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+
+	printLaunchResult(cmd, execution.LaunchResult{
+		Status:          "completed",
+		Summary:         "profile=default git=disabled\nApplied the requested changes.",
+		CriticalRemarks: []string{"missing rollback plan", "   "},
+		MinorRemarks:    []string{"consider renaming helper"},
+		Questions:       []string{"should we add an integration test?"},
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, "critical-remark=missing rollback plan\n") {
+		t.Fatalf("output must include critical remarks: %q", output)
+	}
+	if !strings.Contains(output, "minor-remark=consider renaming helper\n") {
+		t.Fatalf("output must include minor remarks: %q", output)
+	}
+	if !strings.Contains(output, "question=should we add an integration test?\n") {
+		t.Fatalf("output must include questions: %q", output)
+	}
+	if strings.Contains(output, "critical-remark=   ") {
+		t.Fatalf("output must skip blank structured values: %q", output)
 	}
 }
