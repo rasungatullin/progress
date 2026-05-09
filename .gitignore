@@ -60,5 +60,8 @@ debug/
 *.pid
 *.pid.lock
 
-# Progress local workplaces
-.progress/
+# Progress local files
+.progress/*
+.progress/workplaces/
+!.progress/execution/
+!.progress/execution/profiles.json
