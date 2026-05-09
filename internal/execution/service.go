@@ -70,7 +70,7 @@ func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
 }
 
 func (s *Service) LaunchDirect(ctx context.Context, in Invocation) (LaunchResult, error) {
-	profile := Profile{Name: "direct-launch", Mode: "manual", Model: in.Launch.Model}
+	profile := Profile{Name: "direct-launch", Mode: "manual", Model: in.Launch.Model, CommitPush: false}
 	allocation := Allocation{Resource: "external-launch", Reserved: true}
 	workplace := Workplace{Name: in.Launch.Directory, Ready: true}
 

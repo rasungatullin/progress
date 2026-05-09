@@ -21,9 +21,10 @@ type Invocation struct {
 }
 
 type Profile struct {
-	Name  string
-	Mode  string
-	Model string
+	Name       string
+	Mode       string
+	Model      string
+	CommitPush bool
 }
 
 type Allocation struct {

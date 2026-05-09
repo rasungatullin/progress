@@ -37,8 +37,10 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		return model.LaunchResult{}, err
 	}
 
+	commitPush := in.Launch.CommitPush || profile.CommitPush
+
 	gitSummary := "git=disabled"
-	if in.Launch.CommitPush {
+	if commitPush {
 		result, err := s.commitAndPush(ctx, in)
 		if err != nil {
 			return model.LaunchResult{}, err
