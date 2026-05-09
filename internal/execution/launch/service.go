@@ -13,10 +13,18 @@ import (
 
 const RunnerOpenCode = "opencode"
 
-type Service struct{}
+const DefaultCommitMessage = "Apply task result"
+
+type Service struct {
+	runRunner    func(context.Context, model.Invocation) (string, error)
+	runGitOutput func(context.Context, string, ...string) (string, error)
+}
 
 func NewService() *Service {
-	return &Service{}
+	return &Service{
+		runRunner:    runRunner,
+		runGitOutput: runGitOutput,
+	}
 }
 
 func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model.Profile, allocation model.Allocation, workplace model.Workplace) (model.LaunchResult, error) {
@@ -24,31 +32,32 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		return model.LaunchResult{}, err
 	}
 
-	args := []string{
-		"run",
-		"--dir", in.Launch.Directory,
-		"--model", in.Launch.Model,
-		in.Launch.Prompt,
+	runnerOutput, err := s.runRunner(ctx, in)
+	if err != nil {
+		return model.LaunchResult{}, err
 	}
 
-	cmd := exec.CommandContext(ctx, in.Launch.Runner, args...)
-	cmd.Dir = in.Launch.Directory
-	cmd.Env = sanitizedEnv()
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return model.LaunchResult{}, fmt.Errorf("launch runner failed: %w\n%s", err, strings.TrimSpace(string(output)))
+	gitSummary := "git=disabled"
+	if in.Launch.CommitPush {
+		result, err := s.commitAndPush(ctx, in)
+		if err != nil {
+			return model.LaunchResult{}, err
+		}
+
+		gitSummary = result.summary()
 	}
 
 	summary := fmt.Sprintf(
-		"profile=%s resource=%s workplace=%s runner=%s model=%s",
+		"profile=%s resource=%s workplace=%s runner=%s model=%s %s",
 		profile.Name,
 		allocation.Resource,
 		workplace.Name,
 		in.Launch.Runner,
 		in.Launch.Model,
+		gitSummary,
 	)
 
-	return model.LaunchResult{Status: "completed", Summary: summary + "\n" + strings.TrimSpace(string(output))}, nil
+	return model.LaunchResult{Status: "completed", Summary: summary + "\n" + strings.TrimSpace(runnerOutput)}, nil
 }
 
 func validateLaunch(in model.Invocation, workplace model.Workplace) error {
@@ -82,6 +91,157 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 	}
 
 	return nil
+}
+
+type gitResult struct {
+	status string
+	branch string
+}
+
+func (r gitResult) summary() string {
+	if r.branch == "" {
+		return fmt.Sprintf("git=%s", r.status)
+	}
+
+	return fmt.Sprintf("git=%s branch=%s", r.status, r.branch)
+}
+
+func (s *Service) commitAndPush(ctx context.Context, in model.Invocation) (gitResult, error) {
+	if !s.isGitRepository(ctx, in.Launch.Directory) {
+		return gitResult{}, fmt.Errorf("launch directory is not a git repository")
+	}
+
+	branch, err := s.currentBranch(ctx, in.Launch.Directory)
+	if err != nil {
+		return gitResult{}, err
+	}
+
+	hasChanges, err := s.hasChanges(ctx, in.Launch.Directory)
+	if err != nil {
+		return gitResult{}, err
+	}
+
+	if !hasChanges {
+		return gitResult{status: "no-changes", branch: branch}, nil
+	}
+
+	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "add", "-A"); err != nil {
+		return gitResult{}, fmt.Errorf("git add failed: %w", err)
+	}
+
+	hasChanges, err = s.hasChanges(ctx, in.Launch.Directory)
+	if err != nil {
+		return gitResult{}, err
+	}
+
+	if !hasChanges {
+		return gitResult{status: "no-changes", branch: branch}, nil
+	}
+
+	commitMessage := strings.TrimSpace(in.Launch.CommitMessage)
+	if commitMessage == "" {
+		commitMessage = DefaultCommitMessage
+	}
+
+	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "commit", "-m", commitMessage); err != nil {
+		if isNoChangesAfterAddError(err) {
+			return gitResult{status: "no-changes", branch: branch}, nil
+		}
+
+		return gitResult{}, fmt.Errorf("git commit failed: %w", err)
+	}
+
+	hasUpstream, err := s.hasUpstream(ctx, in.Launch.Directory, branch)
+	if err != nil {
+		return gitResult{}, err
+	}
+
+	pushArgs := []string{"push"}
+	if !hasUpstream {
+		pushArgs = append(pushArgs, "-u", "origin", branch)
+	}
+
+	if _, err := s.runGitOutput(ctx, in.Launch.Directory, pushArgs...); err != nil {
+		return gitResult{}, fmt.Errorf("git push failed: %w", err)
+	}
+
+	return gitResult{status: "committed+pushed", branch: branch}, nil
+}
+
+func (s *Service) isGitRepository(ctx context.Context, dir string) bool {
+	output, err := s.runGitOutput(ctx, dir, "rev-parse", "--is-inside-work-tree")
+	if err != nil {
+		return false
+	}
+
+	return strings.TrimSpace(output) == "true"
+}
+
+func (s *Service) currentBranch(ctx context.Context, dir string) (string, error) {
+	output, err := s.runGitOutput(ctx, dir, "branch", "--show-current")
+	if err != nil {
+		return "", fmt.Errorf("resolve current git branch: %w", err)
+	}
+
+	branch := strings.TrimSpace(output)
+	if branch == "" {
+		return "", fmt.Errorf("resolve current git branch: branch is empty")
+	}
+
+	return branch, nil
+}
+
+func (s *Service) hasChanges(ctx context.Context, dir string) (bool, error) {
+	output, err := s.runGitOutput(ctx, dir, "status", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("inspect git changes: %w", err)
+	}
+
+	return strings.TrimSpace(output) != "", nil
+}
+
+func (s *Service) hasUpstream(ctx context.Context, dir, branch string) (bool, error) {
+	output, err := s.runGitOutput(ctx, dir, "for-each-ref", "--format=%(upstream:short)", "refs/heads/"+branch)
+	if err != nil {
+		return false, fmt.Errorf("resolve git upstream: %w", err)
+	}
+
+	return strings.TrimSpace(output) != "", nil
+}
+
+func isNoChangesAfterAddError(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "nothing to commit") || strings.Contains(message, "no changes added to commit")
+}
+
+func runRunner(ctx context.Context, in model.Invocation) (string, error) {
+	args := []string{
+		"run",
+		"--dir", in.Launch.Directory,
+		"--model", in.Launch.Model,
+		in.Launch.Prompt,
+	}
+
+	cmd := exec.CommandContext(ctx, in.Launch.Runner, args...)
+	cmd.Dir = in.Launch.Directory
+	cmd.Env = sanitizedEnv()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("launch runner failed: %w\n%s", err, strings.TrimSpace(string(output)))
+	}
+
+	return string(output), nil
+}
+
+func runGitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w\n%s", err, strings.TrimSpace(string(output)))
+	}
+
+	return string(output), nil
 }
 
 func sanitizedEnv() []string {

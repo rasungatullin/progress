@@ -47,6 +47,21 @@ CLI рассматривается как основной ручной инте
 
 Назначение команды состоит в изолированной проверке непосредственного запуска задачи без повторного прохождения стадий выбора профиля и резервирования ресурсов.
 
+В текущей реализации команда принимает `--dir`, `--runner`, `--model`, `--prompt`, а также опциональные флаги `--commit-push` и `--commit-message`.
+
+Если `--commit-push` не задан, команда выполняет только runner и возвращает его итоговый summary.
+
+Если `--commit-push` задан, то после успешного завершения runner команда:
+
+1. проверяет, что рабочий каталог является git-репозиторием;
+2. определяет текущую активную ветку;
+3. проверяет наличие staged, unstaged и untracked изменений;
+4. при наличии изменений выполняет `git add -A`, `git commit -m <message>` и `git push`;
+5. если upstream у текущей ветки ещё не настроен, выполняет `git push -u origin <branch>`;
+6. если изменений нет, корректно пропускает commit и push.
+
+По умолчанию для `--commit-message` используется нейтральное значение `Apply task result`.
+
 ## 4. Схема дерева команд
 
 ```mermaid
@@ -134,8 +149,35 @@ progress execution workplace --name feature-brief
 flowchart LR
     A[progress execution launch] --> B[Проверка готовности]
     B --> C[Пуск задачи]
-    C --> D[Состояние запуска]
+    C --> D{commit-push включён?}
+    D -->|нет| E[Состояние запуска]
+    D -->|да| F[Git commit и push при наличии изменений]
+    F --> E[Состояние запуска]
 ```
+
+Пример вызова только runner:
+
+```bash
+progress execution launch --dir .progress/workplaces/feature-brief --prompt "Подготовь изменения"
+```
+
+Пример вызова runner с последующим commit и push:
+
+```bash
+progress execution launch \
+  --dir .progress/workplaces/feature-brief \
+  --prompt "Подготовь изменения" \
+  --commit-push \
+  --commit-message "Apply task result"
+```
+
+Ожидаемое поведение:
+
+1. без `--commit-push` выполняется только runner;
+2. с `--commit-push` git-операции запускаются только после успешного завершения runner;
+3. при ошибке runner git-операции не выполняются;
+4. при отсутствии изменений commit и push пропускаются без ошибки;
+5. summary содержит компактный результат git-стадии, например `git=no-changes` или `git=committed+pushed`.
 
 ## 7. Принцип проектирования команд
 
