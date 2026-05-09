@@ -69,7 +69,7 @@ func TestNewLaunchFlagsDefaults(t *testing.T) {
 	}
 }
 
-func TestExecutionProfileCommandPrintsCommitPush(t *testing.T) {
+func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
 	t.Parallel()
 
 	cmd := NewRootCommand()
@@ -84,6 +84,12 @@ func TestExecutionProfileCommandPrintsCommitPush(t *testing.T) {
 	}
 
 	output := stdout.String()
+	if !strings.Contains(output, "description=Базовый профиль исполнения через облачную модель по умолчанию\n") {
+		t.Fatalf("profile output must include description, got %q", output)
+	}
+	if !strings.Contains(output, "model=openai/gpt-5.4\n") {
+		t.Fatalf("profile output must include resolved model, got %q", output)
+	}
 	if !strings.Contains(output, "commit-push=false\n") {
 		t.Fatalf("profile output must include commit-push flag, got %q", output)
 	}

@@ -21,10 +21,29 @@ type Invocation struct {
 }
 
 type Profile struct {
-	Name       string
-	Mode       string
-	Model      string
-	CommitPush bool
+	Name        string
+	Description string
+	Mode        string
+	Model       string
+	CommitPush  bool
+}
+
+type ProfileConfigFile struct {
+	Defaults ProfileOptions           `json:"defaults"`
+	Profiles map[string]ProfileConfig `json:"profiles"`
+}
+
+type ProfileOptions struct {
+	Mode       string `json:"mode"`
+	Model      string `json:"model"`
+	CommitPush *bool  `json:"commit-push"`
+}
+
+type ProfileConfig struct {
+	Description string `json:"description"`
+	Mode        string `json:"mode"`
+	Model       string `json:"model"`
+	CommitPush  *bool  `json:"commit-push"`
 }
 
 type Allocation struct {
