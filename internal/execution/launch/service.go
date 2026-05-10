@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,14 @@ const structuredOutputEnd = "</progress-structured-output>"
 const structuredInputStart = "<progress-structured-input>"
 
 const structuredInputEnd = "</progress-structured-input>"
+
+type trailingStructuredBlockState int
+
+const (
+	trailingStructuredBlockAbsent trailingStructuredBlockState = iota
+	trailingStructuredBlockValid
+	trailingStructuredBlockInvalid
+)
 
 type Service struct {
 	runRunner    func(context.Context, model.Invocation) (string, error)
@@ -49,7 +58,10 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		return model.LaunchResult{}, err
 	}
 
-	plainRunnerOutput, structuredOutput, hasStructuredOutput := parseStructuredOutput(runnerOutput)
+	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState := parseStructuredOutput(runnerOutput)
+	if err := validateStructuredOutputRequirement(in.Launch, rawStructuredOutput, structuredOutputState); err != nil {
+		return model.LaunchResult{}, err
+	}
 
 	commitPush := in.Launch.CommitPush || profile.CommitPush
 
@@ -74,7 +86,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	)
 
 	result := model.LaunchResult{Status: "completed", Summary: joinSummary(summary, plainRunnerOutput)}
-	if hasStructuredOutput {
+	if structuredOutputState == trailingStructuredBlockValid {
 		result.ReviewCycle = structuredOutput.ReviewCycle
 		result.CriticalRemarks = structuredOutput.CriticalRemarks
 		result.MinorRemarks = structuredOutput.MinorRemarks
@@ -91,29 +103,29 @@ type structuredOutput struct {
 	Questions       []string `json:"questions"`
 }
 
-func parseStructuredOutput(output string) (string, structuredOutput, bool) {
-	plainOutput, rawPayload, ok := extractTrailingStructuredBlock(output, structuredOutputStart, structuredOutputEnd, func(rawPayload string) bool {
+func parseStructuredOutput(output string) (string, string, structuredOutput, trailingStructuredBlockState) {
+	plainOutput, rawPayload, state := extractTrailingStructuredBlock(output, structuredOutputStart, structuredOutputEnd, func(rawPayload string) bool {
 		_, err := parseStructuredPayload(rawPayload)
 		return err == nil
 	})
-	if !ok {
-		return output, structuredOutput{}, false
+	if state != trailingStructuredBlockValid {
+		return output, "", structuredOutput{}, state
 	}
 
 	parsed, err := parseStructuredPayload(rawPayload)
 	if err != nil {
-		return output, structuredOutput{}, false
+		return output, rawPayload, structuredOutput{}, trailingStructuredBlockInvalid
 	}
 
-	return plainOutput, parsed, true
+	return plainOutput, rawPayload, parsed, trailingStructuredBlockValid
 }
 
 func parseStructuredInput(prompt string) (string, *model.ReviewCycleEnvelope, bool) {
-	plainPrompt, rawPayload, ok := extractTrailingStructuredBlock(prompt, structuredInputStart, structuredInputEnd, func(rawPayload string) bool {
+	plainPrompt, rawPayload, state := extractTrailingStructuredBlock(prompt, structuredInputStart, structuredInputEnd, func(rawPayload string) bool {
 		_, err := parseStructuredPayload(rawPayload)
 		return err == nil
 	})
-	if !ok {
+	if state != trailingStructuredBlockValid {
 		return prompt, nil, false
 	}
 
@@ -130,24 +142,30 @@ func parseStructuredInput(prompt string) (string, *model.ReviewCycleEnvelope, bo
 	return plainPrompt, envelope, true
 }
 
-func extractTrailingStructuredBlock(text, startTag, endTag string, validatePayload func(string) bool) (string, string, bool) {
+func extractTrailingStructuredBlock(text, startTag, endTag string, validatePayload func(string) bool) (string, string, trailingStructuredBlockState) {
 	trimmedText := strings.TrimRightFunc(text, unicode.IsSpace)
 	if !strings.HasSuffix(trimmedText, endTag) {
-		return text, "", false
+		return text, "", trailingStructuredBlockAbsent
 	}
 
 	end := len(trimmedText) - len(endTag)
 	searchEnd := end
+	foundCandidate := false
 	for {
 		start := strings.LastIndex(trimmedText[:searchEnd], startTag)
 		if start == -1 {
-			return text, "", false
+			if foundCandidate {
+				return text, "", trailingStructuredBlockInvalid
+			}
+
+			return text, "", trailingStructuredBlockAbsent
 		}
 
+		foundCandidate = true
 		rawPayload := strings.TrimSpace(trimmedText[start+len(startTag) : end])
 		if rawPayload != "" && validatePayload(rawPayload) {
 			plainText := strings.TrimSpace(trimmedText[:start])
-			return plainText, rawPayload, true
+			return plainText, rawPayload, trailingStructuredBlockValid
 		}
 
 		searchEnd = start
@@ -388,6 +406,205 @@ func prepareInvocation(in model.Invocation) model.Invocation {
 	return in
 }
 
+func validateStructuredOutputRequirement(spec model.LaunchSpec, rawPayload string, state trailingStructuredBlockState) error {
+	if !spec.StructuredOutputRequired {
+		return nil
+	}
+
+	switch state {
+	case trailingStructuredBlockValid:
+		if err := validateRequiredStructuredPayload(spec, rawPayload); err != nil {
+			return fmt.Errorf("structured output is required but %w", err)
+		}
+		return nil
+	case trailingStructuredBlockInvalid:
+		return fmt.Errorf("structured output is required but trailing %s block is invalid", structuredOutputStart)
+	default:
+		return fmt.Errorf("structured output is required but trailing %s block is missing", structuredOutputStart)
+	}
+}
+
+func validateRequiredStructuredPayload(spec model.LaunchSpec, rawPayload string) error {
+	if expectedProtocol, expectedMode, hasExpectation := requiredStructuredExpectation(spec); hasExpectation {
+		switch expectedProtocol {
+		case model.StructuredProtocolLegacy:
+			return validateRequiredLegacyPayload(rawPayload)
+		case model.StructuredProtocolReviewCycle:
+			return validateRequiredReviewCyclePayload(rawPayload, expectedMode)
+		default:
+			return fmt.Errorf("uses unsupported structured protocol %q", strings.TrimSpace(spec.StructuredProtocol))
+		}
+	}
+
+	if err := validateRequiredReviewCyclePayload(rawPayload, ""); err == nil {
+		return nil
+	}
+	if err := validateRequiredLegacyPayload(rawPayload); err == nil {
+		return nil
+	}
+
+	return fmt.Errorf("trailing %s block does not match a supported structured schema", structuredOutputStart)
+}
+
+func requiredStructuredExpectation(spec model.LaunchSpec) (string, string, bool) {
+	if spec.StructuredOutput {
+		protocol := normalizedStructuredProtocol(spec)
+		mode := strings.TrimSpace(spec.StructuredMode)
+		if protocol == model.StructuredProtocolReviewCycle && mode == "" && spec.StructuredInput != nil {
+			mode = strings.TrimSpace(spec.StructuredInput.Mode)
+		}
+
+		return protocol, mode, true
+	}
+
+	if spec.StructuredInput == nil {
+		return "", "", false
+	}
+
+	return model.StructuredProtocolReviewCycle, strings.TrimSpace(spec.StructuredInput.Mode), true
+}
+
+func validateRequiredLegacyPayload(rawPayload string) error {
+	type legacyPayload struct {
+		CriticalRemarks []string `json:"critical_remarks"`
+		MinorRemarks    []string `json:"minor_remarks"`
+		Questions       []string `json:"questions"`
+	}
+
+	var payload legacyPayload
+	if err := decodeJSONStrict(rawPayload, &payload); err != nil {
+		return fmt.Errorf("payload does not match legacy schema: %w", err)
+	}
+
+	if len(dedupeStrings(payload.CriticalRemarks))+len(dedupeStrings(payload.MinorRemarks))+len(dedupeStrings(payload.Questions)) == 0 {
+		return fmt.Errorf("legacy payload must include at least one non-empty remark or question")
+	}
+
+	return nil
+}
+
+func validateRequiredReviewCyclePayload(rawPayload, expectedMode string) error {
+	payload, err := parseStructuredPayloadStrict(rawPayload)
+	if err != nil {
+		return fmt.Errorf("payload does not match review-cycle schema: %w", err)
+	}
+	questions, _, err := parseStructuredQuestionsStrict(payload.Questions)
+	if err != nil {
+		return fmt.Errorf("payload does not match review-cycle schema: %w", err)
+	}
+
+	if payload.ProtocolVersion != model.ReviewCycleProtocolVersion {
+		return fmt.Errorf("review-cycle payload must set protocol_version=%q", model.ReviewCycleProtocolVersion)
+	}
+	if strings.TrimSpace(payload.Summary) == "" {
+		return fmt.Errorf("review-cycle payload must include a non-empty summary")
+	}
+	if payload.Mode != "" && !isSupportedStructuredMode(payload.Mode) {
+		return fmt.Errorf("review-cycle payload uses unsupported mode %q", payload.Mode)
+	}
+	if expectedMode != "" && payload.Mode != expectedMode {
+		return fmt.Errorf("review-cycle payload mode %q does not match requested mode %q", payload.Mode, expectedMode)
+	}
+	if err := validateRequiredReviewCycleDetails(payload.Remarks, questions, payload.FollowUpActions, payload.Changes); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateRequiredReviewCycleDetails(remarks []model.ReviewCycleRemark, questions []model.ReviewCycleQuestion, actions []model.ReviewCycleAction, changes []model.ReviewCycleChange) error {
+	for index, remark := range remarks {
+		if hasNonEmptyStructuredField(remark.ID, remark.Status, remark.ResponseStatus, remark.Severity, remark.Type, remark.Title, remark.Body, remark.Reply, remark.FixSummary) {
+			continue
+		}
+
+		return fmt.Errorf("review-cycle payload remark[%d] must include at least one non-empty field", index)
+	}
+
+	for index, question := range questions {
+		if hasNonEmptyStructuredField(question.ID, question.Status, question.Title, question.Body, question.Reply) {
+			continue
+		}
+
+		return fmt.Errorf("review-cycle payload question[%d] must include at least one non-empty field", index)
+	}
+
+	for index, action := range actions {
+		if hasNonEmptyStructuredField(action.ID, action.Status, action.Type, action.Title, action.Body) {
+			continue
+		}
+
+		return fmt.Errorf("review-cycle payload follow_up_actions[%d] must include at least one non-empty field", index)
+	}
+
+	for index, change := range changes {
+		if hasNonEmptyStructuredField(change.Summary) {
+			continue
+		}
+
+		return fmt.Errorf("review-cycle payload changes[%d] must include a non-empty summary", index)
+	}
+
+	return nil
+}
+
+func hasNonEmptyStructuredField(values ...string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func parseStructuredPayloadStrict(rawPayload string) (structuredPayload, error) {
+	var payload structuredPayload
+	if err := decodeJSONStrict(rawPayload, &payload); err != nil {
+		return structuredPayload{}, err
+	}
+
+	if _, _, err := parseStructuredQuestionsStrict(payload.Questions); err != nil {
+		return structuredPayload{}, err
+	}
+
+	return payload, nil
+}
+
+func decodeJSONStrict(raw string, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing JSON tokens")
+		}
+		return err
+	}
+
+	return nil
+}
+
+func parseStructuredQuestionsStrict(raw json.RawMessage) ([]model.ReviewCycleQuestion, bool, error) {
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+
+	var legacyQuestions []string
+	if err := decodeJSONStrict(string(raw), &legacyQuestions); err == nil {
+		return stringsToQuestions(legacyQuestions), false, nil
+	}
+
+	var questions []model.ReviewCycleQuestion
+	if err := decodeJSONStrict(string(raw), &questions); err == nil {
+		return questions, true, nil
+	}
+
+	return nil, false, fmt.Errorf("parse structured questions")
+}
+
 func joinSummary(parts ...string) string {
 	filtered := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -421,6 +638,10 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 
 	if strings.TrimSpace(in.Launch.Model) == "" {
 		return fmt.Errorf("launch model is required")
+	}
+
+	if err := validateStructuredOutputSettings(in.Launch); err != nil {
+		return err
 	}
 
 	info, err := os.Stat(in.Launch.Directory)
@@ -557,7 +778,7 @@ func isNoChangesAfterAddError(err error) bool {
 }
 
 func runRunner(ctx context.Context, in model.Invocation) (string, error) {
-	prompt, err := buildRunnerPrompt(in.Launch.Prompt, in.Launch.StructuredInput)
+	prompt, err := buildRunnerPrompt(in.Launch)
 	if err != nil {
 		return "", err
 	}
@@ -580,19 +801,110 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	return string(output), nil
 }
 
-func buildRunnerPrompt(prompt string, structuredInput *model.ReviewCycleEnvelope) (string, error) {
-	prompt = strings.TrimSpace(prompt)
-	if structuredInput == nil {
-		return prompt, nil
+func buildRunnerPrompt(spec model.LaunchSpec) (string, error) {
+	parts := make([]string, 0, 4)
+	prompt := strings.TrimSpace(spec.Prompt)
+	if prompt != "" {
+		parts = append(parts, prompt)
 	}
 
-	payload, err := json.Marshal(structuredInput)
+	if spec.StructuredOutput {
+		parts = append(parts, buildStructuredOutputInstruction(normalizedStructuredProtocol(spec), strings.TrimSpace(spec.StructuredMode)))
+	}
+
+	if spec.StructuredInput == nil {
+		return joinSummary(parts...), nil
+	}
+
+	payload, err := json.Marshal(spec.StructuredInput)
 	if err != nil {
 		return "", fmt.Errorf("marshal structured input: %w", err)
 	}
 
-	parts := []string{prompt, structuredInputStart, string(payload), structuredInputEnd}
+	parts = append(parts, structuredInputStart, string(payload), structuredInputEnd)
 	return joinSummary(parts...), nil
+}
+
+func validateStructuredOutputSettings(spec model.LaunchSpec) error {
+	if !spec.StructuredOutput {
+		if strings.TrimSpace(spec.StructuredProtocol) != "" {
+			return fmt.Errorf("structured protocol requires structured output to be enabled")
+		}
+		if strings.TrimSpace(spec.StructuredMode) != "" {
+			return fmt.Errorf("structured mode requires structured output to be enabled")
+		}
+		return nil
+	}
+
+	if !isSupportedStructuredProtocol(normalizedStructuredProtocol(spec)) {
+		return fmt.Errorf("unsupported structured protocol: %s", strings.TrimSpace(spec.StructuredProtocol))
+	}
+
+	if mode := strings.TrimSpace(spec.StructuredMode); mode != "" && !isSupportedStructuredMode(mode) {
+		return fmt.Errorf("unsupported structured mode: %s", mode)
+	}
+
+	return nil
+}
+
+func normalizedStructuredProtocol(spec model.LaunchSpec) string {
+	protocol := strings.TrimSpace(spec.StructuredProtocol)
+	if protocol == "" {
+		return model.StructuredProtocolReviewCycle
+	}
+
+	return protocol
+}
+
+func isSupportedStructuredProtocol(protocol string) bool {
+	switch protocol {
+	case model.StructuredProtocolLegacy, model.StructuredProtocolReviewCycle:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedStructuredMode(mode string) bool {
+	switch mode {
+	case model.ReviewCycleModeReview, model.ReviewCycleModeReply, model.ReviewCycleModeFix, model.ReviewCycleModeReReview:
+		return true
+	default:
+		return false
+	}
+}
+
+func buildStructuredOutputInstruction(protocol, mode string) string {
+	if protocol == model.StructuredProtocolLegacy {
+		return buildLegacyStructuredOutputInstruction(mode)
+	}
+
+	return buildReviewCycleStructuredOutputInstruction(mode)
+}
+
+func buildLegacyStructuredOutputInstruction(mode string) string {
+	parts := []string{
+		"Return your normal answer, then append a trailing <progress-structured-output>...</progress-structured-output> JSON block.",
+		"Use a JSON object with array fields critical_remarks, minor_remarks, questions.",
+	}
+	if mode != "" {
+		parts = append(parts, fmt.Sprintf("Current structured mode: %s.", mode))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func buildReviewCycleStructuredOutputInstruction(mode string) string {
+	parts := []string{
+		"Return your normal answer, then append a trailing <progress-structured-output>...</progress-structured-output> JSON block.",
+		fmt.Sprintf("Use a JSON object with protocol_version=%q and a summary field.", model.ReviewCycleProtocolVersion),
+		"Include remarks, questions, follow_up_actions, and changes when they are applicable.",
+	}
+	if mode != "" {
+		parts = append(parts, fmt.Sprintf("Set mode to %q.", mode))
+	}
+
+	return strings.Join(parts, " ")
 }
 
 func runGitOutput(ctx context.Context, dir string, args ...string) (string, error) {

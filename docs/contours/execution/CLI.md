@@ -80,11 +80,22 @@ CLI рассматривается как основной ручной инте
 
 Назначение команды состоит в изолированной проверке непосредственного запуска задачи без повторного прохождения стадий выбора профиля и резервирования ресурсов.
 
-В текущей реализации команда принимает `--dir`, `--runner`, `--model`, `--prompt`, а также опциональные флаги `--commit-push` и `--commit-message`.
+В текущей реализации команда принимает `--dir`, `--runner`, `--model`, `--prompt`, а также опциональные флаги `--structured-output`, `--structured-protocol`, `--structured-mode`, `--structured-output-required`, `--commit-push` и `--commit-message`.
 
 Эффективный `commit-push` для стадии запуска определяется по простому правилу: git-стадия включается, если `--commit-push` передан явно либо если включён одноимённый флаг у выбранного execution profile.
 
 Если `--commit-push` не задан и профиль также не включает `commit-push`, команда выполняет только runner и возвращает его итоговый summary.
+
+Если `--structured-output` не указан, executor не добавляет в prompt никакой новой служебной structured-инструкции и поведение остаётся максимально близким к текущему. При этом явные `--structured-protocol` и `--structured-mode` без `--structured-output` считаются ошибкой конфигурации, чтобы поведение не было асимметричным и не создавалось впечатление, что часть флагов молча применяется.
+
+Если `--structured-output` указан, executor сам дописывает в конец prompt короткую детерминированную инструкцию, требующую trailing block `<progress-structured-output>...</progress-structured-output>`. Если `--structured-protocol` не передан явно, для этого режима используется effective default `review-cycle`. Значение `--structured-mode` по умолчанию не подставляется: если флаг не указан, executor не заставляет runner явно выставлять `mode` в injected-инструкции.
+
+Поддерживаются два минимальных протокола:
+
+1. `legacy` — runner должен вернуть JSON-объект с массивами `critical_remarks`, `minor_remarks`, `questions`;
+2. `review-cycle` — runner должен вернуть JSON-объект с `protocol_version="review-cycle/v1"`, `summary` и, при необходимости, массивами `remarks`, `questions`, `follow_up_actions`, `changes`; если явно задан `--structured-mode`, injected-инструкция дополнительно требует выставить соответствующий `mode`.
+
+Флаг `--structured-output-required` включает строгую валидацию результата: ошибкой запуска считается отсутствие trailing structured block, невалидный JSON block, пустой или бессмысленный payload, неизвестные top-level поля, пустые объектные элементы внутри `remarks` / `questions` / `follow_up_actions` / `changes`, а также несовпадение ответа с реально запрошенным протоколом и `mode`. Для `review-cycle` strict-режим требует `protocol_version="review-cycle/v1"` и непустой `summary`; если `mode` не был передан отдельным флагом, но уже присутствует в текущем structured input envelope, он тоже считается ожидаемым. Для `legacy` требуется хотя бы один непустой элемент в `critical_remarks`, `minor_remarks` или `questions`.
 
 Runner может дополнительно вернуть необязательный structured block в формате JSON внутри секции `<progress-structured-output>...</progress-structured-output>`. Legacy-ключи `critical_remarks`, `minor_remarks` и `questions` по-прежнему принимаются, но сразу нормализуются в канонический review-cycle envelope.
 

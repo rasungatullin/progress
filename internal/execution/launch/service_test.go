@@ -374,6 +374,99 @@ func TestLaunchStructuredOutputAbsent(t *testing.T) {
 	}
 }
 
+func TestLaunchWithoutStructuredOutputFlagKeepsPromptUnchanged(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Prompt = "Review the patch."
+
+	service := &Service{
+		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
+			prompt, err := buildRunnerPrompt(in.Launch)
+			if err != nil {
+				t.Fatalf("buildRunnerPrompt: %v", err)
+			}
+			if prompt != "Review the patch." {
+				t.Fatalf("runner prompt must stay unchanged without structured-output flag: %q", prompt)
+			}
+			return "Applied the requested changes.", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputLegacyInjection(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredProtocol = model.StructuredProtocolLegacy
+
+	service := &Service{
+		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
+			prompt, err := buildRunnerPrompt(in.Launch)
+			if err != nil {
+				t.Fatalf("buildRunnerPrompt: %v", err)
+			}
+			if !strings.Contains(prompt, "critical_remarks, minor_remarks, questions") {
+				t.Fatalf("legacy prompt must include legacy structured instruction: %q", prompt)
+			}
+			if !strings.Contains(prompt, structuredOutputStart) {
+				t.Fatalf("legacy prompt must mention structured output block tags: %q", prompt)
+			}
+			return "Applied the requested changes.", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputReviewCycleInjection(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredProtocol = model.StructuredProtocolReviewCycle
+	invocation.Launch.StructuredMode = model.ReviewCycleModeReview
+
+	service := &Service{
+		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
+			prompt, err := buildRunnerPrompt(in.Launch)
+			if err != nil {
+				t.Fatalf("buildRunnerPrompt: %v", err)
+			}
+			if !strings.Contains(prompt, `protocol_version="review-cycle/v1"`) {
+				t.Fatalf("review-cycle prompt must require review-cycle protocol version: %q", prompt)
+			}
+			if !strings.Contains(prompt, `Set mode to "review".`) {
+				t.Fatalf("review-cycle prompt must require selected mode: %q", prompt)
+			}
+			return "Applied the requested changes.", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+}
+
 func TestLaunchMalformedStructuredOutputFallsBackToRawSummary(t *testing.T) {
 	t.Parallel()
 
@@ -405,6 +498,310 @@ func TestLaunchMalformedStructuredOutputFallsBackToRawSummary(t *testing.T) {
 	}
 	if !strings.Contains(result.Summary, `{"critical_remarks":"missing rollback plan"}`) {
 		t.Fatalf("summary must preserve malformed payload for diagnostics: %q", result.Summary)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredFailsWhenBlockMissing(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutputRequired = true
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "Applied the requested changes.", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), "structured output is required") || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredPassesWhenBlockPresent(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutputRequired = true
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredProtocol = model.StructuredProtocolLegacy
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"critical_remarks":["missing rollback plan"]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !slices.Equal(result.CriticalRemarks, []string{"missing rollback plan"}) {
+		t.Fatalf("structured block must still be parsed in required mode: %#v", result.CriticalRemarks)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredFailsForEmptyPayload(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredOutputRequired = true
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), `protocol_version="review-cycle/v1"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredFailsForUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredOutputRequired = true
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","unexpected":true}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), "does not match review-cycle schema") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredFailsForMeaninglessRemarkObject(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredOutputRequired = true
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{}]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), "remark[0] must include at least one non-empty field") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredFailsForProtocolMismatch(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredProtocol = model.StructuredProtocolReviewCycle
+	invocation.Launch.StructuredOutputRequired = true
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"critical_remarks":["missing rollback plan"]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), `protocol_version="review-cycle/v1"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredFailsForModeMismatch(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredMode = model.ReviewCycleModeReview
+	invocation.Launch.StructuredOutputRequired = true
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","mode":"fix","summary":"Done."}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), `requested mode "review"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredFallsBackToStructuredInputMode(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredOutputRequired = true
+	invocation.Launch.StructuredInput = &model.ReviewCycleEnvelope{
+		ProtocolVersion: model.ReviewCycleProtocolVersion,
+		Mode:            model.ReviewCycleModeReply,
+		Summary:         "Need to answer review remarks.",
+	}
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","mode":"fix","summary":"Done."}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), `requested mode "reply"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchRejectsStructuredProtocolWithoutStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	for _, protocol := range []string{model.StructuredProtocolLegacy, model.StructuredProtocolReviewCycle} {
+		invocation := validInvocation(t, false)
+		invocation.Launch.StructuredProtocol = protocol
+
+		service := &Service{
+			runRunner: func(context.Context, model.Invocation) (string, error) {
+				t.Fatal("runner must not be called when structured-output settings are invalid")
+				return "", nil
+			},
+			runGitOutput: func(context.Context, string, ...string) (string, error) {
+				t.Fatal("git must not be called when validation fails")
+				return "", nil
+			},
+		}
+
+		_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+		if err == nil {
+			t.Fatalf("expected structured protocol error for %q", protocol)
+		}
+		if !strings.Contains(err.Error(), "structured protocol requires structured output") {
+			t.Fatalf("unexpected error for %q: %v", protocol, err)
+		}
+	}
+}
+
+func TestLaunchRejectsStructuredModeWithoutStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredMode = model.ReviewCycleModeReview
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			t.Fatal("runner must not be called when structured-output settings are invalid")
+			return "", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when validation fails")
+			return "", nil
+		},
+	}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected structured mode error")
+	}
+	if !strings.Contains(err.Error(), "structured mode requires structured output") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -662,7 +1059,7 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInput(t *testing.T) {
 		}},
 	}
 
-	prompt, err := buildRunnerPrompt("Apply the latest review fixes.", structuredInput)
+	prompt, err := buildRunnerPrompt(model.LaunchSpec{Prompt: "Apply the latest review fixes.", StructuredInput: structuredInput})
 	if err != nil {
 		t.Fatalf("buildRunnerPrompt: %v", err)
 	}

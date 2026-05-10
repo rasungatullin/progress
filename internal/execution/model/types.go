@@ -1,16 +1,25 @@
 package model
 
 type LaunchSpec struct {
-	Directory       string
-	Runner          string
-	Model           string
-	Prompt          string
-	StructuredInput *ReviewCycleEnvelope
-	CommitPush      bool
-	CommitMessage   string
+	Directory                string
+	Runner                   string
+	Model                    string
+	Prompt                   string
+	StructuredInput          *ReviewCycleEnvelope
+	StructuredOutput         bool
+	StructuredProtocol       string
+	StructuredMode           string
+	StructuredOutputRequired bool
+	CommitPush               bool
+	CommitMessage            string
 }
 
 const ReviewCycleProtocolVersion = "review-cycle/v1"
+
+const (
+	StructuredProtocolLegacy      = "legacy"
+	StructuredProtocolReviewCycle = "review-cycle"
+)
 
 const (
 	ReviewCycleModeReview   = "review"

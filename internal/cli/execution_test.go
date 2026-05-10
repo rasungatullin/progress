@@ -22,6 +22,10 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 		"--runner", "opencode",
 		"--model", "openai/gpt-5.4",
 		"--prompt", "ship it",
+		"--structured-output",
+		"--structured-protocol", "legacy",
+		"--structured-mode", "reply",
+		"--structured-output-required",
 		"--commit-push",
 		"--commit-message", "Custom message",
 	})
@@ -41,6 +45,18 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 	}
 	if invocation.Launch.Prompt != "ship it" {
 		t.Fatalf("unexpected prompt: %q", invocation.Launch.Prompt)
+	}
+	if !invocation.Launch.StructuredOutput {
+		t.Fatal("expected structured-output to be enabled")
+	}
+	if invocation.Launch.StructuredProtocol != "legacy" {
+		t.Fatalf("unexpected structured protocol: %q", invocation.Launch.StructuredProtocol)
+	}
+	if invocation.Launch.StructuredMode != "reply" {
+		t.Fatalf("unexpected structured mode: %q", invocation.Launch.StructuredMode)
+	}
+	if !invocation.Launch.StructuredOutputRequired {
+		t.Fatal("expected structured-output-required to be enabled")
 	}
 }
 
@@ -67,6 +83,86 @@ func TestNewLaunchFlagsDefaults(t *testing.T) {
 	}
 	if invocation.Launch.CommitMessage != launch.DefaultCommitMessage {
 		t.Fatalf("unexpected default commit message: %q", invocation.Launch.CommitMessage)
+	}
+	if invocation.Launch.StructuredProtocol != "" {
+		t.Fatalf("unexpected default structured protocol: %q", invocation.Launch.StructuredProtocol)
+	}
+	if invocation.Launch.StructuredMode != "" {
+		t.Fatalf("structured mode must be empty by default: %q", invocation.Launch.StructuredMode)
+	}
+	if invocation.Launch.StructuredOutput {
+		t.Fatal("structured-output must be disabled by default")
+	}
+	if invocation.Launch.StructuredOutputRequired {
+		t.Fatal("structured-output-required must be disabled by default")
+	}
+}
+
+func TestExecutionLaunchHelpIncludesStructuredFlags(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "launch", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute launch help: %v", err)
+	}
+
+	help := stdout.String()
+	for _, fragment := range []string{
+		"--structured-output",
+		"--structured-protocol string",
+		"--structured-mode string",
+		"--structured-output-required",
+		"по умолчанию review-cycle вместе с --structured-output",
+	} {
+		if !strings.Contains(help, fragment) {
+			t.Fatalf("launch help must include %q, got %q", fragment, help)
+		}
+	}
+}
+
+func TestExecutionLaunchRejectsStructuredProtocolWithoutStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	for _, protocol := range []string{"legacy", execution.StructuredProtocolReviewCycle} {
+		cmd := NewRootCommand()
+		stdout := &bytes.Buffer{}
+		stderr := &bytes.Buffer{}
+		cmd.SetOut(stdout)
+		cmd.SetErr(stderr)
+		cmd.SetArgs([]string{"execution", "launch", "--dir", t.TempDir(), "--prompt", "task", "--structured-protocol", protocol})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("expected launch error for protocol %q", protocol)
+		}
+		if !strings.Contains(err.Error(), "structured protocol requires structured output") {
+			t.Fatalf("unexpected error for protocol %q: %v", protocol, err)
+		}
+	}
+}
+
+func TestExecutionLaunchRejectsStructuredModeWithoutStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "launch", "--dir", t.TempDir(), "--prompt", "task", "--structured-mode", "review"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected launch error for structured mode without structured-output")
+	}
+	if !strings.Contains(err.Error(), "structured mode requires structured output") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
