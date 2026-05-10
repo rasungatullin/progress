@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/execution"
@@ -257,14 +258,29 @@ func printLaunchSummary(cmd *cobra.Command, summary string) {
 }
 
 func printLaunchStructuredOutput(cmd *cobra.Command, result execution.LaunchResult) {
-	if !hasStructuredValues(result.CriticalRemarks, result.MinorRemarks, result.Questions) {
+	if !hasStructuredValues(result.CriticalRemarks, result.MinorRemarks, result.Questions) && result.ReviewCycle == nil {
 		return
 	}
 
 	cmd.Println("structured-output:")
+	printReviewCycleStructuredOutput(cmd, result.ReviewCycle)
 	printLaunchResultSection(cmd, "critical-remark", result.CriticalRemarks)
 	printLaunchResultSection(cmd, "minor-remark", result.MinorRemarks)
 	printLaunchResultSection(cmd, "question", result.Questions)
+}
+
+func printReviewCycleStructuredOutput(cmd *cobra.Command, reviewCycle *execution.ReviewCycleEnvelope) {
+	if reviewCycle == nil {
+		return
+	}
+
+	printLaunchResultSection(cmd, "review-cycle-protocol-version", []string{reviewCycle.ProtocolVersion})
+	printLaunchResultSection(cmd, "review-cycle-mode", []string{reviewCycle.Mode})
+	printLaunchResultSection(cmd, "review-cycle-summary", []string{reviewCycle.Summary})
+	printStructuredJSONSection(cmd, "review-cycle-remark", reviewCycle.Remarks)
+	printStructuredJSONSection(cmd, "review-cycle-question", reviewCycle.Questions)
+	printStructuredJSONSection(cmd, "review-cycle-follow-up-action", reviewCycle.FollowUpActions)
+	printStructuredJSONSection(cmd, "review-cycle-change", reviewCycle.Changes)
 }
 
 func printLaunchResultSection(cmd *cobra.Command, key string, values []string) {
@@ -275,6 +291,22 @@ func printLaunchResultSection(cmd *cobra.Command, key string, values []string) {
 		}
 
 		cmd.Printf("%s=%s\n", key, value)
+	}
+}
+
+func printStructuredJSONSection[T any](cmd *cobra.Command, key string, values []T) {
+	for _, value := range values {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			continue
+		}
+
+		text := strings.TrimSpace(string(encoded))
+		if text == "{}" {
+			continue
+		}
+
+		cmd.Printf("%s=%s\n", key, text)
 	}
 }
 
