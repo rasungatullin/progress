@@ -40,7 +40,9 @@ CLI рассматривается как основной ручной инте
   "defaults": {
     "mode": "manual",
     "model": "openai/gpt-5.4",
-    "commit-push": false
+    "commit-push": false,
+    "structured-input": "auto",
+    "structured-output": "auto"
   },
   "profiles": {
     "default": {
@@ -48,7 +50,8 @@ CLI рассматривается как основной ручной инте
     },
     "local": {
       "description": "Локальный профиль исполнения через локальную модель",
-      "model": "ollama/qwen3.5:2b"
+      "model": "ollama/qwen3.5:2b",
+      "structured-output": "off"
     }
   }
 }
@@ -59,10 +62,12 @@ CLI рассматривается как основной ручной инте
 1. если профиль не указан, используется `default`;
 2. профиль наследует незаданные поля из блока `defaults`;
 3. `model` может быть определена в `defaults` и переопределена в конкретном профиле;
-4. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
-5. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
+4. `structured-input` определяет, должен ли контур учитывать структурированный вход и в каком режиме включать его в итоговый prompt;
+5. `structured-output` определяет, должен ли контур запрашивать и разбирать структурированный ответ;
+6. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
+7. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
 
-В resolved profile команда явно возвращает `description`, `mode`, `model` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
+В resolved profile команда явно возвращает `description`, `mode`, `model`, `commit-push`, `structured-input` и `structured-output`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
 
 ### 3.4 `progress execution resources`
 
@@ -80,7 +85,9 @@ CLI рассматривается как основной ручной инте
 
 Назначение команды состоит в изолированной проверке непосредственного запуска задачи без повторного прохождения стадий выбора профиля и резервирования ресурсов.
 
-В текущей реализации команда принимает `--dir`, `--runner`, `--model`, `--prompt`, а также опциональные флаги `--structured-output`, `--structured-protocol`, `--structured-mode`, `--structured-output-required`, `--commit-push` и `--commit-message`.
+Подробное описание механизма structured input/output, потока данных и требований к расширяемости вынесено в `docs/contours/execution/STRUCTURED_IO.md`. В настоящем документе фиксируются только CLI-аспекты этого механизма.
+
+В текущей реализации команда принимает `--dir`, `--runner`, `--model`, `--prompt`, а также опциональные флаги `--structured-input`, `--structured-output`, `--structured-protocol`, `--structured-mode`, `--structured-output-required`, `--commit-push` и `--commit-message`.
 
 Эффективный `commit-push` для стадии запуска определяется по простому правилу: git-стадия включается, если `--commit-push` передан явно либо если включён одноимённый флаг у выбранного execution profile.
 
@@ -97,13 +104,35 @@ CLI рассматривается как основной ручной инте
 
 Флаг `--structured-output-required` включает строгую валидацию результата: ошибкой запуска считается отсутствие trailing structured block, невалидный JSON block, пустой или бессмысленный payload, неизвестные top-level поля, пустые объектные элементы внутри `remarks` / `questions` / `follow_up_actions` / `changes`, а также несовпадение ответа с реально запрошенным протоколом и `mode`. Для `review-cycle` strict-режим требует `protocol_version="review-cycle/v1"` и непустой `summary`; если `mode` не был передан отдельным флагом, но уже присутствует в текущем structured input envelope, он тоже считается ожидаемым. Для `legacy` требуется хотя бы один непустой элемент в `critical_remarks`, `minor_remarks` или `questions`.
 
+Эффективные режимы `structured-input` и `structured-output` также определяются через профиль и явные флаги запуска. Профиль задаёт поведение по умолчанию, а флаги `--structured-input` и `--structured-output` имеют приоритет и позволяют явно включить, выключить или переопределить режим обработки для конкретного запуска.
+
+Structured input нужен для передачи в контур исполнения полноценного контекста задачи. В этом блоке могут находиться:
+
+- постановка и ограничения задачи;
+- артефакты предыдущего шага;
+- замечания ревью и ответы на них;
+- указания о требуемых интеграционных действиях;
+- дополнительные поля, введённые расширением конфигурации.
+
+Контур исполнения не обязан передавать этот блок модели в исходном виде. Его задача состоит в том, чтобы на основании structured input и активного профиля собрать итоговый prompt, пригодный для конкретного runner и модели.
+
 Runner может дополнительно вернуть необязательный structured block в формате JSON внутри секции `<progress-structured-output>...</progress-structured-output>`. Legacy-ключи `critical_remarks`, `minor_remarks` и `questions` по-прежнему принимаются, но сразу нормализуются в канонический review-cycle envelope.
 
 Review cycle envelope является единственным каноническим представлением structured данных. Поддерживается следующая схема верхнего уровня: `protocol_version`, `mode`, `summary`, `remarks[]`, `questions[]`, `follow_up_actions[]`, `changes[]`. Для `remarks[]` доступны поля `id`, `status`, `response_status`, `severity`, `type`, `title`, `body`, `reply`, `fix_summary`. Если runner присылает mixed payload, legacy-ключи мержатся в тот же envelope, а плоские `critical_remarks`, `minor_remarks` и `questions` затем уже вычисляются из канонической модели как диагностическая проекция.
 
+Основное назначение structured output состоит в том, чтобы результат можно было использовать в следующих каскадах без повторного разбора свободного текста. Например:
+
+- замечания ревью могут быть автоматически прикреплены к коду через интеграции;
+- coder может получить эти замечания как structured input следующего запуска;
+- coder может вернуть ответ на комментарий в structured output;
+- structured output может содержать команды и заключения, например рекомендацию открыть pull request, признак готовности результата или требование доработки;
+- structured output может содержать `commit-message` для автоматического создания коммита.
+
 Executor разбирает structured output только если в конце runner output присутствует один явный trailing block, допускающий только завершающие пробелы и переводы строки после `</progress-structured-output>`. Теги, встретившиеся внутри обычного текста, примера, промежуточного пояснения или literal JSON string values внутри payload, не должны ломать выделение реального trailing block и остаются частью исходного содержимого. Если trailing block присутствует, но не парсится, executor сохраняет исходный runner output в `summary` без заполнения дополнительных полей, чтобы не терять диагностический контекст.
 
-В prompt можно передавать structured input block `<progress-structured-input>...</progress-structured-input>`. Executor выделяет trailing input block из prompt, нормализует его в тот же канонический review-cycle envelope и передаёт эту структуру дальше в launch flow. Если structured input задан программно, runner получает prompt с тем же trailing block. Это позволяет использовать envelope из предыдущего review/reply/fix/re-review запуска как вход для следующего цикла без отдельного legacy path.
+В prompt можно передавать structured input block `<progress-structured-input>...</progress-structured-input>`. Executor выделяет trailing input block из prompt, нормализует его в тот же канонический review-cycle envelope и передаёт эту структуру дальше в launch flow. Если structured input задан программно, контур исполнения может включить его в prompt в исходном виде, преобразовать в инструктивное текстовое представление для модели или дополнить prompt описанием ожидаемого structured output. Это позволяет использовать envelope из предыдущего review/reply/fix/re-review запуска как вход для следующего цикла без отдельного legacy path.
+
+Целевой механизм должен быть расширяемым через конфигурацию. Это означает, что схема structured input/output, правила включения отдельных секций в prompt и набор допустимых команд или заключений не должны быть жёстко зашиты только в одном исполнительном пути. Профиль и конфигурационные расширения должны позволять адаптировать поведение под разные типы задач: review, coding, reply, verification и последующие режимы.
 
 В CLI итог печатается в виде отдельного блока `summary<<PROGRESS_SUMMARY ... PROGRESS_SUMMARY`, после которого при наличии structured данных выводится секция `structured-output:`. Для review cycle envelope CLI дополнительно печатает строки `review-cycle-protocol-version=...`, `review-cycle-mode=...`, `review-cycle-summary=...` и JSON-строки `review-cycle-remark=...`, `review-cycle-question=...`, `review-cycle-follow-up-action=...`, `review-cycle-change=...`. Эти JSON-строки выводятся без дополнительной whitespace-нормализации, чтобы payload оставался lossless. Legacy-строки `critical-remark=...`, `minor-remark=...` и `question=...` сохраняются как производная диагностическая проекция и для них по-прежнему используется однострочная нормализация.
 
