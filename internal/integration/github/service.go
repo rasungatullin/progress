@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,12 +10,25 @@ import (
 	"github.com/rasungatullin/progress/internal/integration/model"
 )
 
-type authStatusRunner interface {
+type ghRunner interface {
 	RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error)
+	RunRepoView(context.Context, string) (CommandResult, resolvedConfig, error)
 }
 
 type Service struct {
-	runner authStatusRunner
+	runner ghRunner
+}
+
+type ghRepoView struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+	Owner       struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+	DefaultBranchRef *struct {
+		Name string `json:"name"`
+	} `json:"defaultBranchRef"`
 }
 
 func NewService() *Service {
@@ -28,14 +42,21 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		Operation: req.Operation,
 	}
 
-	if req.Resource != "auth" || req.Operation != "status" {
+	switch {
+	case req.Resource == "auth" && req.Operation == "status":
+		return s.executeAuthStatus(ctx, response)
+	case (req.Resource == "repo" || req.Resource == "repository") && req.Operation == "get":
+		return s.executeRepoGet(ctx, response, req)
+	default:
 		err := &Error{
 			Code:    ErrorCodeInvalidRequest,
 			Message: fmt.Sprintf("GitHub integration does not support %s %s at this stage", req.Resource, req.Operation),
 		}
 		return response, err
 	}
+}
 
+func (s *Service) executeAuthStatus(ctx context.Context, response model.Response) (model.Response, error) {
 	result, config, err := s.runner.RunAuthStatus(ctx)
 	if err != nil && result.ExitCode == 0 {
 		result.ExitCode = -1
@@ -119,7 +140,69 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 	return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
 }
 
+func (s *Service) executeRepoGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository := strings.TrimSpace(req.Repository)
+	if repository == "" {
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub repository is required"}
+	}
+
+	result, _, err := s.runner.RunRepoView(ctx, repository)
+	if err != nil {
+		var ghErr *Error
+		if errors.As(err, &ghErr) {
+			return response, ghErr
+		}
+
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: err.Error(), Result: result, Err: err}
+	}
+
+	if result.ExitCode != 0 {
+		switch {
+		case isAuthRequired(result):
+			return response, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub authentication is required", Result: result}
+		case isRepoNotFound(result):
+			return response, &Error{Code: ErrorCodeNotFound, Message: fmt.Sprintf("GitHub repository not found: %s", repository), Result: result}
+		default:
+			return response, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode), Result: result}
+		}
+	}
+
+	var raw ghRepoView
+	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}
+	}
+
+	owner := strings.TrimSpace(raw.Owner.Login)
+	name := strings.TrimSpace(raw.Name)
+	if owner == "" || name == "" {
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: "unexpected GitHub CLI JSON response: missing repository owner or name", Result: result}
+	}
+
+	defaultBranch := ""
+	if raw.DefaultBranchRef != nil {
+		defaultBranch = strings.TrimSpace(raw.DefaultBranchRef.Name)
+	}
+
+	response.RepositoryRef = &model.TrackerRepository{
+		System:        "github",
+		FullName:      owner + "/" + name,
+		Owner:         owner,
+		Name:          name,
+		Description:   strings.TrimSpace(raw.Description),
+		DefaultBranch: defaultBranch,
+		URL:           strings.TrimSpace(raw.URL),
+	}
+	return response, nil
+}
+
 func isAuthRequired(result CommandResult) bool {
 	message := strings.ToLower(result.Stdout + "\n" + result.Stderr)
 	return strings.Contains(message, "not logged into any github hosts") || strings.Contains(message, "gh auth login")
+}
+
+func isRepoNotFound(result CommandResult) bool {
+	message := strings.ToLower(result.Stdout + "\n" + result.Stderr)
+	return strings.Contains(message, "repository not found") ||
+		strings.Contains(message, "could not resolve to a repository") ||
+		strings.Contains(message, "http 404")
 }

@@ -20,6 +20,7 @@ const (
 
 	ErrorCodeNotInstalled    = "gh-not-installed"
 	ErrorCodeAuthRequired    = "auth-required"
+	ErrorCodeNotFound        = "not-found"
 	ErrorCodeTimeout         = "timeout"
 	ErrorCodeExternalFailure = "unexpected-external-failure"
 	ErrorCodeInvalidRequest  = "invalid-request"
@@ -100,6 +101,24 @@ func NewRunner() *Runner {
 }
 
 func (r *Runner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConfig, error) {
+	return r.runCommandWithConfig(ctx, []string{"auth", "status"})
+}
+
+func (r *Runner) RunRepoView(ctx context.Context, repository string) (CommandResult, resolvedConfig, error) {
+	repository = strings.TrimSpace(repository)
+	if repository == "" {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: "GitHub repository is required",
+			Result:  result,
+		}
+	}
+
+	return r.runCommandWithConfig(ctx, []string{"repo", "view", repository, "--json", "name,owner,description,defaultBranchRef,url"})
+}
+
+func (r *Runner) runCommandWithConfig(ctx context.Context, args []string) (CommandResult, resolvedConfig, error) {
 	config, err := r.loadConfig(ctx)
 	if err != nil {
 		return CommandResult{}, resolvedConfig{}, err
@@ -107,7 +126,7 @@ func (r *Runner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConf
 
 	path, err := r.lookPath(config.Command)
 	if err != nil {
-		result := CommandResult{Command: config.Command, Args: []string{"auth", "status"}, ExitCode: -1}
+		result := CommandResult{Command: config.Command, Args: append([]string(nil), args...), ExitCode: -1}
 		return result, config, &Error{
 			Code:    ErrorCodeNotInstalled,
 			Message: fmt.Sprintf("GitHub CLI not found: %s", config.Command),
@@ -119,7 +138,7 @@ func (r *Runner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConf
 	result := CommandResult{
 		Command:  config.Command,
 		Path:     path,
-		Args:     []string{"auth", "status"},
+		Args:     append([]string(nil), args...),
 		ExitCode: 0,
 	}
 

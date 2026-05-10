@@ -150,6 +150,72 @@ func TestIntegrationGitHubAuthStatusCommandReturnsNormalizedError(t *testing.T) 
 	}
 }
 
+func TestIntegrationGitHubRepoGetCommandPrintsNormalizedRepository(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "repo", "get", "--repo", "rasungatullin/progress"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			RepositoryRef: &integration.TrackerRepository{
+				System:        "github",
+				FullName:      "rasungatullin/progress",
+				Owner:         "rasungatullin",
+				Name:          "progress",
+				Description:   "Repository description",
+				DefaultBranch: "main",
+				URL:           "https://github.com/rasungatullin/progress",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github repo get command: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=repo\n",
+		"operation=get\n",
+		"full_name=rasungatullin/progress\n",
+		"owner=rasungatullin\n",
+		"name=progress\n",
+		"description=Repository description\n",
+		"default_branch=main\n",
+		"url=https://github.com/rasungatullin/progress\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github repo get output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
+func TestIntegrationGitHubRepoGetCommandRequiresRepoFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "repo", "get"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github repo get error")
+	}
+	if err.Error() != "--repo is required" {
+		t.Fatalf("unexpected github repo get error: %v", err)
+	}
+}
+
 type stubCLIProvider struct {
 	response integration.Response
 	err      error

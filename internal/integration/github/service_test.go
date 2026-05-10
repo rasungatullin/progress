@@ -117,12 +117,100 @@ func TestServiceRejectsUnsupportedOperation(t *testing.T) {
 	}
 }
 
+func TestServiceRepoGetSuccess(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"name":"progress","owner":{"login":"rasungatullin"},"description":"Repository description","defaultBranchRef":{"name":"main"},"url":"https://github.com/rasungatullin/progress"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "rasungatullin/progress"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.RepositoryRef == nil {
+		t.Fatal("expected repository")
+	}
+	if response.RepositoryRef.System != "github" {
+		t.Fatalf("unexpected system: %q", response.RepositoryRef.System)
+	}
+	if response.RepositoryRef.FullName != "rasungatullin/progress" {
+		t.Fatalf("unexpected full name: %q", response.RepositoryRef.FullName)
+	}
+	if response.RepositoryRef.DefaultBranch != "main" {
+		t.Fatalf("unexpected default branch: %q", response.RepositoryRef.DefaultBranch)
+	}
+	if stub.repo != "rasungatullin/progress" {
+		t.Fatalf("unexpected requested repo: %q", stub.repo)
+	}
+}
+
+func TestServiceRepoGetRejectsEmptyRepository(t *testing.T) {
+	t.Parallel()
+
+	service := NewService()
+	service.runner = &stubRunner{}
+
+	_, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+}
+
+func TestServiceRepoGetMapsNotFound(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 1,
+			Stderr:   "GraphQL: Could not resolve to a Repository with the name 'missing/repo'.",
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	_, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "missing/repo"})
+	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
+}
+
+func TestServiceRepoGetMapsAuthRequired(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 1,
+			Stderr:   "You are not logged into any GitHub hosts. Run gh auth login.",
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	_, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "owner/name"})
+	assertGitHubErrorCode(t, err, ErrorCodeAuthRequired)
+}
+
 type stubRunner struct {
 	result CommandResult
 	config resolvedConfig
 	err    error
+	repo   string
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunRepoView(_ context.Context, repository string) (CommandResult, resolvedConfig, error) {
+	r.repo = repository
 	return r.result, r.config, r.err
 }
