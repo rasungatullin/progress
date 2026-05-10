@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -118,6 +119,30 @@ func (r *Runner) RunRepoView(ctx context.Context, repository string) (CommandRes
 	return r.runCommandWithConfig(ctx, []string{"repo", "view", repository, "--json", "name,owner,description,defaultBranchRef,url"})
 }
 
+func (r *Runner) RunIssueView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	repository, err := normalizeRepository(repository)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	number, err = normalizeIssueNumber(number)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	return r.runCommandWithConfig(ctx, []string{"issue", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,labels,assignees,author,url,createdAt,updatedAt"})
+}
+
 func normalizeRepository(repository string) (string, error) {
 	repository = strings.TrimSpace(repository)
 	if repository == "" {
@@ -134,6 +159,14 @@ func normalizeRepository(repository string) (string, error) {
 
 func isRepositoryPart(value string) bool {
 	return value != "" && strings.TrimSpace(value) == value && !strings.ContainsAny(value, " \t\r\n")
+}
+
+func normalizeIssueNumber(number int) (int, error) {
+	if number <= 0 {
+		return 0, fmt.Errorf("GitHub issue number must be greater than zero")
+	}
+
+	return number, nil
 }
 
 func (r *Runner) runCommandWithConfig(ctx context.Context, args []string) (CommandResult, resolvedConfig, error) {

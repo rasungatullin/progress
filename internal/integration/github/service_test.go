@@ -111,10 +111,175 @@ func TestServiceRejectsUnsupportedOperation(t *testing.T) {
 	t.Parallel()
 
 	service := NewService()
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if response.Resource != "issue" {
 		t.Fatalf("unexpected resource: %q", response.Resource)
+	}
+}
+
+func TestServiceIssueGetSuccess(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"number":123,"title":"Fix integration","body":"Line one\nLine two","state":"OPEN","labels":[{"name":"bug"},{"name":"integration"}],"assignees":[{"login":"alice","name":"Alice","url":"https://github.com/alice","isBot":false,"isActive":true}],"author":{"login":"bob","name":"Bob","url":"https://github.com/bob","isBot":false,"isActive":true},"url":"https://github.com/owner/name/issues/123","createdAt":"2026-05-01T10:00:00Z","updatedAt":"2026-05-02T10:00:00Z"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.Issue == nil {
+		t.Fatal("expected issue")
+	}
+	if response.Issue.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", response.Issue.Repository)
+	}
+	if response.Issue.Number != 123 {
+		t.Fatalf("unexpected number: %d", response.Issue.Number)
+	}
+	if len(response.Issue.Labels) != 2 || response.Issue.Labels[0] != "bug" || response.Issue.Labels[1] != "integration" {
+		t.Fatalf("unexpected labels: %#v", response.Issue.Labels)
+	}
+	if len(response.Issue.Assignees) != 1 || response.Issue.Assignees[0].Login != "alice" {
+		t.Fatalf("unexpected assignees: %#v", response.Issue.Assignees)
+	}
+	if response.Issue.Author.Login != "bob" {
+		t.Fatalf("unexpected author: %#v", response.Issue.Author)
+	}
+	if stub.repo != "owner/name" || stub.number != 123 {
+		t.Fatalf("unexpected requested issue: repo=%q number=%d", stub.repo, stub.number)
+	}
+	if response.IssueStatus != nil {
+		t.Fatal("did not expect issue status on success")
+	}
+}
+
+func TestServiceIssueGetRejectsInvalidRepository(t *testing.T) {
+	t.Parallel()
+
+	service := NewService()
+	service.runner = &stubRunner{}
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner", Number: 123})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != ErrorCodeInvalidRequest {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+	if response.IssueStatus.Message != "GitHub repository must use owner/name format" {
+		t.Fatalf("unexpected message: %q", response.IssueStatus.Message)
+	}
+}
+
+func TestServiceIssueGetRejectsNonPositiveNumber(t *testing.T) {
+	t.Parallel()
+
+	service := NewService()
+	service.runner = &stubRunner{}
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 0})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != ErrorCodeInvalidRequest {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+	if response.IssueStatus.Message != "GitHub issue number must be greater than zero" {
+		t.Fatalf("unexpected message: %q", response.IssueStatus.Message)
+	}
+}
+
+func TestServiceIssueGetMapsNotFound(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 1,
+			Stderr:   "GraphQL: Could not resolve to an Issue with the number of 123.",
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != ErrorCodeNotFound {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+	if response.IssueStatus.Repository != "owner/name" || response.IssueStatus.Number != 123 {
+		t.Fatalf("unexpected issue target: %#v", response.IssueStatus)
+	}
+}
+
+func TestServiceIssueGetMapsAuthRequired(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 1,
+			Stderr:   "You are not logged into any GitHub hosts. Run gh auth login.",
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	assertGitHubErrorCode(t, err, ErrorCodeAuthRequired)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != ErrorCodeAuthRequired {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+}
+
+func TestServiceIssueGetMapsMalformedJSONToNormalizedError(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"number":`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != StateExternalFailure {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+	if !strings.Contains(response.IssueStatus.Message, "unexpected GitHub CLI JSON response") {
+		t.Fatalf("unexpected message: %q", response.IssueStatus.Message)
+	}
+	if response.Issue != nil {
+		t.Fatal("did not expect issue")
 	}
 }
 
@@ -326,6 +491,7 @@ type stubRunner struct {
 	config resolvedConfig
 	err    error
 	repo   string
+	number int
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -334,5 +500,11 @@ func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConf
 
 func (r *stubRunner) RunRepoView(_ context.Context, repository string) (CommandResult, resolvedConfig, error) {
 	r.repo = repository
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunIssueView(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	r.repo = repository
+	r.number = number
 	return r.result, r.config, r.err
 }

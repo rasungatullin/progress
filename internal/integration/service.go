@@ -25,6 +25,7 @@ type Artifact = model.Artifact
 type ProviderRequest = model.ProviderRequest
 type AuthStatus = model.AuthStatus
 type RepositoryStatus = model.RepositoryStatus
+type IssueStatus = model.IssueStatus
 
 type Provider interface {
 	Execute(context.Context, ProviderRequest) (Response, error)
