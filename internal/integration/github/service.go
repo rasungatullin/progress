@@ -37,6 +37,16 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 	}
 
 	result, config, err := s.runner.RunAuthStatus(ctx)
+	if err != nil && result.ExitCode == 0 {
+		result.ExitCode = -1
+	}
+	if config.Command == "" {
+		config.Command = defaultCommand
+	}
+	if config.Timeout == 0 {
+		config.Timeout = defaultTimeout
+	}
+
 	status := model.AuthStatus{
 		System:    "github",
 		Command:   config.Command,
@@ -82,6 +92,14 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 			response.AuthStatus = &status
 			return response, &Error{Code: ghErr.Code, Message: status.Message, Result: result, Err: ghErr}
 		}
+	}
+
+	if err != nil {
+		status.State = StateExternalFailure
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "gh auth status failed before completing")
+		response.AuthStatus = &status
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
 	}
 
 	if isAuthRequired(result) {

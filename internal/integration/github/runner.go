@@ -134,6 +134,17 @@ func (r *Runner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConf
 		return result, config, nil
 	}
 
+	if errors.Is(outcome.err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		result.TimedOut = true
+		result.ExitCode = -1
+		return result, config, &Error{
+			Code:    ErrorCodeTimeout,
+			Message: fmt.Sprintf("GitHub CLI command timed out after %s", config.Timeout),
+			Result:  result,
+			Err:     context.DeadlineExceeded,
+		}
+	}
+
 	var exitErr *exec.ExitError
 	if errors.As(outcome.err, &exitErr) {
 		result.ExitCode = exitErr.ExitCode()
@@ -145,17 +156,6 @@ func (r *Runner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConf
 	if errors.As(outcome.err, &codedErr) {
 		result.ExitCode = codedErr.ExitCode()
 		return result, config, nil
-	}
-
-	if errors.Is(outcome.err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		result.TimedOut = true
-		result.ExitCode = -1
-		return result, config, &Error{
-			Code:    ErrorCodeTimeout,
-			Message: fmt.Sprintf("GitHub CLI command timed out after %s", config.Timeout),
-			Result:  result,
-			Err:     context.DeadlineExceeded,
-		}
 	}
 
 	return result, config, &Error{

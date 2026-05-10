@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -74,6 +75,34 @@ func TestServiceAuthStatusMapsTimeout(t *testing.T) {
 	}
 	if response.AuthStatus.State != StateTimeout {
 		t.Fatalf("unexpected state: %q", response.AuthStatus.State)
+	}
+}
+
+func TestServiceAuthStatusMapsGenericRunnerError(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		err: errors.New("parse GitHub integration config: unexpected end of JSON input"),
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "auth", Operation: "status"})
+	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
+	if response.AuthStatus == nil {
+		t.Fatal("expected auth status")
+	}
+	if response.AuthStatus.State != StateExternalFailure {
+		t.Fatalf("unexpected state: %q", response.AuthStatus.State)
+	}
+	if response.AuthStatus.Message != "parse GitHub integration config: unexpected end of JSON input" {
+		t.Fatalf("unexpected message: %q", response.AuthStatus.Message)
+	}
+	if response.AuthStatus.ExitCode != -1 {
+		t.Fatalf("unexpected exit code: %d", response.AuthStatus.ExitCode)
+	}
+	if response.AuthStatus.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", response.AuthStatus.Command)
 	}
 }
 

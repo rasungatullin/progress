@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,6 +100,59 @@ func TestRunnerRunAuthStatusReturnsTimeout(t *testing.T) {
 		t.Fatal("expected timeout result")
 	}
 	assertGitHubErrorCode(t, err, ErrorCodeTimeout)
+}
+
+func TestRunnerRunAuthStatusReturnsTimeoutForKilledProcess(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return []byte(`{"timeout":"10ms"}`), nil }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(ctx context.Context, _ string, _ []string) commandRunner {
+		return defaultRunCommand(ctx, "/bin/sh", []string{"-c", "sleep 1"})
+	}
+
+	result, _, err := runner.RunAuthStatus(context.Background())
+	if !result.TimedOut {
+		t.Fatal("expected timeout result")
+	}
+	if result.ExitCode != -1 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	assertGitHubErrorCode(t, err, ErrorCodeTimeout)
+}
+
+func TestRunnerRunAuthStatusReturnsConfigReadError(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrPermission }
+
+	_, _, err := runner.RunAuthStatus(context.Background())
+	if err == nil {
+		t.Fatal("expected config read error")
+	}
+	if !strings.Contains(err.Error(), "read GitHub integration config") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunnerRunAuthStatusReturnsConfigParseError(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return []byte(`{"timeout":`), nil }
+
+	_, _, err := runner.RunAuthStatus(context.Background())
+	if err == nil {
+		t.Fatal("expected config parse error")
+	}
+	if !strings.Contains(err.Error(), "parse GitHub integration config") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func assertGitHubErrorCode(t *testing.T, err error, code string) {
