@@ -84,7 +84,7 @@ func TestNewLaunchFlagsDefaults(t *testing.T) {
 	if invocation.Launch.CommitMessage != launch.DefaultCommitMessage {
 		t.Fatalf("unexpected default commit message: %q", invocation.Launch.CommitMessage)
 	}
-	if invocation.Launch.StructuredProtocol != execution.StructuredProtocolReviewCycle {
+	if invocation.Launch.StructuredProtocol != "" {
 		t.Fatalf("unexpected default structured protocol: %q", invocation.Launch.StructuredProtocol)
 	}
 	if invocation.Launch.StructuredMode != "" {
@@ -118,11 +118,51 @@ func TestExecutionLaunchHelpIncludesStructuredFlags(t *testing.T) {
 		"--structured-protocol string",
 		"--structured-mode string",
 		"--structured-output-required",
-		"(default \"review-cycle\")",
+		"по умолчанию review-cycle вместе с --structured-output",
 	} {
 		if !strings.Contains(help, fragment) {
 			t.Fatalf("launch help must include %q, got %q", fragment, help)
 		}
+	}
+}
+
+func TestExecutionLaunchRejectsStructuredProtocolWithoutStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	for _, protocol := range []string{"legacy", execution.StructuredProtocolReviewCycle} {
+		cmd := NewRootCommand()
+		stdout := &bytes.Buffer{}
+		stderr := &bytes.Buffer{}
+		cmd.SetOut(stdout)
+		cmd.SetErr(stderr)
+		cmd.SetArgs([]string{"execution", "launch", "--dir", t.TempDir(), "--prompt", "task", "--structured-protocol", protocol})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("expected launch error for protocol %q", protocol)
+		}
+		if !strings.Contains(err.Error(), "structured protocol requires structured output") {
+			t.Fatalf("unexpected error for protocol %q: %v", protocol, err)
+		}
+	}
+}
+
+func TestExecutionLaunchRejectsStructuredModeWithoutStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "launch", "--dir", t.TempDir(), "--prompt", "task", "--structured-mode", "review"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected launch error for structured mode without structured-output")
+	}
+	if !strings.Contains(err.Error(), "structured mode requires structured output") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
