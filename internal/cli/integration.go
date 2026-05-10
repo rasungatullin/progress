@@ -36,11 +36,14 @@ func newIntegrationDispatcherCommand() *cobra.Command {
 		Short: "Диагностика маршрута диспетчера интеграции",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newIntegrationService(cmd)
-			route := service.Dispatch(context.Background(), integration.Request{
+			route, err := service.Dispatch(context.Background(), integration.Request{
 				System:    flags.system,
 				Resource:  flags.resource,
 				Operation: flags.operation,
 			})
+			if err != nil {
+				return err
+			}
 
 			cmd.Printf("system=%s\nprovider=%s\nprovider-available=%t\nresource=%s\noperation=%s\nexpected-result=%s\n", route.System, route.Provider, route.ProviderAvailable, route.Resource, route.Operation, route.ExpectedResult)
 			for _, diagnostic := range route.Diagnostics {

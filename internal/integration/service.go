@@ -22,8 +22,19 @@ type TrackerUser = model.TrackerUser
 type TrackerSearchResult = model.TrackerSearchResult
 type Artifact = model.Artifact
 
+type ProviderRequest struct {
+	System     string
+	Resource   string
+	Operation  string
+	Repository string
+	Number     int
+	Query      string
+	Limit      int
+	Route      Route
+}
+
 type Provider interface {
-	Execute(context.Context, Request) (Response, error)
+	Execute(context.Context, ProviderRequest) (Response, error)
 }
 
 type Service struct {
@@ -39,7 +50,7 @@ func NewService(logger *log.Logger) *Service {
 }
 
 func (s *Service) RegisterProvider(system string, provider Provider) {
-	name := normalizeSystem(system)
+	name := strings.TrimSpace(strings.ToLower(system))
 	if name == "" || provider == nil {
 		return
 	}
@@ -47,38 +58,72 @@ func (s *Service) RegisterProvider(system string, provider Provider) {
 	s.providers[name] = provider
 }
 
-func (s *Service) Dispatch(_ context.Context, req Request) Route {
-	system := normalizeSystem(req.System)
-	resource := normalizeResource(req.Resource)
-	operation := normalizeOperation(req.Operation)
-	provider, ok := s.providers[system]
+func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
+	normalized, err := normalizeRequest(req)
+	if err != nil {
+		route := Route{
+			System:         "",
+			Provider:       "",
+			Resource:       normalizeResource(req.Resource),
+			Operation:      normalizeOperation(req.Operation),
+			ExpectedResult: expectedResult(normalizeResource(req.Resource), normalizeOperation(req.Operation)),
+			Diagnostics: []string{
+				fmt.Sprintf("request system=%s resource=%s operation=%s", strings.TrimSpace(req.System), normalizeResource(req.Resource), normalizeOperation(req.Operation)),
+				"dispatcher mode=diagnostic-only",
+				"invalid-request missing system",
+			},
+		}
+
+		s.logger.Printf("Диспетчер интеграции отклонил запрос: система=%q причина=%q", req.System, err)
+		return route, err
+	}
+
+	_, ok := s.providers[normalized.System]
 
 	route := Route{
-		System:            system,
-		Provider:          system,
+		System:            normalized.System,
+		Provider:          normalized.System,
 		ProviderAvailable: ok,
-		Resource:          resource,
-		Operation:         operation,
-		ExpectedResult:    expectedResult(resource, operation),
-		Diagnostics:       buildDiagnostics(system, resource, operation, ok, s.registeredSystems()),
+		Resource:          normalized.Resource,
+		Operation:         normalized.Operation,
+		ExpectedResult:    expectedResult(normalized.Resource, normalized.Operation),
+		Diagnostics:       buildDiagnostics(normalized.System, normalized.Resource, normalized.Operation, ok, s.registeredSystems()),
 	}
-
-	if ok {
-		_ = provider
-	}
-
 	s.logger.Printf("Диспетчер интеграции сформировал маршрут: система=%q ресурс=%q операция=%q провайдер=%q доступен=%t", route.System, route.Resource, route.Operation, route.Provider, route.ProviderAvailable)
-	return route
+	return route, nil
 }
 
 func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
-	route := s.Dispatch(ctx, req)
+	normalized, err := normalizeRequest(req)
+	if err != nil {
+		return Response{
+			Resource:  normalizeResource(req.Resource),
+			Operation: normalizeOperation(req.Operation),
+			Route: Route{
+				Resource:       normalizeResource(req.Resource),
+				Operation:      normalizeOperation(req.Operation),
+				ExpectedResult: expectedResult(normalizeResource(req.Resource), normalizeOperation(req.Operation)),
+				Diagnostics: []string{
+					fmt.Sprintf("request system=%s resource=%s operation=%s", strings.TrimSpace(req.System), normalizeResource(req.Resource), normalizeOperation(req.Operation)),
+					"dispatcher mode=diagnostic-only",
+					"invalid-request missing system",
+				},
+			},
+		}, err
+	}
+
+	route, err := s.Dispatch(ctx, req)
+	if err != nil {
+		return Response{}, err
+	}
+
+	normalized.Route = route
 	provider, ok := s.providers[route.System]
 	if !ok {
 		return Response{System: route.System, Resource: route.Resource, Operation: route.Operation, Route: route}, fmt.Errorf("integration provider not registered: %s", route.System)
 	}
 
-	result, err := provider.Execute(ctx, req)
+	result, err := provider.Execute(ctx, normalized)
 	if err != nil {
 		return Response{}, err
 	}
@@ -106,11 +151,25 @@ func (s *Service) registeredSystems() []string {
 
 func normalizeSystem(system string) string {
 	system = strings.TrimSpace(strings.ToLower(system))
-	if system == "" {
-		return "unknown"
+	return system
+}
+
+func normalizeRequest(req Request) (ProviderRequest, error) {
+	normalized := ProviderRequest{
+		System:     normalizeSystem(req.System),
+		Resource:   normalizeResource(req.Resource),
+		Operation:  normalizeOperation(req.Operation),
+		Repository: strings.TrimSpace(req.Repository),
+		Number:     req.Number,
+		Query:      strings.TrimSpace(req.Query),
+		Limit:      req.Limit,
 	}
 
-	return system
+	if normalized.System == "" {
+		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
+	}
+
+	return normalized, nil
 }
 
 func normalizeResource(resource string) string {

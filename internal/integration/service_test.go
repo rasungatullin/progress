@@ -13,7 +13,10 @@ func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
 
 	if route.System != "github" {
 		t.Fatalf("unexpected system: %q", route.System)
@@ -39,7 +42,7 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 		},
 	})
 
-	result, err := service.Execute(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	result, err := service.Execute(context.Background(), Request{System: " GitHub ", Resource: " Issue ", Operation: " GET "})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -60,6 +63,32 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	}
 	if result.Operation != "get" {
 		t.Fatalf("unexpected result operation: %q", result.Operation)
+	}
+}
+
+func TestDispatchReturnsErrorForMissingSystem(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	_, err := service.Dispatch(context.Background(), Request{Resource: "issue", Operation: "get"})
+	if err == nil {
+		t.Fatal("expected dispatch error")
+	}
+	if err.Error() != "invalid integration request: system is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteReturnsErrorForMissingSystem(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	_, err := service.Execute(context.Background(), Request{Resource: "issue", Operation: "get"})
+	if err == nil {
+		t.Fatal("expected execute error")
+	}
+	if err.Error() != "invalid integration request: system is required" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -96,10 +125,57 @@ type stubProvider struct {
 	err      error
 }
 
-func (p stubProvider) Execute(context.Context, Request) (Response, error) {
+func (p stubProvider) Execute(context.Context, ProviderRequest) (Response, error) {
 	if p.err != nil {
 		return Response{}, p.err
 	}
 
 	return p.response, nil
+}
+
+type capturingProvider struct {
+	seen ProviderRequest
+}
+
+func (p *capturingProvider) Execute(_ context.Context, req ProviderRequest) (Response, error) {
+	p.seen = req
+	return Response{}, nil
+}
+
+func TestExecutePassesNormalizedRequestToProvider(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	provider := &capturingProvider{}
+	service.RegisterProvider("github", provider)
+
+	_, err := service.Execute(context.Background(), Request{
+		System:     " GitHub ",
+		Resource:   " Issue ",
+		Operation:  " GET ",
+		Repository: " owner/name ",
+		Query:      " is:open ",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if provider.seen.System != "github" {
+		t.Fatalf("unexpected normalized system: %q", provider.seen.System)
+	}
+	if provider.seen.Resource != "issue" {
+		t.Fatalf("unexpected normalized resource: %q", provider.seen.Resource)
+	}
+	if provider.seen.Operation != "get" {
+		t.Fatalf("unexpected normalized operation: %q", provider.seen.Operation)
+	}
+	if provider.seen.Repository != "owner/name" {
+		t.Fatalf("unexpected normalized repository: %q", provider.seen.Repository)
+	}
+	if provider.seen.Query != "is:open" {
+		t.Fatalf("unexpected normalized query: %q", provider.seen.Query)
+	}
+	if provider.seen.Route.System != "github" {
+		t.Fatalf("unexpected route system: %q", provider.seen.Route.System)
+	}
 }
