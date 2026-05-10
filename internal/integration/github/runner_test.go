@@ -193,6 +193,34 @@ func TestRunnerRunRepoViewRejectsEmptyRepository(t *testing.T) {
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 }
 
+func TestRunnerRunRepoViewRejectsMalformedRepositoryFormat(t *testing.T) {
+	t.Parallel()
+
+	invalid := []string{"owner", "owner/", "/name", "owner/name/extra", "owner /name"}
+	for _, repository := range invalid {
+		repository := repository
+		t.Run(repository, func(t *testing.T) {
+			t.Parallel()
+
+			runner := NewRunner()
+			called := false
+			runner.runCommand = func(context.Context, string, []string) commandRunner {
+				called = true
+				return commandRunner{}
+			}
+
+			_, _, err := runner.RunRepoView(context.Background(), repository)
+			assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+			if err.Error() != "GitHub repository must use owner/name format" {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if called {
+				t.Fatal("did not expect gh invocation")
+			}
+		})
+	}
+}
+
 func assertGitHubErrorCode(t *testing.T, err error, code string) {
 	t.Helper()
 

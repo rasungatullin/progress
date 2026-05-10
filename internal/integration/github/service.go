@@ -141,41 +141,82 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 }
 
 func (s *Service) executeRepoGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
-	repository := strings.TrimSpace(req.Repository)
-	if repository == "" {
-		return response, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub repository is required"}
+	repository, err := normalizeRepository(req.Repository)
+	if err != nil {
+		status := repositoryErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository))
+		status.State = ErrorCodeInvalidRequest
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "repository request rejected before invoking gh")
+		response.RepositoryStatus = &status
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
 	}
 
-	result, _, err := s.runner.RunRepoView(ctx, repository)
+	result, config, err := s.runner.RunRepoView(ctx, repository)
+	if err != nil && result.ExitCode == 0 {
+		result.ExitCode = -1
+	}
+	if config.Command == "" {
+		config.Command = defaultCommand
+	}
+
+	status := repositoryErrorStatus(config, result, repository)
 	if err != nil {
 		var ghErr *Error
 		if errors.As(err, &ghErr) {
+			status.State = repositoryStateForErrorCode(ghErr.Code)
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "gh repo view failed before returning a repository payload")
+			response.RepositoryStatus = &status
 			return response, ghErr
 		}
 
-		return response, &Error{Code: ErrorCodeExternalFailure, Message: err.Error(), Result: result, Err: err}
+		status.State = StateExternalFailure
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "gh repo view failed before returning a repository payload")
+		response.RepositoryStatus = &status
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
 	}
 
 	if result.ExitCode != 0 {
 		switch {
 		case isAuthRequired(result):
-			return response, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub authentication is required", Result: result}
+			status.State = ErrorCodeAuthRequired
+			status.Message = "GitHub authentication is required"
+			status.Diagnostics = append(status.Diagnostics, "gh repo view reported that no GitHub login is configured")
+			response.RepositoryStatus = &status
+			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
 		case isRepoNotFound(result):
-			return response, &Error{Code: ErrorCodeNotFound, Message: fmt.Sprintf("GitHub repository not found: %s", repository), Result: result}
+			status.State = ErrorCodeNotFound
+			status.Message = fmt.Sprintf("GitHub repository not found: %s", repository)
+			status.Diagnostics = append(status.Diagnostics, "gh repo view could not resolve the requested repository")
+			response.RepositoryStatus = &status
+			return response, &Error{Code: ErrorCodeNotFound, Message: status.Message, Result: result}
 		default:
-			return response, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode), Result: result}
+			status.State = StateExternalFailure
+			status.Message = fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
+			status.Diagnostics = append(status.Diagnostics, "gh repo view exited with a non-zero code")
+			response.RepositoryStatus = &status
+			return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
 		}
 	}
 
 	var raw ghRepoView
 	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
-		return response, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}
+		status.State = StateExternalFailure
+		status.Message = fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err)
+		status.Diagnostics = append(status.Diagnostics, "gh repo view returned malformed JSON")
+		response.RepositoryStatus = &status
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
 	}
 
 	owner := strings.TrimSpace(raw.Owner.Login)
 	name := strings.TrimSpace(raw.Name)
 	if owner == "" || name == "" {
-		return response, &Error{Code: ErrorCodeExternalFailure, Message: "unexpected GitHub CLI JSON response: missing repository owner or name", Result: result}
+		status.State = StateExternalFailure
+		status.Message = "unexpected GitHub CLI JSON response: missing repository owner or name"
+		status.Diagnostics = append(status.Diagnostics, "gh repo view returned an incomplete repository payload")
+		response.RepositoryStatus = &status
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
 	}
 
 	defaultBranch := ""
@@ -193,6 +234,49 @@ func (s *Service) executeRepoGet(ctx context.Context, response model.Response, r
 		URL:           strings.TrimSpace(raw.URL),
 	}
 	return response, nil
+}
+
+func repositoryErrorStatus(config resolvedConfig, result CommandResult, repository string) model.RepositoryStatus {
+	status := model.RepositoryStatus{
+		System:     "github",
+		Repository: repository,
+		State:      StateExternalFailure,
+		Command:    config.Command,
+		Path:       result.Path,
+		ExitCode:   result.ExitCode,
+		Stdout:     result.Stdout,
+		Stderr:     result.Stderr,
+	}
+
+	if status.Command == "" {
+		status.Command = defaultCommand
+	}
+	if status.ExitCode == 0 {
+		status.ExitCode = -1
+	}
+
+	if repository != "" {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("repository=%s", repository))
+	}
+	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s repo view %s --json name,owner,description,defaultBranchRef,url", status.Command, repository))
+	return status
+}
+
+func repositoryStateForErrorCode(code string) string {
+	switch code {
+	case ErrorCodeInvalidRequest:
+		return ErrorCodeInvalidRequest
+	case ErrorCodeNotInstalled:
+		return StateNotInstalled
+	case ErrorCodeAuthRequired:
+		return ErrorCodeAuthRequired
+	case ErrorCodeNotFound:
+		return ErrorCodeNotFound
+	case ErrorCodeTimeout:
+		return StateTimeout
+	default:
+		return StateExternalFailure
+	}
 }
 
 func isAuthRequired(result CommandResult) bool {

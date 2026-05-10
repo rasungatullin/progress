@@ -105,17 +105,35 @@ func (r *Runner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConf
 }
 
 func (r *Runner) RunRepoView(ctx context.Context, repository string) (CommandResult, resolvedConfig, error) {
-	repository = strings.TrimSpace(repository)
-	if repository == "" {
+	repository, err := normalizeRepository(repository)
+	if err != nil {
 		result := CommandResult{Command: defaultCommand, ExitCode: -1}
 		return result, resolvedConfig{}, &Error{
 			Code:    ErrorCodeInvalidRequest,
-			Message: "GitHub repository is required",
+			Message: err.Error(),
 			Result:  result,
 		}
 	}
 
 	return r.runCommandWithConfig(ctx, []string{"repo", "view", repository, "--json", "name,owner,description,defaultBranchRef,url"})
+}
+
+func normalizeRepository(repository string) (string, error) {
+	repository = strings.TrimSpace(repository)
+	if repository == "" {
+		return "", fmt.Errorf("GitHub repository is required")
+	}
+
+	parts := strings.Split(repository, "/")
+	if len(parts) != 2 || !isRepositoryPart(parts[0]) || !isRepositoryPart(parts[1]) {
+		return "", fmt.Errorf("GitHub repository must use owner/name format")
+	}
+
+	return repository, nil
+}
+
+func isRepositoryPart(value string) bool {
+	return value != "" && strings.TrimSpace(value) == value && !strings.ContainsAny(value, " \t\r\n")
 }
 
 func (r *Runner) runCommandWithConfig(ctx context.Context, args []string) (CommandResult, resolvedConfig, error) {

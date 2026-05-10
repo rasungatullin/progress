@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,8 +160,17 @@ func TestServiceRepoGetRejectsEmptyRepository(t *testing.T) {
 	service := NewService()
 	service.runner = &stubRunner{}
 
-	_, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if response.RepositoryStatus == nil {
+		t.Fatal("expected repository status")
+	}
+	if response.RepositoryStatus.State != ErrorCodeInvalidRequest {
+		t.Fatalf("unexpected state: %q", response.RepositoryStatus.State)
+	}
+	if response.RepositoryStatus.Message != "GitHub repository is required" {
+		t.Fatalf("unexpected message: %q", response.RepositoryStatus.Message)
+	}
 }
 
 func TestServiceRepoGetMapsNotFound(t *testing.T) {
@@ -177,8 +187,17 @@ func TestServiceRepoGetMapsNotFound(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	_, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "missing/repo"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "missing/repo"})
 	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
+	if response.RepositoryStatus == nil {
+		t.Fatal("expected repository status")
+	}
+	if response.RepositoryStatus.State != ErrorCodeNotFound {
+		t.Fatalf("unexpected state: %q", response.RepositoryStatus.State)
+	}
+	if response.RepositoryStatus.Repository != "missing/repo" {
+		t.Fatalf("unexpected repository: %q", response.RepositoryStatus.Repository)
+	}
 }
 
 func TestServiceRepoGetMapsAuthRequired(t *testing.T) {
@@ -195,8 +214,111 @@ func TestServiceRepoGetMapsAuthRequired(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	_, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "owner/name"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "owner/name"})
 	assertGitHubErrorCode(t, err, ErrorCodeAuthRequired)
+	if response.RepositoryStatus == nil {
+		t.Fatal("expected repository status")
+	}
+	if response.RepositoryStatus.State != ErrorCodeAuthRequired {
+		t.Fatalf("unexpected state: %q", response.RepositoryStatus.State)
+	}
+	if response.RepositoryStatus.ExitCode != 1 {
+		t.Fatalf("unexpected exit code: %d", response.RepositoryStatus.ExitCode)
+	}
+}
+
+func TestServiceRepoGetMapsNotInstalled(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", ExitCode: -1},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+		err: &Error{
+			Code:    ErrorCodeNotInstalled,
+			Message: "GitHub CLI not found: gh",
+			Result:  CommandResult{Command: "gh", ExitCode: -1},
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "owner/name"})
+	assertGitHubErrorCode(t, err, ErrorCodeNotInstalled)
+	if response.RepositoryStatus == nil {
+		t.Fatal("expected repository status")
+	}
+	if response.RepositoryStatus.State != StateNotInstalled {
+		t.Fatalf("unexpected state: %q", response.RepositoryStatus.State)
+	}
+	if response.RepositoryStatus.Message != "GitHub CLI not found: gh" {
+		t.Fatalf("unexpected message: %q", response.RepositoryStatus.Message)
+	}
+	if response.RepositoryStatus.ExitCode != -1 {
+		t.Fatalf("unexpected exit code: %d", response.RepositoryStatus.ExitCode)
+	}
+	if response.RepositoryRef != nil {
+		t.Fatal("did not expect repository ref")
+	}
+	if stub.repo != "owner/name" {
+		t.Fatalf("unexpected requested repo: %q", stub.repo)
+	}
+}
+
+func TestServiceRepoGetMapsMalformedJSONToNormalizedError(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"name":`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "owner/name"})
+	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
+	if response.RepositoryStatus == nil {
+		t.Fatal("expected repository status")
+	}
+	if response.RepositoryStatus.State != StateExternalFailure {
+		t.Fatalf("unexpected state: %q", response.RepositoryStatus.State)
+	}
+	if !strings.Contains(response.RepositoryStatus.Message, "unexpected GitHub CLI JSON response") {
+		t.Fatalf("unexpected message: %q", response.RepositoryStatus.Message)
+	}
+	if response.RepositoryStatus.Stdout != `{"name":` {
+		t.Fatalf("unexpected stdout: %q", response.RepositoryStatus.Stdout)
+	}
+	if response.RepositoryRef != nil {
+		t.Fatal("did not expect repository ref")
+	}
+}
+
+func TestServiceRepoGetMapsUnexpectedExternalFailureToNormalizedError(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", ExitCode: -1},
+		err:    errors.New("gh spawn failed"),
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", Repository: "owner/name"})
+	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
+	if response.RepositoryStatus == nil {
+		t.Fatal("expected repository status")
+	}
+	if response.RepositoryStatus.State != StateExternalFailure {
+		t.Fatalf("unexpected state: %q", response.RepositoryStatus.State)
+	}
+	if response.RepositoryStatus.Message != "gh spawn failed" {
+		t.Fatalf("unexpected message: %q", response.RepositoryStatus.Message)
+	}
 }
 
 type stubRunner struct {

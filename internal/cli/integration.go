@@ -175,13 +175,24 @@ func printGitHubAuthStatus(cmd *cobra.Command, response integration.Response) {
 
 func printGitHubRepository(cmd *cobra.Command, response integration.Response) {
 	repository := response.RepositoryRef
-	if repository == nil {
+	if repository != nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nfull_name=%s\nowner=%s\nname=%s\ndefault_branch=%s\nurl=%s\n", repository.System, response.Resource, response.Operation, repository.FullName, repository.Owner, repository.Name, repository.DefaultBranch, repository.URL)
+		printMultilineField(cmd, "description", repository.Description)
+		return
+	}
+
+	status := response.RepositoryStatus
+	if status == nil {
 		cmd.Printf("system=%s\nresource=%s\noperation=%s\nmessage=GitHub repo get did not return a normalized repository\n", response.System, response.Resource, response.Operation)
 		return
 	}
 
-	cmd.Printf("system=%s\nresource=%s\noperation=%s\nfull_name=%s\nowner=%s\nname=%s\ndefault_branch=%s\nurl=%s\n", repository.System, response.Resource, response.Operation, repository.FullName, repository.Owner, repository.Name, repository.DefaultBranch, repository.URL)
-	printMultilineField(cmd, "description", repository.Description)
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	for _, diagnostic := range status.Diagnostics {
+		cmd.Printf("diagnostic=%s\n", diagnostic)
+	}
+	printMultilineField(cmd, "stdout", status.Stdout)
+	printMultilineField(cmd, "stderr", status.Stderr)
 }
 
 func printMultilineField(cmd *cobra.Command, key string, value string) {
