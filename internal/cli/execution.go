@@ -14,14 +14,18 @@ import (
 const defaultLaunchModel = "openai/gpt-5.4"
 
 type launchFlags struct {
-	directory     string
-	name          string
-	profile       string
-	runner        string
-	model         string
-	prompt        string
-	commitPush    bool
-	commitMessage string
+	directory                string
+	name                     string
+	profile                  string
+	runner                   string
+	model                    string
+	prompt                   string
+	structuredOutput         bool
+	structuredProtocol       string
+	structuredMode           string
+	structuredOutputRequired bool
+	commitPush               bool
+	commitMessage            string
 }
 
 func newExecutionCommand() *cobra.Command {
@@ -196,6 +200,10 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
 	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
+	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
+	cmd.Flags().StringVar(&flags.structuredProtocol, "structured-protocol", execution.StructuredProtocolReviewCycle, "Протокол structured output при --structured-output: legacy или review-cycle")
+	cmd.Flags().StringVar(&flags.structuredMode, "structured-mode", "", "Режим structured output при --structured-output: review, reply, fix, re-review")
+	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
 	cmd.Flags().BoolVar(&flags.commitPush, "commit-push", false, "После успешного запуска выполнить git commit и git push")
 	cmd.Flags().StringVar(&flags.commitMessage, "commit-message", launch.DefaultCommitMessage, "Текст git commit при использовании --commit-push")
 	_ = cmd.MarkFlagRequired("dir")
@@ -209,6 +217,10 @@ func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
 	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
+	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
+	cmd.Flags().StringVar(&flags.structuredProtocol, "structured-protocol", execution.StructuredProtocolReviewCycle, "Протокол structured output при --structured-output: legacy или review-cycle")
+	cmd.Flags().StringVar(&flags.structuredMode, "structured-mode", "", "Режим structured output при --structured-output: review, reply, fix, re-review")
+	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
 	_ = cmd.MarkFlagRequired("prompt")
 }
 
@@ -226,12 +238,16 @@ func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 		Profile:   flags.profile,
 		Workplace: execution.WorkplaceSpec{Name: flags.name},
 		Launch: execution.LaunchSpec{
-			Directory:     flags.directory,
-			Runner:        flags.runner,
-			Model:         flags.model,
-			Prompt:        flags.prompt,
-			CommitPush:    flags.commitPush,
-			CommitMessage: flags.commitMessage,
+			Directory:                flags.directory,
+			Runner:                   flags.runner,
+			Model:                    flags.model,
+			Prompt:                   flags.prompt,
+			StructuredOutput:         flags.structuredOutput,
+			StructuredProtocol:       flags.structuredProtocol,
+			StructuredMode:           flags.structuredMode,
+			StructuredOutputRequired: flags.structuredOutputRequired,
+			CommitPush:               flags.commitPush,
+			CommitMessage:            flags.commitMessage,
 		},
 	}
 }

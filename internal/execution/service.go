@@ -25,6 +25,11 @@ type ReviewCycleQuestion = model.ReviewCycleQuestion
 type ReviewCycleAction = model.ReviewCycleAction
 type ReviewCycleChange = model.ReviewCycleChange
 
+const (
+	StructuredProtocolLegacy      = model.StructuredProtocolLegacy
+	StructuredProtocolReviewCycle = model.StructuredProtocolReviewCycle
+)
+
 type ProfileResolver interface {
 	Resolve(context.Context, Invocation) (Profile, error)
 }
