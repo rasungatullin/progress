@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	githubprovider "github.com/rasungatullin/progress/internal/integration/github"
 	"github.com/rasungatullin/progress/internal/integration/model"
 )
 
@@ -21,17 +22,8 @@ type TrackerRepository = model.TrackerRepository
 type TrackerUser = model.TrackerUser
 type TrackerSearchResult = model.TrackerSearchResult
 type Artifact = model.Artifact
-
-type ProviderRequest struct {
-	System     string
-	Resource   string
-	Operation  string
-	Repository string
-	Number     int
-	Query      string
-	Limit      int
-	Route      Route
-}
+type ProviderRequest = model.ProviderRequest
+type AuthStatus = model.AuthStatus
 
 type Provider interface {
 	Execute(context.Context, ProviderRequest) (Response, error)
@@ -43,10 +35,12 @@ type Service struct {
 }
 
 func NewService(logger *log.Logger) *Service {
-	return &Service{
+	service := &Service{
 		logger:    logger,
 		providers: make(map[string]Provider),
 	}
+	service.RegisterProvider("github", githubprovider.NewService())
+	return service
 }
 
 func (s *Service) RegisterProvider(system string, provider Provider) {
@@ -124,14 +118,14 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	}
 
 	result, err := provider.Execute(ctx, normalized)
-	if err != nil {
-		return Response{}, err
-	}
-
 	result.System = firstNonEmpty(result.System, route.System)
 	result.Resource = firstNonEmpty(result.Resource, route.Resource)
 	result.Operation = firstNonEmpty(result.Operation, route.Operation)
 	result.Route = route
+	if err != nil {
+		return result, err
+	}
+
 	return result, nil
 }
 
@@ -206,6 +200,11 @@ func expectedResult(resource string, operation string) string {
 		return "tracker-comment[]"
 	case "review":
 		return "tracker-review[]"
+	case "auth":
+		if operation == "status" {
+			return "integration-auth-status"
+		}
+		return "normalized-response"
 	case "repository", "repo":
 		return "tracker-repository"
 	default:
