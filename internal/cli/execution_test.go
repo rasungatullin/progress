@@ -156,6 +156,70 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestPrintLaunchResultWithReviewCycleEnvelope(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "launch"}
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+
+	printLaunchResult(cmd, execution.LaunchResult{
+		Status:  "completed",
+		Summary: "profile=default git=disabled\nApplied the requested changes.",
+		ReviewCycle: &execution.ReviewCycleEnvelope{
+			ProtocolVersion: "review-cycle/v1",
+			Mode:            "re-review",
+			Summary:         "Re-check after fixes.",
+			Remarks: []execution.ReviewCycleRemark{{
+				ID:       "remark-1",
+				Status:   "resolved",
+				Severity: "critical",
+				Title:    "Rollback plan",
+				Body:     "Confirmed in deploy docs.",
+			}},
+			Questions: []execution.ReviewCycleQuestion{{
+				ID:    "question-1",
+				Title: "Integration coverage",
+				Body:  "Is the new test enough?",
+			}},
+			FollowUpActions: []execution.ReviewCycleAction{{
+				ID:     "action-1",
+				Status: "pending",
+				Type:   "test",
+				Title:  "Run smoke suite",
+			}},
+			Changes: []execution.ReviewCycleChange{{Summary: "Updated release checklist."}},
+		},
+		CriticalRemarks: []string{"Rollback plan: Confirmed in deploy docs."},
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, "review-cycle-protocol-version=review-cycle/v1\n") {
+		t.Fatalf("output must include review cycle protocol version: %q", output)
+	}
+	if !strings.Contains(output, "review-cycle-mode=re-review\n") {
+		t.Fatalf("output must include review cycle mode: %q", output)
+	}
+	if !strings.Contains(output, "review-cycle-summary=Re-check after fixes.\n") {
+		t.Fatalf("output must include review cycle summary: %q", output)
+	}
+	if !strings.Contains(output, `review-cycle-remark={"id":"remark-1","status":"resolved","severity":"critical","title":"Rollback plan","body":"Confirmed in deploy docs."}`+"\n") {
+		t.Fatalf("output must include serialized review cycle remark: %q", output)
+	}
+	if !strings.Contains(output, `review-cycle-question={"id":"question-1","title":"Integration coverage","body":"Is the new test enough?"}`+"\n") {
+		t.Fatalf("output must include serialized review cycle question: %q", output)
+	}
+	if !strings.Contains(output, `review-cycle-follow-up-action={"id":"action-1","status":"pending","type":"test","title":"Run smoke suite"}`+"\n") {
+		t.Fatalf("output must include serialized follow-up action: %q", output)
+	}
+	if !strings.Contains(output, `review-cycle-change={"summary":"Updated release checklist."}`+"\n") {
+		t.Fatalf("output must include serialized change: %q", output)
+	}
+	if !strings.Contains(output, "critical-remark=Rollback plan: Confirmed in deploy docs.\n") {
+		t.Fatalf("output must keep legacy critical remark view: %q", output)
+	}
+}
+
 func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
 	t.Parallel()
 

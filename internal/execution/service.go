@@ -19,6 +19,11 @@ type Profile = model.Profile
 type Allocation = model.Allocation
 type Workplace = model.Workplace
 type LaunchResult = model.LaunchResult
+type ReviewCycleEnvelope = model.ReviewCycleEnvelope
+type ReviewCycleRemark = model.ReviewCycleRemark
+type ReviewCycleQuestion = model.ReviewCycleQuestion
+type ReviewCycleAction = model.ReviewCycleAction
+type ReviewCycleChange = model.ReviewCycleChange
 
 type ProfileResolver interface {
 	Resolve(context.Context, Invocation) (Profile, error)

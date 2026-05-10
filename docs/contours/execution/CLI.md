@@ -86,11 +86,15 @@ CLI рассматривается как основной ручной инте
 
 Если `--commit-push` не задан и профиль также не включает `commit-push`, команда выполняет только runner и возвращает его итоговый summary.
 
-Runner может дополнительно вернуть необязательный structured block в формате JSON внутри секции `<progress-structured-output>...</progress-structured-output>`. Поддерживаются ключи `critical_remarks`, `minor_remarks` и `questions`, каждый со значением-массивом строк.
+Runner может дополнительно вернуть необязательный structured block в формате JSON внутри секции `<progress-structured-output>...</progress-structured-output>`. Legacy-формат по-прежнему поддерживает ключи `critical_remarks`, `minor_remarks` и `questions`, каждый со значением-массивом строк.
+
+Для review cycle дополнительно поддерживается расширенный envelope со следующей схемой верхнего уровня: `protocol_version`, `mode`, `summary`, `remarks[]`, `questions[]`, `follow_up_actions[]`, `changes[]`. Для `remarks[]` доступны поля `id`, `status`, `response_status`, `severity`, `type`, `title`, `body`, `reply`, `fix_summary`. `questions[]` и `follow_up_actions[]` тоже передаются как JSON-объекты; executor сохраняет их в явную модель и одновременно строит legacy-представление для `critical_remarks`, `minor_remarks` и `questions`, чтобы старые потребители не ломались.
 
 Executor разбирает structured output только если в конце runner output присутствует один явный trailing block, допускающий только завершающие пробелы и переводы строки после `</progress-structured-output>`. Теги, встретившиеся внутри обычного текста, примера или промежуточного пояснения, не считаются structured result и остаются в `summary`. Если trailing block присутствует, но не парсится, executor сохраняет исходный runner output в `summary` без заполнения дополнительных полей, чтобы не терять диагностический контекст.
 
-В CLI итог печатается в виде отдельного блока `summary<<PROGRESS_SUMMARY ... PROGRESS_SUMMARY`, после которого при наличии structured данных выводится секция `structured-output:` со строками `critical-remark=...`, `minor-remark=...` и `question=...`. Для устранения неоднозначности multiline structured значения в CLI нормализуются в одну строку.
+В prompt можно передавать базовый structured input block `<progress-structured-input>...</progress-structured-input>`. Executor выделяет trailing input block из prompt, разбирает его в ту же review cycle модель и передаёт эту структуру дальше в launch flow. Если structured input задан программно, runner получает канонический prompt с тем же trailing block. Это позволяет использовать envelope из предыдущего review/reply/fix/re-review запуска как вход для следующего цикла.
+
+В CLI итог печатается в виде отдельного блока `summary<<PROGRESS_SUMMARY ... PROGRESS_SUMMARY`, после которого при наличии structured данных выводится секция `structured-output:`. Для review cycle envelope CLI дополнительно печатает строки `review-cycle-protocol-version=...`, `review-cycle-mode=...`, `review-cycle-summary=...` и JSON-строки `review-cycle-remark=...`, `review-cycle-question=...`, `review-cycle-follow-up-action=...`, `review-cycle-change=...`. Legacy-строки `critical-remark=...`, `minor-remark=...` и `question=...` сохраняются. Для устранения неоднозначности multiline structured значения в CLI нормализуются в одну строку.
 
 Если effective `commit-push` включён, то после успешного завершения runner команда:
 

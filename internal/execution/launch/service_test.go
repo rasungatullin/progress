@@ -230,6 +230,67 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 	if !slices.Equal(result.Questions, []string{"should we add an integration test?"}) {
 		t.Fatalf("unexpected questions: %#v", result.Questions)
 	}
+	if result.ReviewCycle != nil {
+		t.Fatalf("legacy structured output must not populate review cycle envelope: %#v", result.ReviewCycle)
+	}
+}
+
+func TestLaunchStructuredOutputReviewCycleEnvelopePresent(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","mode":"review","summary":"Main review findings.","remarks":[{"id":"remark-1","status":"open","response_status":"needs-reply","severity":"critical","type":"bug","title":"Missing rollback plan","body":"Document rollback steps."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist","body":"Add rollback item."}],"changes":[{"summary":"Touched deploy docs."}]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if result.ReviewCycle == nil {
+		t.Fatal("review cycle envelope must be populated")
+	}
+	if result.ReviewCycle.ProtocolVersion != model.ReviewCycleProtocolVersion {
+		t.Fatalf("unexpected protocol version: %#v", result.ReviewCycle)
+	}
+	if result.ReviewCycle.Mode != model.ReviewCycleModeReview {
+		t.Fatalf("unexpected mode: %#v", result.ReviewCycle)
+	}
+	if result.ReviewCycle.Summary != "Main review findings." {
+		t.Fatalf("unexpected structured summary: %#v", result.ReviewCycle)
+	}
+	if len(result.ReviewCycle.Remarks) != 1 || result.ReviewCycle.Remarks[0].ID != "remark-1" {
+		t.Fatalf("unexpected remarks: %#v", result.ReviewCycle.Remarks)
+	}
+	if len(result.ReviewCycle.Questions) != 1 || result.ReviewCycle.Questions[0].ID != "question-1" {
+		t.Fatalf("unexpected questions: %#v", result.ReviewCycle.Questions)
+	}
+	if len(result.ReviewCycle.FollowUpActions) != 1 || result.ReviewCycle.FollowUpActions[0].ID != "action-1" {
+		t.Fatalf("unexpected follow-up actions: %#v", result.ReviewCycle.FollowUpActions)
+	}
+	if len(result.ReviewCycle.Changes) != 1 || result.ReviewCycle.Changes[0].Summary != "Touched deploy docs." {
+		t.Fatalf("unexpected changes: %#v", result.ReviewCycle.Changes)
+	}
+	if !slices.Equal(result.CriticalRemarks, []string{"Missing rollback plan: Document rollback steps."}) {
+		t.Fatalf("unexpected critical remarks: %#v", result.CriticalRemarks)
+	}
+	if len(result.MinorRemarks) != 0 {
+		t.Fatalf("unexpected minor remarks: %#v", result.MinorRemarks)
+	}
+	if !slices.Equal(result.Questions, []string{"Integration coverage: Should we add an integration test?"}) {
+		t.Fatalf("unexpected legacy questions view: %#v", result.Questions)
+	}
 }
 
 func TestLaunchStructuredOutputAbsent(t *testing.T) {
@@ -368,6 +429,48 @@ func TestLaunchTrailingTextAfterStructuredBlockDisablesExtraction(t *testing.T) 
 	}
 	if !strings.Contains(result.Summary, structuredOutputStart) {
 		t.Fatalf("summary must keep non-trailing structured markers verbatim: %q", result.Summary)
+	}
+}
+
+func TestLaunchParsesStructuredInputBlock(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Prompt = strings.Join([]string{
+		"Reply to the latest review.",
+		structuredInputStart,
+		`{"protocol_version":"review-cycle/v1","mode":"reply","summary":"Need to answer review remarks.","remarks":[{"id":"remark-1","status":"open","response_status":"needs-reply","severity":"critical","title":"Missing rollback plan","body":"Please add rollback steps."}]}`,
+		structuredInputEnd,
+	}, "\n")
+
+	service := &Service{
+		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
+			if in.Launch.Prompt != "Reply to the latest review." {
+				t.Fatalf("runner must receive plain prompt without protocol block: %q", in.Launch.Prompt)
+			}
+			if in.Launch.StructuredInput == nil {
+				t.Fatal("runner invocation must include parsed structured input")
+			}
+			if in.Launch.StructuredInput.Mode != model.ReviewCycleModeReply {
+				t.Fatalf("unexpected structured input mode: %#v", in.Launch.StructuredInput)
+			}
+			if len(in.Launch.StructuredInput.Remarks) != 1 || in.Launch.StructuredInput.Remarks[0].ID != "remark-1" {
+				t.Fatalf("unexpected structured input remarks: %#v", in.Launch.StructuredInput.Remarks)
+			}
+			return "runner output", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !strings.Contains(result.Summary, "runner output") {
+		t.Fatalf("summary must preserve runner output: %q", result.Summary)
 	}
 }
 
