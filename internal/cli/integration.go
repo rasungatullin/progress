@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/integration"
@@ -13,6 +14,7 @@ type integrationFlags struct {
 	system    string
 	resource  string
 	operation string
+	repo      string
 }
 
 var integrationServiceFactory = func(cmd *cobra.Command) *integration.Service {
@@ -37,6 +39,17 @@ func newIntegrationGitHubCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newIntegrationGitHubAuthCommand())
+	cmd.AddCommand(newIntegrationGitHubRepoCommand())
+	return cmd
+}
+
+func newIntegrationGitHubRepoCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "repo",
+		Short: "Операции с репозиториями GitHub",
+	}
+
+	cmd.AddCommand(newIntegrationGitHubRepoGetCommand())
 	return cmd
 }
 
@@ -69,6 +82,37 @@ func newIntegrationGitHubAuthStatusCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newIntegrationGitHubRepoGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "get",
+		Short: "Получение сведений о репозитории GitHub",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(flags.repo) == "" {
+				return fmt.Errorf("--repo is required")
+			}
+
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				System:     "github",
+				Resource:   "repo",
+				Operation:  "get",
+				Repository: flags.repo,
+			})
+			printGitHubRepository(cmd, response)
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
+	return cmd
 }
 
 func newIntegrationDispatcherCommand() *cobra.Command {
@@ -122,6 +166,28 @@ func printGitHubAuthStatus(cmd *cobra.Command, response integration.Response) {
 	}
 
 	cmd.Printf("system=%s\nresource=%s\noperation=%s\nstate=%s\navailable=%t\nauthenticated=%t\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.State, status.Available, status.Authenticated, status.Command, status.Path, status.ExitCode, status.Message)
+	for _, diagnostic := range status.Diagnostics {
+		cmd.Printf("diagnostic=%s\n", diagnostic)
+	}
+	printMultilineField(cmd, "stdout", status.Stdout)
+	printMultilineField(cmd, "stderr", status.Stderr)
+}
+
+func printGitHubRepository(cmd *cobra.Command, response integration.Response) {
+	repository := response.RepositoryRef
+	if repository != nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nfull_name=%s\nowner=%s\nname=%s\ndefault_branch=%s\nurl=%s\n", repository.System, response.Resource, response.Operation, repository.FullName, repository.Owner, repository.Name, repository.DefaultBranch, repository.URL)
+		printMultilineField(cmd, "description", repository.Description)
+		return
+	}
+
+	status := response.RepositoryStatus
+	if status == nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nmessage=GitHub repo get did not return a normalized repository\n", response.System, response.Resource, response.Operation)
+		return
+	}
+
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.State, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}

@@ -24,6 +24,7 @@ type TrackerSearchResult = model.TrackerSearchResult
 type Artifact = model.Artifact
 type ProviderRequest = model.ProviderRequest
 type AuthStatus = model.AuthStatus
+type RepositoryStatus = model.RepositoryStatus
 
 type Provider interface {
 	Execute(context.Context, ProviderRequest) (Response, error)

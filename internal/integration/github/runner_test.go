@@ -155,6 +155,72 @@ func TestRunnerRunAuthStatusReturnsConfigParseError(t *testing.T) {
 	}
 }
 
+func TestRunnerRunRepoViewBuildsJSONCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"repo", "view", "owner/name", "--json", "name,owner,description,defaultBranchRef,url"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `{"name":"name"}`}
+	}
+
+	result, config, err := runner.RunRepoView(context.Background(), "owner/name")
+	if err != nil {
+		t.Fatalf("run repo view: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
+func TestRunnerRunRepoViewRejectsEmptyRepository(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	_, _, err := runner.RunRepoView(context.Background(), " ")
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+}
+
+func TestRunnerRunRepoViewRejectsMalformedRepositoryFormat(t *testing.T) {
+	t.Parallel()
+
+	invalid := []string{"owner", "owner/", "/name", "owner/name/extra", "owner /name"}
+	for _, repository := range invalid {
+		repository := repository
+		t.Run(repository, func(t *testing.T) {
+			t.Parallel()
+
+			runner := NewRunner()
+			called := false
+			runner.runCommand = func(context.Context, string, []string) commandRunner {
+				called = true
+				return commandRunner{}
+			}
+
+			_, _, err := runner.RunRepoView(context.Background(), repository)
+			assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+			if err.Error() != "GitHub repository must use owner/name format" {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if called {
+				t.Fatal("did not expect gh invocation")
+			}
+		})
+	}
+}
+
 func assertGitHubErrorCode(t *testing.T, err error, code string) {
 	t.Helper()
 

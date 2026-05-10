@@ -22,19 +22,20 @@ type ProviderRequest struct {
 }
 
 type Response struct {
-	System        string
-	Resource      string
-	Operation     string
-	Route         Route
-	AuthStatus    *AuthStatus
-	Issue         *TrackerIssue
-	PullRequest   *TrackerPullRequest
-	Comments      []TrackerComment
-	Reviews       []TrackerReview
-	RepositoryRef *TrackerRepository
-	SearchResults []TrackerSearchResult
-	Artifacts     []Artifact
-	Metadata      map[string]string
+	System           string
+	Resource         string
+	Operation        string
+	Route            Route
+	AuthStatus       *AuthStatus
+	RepositoryStatus *RepositoryStatus
+	Issue            *TrackerIssue
+	PullRequest      *TrackerPullRequest
+	Comments         []TrackerComment
+	Reviews          []TrackerReview
+	RepositoryRef    *TrackerRepository
+	SearchResults    []TrackerSearchResult
+	Artifacts        []Artifact
+	Metadata         map[string]string
 }
 
 type AuthStatus struct {
@@ -49,6 +50,19 @@ type AuthStatus struct {
 	Diagnostics   []string
 	Stdout        string
 	Stderr        string
+}
+
+type RepositoryStatus struct {
+	System      string
+	Repository  string
+	State       string
+	Command     string
+	Path        string
+	ExitCode    int
+	Message     string
+	Diagnostics []string
+	Stdout      string
+	Stderr      string
 }
 
 type Route struct {
