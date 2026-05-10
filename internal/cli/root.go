@@ -20,6 +20,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.SetHelpCommand(newHelpCommand(cmd))
 	cmd.CompletionOptions.DisableDefaultCmd = true
 
+	cmd.AddCommand(newIntegrationCommand())
 	cmd.AddCommand(newExecutionCommand())
 	cmd.AddCommand(newCompletionCommand(cmd))
 	localizeHelp(cmd)
