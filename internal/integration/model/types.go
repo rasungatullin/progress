@@ -10,11 +10,23 @@ type Request struct {
 	Limit      int
 }
 
+type ProviderRequest struct {
+	System     string
+	Resource   string
+	Operation  string
+	Repository string
+	Number     int
+	Query      string
+	Limit      int
+	Route      Route
+}
+
 type Response struct {
 	System        string
 	Resource      string
 	Operation     string
 	Route         Route
+	AuthStatus    *AuthStatus
 	Issue         *TrackerIssue
 	PullRequest   *TrackerPullRequest
 	Comments      []TrackerComment
@@ -23,6 +35,20 @@ type Response struct {
 	SearchResults []TrackerSearchResult
 	Artifacts     []Artifact
 	Metadata      map[string]string
+}
+
+type AuthStatus struct {
+	System        string
+	State         string
+	Available     bool
+	Authenticated bool
+	Command       string
+	Path          string
+	ExitCode      int
+	Message       string
+	Diagnostics   []string
+	Stdout        string
+	Stderr        string
 }
 
 type Route struct {
