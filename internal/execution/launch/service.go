@@ -92,7 +92,10 @@ type structuredOutput struct {
 }
 
 func parseStructuredOutput(output string) (string, structuredOutput, bool) {
-	plainOutput, rawPayload, ok := extractTrailingStructuredBlock(output, structuredOutputStart, structuredOutputEnd)
+	plainOutput, rawPayload, ok := extractTrailingStructuredBlock(output, structuredOutputStart, structuredOutputEnd, func(rawPayload string) bool {
+		_, err := parseStructuredPayload(rawPayload)
+		return err == nil
+	})
 	if !ok {
 		return output, structuredOutput{}, false
 	}
@@ -106,7 +109,10 @@ func parseStructuredOutput(output string) (string, structuredOutput, bool) {
 }
 
 func parseStructuredInput(prompt string) (string, *model.ReviewCycleEnvelope, bool) {
-	plainPrompt, rawPayload, ok := extractTrailingStructuredBlock(prompt, structuredInputStart, structuredInputEnd)
+	plainPrompt, rawPayload, ok := extractTrailingStructuredBlock(prompt, structuredInputStart, structuredInputEnd, func(rawPayload string) bool {
+		_, err := parseStructuredPayload(rawPayload)
+		return err == nil
+	})
 	if !ok {
 		return prompt, nil, false
 	}
@@ -118,34 +124,34 @@ func parseStructuredInput(prompt string) (string, *model.ReviewCycleEnvelope, bo
 
 	envelope := parsed.ReviewCycle
 	if envelope == nil {
-		envelope = legacyReviewCycleEnvelope(parsed)
-	}
-	if envelope == nil {
 		return prompt, nil, false
 	}
 
 	return plainPrompt, envelope, true
 }
 
-func extractTrailingStructuredBlock(text, startTag, endTag string) (string, string, bool) {
+func extractTrailingStructuredBlock(text, startTag, endTag string, validatePayload func(string) bool) (string, string, bool) {
 	trimmedText := strings.TrimRightFunc(text, unicode.IsSpace)
 	if !strings.HasSuffix(trimmedText, endTag) {
 		return text, "", false
 	}
 
 	end := len(trimmedText) - len(endTag)
-	start := strings.LastIndex(trimmedText[:end], startTag)
-	if start == -1 {
-		return text, "", false
-	}
+	searchEnd := end
+	for {
+		start := strings.LastIndex(trimmedText[:searchEnd], startTag)
+		if start == -1 {
+			return text, "", false
+		}
 
-	rawPayload := strings.TrimSpace(trimmedText[start+len(startTag) : end])
-	if rawPayload == "" {
-		return text, "", false
-	}
+		rawPayload := strings.TrimSpace(trimmedText[start+len(startTag) : end])
+		if rawPayload != "" && validatePayload(rawPayload) {
+			plainText := strings.TrimSpace(trimmedText[:start])
+			return plainText, rawPayload, true
+		}
 
-	plainText := strings.TrimSpace(trimmedText[:start])
-	return plainText, rawPayload, true
+		searchEnd = start
+	}
 }
 
 type structuredPayload struct {
@@ -166,65 +172,66 @@ func parseStructuredPayload(rawPayload string) (structuredOutput, error) {
 		return structuredOutput{}, err
 	}
 
-	legacyQuestions, questions, structuredQuestions, err := parseStructuredQuestions(payload.Questions)
+	envelope, err := canonicalReviewCycleEnvelope(payload)
 	if err != nil {
 		return structuredOutput{}, err
 	}
 
-	result := structuredOutput{
-		CriticalRemarks: payload.CriticalRemarks,
-		MinorRemarks:    payload.MinorRemarks,
-		Questions:       legacyQuestions,
-	}
-
-	if hasReviewCycleEnvelope(payload, structuredQuestions) {
-		envelope := &model.ReviewCycleEnvelope{
-			ProtocolVersion: payload.ProtocolVersion,
-			Mode:            payload.Mode,
-			Summary:         payload.Summary,
-			Remarks:         payload.Remarks,
-			Questions:       questions,
-			FollowUpActions: payload.FollowUpActions,
-			Changes:         payload.Changes,
-		}
-		if envelope.ProtocolVersion == "" {
-			envelope.ProtocolVersion = model.ReviewCycleProtocolVersion
-		}
-
-		result.ReviewCycle = envelope
-		result.CriticalRemarks = append([]string(nil), result.CriticalRemarks...)
-		result.MinorRemarks = append([]string(nil), result.MinorRemarks...)
-		result.Questions = append([]string(nil), result.Questions...)
-
-		envelopeCritical, envelopeMinor, envelopeQuestions := reviewCycleLegacyView(*envelope)
-		result.CriticalRemarks = append(result.CriticalRemarks, envelopeCritical...)
-		result.MinorRemarks = append(result.MinorRemarks, envelopeMinor...)
-		result.Questions = append(result.Questions, envelopeQuestions...)
+	result := structuredOutput{ReviewCycle: envelope}
+	if envelope != nil {
+		result.CriticalRemarks, result.MinorRemarks, result.Questions = reviewCycleLegacyView(*envelope)
 	}
 
 	return dedupeStructuredOutput(result), nil
 }
 
-func parseStructuredQuestions(raw json.RawMessage) ([]string, []model.ReviewCycleQuestion, bool, error) {
+func canonicalReviewCycleEnvelope(payload structuredPayload) (*model.ReviewCycleEnvelope, error) {
+	questions, _, err := parseStructuredQuestions(payload.Questions)
+	if err != nil {
+		return nil, err
+	}
+
+	envelope := &model.ReviewCycleEnvelope{
+		ProtocolVersion: payload.ProtocolVersion,
+		Mode:            payload.Mode,
+		Summary:         payload.Summary,
+		Remarks:         append([]model.ReviewCycleRemark(nil), payload.Remarks...),
+		Questions:       questions,
+		FollowUpActions: append([]model.ReviewCycleAction(nil), payload.FollowUpActions...),
+		Changes:         append([]model.ReviewCycleChange(nil), payload.Changes...),
+	}
+	appendLegacyRemarks(envelope, payload.CriticalRemarks, "critical")
+	appendLegacyRemarks(envelope, payload.MinorRemarks, "minor")
+	if envelope.ProtocolVersion == "" && hasReviewCycleEnvelope(*envelope) {
+		envelope.ProtocolVersion = model.ReviewCycleProtocolVersion
+	}
+	if !hasReviewCycleEnvelope(*envelope) {
+		return nil, nil
+	}
+
+	return envelope, nil
+}
+
+func parseStructuredQuestions(raw json.RawMessage) ([]model.ReviewCycleQuestion, bool, error) {
 	if len(raw) == 0 {
-		return nil, nil, false, nil
+		return nil, false, nil
 	}
 
 	var legacyQuestions []string
 	if err := json.Unmarshal(raw, &legacyQuestions); err == nil {
-		return legacyQuestions, stringsToQuestions(legacyQuestions), false, nil
+		return stringsToQuestions(legacyQuestions), false, nil
 	}
 
 	var questions []model.ReviewCycleQuestion
 	if err := json.Unmarshal(raw, &questions); err == nil {
-		return nil, questions, true, nil
+		return questions, true, nil
 	}
 
-	return nil, nil, false, fmt.Errorf("parse structured questions")
+	return nil, false, fmt.Errorf("parse structured questions")
 }
 
-func hasReviewCycleEnvelope(payload structuredPayload, structuredQuestions bool) bool {
-	return payload.ProtocolVersion != "" || payload.Mode != "" || payload.Summary != "" || len(payload.Remarks) != 0 || structuredQuestions || len(payload.FollowUpActions) != 0 || len(payload.Changes) != 0
+func hasReviewCycleEnvelope(envelope model.ReviewCycleEnvelope) bool {
+	return envelope.ProtocolVersion != "" || envelope.Mode != "" || envelope.Summary != "" || len(envelope.Remarks) != 0 || len(envelope.Questions) != 0 || len(envelope.FollowUpActions) != 0 || len(envelope.Changes) != 0
 }
 
 func stringsToQuestions(values []string) []model.ReviewCycleQuestion {
@@ -241,13 +248,28 @@ func stringsToQuestions(values []string) []model.ReviewCycleQuestion {
 	return questions
 }
 
+func appendLegacyRemarks(envelope *model.ReviewCycleEnvelope, values []string, severity string) {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		envelope.Remarks = append(envelope.Remarks, model.ReviewCycleRemark{Severity: severity, Body: value})
+	}
+}
+
 func reviewCycleLegacyView(envelope model.ReviewCycleEnvelope) ([]string, []string, []string) {
 	criticalRemarks := make([]string, 0, len(envelope.Remarks))
 	minorRemarks := make([]string, 0, len(envelope.Remarks))
 	for _, remark := range envelope.Remarks {
-		text := compactStructuredText(remark.Title, remark.Body)
+		text := joinLegacySegments(
+			compactStructuredText(remark.Title, remark.Body),
+			labelStructuredText("reply", remark.Reply),
+			labelStructuredText("fix_summary", remark.FixSummary),
+		)
 		if text == "" {
-			text = compactStructuredText(remark.ID, remark.FixSummary, remark.Reply)
+			text = compactStructuredText(remark.ID)
 		}
 		if text == "" {
 			continue
@@ -263,7 +285,13 @@ func reviewCycleLegacyView(envelope model.ReviewCycleEnvelope) ([]string, []stri
 
 	questions := make([]string, 0, len(envelope.Questions))
 	for _, question := range envelope.Questions {
-		text := compactStructuredText(question.Title, question.Body, question.Reply)
+		text := joinLegacySegments(
+			compactStructuredText(question.Title, question.Body),
+			labelStructuredText("reply", question.Reply),
+		)
+		if text == "" {
+			text = compactStructuredText(question.ID)
+		}
 		if text == "" {
 			continue
 		}
@@ -272,42 +300,6 @@ func reviewCycleLegacyView(envelope model.ReviewCycleEnvelope) ([]string, []stri
 	}
 
 	return criticalRemarks, minorRemarks, questions
-}
-
-func legacyReviewCycleEnvelope(output structuredOutput) *model.ReviewCycleEnvelope {
-	output = dedupeStructuredOutput(output)
-	criticalRemarks, minorRemarks, questions := output.CriticalRemarks, output.MinorRemarks, output.Questions
-	if len(criticalRemarks) == 0 && len(minorRemarks) == 0 && len(questions) == 0 {
-		return nil
-	}
-
-	envelope := &model.ReviewCycleEnvelope{ProtocolVersion: model.ReviewCycleProtocolVersion}
-	for _, remark := range criticalRemarks {
-		remark = strings.TrimSpace(remark)
-		if remark == "" {
-			continue
-		}
-
-		envelope.Remarks = append(envelope.Remarks, model.ReviewCycleRemark{Severity: "critical", Body: remark})
-	}
-	for _, remark := range minorRemarks {
-		remark = strings.TrimSpace(remark)
-		if remark == "" {
-			continue
-		}
-
-		envelope.Remarks = append(envelope.Remarks, model.ReviewCycleRemark{Severity: "minor", Body: remark})
-	}
-	for _, question := range questions {
-		question = strings.TrimSpace(question)
-		if question == "" {
-			continue
-		}
-
-		envelope.Questions = append(envelope.Questions, model.ReviewCycleQuestion{Body: question})
-	}
-
-	return envelope
 }
 
 func dedupeStructuredOutput(output structuredOutput) structuredOutput {
@@ -348,6 +340,29 @@ func compactStructuredText(parts ...string) string {
 	}
 
 	return strings.Join(filtered, ": ")
+}
+
+func labelStructuredText(label, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("%s=%s", label, value)
+}
+
+func joinLegacySegments(parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		filtered = append(filtered, part)
+	}
+
+	return strings.Join(filtered, "; ")
 }
 
 func isCriticalSeverity(severity string) bool {

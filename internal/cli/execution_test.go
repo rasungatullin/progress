@@ -220,6 +220,35 @@ func TestPrintLaunchResultWithReviewCycleEnvelope(t *testing.T) {
 	}
 }
 
+func TestPrintLaunchResultPreservesReviewCycleJSONPayload(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "launch"}
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+
+	printLaunchResult(cmd, execution.LaunchResult{
+		Status:  "completed",
+		Summary: "Applied the requested changes.",
+		ReviewCycle: &execution.ReviewCycleEnvelope{
+			ProtocolVersion: "review-cycle/v1",
+			Remarks: []execution.ReviewCycleRemark{{
+				ID:         "remark-1",
+				Severity:   "critical",
+				Title:      "Spacing",
+				Body:       "keep   internal   spacing",
+				Reply:      "reply  keeps  spaces",
+				FixSummary: "fix  keeps  spaces",
+			}},
+		},
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, `review-cycle-remark={"id":"remark-1","severity":"critical","title":"Spacing","body":"keep   internal   spacing","reply":"reply  keeps  spaces","fix_summary":"fix  keeps  spaces"}`+"\n") {
+		t.Fatalf("review-cycle JSON payload must preserve spaces inside string values: %q", output)
+	}
+}
+
 func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
 	t.Parallel()
 

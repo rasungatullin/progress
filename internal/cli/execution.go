@@ -301,7 +301,7 @@ func printStructuredJSONSection[T any](cmd *cobra.Command, key string, values []
 			continue
 		}
 
-		text := normalizeStructuredValue(string(encoded))
+		text := strings.TrimSpace(string(encoded))
 		if text == "{}" {
 			continue
 		}
