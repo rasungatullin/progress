@@ -28,6 +28,7 @@ type Response struct {
 	Route            Route
 	AuthStatus       *AuthStatus
 	RepositoryStatus *RepositoryStatus
+	IssueStatus      *IssueStatus
 	Issue            *TrackerIssue
 	PullRequest      *TrackerPullRequest
 	Comments         []TrackerComment
@@ -55,6 +56,20 @@ type AuthStatus struct {
 type RepositoryStatus struct {
 	System      string
 	Repository  string
+	State       string
+	Command     string
+	Path        string
+	ExitCode    int
+	Message     string
+	Diagnostics []string
+	Stdout      string
+	Stderr      string
+}
+
+type IssueStatus struct {
+	System      string
+	Repository  string
+	Number      int
 	State       string
 	Command     string
 	Path        string

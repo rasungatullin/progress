@@ -15,6 +15,7 @@ type integrationFlags struct {
 	resource  string
 	operation string
 	repo      string
+	number    int
 }
 
 var integrationServiceFactory = func(cmd *cobra.Command) *integration.Service {
@@ -40,6 +41,17 @@ func newIntegrationGitHubCommand() *cobra.Command {
 
 	cmd.AddCommand(newIntegrationGitHubAuthCommand())
 	cmd.AddCommand(newIntegrationGitHubRepoCommand())
+	cmd.AddCommand(newIntegrationGitHubIssueCommand())
+	return cmd
+}
+
+func newIntegrationGitHubIssueCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "issue",
+		Short: "Операции с задачами GitHub",
+	}
+
+	cmd.AddCommand(newIntegrationGitHubIssueGetCommand())
 	return cmd
 }
 
@@ -112,6 +124,42 @@ func newIntegrationGitHubRepoGetCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
+	return cmd
+}
+
+func newIntegrationGitHubIssueGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "get",
+		Short: "Получение задачи GitHub по номеру",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("repo") || strings.TrimSpace(flags.repo) == "" {
+				return fmt.Errorf("--repo is required")
+			}
+			if !cmd.Flags().Changed("number") {
+				return fmt.Errorf("--number is required")
+			}
+
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				System:     "github",
+				Resource:   "issue",
+				Operation:  "get",
+				Repository: flags.repo,
+				Number:     flags.number,
+			})
+			printGitHubIssue(cmd, response)
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
+	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер задачи GitHub")
 	return cmd
 }
 
@@ -188,6 +236,40 @@ func printGitHubRepository(cmd *cobra.Command, response integration.Response) {
 	}
 
 	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	for _, diagnostic := range status.Diagnostics {
+		cmd.Printf("diagnostic=%s\n", diagnostic)
+	}
+	printMultilineField(cmd, "stdout", status.Stdout)
+	printMultilineField(cmd, "stderr", status.Stderr)
+}
+
+func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
+	issue := response.Issue
+	if issue != nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\ntitle=%s\nstate=%s\nauthor_login=%s\nauthor_name=%s\nauthor_url=%s\nurl=%s\ncreated_at=%s\nupdated_at=%s\n", issue.System, response.Resource, response.Operation, issue.Repository, issue.Number, issue.Title, issue.State, issue.Author.Login, issue.Author.Name, issue.Author.URL, issue.URL, issue.CreatedAt, issue.UpdatedAt)
+		for _, label := range issue.Labels {
+			cmd.Printf("label=%s\n", label)
+		}
+		for _, assignee := range issue.Assignees {
+			cmd.Printf("assignee_login=%s\n", assignee.Login)
+			if assignee.Name != "" {
+				cmd.Printf("assignee_name=%s\n", assignee.Name)
+			}
+			if assignee.URL != "" {
+				cmd.Printf("assignee_url=%s\n", assignee.URL)
+			}
+		}
+		printMultilineField(cmd, "body", issue.Body)
+		return
+	}
+
+	status := response.IssueStatus
+	if status == nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nmessage=GitHub issue get did not return a normalized issue\n", response.System, response.Resource, response.Operation)
+		return
+	}
+
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}

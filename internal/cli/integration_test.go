@@ -378,6 +378,155 @@ func TestIntegrationGitHubRepoGetCommandPrintsNormalizedInvalidRepositoryResult(
 	}
 }
 
+func TestIntegrationGitHubIssueGetCommandPrintsNormalizedIssue(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--repo", "owner/name", "--number", "123"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     123,
+				Title:      "Fix integration",
+				Body:       "Line one\nLine two",
+				State:      "OPEN",
+				Labels:     []string{"bug", "integration"},
+				Assignees: []integration.TrackerUser{{
+					System: "github",
+					Login:  "alice",
+					Name:   "Alice",
+					URL:    "https://github.com/alice",
+				}},
+				Author:    integration.TrackerUser{System: "github", Login: "bob", Name: "Bob", URL: "https://github.com/bob"},
+				URL:       "https://github.com/owner/name/issues/123",
+				CreatedAt: "2026-05-01T10:00:00Z",
+				UpdatedAt: "2026-05-02T10:00:00Z",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue get command: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=issue\n",
+		"operation=get\n",
+		"repository=owner/name\n",
+		"number=123\n",
+		"title=Fix integration\n",
+		"state=OPEN\n",
+		"author_login=bob\n",
+		"author_name=Bob\n",
+		"author_url=https://github.com/bob\n",
+		"label=bug\n",
+		"label=integration\n",
+		"assignee_login=alice\n",
+		"assignee_name=Alice\n",
+		"assignee_url=https://github.com/alice\n",
+		"url=https://github.com/owner/name/issues/123\n",
+		"created_at=2026-05-01T10:00:00Z\n",
+		"updated_at=2026-05-02T10:00:00Z\n",
+		"body=Line one\n",
+		"body=Line two\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github issue get output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
+func TestIntegrationGitHubIssueGetCommandRequiresFlags(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--repo", "owner/name"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github issue get error")
+	}
+	if err.Error() != "--number is required" {
+		t.Fatalf("unexpected github issue get error: %v", err)
+	}
+}
+
+func TestIntegrationGitHubIssueGetCommandPrintsNormalizedErrorResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--repo", "owner/name", "--number", "123"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			IssueStatus: &integration.IssueStatus{
+				System:      "github",
+				Repository:  "owner/name",
+				Number:      123,
+				State:       "auth-required",
+				Command:     "gh",
+				Path:        "/usr/local/bin/gh",
+				ExitCode:    1,
+				Message:     "GitHub authentication is required",
+				Diagnostics: []string{"repository=owner/name", "number=123", "gh issue view reported that no GitHub login is configured"},
+				Stderr:      "You are not logged into any GitHub hosts. Run gh auth login.",
+			},
+		},
+		err: assertErr("GitHub authentication is required"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github issue get error")
+	}
+	if err.Error() != "GitHub authentication is required" {
+		t.Fatalf("unexpected github issue get error: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=issue\n",
+		"operation=get\n",
+		"repository=owner/name\n",
+		"number=123\n",
+		"state=auth-required\n",
+		"command=gh\n",
+		"path=/usr/local/bin/gh\n",
+		"exit-code=1\n",
+		"message=GitHub authentication is required\n",
+		"diagnostic=repository=owner/name\n",
+		"diagnostic=number=123\n",
+		"diagnostic=gh issue view reported that no GitHub login is configured\n",
+		"stderr=You are not logged into any GitHub hosts. Run gh auth login.\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github issue get output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
 type stubCLIProvider struct {
 	response integration.Response
 	err      error
