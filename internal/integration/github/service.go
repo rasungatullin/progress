@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/integration/model"
@@ -14,6 +15,7 @@ type ghRunner interface {
 	RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error)
 	RunRepoView(context.Context, string) (CommandResult, resolvedConfig, error)
 	RunIssueView(context.Context, string, int) (CommandResult, resolvedConfig, error)
+	RunPRCreate(context.Context, string, PRCreateRequest) (CommandResult, resolvedConfig, error)
 }
 
 type Service struct {
@@ -74,6 +76,8 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executeRepoGet(ctx, response, req)
 	case req.Resource == "issue" && req.Operation == "get":
 		return s.executeIssueGet(ctx, response, req)
+	case (req.Resource == "pr" || req.Resource == "pull-request") && req.Operation == "create":
+		return s.executePRCreate(ctx, response, req)
 	default:
 		err := &Error{
 			Code:    ErrorCodeInvalidRequest,
@@ -81,6 +85,104 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		}
 		return response, err
 	}
+}
+
+func (s *Service) executePRCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository, err := normalizeRepository(req.Repository)
+	if err != nil {
+		status := prErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Base, req.Head, req.Title, req.Body, req.Draft)
+		status.State = ErrorCodeInvalidRequest
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "pull request create request rejected before invoking gh")
+		response.PullRequestStatus = &status
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	}
+
+	prRequest, err := normalizePRCreateRequest(PRCreateRequest{Base: req.Base, Head: req.Head, Title: req.Title, Body: req.Body, Draft: req.Draft})
+	if err != nil {
+		status := prErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Base, req.Head, req.Title, req.Body, req.Draft)
+		status.State = ErrorCodeInvalidRequest
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "pull request create request rejected before invoking gh")
+		response.PullRequestStatus = &status
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	}
+
+	result, config, err := s.runner.RunPRCreate(ctx, repository, prRequest)
+	if err != nil && result.ExitCode == 0 {
+		result.ExitCode = -1
+	}
+	if config.Command == "" {
+		config.Command = defaultCommand
+	}
+
+	status := prErrorStatus(config, result, repository, prRequest.Base, prRequest.Head, prRequest.Title, prRequest.Body, prRequest.Draft)
+	if err != nil {
+		var ghErr *Error
+		if errors.As(err, &ghErr) {
+			status.State = prStateForErrorCode(ghErr.Code)
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "gh pr create failed before returning a pull request payload")
+			response.PullRequestStatus = &status
+			return response, ghErr
+		}
+
+		status.State = StateExternalFailure
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "gh pr create failed before returning a pull request payload")
+		response.PullRequestStatus = &status
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+	}
+
+	if result.ExitCode != 0 {
+		switch {
+		case isAuthRequired(result):
+			status.State = ErrorCodeAuthRequired
+			status.Message = "GitHub authentication is required"
+			status.Diagnostics = append(status.Diagnostics, "gh pr create reported that no GitHub login is configured")
+			response.PullRequestStatus = &status
+			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
+		case isRepoNotFound(result), isPRCreateBranchNotFound(result):
+			status.State = ErrorCodeNotFound
+			status.Message = fmt.Sprintf("GitHub repository or branch not found for pull request creation: %s %s -> %s", repository, prRequest.Head, prRequest.Base)
+			status.Diagnostics = append(status.Diagnostics, "gh pr create could not resolve the requested repository or branch")
+			response.PullRequestStatus = &status
+			return response, &Error{Code: ErrorCodeNotFound, Message: status.Message, Result: result}
+		case isPRAlreadyExists(result):
+			status.State = ErrorCodeAlreadyExists
+			status.Message = fmt.Sprintf("GitHub pull request already exists for %s %s -> %s", repository, prRequest.Head, prRequest.Base)
+			status.Diagnostics = append(status.Diagnostics, "gh pr create reported an existing pull request between the requested branches")
+			status.URL = extractFirstURL(result.Stdout + "\n" + result.Stderr)
+			status.Number = pullRequestNumberFromURL(status.URL)
+			response.PullRequestStatus = &status
+			return response, &Error{Code: ErrorCodeAlreadyExists, Message: status.Message, Result: result}
+		default:
+			status.State = StateExternalFailure
+			status.Message = fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
+			status.Diagnostics = append(status.Diagnostics, "gh pr create exited with a non-zero code")
+			response.PullRequestStatus = &status
+			return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+		}
+	}
+
+	status.State = "created"
+	status.URL = extractFirstURL(result.Stdout)
+	status.Number = pullRequestNumberFromURL(status.URL)
+	status.Message = fmt.Sprintf("GitHub pull request created for %s %s -> %s", repository, prRequest.Head, prRequest.Base)
+	status.Diagnostics = append(status.Diagnostics, "gh pr create completed successfully")
+	response.PullRequestStatus = &status
+	response.PullRequest = &model.TrackerPullRequest{
+		System:     "github",
+		Repository: repository,
+		Number:     status.Number,
+		Title:      prRequest.Title,
+		Body:       prRequest.Body,
+		State:      status.State,
+		BaseRef:    prRequest.Base,
+		HeadRef:    prRequest.Head,
+		URL:        status.URL,
+	}
+	return response, nil
 }
 
 func (s *Service) executeIssueGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
@@ -423,6 +525,25 @@ func repositoryStateForErrorCode(code string) string {
 	}
 }
 
+func prStateForErrorCode(code string) string {
+	switch code {
+	case ErrorCodeInvalidRequest:
+		return ErrorCodeInvalidRequest
+	case ErrorCodeNotInstalled:
+		return StateNotInstalled
+	case ErrorCodeAuthRequired:
+		return ErrorCodeAuthRequired
+	case ErrorCodeNotFound:
+		return ErrorCodeNotFound
+	case ErrorCodeAlreadyExists:
+		return ErrorCodeAlreadyExists
+	case ErrorCodeTimeout:
+		return StateTimeout
+	default:
+		return StateExternalFailure
+	}
+}
+
 func issueErrorStatus(config resolvedConfig, result CommandResult, repository string, number int) model.IssueStatus {
 	status := model.IssueStatus{
 		System:     "github",
@@ -450,6 +571,43 @@ func issueErrorStatus(config resolvedConfig, result CommandResult, repository st
 		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("number=%d", number))
 	}
 	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s issue view %d --repo %s --json number,title,body,state,labels,assignees,author,url,createdAt,updatedAt", status.Command, number, repository))
+	return status
+}
+
+func prErrorStatus(config resolvedConfig, result CommandResult, repository string, base string, head string, title string, body string, draft bool) model.PullRequestStatus {
+	status := model.PullRequestStatus{
+		System:     "github",
+		Repository: repository,
+		Base:       strings.TrimSpace(base),
+		Head:       strings.TrimSpace(head),
+		Title:      strings.TrimSpace(title),
+		Draft:      draft,
+		State:      StateExternalFailure,
+		Command:    config.Command,
+		Path:       result.Path,
+		ExitCode:   result.ExitCode,
+		Stdout:     result.Stdout,
+		Stderr:     result.Stderr,
+	}
+
+	if status.Command == "" {
+		status.Command = defaultCommand
+	}
+	if status.ExitCode == 0 {
+		status.ExitCode = -1
+	}
+
+	if repository != "" {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("repository=%s", repository))
+	}
+	if status.Base != "" {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("base=%s", status.Base))
+	}
+	if status.Head != "" {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("head=%s", status.Head))
+	}
+	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("draft=%t", status.Draft))
+	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s pr create --repo %s --base %s --head %s --title %s --body %s", status.Command, repository, status.Base, status.Head, maskCommandValue(status.Title), maskCommandValue(body)))
 	return status
 }
 
@@ -483,4 +641,57 @@ func isIssueNotFound(result CommandResult) bool {
 		strings.Contains(message, "could not resolve to an issue or pull request") ||
 		strings.Contains(message, "issue not found") ||
 		strings.Contains(message, "http 404")
+}
+
+func isPRAlreadyExists(result CommandResult) bool {
+	message := strings.ToLower(result.Stdout + "\n" + result.Stderr)
+	return strings.Contains(message, "a pull request for branch") ||
+		strings.Contains(message, "already exists") && strings.Contains(message, "pull request")
+}
+
+func isPRCreateBranchNotFound(result CommandResult) bool {
+	message := strings.ToLower(result.Stdout + "\n" + result.Stderr)
+	return strings.Contains(message, "head sha can't be blank") ||
+		strings.Contains(message, "base sha can't be blank") ||
+		strings.Contains(message, "no commits between") ||
+		strings.Contains(message, "head ref must be a branch") ||
+		strings.Contains(message, "not found") && strings.Contains(message, "branch")
+}
+
+func extractFirstURL(value string) string {
+	for _, field := range strings.Fields(strings.TrimSpace(value)) {
+		field = strings.Trim(field, "()[]<>{}\"'.,")
+		if strings.HasPrefix(field, "https://") || strings.HasPrefix(field, "http://") {
+			return field
+		}
+	}
+
+	return ""
+}
+
+func pullRequestNumberFromURL(value string) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+
+	parts := strings.Split(strings.TrimRight(value, "/"), "/")
+	if len(parts) == 0 {
+		return 0
+	}
+
+	number, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil || number <= 0 {
+		return 0
+	}
+
+	return number
+}
+
+func maskCommandValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "''"
+	}
+
+	return "<provided>"
 }

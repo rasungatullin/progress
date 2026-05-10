@@ -262,6 +262,60 @@ func TestRunnerRunIssueViewRejectsInvalidInputs(t *testing.T) {
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 }
 
+func TestRunnerRunPRCreateBuildsCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature/branch", "--title", "Add feature", "--body", "Implements the feature", "--draft"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: "https://github.com/owner/name/pull/12"}
+	}
+
+	result, config, err := runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Base: "main", Head: "feature/branch", Title: "Add feature", Body: "Implements the feature", Draft: true})
+	if err != nil {
+		t.Fatalf("run pr create: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
+func TestRunnerRunPRCreateRejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+
+	_, _, err := runner.RunPRCreate(context.Background(), "owner", PRCreateRequest{Base: "main", Head: "feature", Title: "Title", Body: "Body"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+
+	_, _, err = runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Head: "feature", Title: "Title", Body: "Body"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+
+	_, _, err = runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Base: "main", Title: "Title", Body: "Body"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+
+	_, _, err = runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Base: "main", Head: "feature", Body: "Body"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+
+	_, _, err = runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Base: "main", Head: "feature", Title: "Title"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+
+	_, _, err = runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Base: "main", Head: "main", Title: "Title", Body: "Body"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+}
+
 func assertGitHubErrorCode(t *testing.T, err error, code string) {
 	t.Helper()
 

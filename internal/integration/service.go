@@ -26,6 +26,7 @@ type ProviderRequest = model.ProviderRequest
 type AuthStatus = model.AuthStatus
 type RepositoryStatus = model.RepositoryStatus
 type IssueStatus = model.IssueStatus
+type PullRequestStatus = model.PullRequestStatus
 
 type Provider interface {
 	Execute(context.Context, ProviderRequest) (Response, error)
@@ -157,6 +158,11 @@ func normalizeRequest(req Request) (ProviderRequest, error) {
 		Operation:  normalizeOperation(req.Operation),
 		Repository: strings.TrimSpace(req.Repository),
 		Number:     req.Number,
+		Base:       strings.TrimSpace(req.Base),
+		Head:       strings.TrimSpace(req.Head),
+		Title:      strings.TrimSpace(req.Title),
+		Body:       strings.TrimSpace(req.Body),
+		Draft:      req.Draft,
 		Query:      strings.TrimSpace(req.Query),
 		Limit:      req.Limit,
 	}

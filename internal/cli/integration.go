@@ -16,6 +16,11 @@ type integrationFlags struct {
 	operation string
 	repo      string
 	number    int
+	base      string
+	head      string
+	title     string
+	body      string
+	draft     bool
 }
 
 var integrationServiceFactory = func(cmd *cobra.Command) *integration.Service {
@@ -42,6 +47,17 @@ func newIntegrationGitHubCommand() *cobra.Command {
 	cmd.AddCommand(newIntegrationGitHubAuthCommand())
 	cmd.AddCommand(newIntegrationGitHubRepoCommand())
 	cmd.AddCommand(newIntegrationGitHubIssueCommand())
+	cmd.AddCommand(newIntegrationGitHubPRCommand())
+	return cmd
+}
+
+func newIntegrationGitHubPRCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "pr",
+		Short: "Операции с pull request GitHub",
+	}
+
+	cmd.AddCommand(newIntegrationGitHubPRCreateCommand())
 	return cmd
 }
 
@@ -163,6 +179,59 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 	return cmd
 }
 
+func newIntegrationGitHubPRCreateCommand() *cobra.Command {
+	flags := &integrationFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Создание pull request GitHub",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("repo") || strings.TrimSpace(flags.repo) == "" {
+				return fmt.Errorf("--repo is required")
+			}
+			if !cmd.Flags().Changed("base") || strings.TrimSpace(flags.base) == "" {
+				return fmt.Errorf("--base is required")
+			}
+			if !cmd.Flags().Changed("head") || strings.TrimSpace(flags.head) == "" {
+				return fmt.Errorf("--head is required")
+			}
+			if !cmd.Flags().Changed("title") || strings.TrimSpace(flags.title) == "" {
+				return fmt.Errorf("--title is required")
+			}
+			if !cmd.Flags().Changed("body") || strings.TrimSpace(flags.body) == "" {
+				return fmt.Errorf("--body is required")
+			}
+
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				System:     "github",
+				Resource:   "pr",
+				Operation:  "create",
+				Repository: flags.repo,
+				Base:       flags.base,
+				Head:       flags.head,
+				Title:      flags.title,
+				Body:       flags.body,
+				Draft:      flags.draft,
+			})
+			printGitHubPullRequestStatus(cmd, response)
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
+	cmd.Flags().StringVar(&flags.base, "base", "", "Базовая ветка pull request")
+	cmd.Flags().StringVar(&flags.head, "head", "", "Ветка с изменениями")
+	cmd.Flags().StringVar(&flags.title, "title", "", "Заголовок pull request")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Описание pull request")
+	cmd.Flags().BoolVar(&flags.draft, "draft", false, "Создать pull request как draft")
+	return cmd
+}
+
 func newIntegrationDispatcherCommand() *cobra.Command {
 	flags := &integrationFlags{
 		system:    "github",
@@ -270,6 +339,21 @@ func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 	}
 
 	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	for _, diagnostic := range status.Diagnostics {
+		cmd.Printf("diagnostic=%s\n", diagnostic)
+	}
+	printMultilineField(cmd, "stdout", status.Stdout)
+	printMultilineField(cmd, "stderr", status.Stderr)
+}
+
+func printGitHubPullRequestStatus(cmd *cobra.Command, response integration.Response) {
+	status := response.PullRequestStatus
+	if status == nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nmessage=GitHub pr create did not return a normalized pull request status\n", response.System, response.Resource, response.Operation)
+		return
+	}
+
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nbase=%s\nhead=%s\ntitle=%s\ndraft=%t\nstate=%s\nnumber=%d\nurl=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Base, status.Head, status.Title, status.Draft, status.State, status.Number, status.URL, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}
