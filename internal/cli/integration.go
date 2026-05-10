@@ -41,13 +41,9 @@ func newIntegrationDispatcherCommand() *cobra.Command {
 				Resource:  flags.resource,
 				Operation: flags.operation,
 			})
+			printIntegrationRoute(cmd, route)
 			if err != nil {
 				return err
-			}
-
-			cmd.Printf("system=%s\nprovider=%s\nprovider-available=%t\nresource=%s\noperation=%s\nexpected-result=%s\n", route.System, route.Provider, route.ProviderAvailable, route.Resource, route.Operation, route.ExpectedResult)
-			for _, diagnostic := range route.Diagnostics {
-				cmd.Printf("diagnostic=%s\n", diagnostic)
 			}
 
 			return nil
@@ -62,4 +58,11 @@ func newIntegrationDispatcherCommand() *cobra.Command {
 
 func newIntegrationService(cmd *cobra.Command) *integration.Service {
 	return integration.NewService(logging.New(cmd.ErrOrStderr()))
+}
+
+func printIntegrationRoute(cmd *cobra.Command, route integration.Route) {
+	cmd.Printf("system=%s\nprovider=%s\nprovider-available=%t\nresource=%s\noperation=%s\nexpected-result=%s\n", route.System, route.Provider, route.ProviderAvailable, route.Resource, route.Operation, route.ExpectedResult)
+	for _, diagnostic := range route.Diagnostics {
+		cmd.Printf("diagnostic=%s\n", diagnostic)
+	}
 }

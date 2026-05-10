@@ -37,3 +37,39 @@ func TestIntegrationDispatcherCommandPrintsDiagnosticRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestIntegrationDispatcherCommandPrintsDiagnosticsOnInvalidRequest(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "dispatcher", "--system", "", "--resource", "issue", "--operation", "get"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected dispatcher error")
+	}
+	if err.Error() != "invalid integration request: system is required" {
+		t.Fatalf("unexpected dispatcher error: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=\n",
+		"provider=\n",
+		"provider-available=false\n",
+		"resource=issue\n",
+		"operation=get\n",
+		"expected-result=tracker-issue\n",
+		"diagnostic=request system= resource=issue operation=get\n",
+		"diagnostic=dispatcher mode=diagnostic-only\n",
+		"diagnostic=invalid-request missing system\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("dispatcher output must include %q, got %q", fragment, output)
+		}
+	}
+}
