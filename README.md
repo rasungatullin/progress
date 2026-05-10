@@ -50,6 +50,7 @@ progress synthesize --config ./configs/dev.yaml
 - `docs/contours/integration/README.md` — контур интеграции с внешними системами;
 - `docs/contours/decision/README.md` — контур принятия решения;
 - `docs/contours/execution/README.md` — контур исполнения;
+- `docs/contours/execution/STRUCTURED_IO.md` — структурированный ввод и вывод контура исполнения;
 - `docs/PLAN.md` — поэтапный план архитектурного развития.
 
 ## Принципы терминологии
