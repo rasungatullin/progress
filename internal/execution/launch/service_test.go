@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -188,6 +189,256 @@ func TestLaunchRunnerErrorSkipsGit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "launch runner failed") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchStructuredOutputPresent(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"critical_remarks":["missing rollback plan"],"minor_remarks":["consider renaming helper"],"questions":["should we add an integration test?"]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if !strings.Contains(result.Summary, "Applied the requested changes.") {
+		t.Fatalf("summary must keep plain runner output: %q", result.Summary)
+	}
+	if strings.Contains(result.Summary, structuredOutputStart) {
+		t.Fatalf("summary must not keep structured block markers: %q", result.Summary)
+	}
+	if !slices.Equal(result.CriticalRemarks, []string{"missing rollback plan"}) {
+		t.Fatalf("unexpected critical remarks: %#v", result.CriticalRemarks)
+	}
+	if !slices.Equal(result.MinorRemarks, []string{"consider renaming helper"}) {
+		t.Fatalf("unexpected minor remarks: %#v", result.MinorRemarks)
+	}
+	if !slices.Equal(result.Questions, []string{"should we add an integration test?"}) {
+		t.Fatalf("unexpected questions: %#v", result.Questions)
+	}
+}
+
+func TestLaunchStructuredOutputAbsent(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "Applied the requested changes.", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if len(result.CriticalRemarks) != 0 || len(result.MinorRemarks) != 0 || len(result.Questions) != 0 {
+		t.Fatalf("structured output must stay empty when absent: %#v", result)
+	}
+	if !strings.Contains(result.Summary, "Applied the requested changes.") {
+		t.Fatalf("summary must keep plain runner output: %q", result.Summary)
+	}
+}
+
+func TestLaunchMalformedStructuredOutputFallsBackToRawSummary(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"critical_remarks":"missing rollback plan"}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if len(result.CriticalRemarks) != 0 || len(result.MinorRemarks) != 0 || len(result.Questions) != 0 {
+		t.Fatalf("malformed structured output must not populate fields: %#v", result)
+	}
+	if !strings.Contains(result.Summary, structuredOutputStart) {
+		t.Fatalf("summary must preserve raw output on malformed structured block: %q", result.Summary)
+	}
+	if !strings.Contains(result.Summary, `{"critical_remarks":"missing rollback plan"}`) {
+		t.Fatalf("summary must preserve malformed payload for diagnostics: %q", result.Summary)
+	}
+}
+
+func TestLaunchStructuredOutputOnlyFromTrailingBlock(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Example in prose:",
+				structuredOutputStart,
+				`{"critical_remarks":["example only"]}`,
+				structuredOutputEnd,
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"critical_remarks":["missing rollback plan"],"minor_remarks":["consider renaming helper"],"questions":["should we add an integration test?"]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if strings.Contains(result.Summary, "Applied the requested changes.\n"+structuredOutputStart) {
+		t.Fatalf("summary must strip trailing structured block: %q", result.Summary)
+	}
+	if !strings.Contains(result.Summary, "Example in prose:") || !strings.Contains(result.Summary, `{"critical_remarks":["example only"]}`) {
+		t.Fatalf("summary must preserve non-trailing example block: %q", result.Summary)
+	}
+	if !slices.Equal(result.CriticalRemarks, []string{"missing rollback plan"}) {
+		t.Fatalf("unexpected critical remarks: %#v", result.CriticalRemarks)
+	}
+	if !slices.Equal(result.MinorRemarks, []string{"consider renaming helper"}) {
+		t.Fatalf("unexpected minor remarks: %#v", result.MinorRemarks)
+	}
+	if !slices.Equal(result.Questions, []string{"should we add an integration test?"}) {
+		t.Fatalf("unexpected questions: %#v", result.Questions)
+	}
+}
+
+func TestLaunchTrailingTextAfterStructuredBlockDisablesExtraction(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"critical_remarks":["missing rollback plan"]}`,
+				structuredOutputEnd,
+				"example continuation after block",
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if len(result.CriticalRemarks) != 0 || len(result.MinorRemarks) != 0 || len(result.Questions) != 0 {
+		t.Fatalf("structured output must stay empty when block is not trailing: %#v", result)
+	}
+	if !strings.Contains(result.Summary, "example continuation after block") {
+		t.Fatalf("summary must preserve trailing prose after non-trailing block: %q", result.Summary)
+	}
+	if !strings.Contains(result.Summary, structuredOutputStart) {
+		t.Fatalf("summary must keep non-trailing structured markers verbatim: %q", result.Summary)
+	}
+}
+
+func TestLaunchBrokenBlockBeforeValidTrailingBlock(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Broken example in prose:",
+				structuredOutputStart,
+				`{"critical_remarks":`,
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"critical_remarks":["missing rollback plan"]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if !slices.Equal(result.CriticalRemarks, []string{"missing rollback plan"}) {
+		t.Fatalf("unexpected critical remarks: %#v", result.CriticalRemarks)
+	}
+	if !strings.Contains(result.Summary, `{"critical_remarks":`) {
+		t.Fatalf("summary must preserve earlier broken example: %q", result.Summary)
+	}
+}
+
+func TestLaunchInvalidTrailingBlockWinsOverEarlierValidBlock(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"critical_remarks":["earlier valid block"]}`,
+				structuredOutputEnd,
+				structuredOutputStart,
+				`{"critical_remarks":"broken trailing block"}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if len(result.CriticalRemarks) != 0 || len(result.MinorRemarks) != 0 || len(result.Questions) != 0 {
+		t.Fatalf("invalid trailing block must suppress structured extraction: %#v", result)
+	}
+	if !strings.Contains(result.Summary, `{"critical_remarks":["earlier valid block"]}`) {
+		t.Fatalf("summary must preserve earlier valid block when trailing block is invalid: %q", result.Summary)
+	}
+	if !strings.Contains(result.Summary, `{"critical_remarks":"broken trailing block"}`) {
+		t.Fatalf("summary must preserve invalid trailing block for diagnostics: %q", result.Summary)
 	}
 }
 

@@ -86,6 +86,12 @@ CLI рассматривается как основной ручной инте
 
 Если `--commit-push` не задан и профиль также не включает `commit-push`, команда выполняет только runner и возвращает его итоговый summary.
 
+Runner может дополнительно вернуть необязательный structured block в формате JSON внутри секции `<progress-structured-output>...</progress-structured-output>`. Поддерживаются ключи `critical_remarks`, `minor_remarks` и `questions`, каждый со значением-массивом строк.
+
+Executor разбирает structured output только если в конце runner output присутствует один явный trailing block, допускающий только завершающие пробелы и переводы строки после `</progress-structured-output>`. Теги, встретившиеся внутри обычного текста, примера или промежуточного пояснения, не считаются structured result и остаются в `summary`. Если trailing block присутствует, но не парсится, executor сохраняет исходный runner output в `summary` без заполнения дополнительных полей, чтобы не терять диагностический контекст.
+
+В CLI итог печатается в виде отдельного блока `summary<<PROGRESS_SUMMARY ... PROGRESS_SUMMARY`, после которого при наличии structured данных выводится секция `structured-output:` со строками `critical-remark=...`, `minor-remark=...` и `question=...`. Для устранения неоднозначности multiline structured значения в CLI нормализуются в одну строку.
+
 Если effective `commit-push` включён, то после успешного завершения runner команда:
 
 1. проверяет, что рабочий каталог является git-репозиторием;
