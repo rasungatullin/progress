@@ -112,8 +112,11 @@ func TestPrintLaunchResultWithoutStructuredOutput(t *testing.T) {
 	if !strings.Contains(output, "state=completed\n") {
 		t.Fatalf("output must include state: %q", output)
 	}
-	if !strings.Contains(output, "summary=profile=default git=disabled\nApplied the requested changes.\n") {
+	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nprofile=default git=disabled\nApplied the requested changes.\nPROGRESS_SUMMARY\n") {
 		t.Fatalf("output must include summary: %q", output)
+	}
+	if strings.Contains(output, "structured-output:\n") {
+		t.Fatalf("output must omit structured section when values are absent: %q", output)
 	}
 	if strings.Contains(output, "critical-remark=") || strings.Contains(output, "minor-remark=") || strings.Contains(output, "question=") {
 		t.Fatalf("output must omit empty structured sections: %q", output)
@@ -136,6 +139,9 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 	})
 
 	output := stdout.String()
+	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nprofile=default git=disabled\nApplied the requested changes.\nPROGRESS_SUMMARY\nstructured-output:\n") {
+		t.Fatalf("output must separate summary from structured section: %q", output)
+	}
 	if !strings.Contains(output, "critical-remark=missing rollback plan\n") {
 		t.Fatalf("output must include critical remarks: %q", output)
 	}
@@ -147,5 +153,54 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 	}
 	if strings.Contains(output, "critical-remark=   ") {
 		t.Fatalf("output must skip blank structured values: %q", output)
+	}
+}
+
+func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "launch"}
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+
+	printLaunchResult(cmd, execution.LaunchResult{
+		Status:          "completed",
+		Summary:         "line one\nline two\nline three",
+		CriticalRemarks: []string{"missing rollback plan"},
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nline one\nline two\nline three\nPROGRESS_SUMMARY\nstructured-output:\n") {
+		t.Fatalf("multiline summary must stay inside explicit summary block: %q", output)
+	}
+	if strings.Contains(output, "line three\ncritical-remark=") {
+		t.Fatalf("structured lines must not be ambiguous continuation of summary: %q", output)
+	}
+}
+
+func TestPrintLaunchResultNormalizesMultilineStructuredValues(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "launch"}
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+
+	printLaunchResult(cmd, execution.LaunchResult{
+		Status:          "completed",
+		Summary:         "Applied the requested changes.",
+		CriticalRemarks: []string{"missing\nrollback\nplan"},
+		MinorRemarks:    []string{" consider\t renaming  helper "},
+		Questions:       []string{"should we add\n\nan integration test?"},
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, "critical-remark=missing rollback plan\n") {
+		t.Fatalf("critical remark must be normalized to one line: %q", output)
+	}
+	if !strings.Contains(output, "minor-remark=consider renaming helper\n") {
+		t.Fatalf("minor remark must be normalized to one line: %q", output)
+	}
+	if !strings.Contains(output, "question=should we add an integration test?\n") {
+		t.Fatalf("question must be normalized to one line: %q", output)
 	}
 }

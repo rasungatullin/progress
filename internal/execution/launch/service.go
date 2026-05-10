@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
@@ -83,18 +84,18 @@ type structuredOutput struct {
 }
 
 func parseStructuredOutput(output string) (string, structuredOutput, bool) {
-	start := strings.Index(output, structuredOutputStart)
+	trimmedOutput := strings.TrimRightFunc(output, unicode.IsSpace)
+	if !strings.HasSuffix(trimmedOutput, structuredOutputEnd) {
+		return output, structuredOutput{}, false
+	}
+
+	end := len(trimmedOutput) - len(structuredOutputEnd)
+	start := strings.LastIndex(trimmedOutput[:end], structuredOutputStart)
 	if start == -1 {
 		return output, structuredOutput{}, false
 	}
 
-	end := strings.Index(output[start+len(structuredOutputStart):], structuredOutputEnd)
-	if end == -1 {
-		return output, structuredOutput{}, false
-	}
-
-	end += start + len(structuredOutputStart)
-	rawPayload := strings.TrimSpace(output[start+len(structuredOutputStart) : end])
+	rawPayload := strings.TrimSpace(trimmedOutput[start+len(structuredOutputStart) : end])
 	if rawPayload == "" {
 		return output, structuredOutput{}, false
 	}
@@ -104,7 +105,7 @@ func parseStructuredOutput(output string) (string, structuredOutput, bool) {
 		return output, structuredOutput{}, false
 	}
 
-	plainOutput := strings.TrimSpace(output[:start] + output[end+len(structuredOutputEnd):])
+	plainOutput := strings.TrimSpace(trimmedOutput[:start])
 	return plainOutput, parsed, true
 }
 

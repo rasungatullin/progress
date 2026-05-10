@@ -247,7 +247,21 @@ func invocationFromWorkplaceFlags(flags *launchFlags) execution.Invocation {
 }
 
 func printLaunchResult(cmd *cobra.Command, result execution.LaunchResult) {
-	cmd.Printf("state=%s\nsummary=%s\n", result.Status, result.Summary)
+	cmd.Printf("state=%s\n", result.Status)
+	printLaunchSummary(cmd, result.Summary)
+	printLaunchStructuredOutput(cmd, result)
+}
+
+func printLaunchSummary(cmd *cobra.Command, summary string) {
+	cmd.Printf("summary<<%s\n%s\n%s\n", launchSummaryDelimiter, summary, launchSummaryDelimiter)
+}
+
+func printLaunchStructuredOutput(cmd *cobra.Command, result execution.LaunchResult) {
+	if !hasStructuredValues(result.CriticalRemarks, result.MinorRemarks, result.Questions) {
+		return
+	}
+
+	cmd.Println("structured-output:")
 	printLaunchResultSection(cmd, "critical-remark", result.CriticalRemarks)
 	printLaunchResultSection(cmd, "minor-remark", result.MinorRemarks)
 	printLaunchResultSection(cmd, "question", result.Questions)
@@ -255,11 +269,29 @@ func printLaunchResult(cmd *cobra.Command, result execution.LaunchResult) {
 
 func printLaunchResultSection(cmd *cobra.Command, key string, values []string) {
 	for _, value := range values {
-		value = strings.TrimSpace(value)
+		value = normalizeStructuredValue(value)
 		if value == "" {
 			continue
 		}
 
 		cmd.Printf("%s=%s\n", key, value)
 	}
+}
+
+const launchSummaryDelimiter = "PROGRESS_SUMMARY"
+
+func normalizeStructuredValue(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func hasStructuredValues(sections ...[]string) bool {
+	for _, values := range sections {
+		for _, value := range values {
+			if normalizeStructuredValue(value) != "" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
