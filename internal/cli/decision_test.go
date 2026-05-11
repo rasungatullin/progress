@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/decision"
+	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/integration"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,15 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 					URL:    "https://github.com/owner/name/issues/123",
 				},
 			},
+			Decision: &decision.Decision{
+				Type: decision.DecisionType(decision.DecisionTypeExecute),
+				Reasons: []decision.DecisionReason{{
+					Code:    "issue_context_ready",
+					Message: "Issue-backed decision context is ready for direct execution handoff.",
+				}},
+				ExecutionPlan: &decision.ExecutionPlan{Profile: "default"},
+			},
+			Execution: &execution.LaunchResult{Status: "completed", Summary: "profile=default runner=opencode"},
 		}}
 	}
 	t.Cleanup(func() { decisionServiceFactory = original })
@@ -48,6 +58,11 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 		"signal-source=task\n",
 		"signal-kind=task-number\n",
 		"context-ready=true\n",
+		"decision-type=execute\n",
+		"decision-reason=issue_context_ready:Issue-backed decision context is ready for direct execution handoff.\n",
+		"execution-profile=default\n",
+		"execution-status=completed\n",
+		"execution-summary=profile=default runner=opencode\n",
 		"issue-number=123\n",
 		"issue-title=Implement stage 1\n",
 		"issue-state=OPEN\n",
@@ -103,6 +118,73 @@ func TestDecisionStartCommandPropagatesServiceError(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("did not expect output on failure, got %q", stdout.String())
+	}
+}
+
+func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"decision", "start", "--task", "77"})
+
+	original := decisionServiceFactory
+	decisionServiceFactory = func(*cobra.Command) decisionStarter {
+		return stubDecisionStarter{
+			result: decision.StartResult{
+				Context: decision.DecisionContext{
+					Signal: decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: 77},
+					Issue:  &integration.TrackerIssue{Number: 77, Title: "Fix execution handoff", State: "OPEN"},
+				},
+				Ready: true,
+				Decision: &decision.Decision{
+					Type:          decision.DecisionType(decision.DecisionTypeExecute),
+					ExecutionPlan: &decision.ExecutionPlan{Profile: "default"},
+				},
+				Execution: &execution.LaunchResult{
+					Status:  "failed",
+					Summary: "Applied the requested changes.",
+					StructuredOutput: &execution.StructuredOutput{
+						ProtocolVersion: execution.StructuredIOVersion,
+						Summary:         "Need follow-up.",
+						Remarks: []execution.StructuredRemark{{
+							ID:    "remark-1",
+							Title: "Rollback plan",
+							Body:  "Still missing.",
+						}},
+					},
+				},
+			},
+			err: assertErr("execution failed"),
+		}
+	}
+	t.Cleanup(func() { decisionServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected decision service error")
+	}
+	if err.Error() != "execution failed" {
+		t.Fatalf("unexpected decision service error: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"task=77\n",
+		"decision-type=execute\n",
+		"execution-status=failed\n",
+		"execution-summary=Applied the requested changes.\n",
+		"structured-output:\n",
+		"protocol-version=review-cycle/v1\n",
+		"summary-field=Need follow-up.\n",
+		`remark={"id":"remark-1","title":"Rollback plan","body":"Still missing."}` + "\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("decision start output must include %q, got %q", fragment, output)
+		}
 	}
 }
 
