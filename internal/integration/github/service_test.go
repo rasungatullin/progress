@@ -283,6 +283,36 @@ func TestServiceIssueGetMapsMalformedJSONToNormalizedError(t *testing.T) {
 	}
 }
 
+func TestServiceIssueGetUsesConfiguredDefaultRepository(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"number":123,"title":"Fix integration","body":"","state":"OPEN","labels":[],"assignees":[],"author":{"login":"bob","name":"Bob","url":"https://github.com/bob","isBot":false,"isActive":true},"url":"https://github.com/owner/name/issues/123","createdAt":"2026-05-01T10:00:00Z","updatedAt":"2026-05-02T10:00:00Z"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "owner/name"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Number: 123})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.Issue == nil {
+		t.Fatal("expected issue")
+	}
+	if response.Issue.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", response.Issue.Repository)
+	}
+	if stub.repo != "" {
+		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
+	}
+}
+
 func TestServiceRepoGetSuccess(t *testing.T) {
 	t.Parallel()
 

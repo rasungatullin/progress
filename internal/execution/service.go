@@ -19,16 +19,20 @@ type Profile = model.Profile
 type Allocation = model.Allocation
 type Workplace = model.Workplace
 type LaunchResult = model.LaunchResult
-type ReviewCycleEnvelope = model.ReviewCycleEnvelope
-type ReviewCycleRemark = model.ReviewCycleRemark
-type ReviewCycleQuestion = model.ReviewCycleQuestion
-type ReviewCycleAction = model.ReviewCycleAction
-type ReviewCycleChange = model.ReviewCycleChange
+type StructuredInput = model.StructuredInput
+type StructuredOutput = model.StructuredOutput
+type StructuredExtensions = model.StructuredExtensions
+type StructuredContext = model.StructuredContext
+type StructuredResult = model.StructuredResult
+type StructuredRemark = model.StructuredRemark
+type StructuredResponse = model.StructuredResponse
+type StructuredQuestion = model.StructuredQuestion
+type StructuredAction = model.StructuredAction
+type StructuredChange = model.StructuredChange
+type StructuredCommand = model.StructuredCommand
+type StructuredConclusion = model.StructuredConclusion
 
-const (
-	StructuredProtocolLegacy      = model.StructuredProtocolLegacy
-	StructuredProtocolReviewCycle = model.StructuredProtocolReviewCycle
-)
+const StructuredIOVersion = model.StructuredIOVersion
 
 type ProfileResolver interface {
 	Resolve(context.Context, Invocation) (Profile, error)
@@ -126,7 +130,7 @@ func (s *Service) Launch(ctx context.Context, in Invocation, profile Profile, al
 
 	result, err := s.launcher.Launch(ctx, in, profile, allocation, workplace)
 	if err != nil {
-		return LaunchResult{}, err
+		return result, err
 	}
 
 	s.logger.Printf("Запуск выполнения завершён: каталог=%q состояние=%q", in.Launch.Directory, result.Status)

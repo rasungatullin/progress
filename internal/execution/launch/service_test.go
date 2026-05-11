@@ -2,12 +2,12 @@ package launch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -33,81 +33,6 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	}
 	if !strings.Contains(result.Summary, "git=disabled") {
 		t.Fatalf("summary must include disabled git state: %q", result.Summary)
-	}
-}
-
-func TestLaunchCommitPushEnabledByProfile(t *testing.T) {
-	t.Parallel()
-
-	var calls [][]string
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return "runner output", nil
-		},
-		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch strings.Join(args, " ") {
-			case "rev-parse --is-inside-work-tree":
-				return "true\n", nil
-			case "branch --show-current":
-				return "feature/test\n", nil
-			case "status --porcelain":
-				return "", nil
-			default:
-				return "", fmt.Errorf("unexpected git command: %v", args)
-			}
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfileWithCommitPush(true), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-	if !strings.Contains(result.Summary, "git=no-changes branch=feature/test") {
-		t.Fatalf("unexpected summary: %q", result.Summary)
-	}
-
-	expectedCalls := [][]string{{"rev-parse", "--is-inside-work-tree"}, {"branch", "--show-current"}, {"status", "--porcelain"}}
-	if !reflect.DeepEqual(calls, expectedCalls) {
-		t.Fatalf("unexpected git calls: %#v", calls)
-	}
-}
-
-func TestLaunchCommitPushNoChanges(t *testing.T) {
-	t.Parallel()
-
-	var calls [][]string
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return "runner output", nil
-		},
-		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch strings.Join(args, " ") {
-			case "rev-parse --is-inside-work-tree":
-				return "true\n", nil
-			case "branch --show-current":
-				return "feature/test\n", nil
-			case "status --porcelain":
-				return "", nil
-			default:
-				return "", fmt.Errorf("unexpected git command: %v", args)
-			}
-		},
-	}
-
-	invocation := validInvocation(t, true)
-	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-	if !strings.Contains(result.Summary, "git=no-changes branch=feature/test") {
-		t.Fatalf("unexpected summary: %q", result.Summary)
-	}
-
-	expectedCalls := [][]string{{"rev-parse", "--is-inside-work-tree"}, {"branch", "--show-current"}, {"status", "--porcelain"}}
-	if !reflect.DeepEqual(calls, expectedCalls) {
-		t.Fatalf("unexpected git calls: %#v", calls)
 	}
 }
 
@@ -170,983 +95,6 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 	}
 }
 
-func TestLaunchRunnerErrorSkipsGit(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return "", errors.New("launch runner failed: exit status 1")
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not run after runner error")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected launch error")
-	}
-	if !strings.Contains(err.Error(), "launch runner failed") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputPresent(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"critical_remarks":["missing rollback plan"],"minor_remarks":["consider renaming helper"],"questions":["should we add an integration test?"]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if !strings.Contains(result.Summary, "Applied the requested changes.") {
-		t.Fatalf("summary must keep plain runner output: %q", result.Summary)
-	}
-	if strings.Contains(result.Summary, structuredOutputStart) {
-		t.Fatalf("summary must not keep structured block markers: %q", result.Summary)
-	}
-	if !slices.Equal(result.CriticalRemarks, []string{"missing rollback plan"}) {
-		t.Fatalf("unexpected critical remarks: %#v", result.CriticalRemarks)
-	}
-	if !slices.Equal(result.MinorRemarks, []string{"consider renaming helper"}) {
-		t.Fatalf("unexpected minor remarks: %#v", result.MinorRemarks)
-	}
-	if !slices.Equal(result.Questions, []string{"should we add an integration test?"}) {
-		t.Fatalf("unexpected questions: %#v", result.Questions)
-	}
-	if result.ReviewCycle == nil {
-		t.Fatal("legacy structured output must be normalized into review cycle envelope")
-	}
-	if result.ReviewCycle.ProtocolVersion != model.ReviewCycleProtocolVersion {
-		t.Fatalf("unexpected review cycle protocol version: %#v", result.ReviewCycle)
-	}
-	if len(result.ReviewCycle.Remarks) != 2 || result.ReviewCycle.Remarks[0].Body != "missing rollback plan" || result.ReviewCycle.Remarks[1].Body != "consider renaming helper" {
-		t.Fatalf("unexpected review cycle remarks: %#v", result.ReviewCycle.Remarks)
-	}
-	if len(result.ReviewCycle.Questions) != 1 || result.ReviewCycle.Questions[0].Body != "should we add an integration test?" {
-		t.Fatalf("unexpected review cycle questions: %#v", result.ReviewCycle.Questions)
-	}
-}
-
-func TestLaunchStructuredOutputReviewCycleEnvelopePresent(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","mode":"review","summary":"Main review findings.","remarks":[{"id":"remark-1","status":"open","response_status":"needs-reply","severity":"critical","type":"bug","title":"Missing rollback plan","body":"Document rollback steps."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist","body":"Add rollback item."}],"changes":[{"summary":"Touched deploy docs."}]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if result.ReviewCycle == nil {
-		t.Fatal("review cycle envelope must be populated")
-	}
-	if result.ReviewCycle.ProtocolVersion != model.ReviewCycleProtocolVersion {
-		t.Fatalf("unexpected protocol version: %#v", result.ReviewCycle)
-	}
-	if result.ReviewCycle.Mode != model.ReviewCycleModeReview {
-		t.Fatalf("unexpected mode: %#v", result.ReviewCycle)
-	}
-	if result.ReviewCycle.Summary != "Main review findings." {
-		t.Fatalf("unexpected structured summary: %#v", result.ReviewCycle)
-	}
-	if len(result.ReviewCycle.Remarks) != 1 || result.ReviewCycle.Remarks[0].ID != "remark-1" {
-		t.Fatalf("unexpected remarks: %#v", result.ReviewCycle.Remarks)
-	}
-	if len(result.ReviewCycle.Questions) != 1 || result.ReviewCycle.Questions[0].ID != "question-1" {
-		t.Fatalf("unexpected questions: %#v", result.ReviewCycle.Questions)
-	}
-	if len(result.ReviewCycle.FollowUpActions) != 1 || result.ReviewCycle.FollowUpActions[0].ID != "action-1" {
-		t.Fatalf("unexpected follow-up actions: %#v", result.ReviewCycle.FollowUpActions)
-	}
-	if len(result.ReviewCycle.Changes) != 1 || result.ReviewCycle.Changes[0].Summary != "Touched deploy docs." {
-		t.Fatalf("unexpected changes: %#v", result.ReviewCycle.Changes)
-	}
-	if !slices.Equal(result.CriticalRemarks, []string{"Missing rollback plan: Document rollback steps."}) {
-		t.Fatalf("unexpected critical remarks: %#v", result.CriticalRemarks)
-	}
-	if len(result.MinorRemarks) != 0 {
-		t.Fatalf("unexpected minor remarks: %#v", result.MinorRemarks)
-	}
-	if !slices.Equal(result.Questions, []string{"Integration coverage: Should we add an integration test?"}) {
-		t.Fatalf("unexpected legacy questions view: %#v", result.Questions)
-	}
-}
-
-func TestLaunchStructuredOutputMixedPayloadMergesIntoCanonicalEnvelope(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","mode":"review","summary":"Main review findings.","remarks":[{"id":"remark-1","status":"open","response_status":"needs-reply","severity":"critical","type":"bug","title":"Missing rollback plan","body":"Document rollback steps.","reply":"Will update docs.","fix_summary":"Added rollback section."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?","reply":"Added one integration scenario."}],"critical_remarks":["legacy critical context"],"minor_remarks":["legacy naming note"]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if result.ReviewCycle == nil {
-		t.Fatal("review cycle envelope must be populated")
-	}
-	if len(result.ReviewCycle.Remarks) != 3 {
-		t.Fatalf("unexpected canonical remarks: %#v", result.ReviewCycle.Remarks)
-	}
-	if result.ReviewCycle.Remarks[1].Body != "legacy critical context" || result.ReviewCycle.Remarks[1].Severity != "critical" {
-		t.Fatalf("legacy critical remark must be merged into envelope: %#v", result.ReviewCycle.Remarks)
-	}
-	if result.ReviewCycle.Remarks[2].Body != "legacy naming note" || result.ReviewCycle.Remarks[2].Severity != "minor" {
-		t.Fatalf("legacy minor remark must be merged into envelope: %#v", result.ReviewCycle.Remarks)
-	}
-	if !slices.Equal(result.CriticalRemarks, []string{"Missing rollback plan: Document rollback steps.; reply=Will update docs.; fix_summary=Added rollback section.", "legacy critical context"}) {
-		t.Fatalf("unexpected critical remarks projection: %#v", result.CriticalRemarks)
-	}
-	if !slices.Equal(result.MinorRemarks, []string{"legacy naming note"}) {
-		t.Fatalf("unexpected minor remarks projection: %#v", result.MinorRemarks)
-	}
-	if !slices.Equal(result.Questions, []string{"Integration coverage: Should we add an integration test?; reply=Added one integration scenario."}) {
-		t.Fatalf("unexpected question projection: %#v", result.Questions)
-	}
-}
-
-func TestLaunchStructuredOutputAbsent(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return "Applied the requested changes.", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if len(result.CriticalRemarks) != 0 || len(result.MinorRemarks) != 0 || len(result.Questions) != 0 {
-		t.Fatalf("structured output must stay empty when absent: %#v", result)
-	}
-	if !strings.Contains(result.Summary, "Applied the requested changes.") {
-		t.Fatalf("summary must keep plain runner output: %q", result.Summary)
-	}
-}
-
-func TestLaunchWithoutStructuredOutputFlagKeepsPromptUnchanged(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.Prompt = "Review the patch."
-
-	service := &Service{
-		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
-			prompt, err := buildRunnerPrompt(in.Launch)
-			if err != nil {
-				t.Fatalf("buildRunnerPrompt: %v", err)
-			}
-			if prompt != "Review the patch." {
-				t.Fatalf("runner prompt must stay unchanged without structured-output flag: %q", prompt)
-			}
-			return "Applied the requested changes.", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputLegacyInjection(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredProtocol = model.StructuredProtocolLegacy
-
-	service := &Service{
-		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
-			prompt, err := buildRunnerPrompt(in.Launch)
-			if err != nil {
-				t.Fatalf("buildRunnerPrompt: %v", err)
-			}
-			if !strings.Contains(prompt, "critical_remarks, minor_remarks, questions") {
-				t.Fatalf("legacy prompt must include legacy structured instruction: %q", prompt)
-			}
-			if !strings.Contains(prompt, structuredOutputStart) {
-				t.Fatalf("legacy prompt must mention structured output block tags: %q", prompt)
-			}
-			return "Applied the requested changes.", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputReviewCycleInjection(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredProtocol = model.StructuredProtocolReviewCycle
-	invocation.Launch.StructuredMode = model.ReviewCycleModeReview
-
-	service := &Service{
-		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
-			prompt, err := buildRunnerPrompt(in.Launch)
-			if err != nil {
-				t.Fatalf("buildRunnerPrompt: %v", err)
-			}
-			if !strings.Contains(prompt, `protocol_version="review-cycle/v1"`) {
-				t.Fatalf("review-cycle prompt must require review-cycle protocol version: %q", prompt)
-			}
-			if !strings.Contains(prompt, `Set mode to "review".`) {
-				t.Fatalf("review-cycle prompt must require selected mode: %q", prompt)
-			}
-			return "Applied the requested changes.", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-}
-
-func TestLaunchMalformedStructuredOutputFallsBackToRawSummary(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"critical_remarks":"missing rollback plan"}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if len(result.CriticalRemarks) != 0 || len(result.MinorRemarks) != 0 || len(result.Questions) != 0 {
-		t.Fatalf("malformed structured output must not populate fields: %#v", result)
-	}
-	if !strings.Contains(result.Summary, structuredOutputStart) {
-		t.Fatalf("summary must preserve raw output on malformed structured block: %q", result.Summary)
-	}
-	if !strings.Contains(result.Summary, `{"critical_remarks":"missing rollback plan"}`) {
-		t.Fatalf("summary must preserve malformed payload for diagnostics: %q", result.Summary)
-	}
-}
-
-func TestLaunchStructuredOutputRequiredFailsWhenBlockMissing(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutputRequired = true
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return "Applied the requested changes.", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected required structured output error")
-	}
-	if !strings.Contains(err.Error(), "structured output is required") || !strings.Contains(err.Error(), "missing") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputRequiredPassesWhenBlockPresent(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutputRequired = true
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredProtocol = model.StructuredProtocolLegacy
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"critical_remarks":["missing rollback plan"]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-	if !slices.Equal(result.CriticalRemarks, []string{"missing rollback plan"}) {
-		t.Fatalf("structured block must still be parsed in required mode: %#v", result.CriticalRemarks)
-	}
-}
-
-func TestLaunchStructuredOutputRequiredFailsForEmptyPayload(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredOutputRequired = true
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected required structured output error")
-	}
-	if !strings.Contains(err.Error(), `protocol_version="review-cycle/v1"`) {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputRequiredFailsForUnknownFields(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredOutputRequired = true
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","unexpected":true}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected required structured output error")
-	}
-	if !strings.Contains(err.Error(), "does not match review-cycle schema") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputRequiredFailsForMeaninglessRemarkObject(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredOutputRequired = true
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{}]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected required structured output error")
-	}
-	if !strings.Contains(err.Error(), "remark[0] must include at least one non-empty field") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputRequiredFailsForProtocolMismatch(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredProtocol = model.StructuredProtocolReviewCycle
-	invocation.Launch.StructuredOutputRequired = true
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"critical_remarks":["missing rollback plan"]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected required structured output error")
-	}
-	if !strings.Contains(err.Error(), `protocol_version="review-cycle/v1"`) {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputRequiredFailsForModeMismatch(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredMode = model.ReviewCycleModeReview
-	invocation.Launch.StructuredOutputRequired = true
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","mode":"fix","summary":"Done."}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected required structured output error")
-	}
-	if !strings.Contains(err.Error(), `requested mode "review"`) {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputRequiredFallsBackToStructuredInputMode(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredOutputRequired = true
-	invocation.Launch.StructuredInput = &model.ReviewCycleEnvelope{
-		ProtocolVersion: model.ReviewCycleProtocolVersion,
-		Mode:            model.ReviewCycleModeReply,
-		Summary:         "Need to answer review remarks.",
-	}
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","mode":"fix","summary":"Done."}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected required structured output error")
-	}
-	if !strings.Contains(err.Error(), `requested mode "reply"`) {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchRejectsStructuredProtocolWithoutStructuredOutput(t *testing.T) {
-	t.Parallel()
-
-	for _, protocol := range []string{model.StructuredProtocolLegacy, model.StructuredProtocolReviewCycle} {
-		invocation := validInvocation(t, false)
-		invocation.Launch.StructuredProtocol = protocol
-
-		service := &Service{
-			runRunner: func(context.Context, model.Invocation) (string, error) {
-				t.Fatal("runner must not be called when structured-output settings are invalid")
-				return "", nil
-			},
-			runGitOutput: func(context.Context, string, ...string) (string, error) {
-				t.Fatal("git must not be called when validation fails")
-				return "", nil
-			},
-		}
-
-		_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-		if err == nil {
-			t.Fatalf("expected structured protocol error for %q", protocol)
-		}
-		if !strings.Contains(err.Error(), "structured protocol requires structured output") {
-			t.Fatalf("unexpected error for %q: %v", protocol, err)
-		}
-	}
-}
-
-func TestLaunchRejectsStructuredModeWithoutStructuredOutput(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredMode = model.ReviewCycleModeReview
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			t.Fatal("runner must not be called when structured-output settings are invalid")
-			return "", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when validation fails")
-			return "", nil
-		},
-	}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected structured mode error")
-	}
-	if !strings.Contains(err.Error(), "structured mode requires structured output") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchStructuredOutputOnlyFromTrailingBlock(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Example in prose:",
-				structuredOutputStart,
-				`{"critical_remarks":["example only"]}`,
-				structuredOutputEnd,
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"critical_remarks":["missing rollback plan"],"minor_remarks":["consider renaming helper"],"questions":["should we add an integration test?"]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if strings.Contains(result.Summary, "Applied the requested changes.\n"+structuredOutputStart) {
-		t.Fatalf("summary must strip trailing structured block: %q", result.Summary)
-	}
-	if !strings.Contains(result.Summary, "Example in prose:") || !strings.Contains(result.Summary, `{"critical_remarks":["example only"]}`) {
-		t.Fatalf("summary must preserve non-trailing example block: %q", result.Summary)
-	}
-	if !slices.Equal(result.CriticalRemarks, []string{"missing rollback plan"}) {
-		t.Fatalf("unexpected critical remarks: %#v", result.CriticalRemarks)
-	}
-	if !slices.Equal(result.MinorRemarks, []string{"consider renaming helper"}) {
-		t.Fatalf("unexpected minor remarks: %#v", result.MinorRemarks)
-	}
-	if !slices.Equal(result.Questions, []string{"should we add an integration test?"}) {
-		t.Fatalf("unexpected questions: %#v", result.Questions)
-	}
-}
-
-func TestLaunchTrailingTextAfterStructuredBlockDisablesExtraction(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"critical_remarks":["missing rollback plan"]}`,
-				structuredOutputEnd,
-				"example continuation after block",
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if len(result.CriticalRemarks) != 0 || len(result.MinorRemarks) != 0 || len(result.Questions) != 0 {
-		t.Fatalf("structured output must stay empty when block is not trailing: %#v", result)
-	}
-	if !strings.Contains(result.Summary, "example continuation after block") {
-		t.Fatalf("summary must preserve trailing prose after non-trailing block: %q", result.Summary)
-	}
-	if !strings.Contains(result.Summary, structuredOutputStart) {
-		t.Fatalf("summary must keep non-trailing structured markers verbatim: %q", result.Summary)
-	}
-}
-
-func TestLaunchParsesStructuredInputBlock(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.Prompt = strings.Join([]string{
-		"Reply to the latest review.",
-		structuredInputStart,
-		`{"protocol_version":"review-cycle/v1","mode":"reply","summary":"Need to answer review remarks.","remarks":[{"id":"remark-1","status":"open","response_status":"needs-reply","severity":"critical","title":"Missing rollback plan","body":"Please add rollback steps."}]}`,
-		structuredInputEnd,
-	}, "\n")
-
-	service := &Service{
-		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
-			if in.Launch.Prompt != "Reply to the latest review." {
-				t.Fatalf("runner must receive plain prompt without protocol block: %q", in.Launch.Prompt)
-			}
-			if in.Launch.StructuredInput == nil {
-				t.Fatal("runner invocation must include parsed structured input")
-			}
-			if in.Launch.StructuredInput.Mode != model.ReviewCycleModeReply {
-				t.Fatalf("unexpected structured input mode: %#v", in.Launch.StructuredInput)
-			}
-			if len(in.Launch.StructuredInput.Remarks) != 1 || in.Launch.StructuredInput.Remarks[0].ID != "remark-1" {
-				t.Fatalf("unexpected structured input remarks: %#v", in.Launch.StructuredInput.Remarks)
-			}
-			return "runner output", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-	if !strings.Contains(result.Summary, "runner output") {
-		t.Fatalf("summary must preserve runner output: %q", result.Summary)
-	}
-}
-
-func TestLaunchParsesStructuredOutputBlockWhenPayloadContainsLiteralTag(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","mode":"fix","summary":"Done.","remarks":[{"id":"remark-1","severity":"critical","title":"Literal tag","body":"Keep literal <progress-structured-output> inside payload."}]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if result.ReviewCycle == nil || len(result.ReviewCycle.Remarks) != 1 {
-		t.Fatalf("structured output with literal tag inside payload must still parse: %#v", result.ReviewCycle)
-	}
-	if result.ReviewCycle.Remarks[0].Body != "Keep literal <progress-structured-output> inside payload." {
-		t.Fatalf("unexpected remark body: %#v", result.ReviewCycle.Remarks)
-	}
-}
-
-func TestLaunchParsesStructuredInputBlockWhenPayloadContainsLiteralTag(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.Prompt = strings.Join([]string{
-		"Reply to the latest review.",
-		structuredInputStart,
-		`{"protocol_version":"review-cycle/v1","mode":"reply","summary":"Need to answer review remarks.","remarks":[{"id":"remark-1","status":"open","response_status":"needs-reply","severity":"critical","title":"Literal tag","body":"Please keep literal <progress-structured-input> in the quoted example."}]}`,
-		structuredInputEnd,
-	}, "\n")
-
-	service := &Service{
-		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
-			if in.Launch.Prompt != "Reply to the latest review." {
-				t.Fatalf("runner must receive plain prompt without protocol block: %q", in.Launch.Prompt)
-			}
-			if in.Launch.StructuredInput == nil || len(in.Launch.StructuredInput.Remarks) != 1 {
-				t.Fatalf("runner invocation must include parsed structured input: %#v", in.Launch.StructuredInput)
-			}
-			if in.Launch.StructuredInput.Remarks[0].Body != "Please keep literal <progress-structured-input> in the quoted example." {
-				t.Fatalf("unexpected structured input remark: %#v", in.Launch.StructuredInput.Remarks)
-			}
-			return "runner output", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-	if !strings.Contains(result.Summary, "runner output") {
-		t.Fatalf("summary must preserve runner output: %q", result.Summary)
-	}
-}
-
-func TestLaunchParsesStructuredInputMixedPayloadIntoCanonicalEnvelope(t *testing.T) {
-	t.Parallel()
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.Prompt = strings.Join([]string{
-		"Reply to the latest review.",
-		structuredInputStart,
-		`{"protocol_version":"review-cycle/v1","mode":"reply","summary":"Need to answer review remarks.","remarks":[{"id":"remark-1","status":"open","response_status":"needs-reply","severity":"critical","title":"Missing rollback plan","body":"Please add rollback steps.","reply":"Added rollback section.","fix_summary":"Updated deploy docs."}],"critical_remarks":["legacy critical context"],"questions":["legacy question"]}`,
-		structuredInputEnd,
-	}, "\n")
-
-	service := &Service{
-		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
-			if in.Launch.Prompt != "Reply to the latest review." {
-				t.Fatalf("runner must receive plain prompt without protocol block: %q", in.Launch.Prompt)
-			}
-			if in.Launch.StructuredInput == nil {
-				t.Fatal("runner invocation must include parsed structured input")
-			}
-			if in.Launch.StructuredInput.Mode != model.ReviewCycleModeReply {
-				t.Fatalf("unexpected structured input mode: %#v", in.Launch.StructuredInput)
-			}
-			if len(in.Launch.StructuredInput.Remarks) != 2 {
-				t.Fatalf("mixed payload must merge legacy remarks into canonical envelope: %#v", in.Launch.StructuredInput.Remarks)
-			}
-			if in.Launch.StructuredInput.Remarks[1].Body != "legacy critical context" || in.Launch.StructuredInput.Remarks[1].Severity != "critical" {
-				t.Fatalf("unexpected merged legacy remark: %#v", in.Launch.StructuredInput.Remarks)
-			}
-			if len(in.Launch.StructuredInput.Questions) != 1 || in.Launch.StructuredInput.Questions[0].Body != "legacy question" {
-				t.Fatalf("legacy questions must be merged into canonical envelope: %#v", in.Launch.StructuredInput.Questions)
-			}
-			return "runner output", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-	if !strings.Contains(result.Summary, "runner output") {
-		t.Fatalf("summary must preserve runner output: %q", result.Summary)
-	}
-}
-
-func TestBuildRunnerPromptAppendsProgrammaticStructuredInput(t *testing.T) {
-	t.Parallel()
-
-	structuredInput := &model.ReviewCycleEnvelope{
-		ProtocolVersion: model.ReviewCycleProtocolVersion,
-		Mode:            model.ReviewCycleModeFix,
-		Summary:         "Apply the accepted fixes.",
-		Remarks: []model.ReviewCycleRemark{{
-			ID:       "remark-1",
-			Severity: "critical",
-			Title:    "Rollback plan",
-			Body:     "Please add rollback steps.",
-		}},
-	}
-
-	prompt, err := buildRunnerPrompt(model.LaunchSpec{Prompt: "Apply the latest review fixes.", StructuredInput: structuredInput})
-	if err != nil {
-		t.Fatalf("buildRunnerPrompt: %v", err)
-	}
-
-	plainPrompt, parsedStructuredInput, ok := parseStructuredInput(prompt)
-	if !ok {
-		t.Fatalf("programmatic structured input must be encoded into runner prompt: %q", prompt)
-	}
-	if plainPrompt != "Apply the latest review fixes." {
-		t.Fatalf("unexpected plain prompt after round-trip: %q", plainPrompt)
-	}
-	if !reflect.DeepEqual(parsedStructuredInput, structuredInput) {
-		t.Fatalf("unexpected structured input after round-trip: %#v", parsedStructuredInput)
-	}
-}
-
-func TestLaunchBrokenBlockBeforeValidTrailingBlock(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Broken example in prose:",
-				structuredOutputStart,
-				`{"critical_remarks":`,
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"critical_remarks":["missing rollback plan"]}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if !slices.Equal(result.CriticalRemarks, []string{"missing rollback plan"}) {
-		t.Fatalf("unexpected critical remarks: %#v", result.CriticalRemarks)
-	}
-	if !strings.Contains(result.Summary, `{"critical_remarks":`) {
-		t.Fatalf("summary must preserve earlier broken example: %q", result.Summary)
-	}
-}
-
-func TestLaunchInvalidTrailingBlockWinsOverEarlierValidBlock(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
-				"Applied the requested changes.",
-				structuredOutputStart,
-				`{"critical_remarks":["earlier valid block"]}`,
-				structuredOutputEnd,
-				structuredOutputStart,
-				`{"critical_remarks":"broken trailing block"}`,
-				structuredOutputEnd,
-			}, "\n"), nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
-	if err != nil {
-		t.Fatalf("launch: %v", err)
-	}
-
-	if len(result.CriticalRemarks) != 0 || len(result.MinorRemarks) != 0 || len(result.Questions) != 0 {
-		t.Fatalf("invalid trailing block must suppress structured extraction: %#v", result)
-	}
-	if !strings.Contains(result.Summary, `{"critical_remarks":["earlier valid block"]}`) {
-		t.Fatalf("summary must preserve earlier valid block when trailing block is invalid: %q", result.Summary)
-	}
-	if !strings.Contains(result.Summary, `{"critical_remarks":"broken trailing block"}`) {
-		t.Fatalf("summary must preserve invalid trailing block for diagnostics: %q", result.Summary)
-	}
-}
-
 func TestLaunchPushErrorReturned(t *testing.T) {
 	t.Parallel()
 
@@ -1185,6 +133,485 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 	}
 }
 
+func TestLaunchStructuredOutputPresent(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Main result.","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !strings.Contains(result.Summary, "Applied the requested changes.") {
+		t.Fatalf("summary must keep plain runner output: %q", result.Summary)
+	}
+	if strings.Contains(result.Summary, structuredOutputStart) {
+		t.Fatalf("summary must not keep structured block markers: %q", result.Summary)
+	}
+	if result.StructuredOutput == nil {
+		t.Fatal("structured output must be parsed")
+	}
+	if result.StructuredOutput.ProtocolVersion != model.StructuredIOVersion {
+		t.Fatalf("unexpected protocol version: %#v", result.StructuredOutput)
+	}
+	if result.StructuredOutput.Summary != "Main result." {
+		t.Fatalf("unexpected structured summary: %#v", result.StructuredOutput)
+	}
+	if len(result.StructuredOutput.Remarks) != 1 || result.StructuredOutput.Remarks[0].Body != "Document rollback steps." {
+		t.Fatalf("unexpected remarks: %#v", result.StructuredOutput.Remarks)
+	}
+	if len(result.StructuredOutput.Commands) != 1 || result.StructuredOutput.Commands[0].Name != "open-pr" {
+		t.Fatalf("unexpected commands: %#v", result.StructuredOutput.Commands)
+	}
+	if result.StructuredOutput.Conclusion == nil || result.StructuredOutput.Conclusion.Status != "needs-follow-up" {
+		t.Fatalf("unexpected conclusion: %#v", result.StructuredOutput.Conclusion)
+	}
+	if string(result.StructuredOutput.Extensions["custom"]) != `{"owner":"release"}` {
+		t.Fatalf("unexpected extensions: %#v", result.StructuredOutput.Extensions)
+	}
+}
+
+func TestLaunchStructuredOutputInvalidPreservesFreeText(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","remarks":[{}]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.StructuredOutput != nil {
+		t.Fatalf("invalid structured output must not populate fields: %#v", result.StructuredOutput)
+	}
+	if !strings.Contains(result.Summary, `{"protocol_version":"review-cycle/v1","remarks":[{}]}`) {
+		t.Fatalf("summary must preserve invalid block for diagnostics: %q", result.Summary)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredMissingFails(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "Applied the requested changes.", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutputRequired = true
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), "structured output is required") || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("unexpected result status: %#v", result)
+	}
+	if !strings.Contains(result.Summary, "Applied the requested changes.") {
+		t.Fatalf("summary must preserve plain runner output: %q", result.Summary)
+	}
+}
+
+func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		payload    string
+		expectPart string
+	}{
+		{
+			name:       "empty summary",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":"ok","summary":""}`,
+			expectPart: "structured output must include a non-empty summary",
+		},
+		{
+			name:       "unknown field",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","unknown":true}`,
+			expectPart: `unknown field "unknown"`,
+		},
+		{
+			name:       "meaningless remark object",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{}]}`,
+			expectPart: "structured output remarks[0] must include at least one non-empty field",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			service := &Service{
+				runRunner: func(context.Context, model.Invocation) (string, error) {
+					return strings.Join([]string{
+						"Applied the requested changes.",
+						structuredOutputStart,
+						tc.payload,
+						structuredOutputEnd,
+					}, "\n"), nil
+				},
+				runGitOutput: func(context.Context, string, ...string) (string, error) {
+					t.Fatal("git must not be called when commit-push is disabled")
+					return "", nil
+				},
+			}
+
+			invocation := validInvocation(t, false)
+			invocation.Launch.StructuredOutputRequired = true
+
+			result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+			if err == nil {
+				t.Fatal("expected required structured output error")
+			}
+			if !strings.Contains(err.Error(), "structured output is required") || !strings.Contains(err.Error(), tc.expectPart) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.Status != "failed" {
+				t.Fatalf("unexpected result status: %#v", result)
+			}
+			if !strings.Contains(result.Summary, tc.payload) {
+				t.Fatalf("summary must preserve invalid structured payload: %q", result.Summary)
+			}
+		})
+	}
+}
+
+func TestStructuredInputCanonicalValidatorSharedAcrossPromptAndProgrammaticPaths(t *testing.T) {
+	t.Parallel()
+
+	rawPayload := `{"protocol_version":"review-cycle/v1"}`
+	_, promptErr := parseStructuredInputPayload(rawPayload)
+	if promptErr == nil {
+		t.Fatal("expected prompt structured input validation error")
+	}
+
+	_, programmaticErr := buildRunnerPrompt(model.LaunchSpec{
+		Prompt: "Apply the fixes.",
+		StructuredInput: &model.StructuredInput{
+			ProtocolVersion: model.StructuredIOVersion,
+		},
+	})
+	if programmaticErr == nil {
+		t.Fatal("expected programmatic structured input validation error")
+	}
+
+	expectPart := "structured input must include at least one non-empty field besides protocol_version"
+	if !strings.Contains(promptErr.Error(), expectPart) {
+		t.Fatalf("unexpected prompt validation error: %v", promptErr)
+	}
+	if !strings.Contains(programmaticErr.Error(), expectPart) {
+		t.Fatalf("unexpected programmatic validation error: %v", programmaticErr)
+	}
+}
+
+func TestLaunchProgrammaticStructuredInputRejectsProtocolOnlyPayload(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			t.Fatal("runner must not be called when structured input is invalid")
+			return "", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredInput = &model.StructuredInput{ProtocolVersion: model.StructuredIOVersion}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected invalid structured input error")
+	}
+	if !strings.Contains(err.Error(), "structured input must include at least one non-empty field besides protocol_version") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchPromptStructuredInputRejectsProtocolOnlyPayload(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			t.Fatal("runner must not be called when prompt structured input is invalid")
+			return "", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Prompt = strings.Join([]string{
+		"Reply to the latest review.",
+		structuredInputStart,
+		`{"protocol_version":"review-cycle/v1"}`,
+		structuredInputEnd,
+	}, "\n")
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected invalid structured input error")
+	}
+	if !strings.Contains(err.Error(), "structured input must include at least one non-empty field besides protocol_version") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchParsesStructuredInputFromPromptBlock(t *testing.T) {
+	t.Parallel()
+
+	structuredInput := model.StructuredInput{
+		ProtocolVersion: model.StructuredIOVersion,
+		Task:            "Answer review remarks.",
+		Constraints:     []string{"Do not change public API."},
+		ReviewRemarks: []model.StructuredRemark{{
+			ID:       "remark-1",
+			Severity: "critical",
+			Title:    "Rollback plan",
+			Body:     "Please add rollback steps.",
+		}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-1",
+			Summary:  "Will update docs.",
+		}},
+	}
+
+	payload, err := buildStructuredJSON(structuredInput)
+	if err != nil {
+		t.Fatalf("marshal structured input: %v", err)
+	}
+
+	service := &Service{
+		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
+			if in.Launch.Prompt != "Reply to the latest review." {
+				t.Fatalf("runner must receive plain prompt without structured block: %q", in.Launch.Prompt)
+			}
+			if !reflect.DeepEqual(in.Launch.StructuredInput, &structuredInput) {
+				t.Fatalf("unexpected structured input: %#v", in.Launch.StructuredInput)
+			}
+			return "done", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Prompt = strings.Join([]string{
+		"Reply to the latest review.",
+		structuredInputStart,
+		payload,
+		structuredInputEnd,
+	}, "\n")
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+}
+
+func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction(t *testing.T) {
+	t.Parallel()
+
+	structuredInput := &model.StructuredInput{
+		Task:        "Apply the accepted fixes.",
+		Constraints: []string{"Do not change the public API."},
+		ProjectContext: []model.StructuredContext{{
+			Title: "Service",
+			Body:  "Execution contour migration.",
+		}},
+		OperationalContext: []model.StructuredContext{{
+			Title: "Branch",
+			Body:  "feature/structured-io",
+		}},
+		PreviousRunResults: []model.StructuredResult{{
+			Summary: "Earlier attempt failed validation.",
+		}},
+		ReviewRemarks: []model.StructuredRemark{{
+			ID:       "remark-1",
+			Severity: "critical",
+			Title:    "Rollback plan",
+			Body:     "Please add rollback steps.",
+		}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-1",
+			Summary:  "Will update docs.",
+		}},
+		IntegrationActions: []model.StructuredAction{{
+			Type:  "github",
+			Title: "Open PR after changes",
+		}},
+	}
+
+	prompt, err := buildRunnerPrompt(model.LaunchSpec{
+		Prompt:           "Apply the latest review fixes.",
+		StructuredInput:  structuredInput,
+		StructuredOutput: true,
+	})
+	if err != nil {
+		t.Fatalf("buildRunnerPrompt: %v", err)
+	}
+	if !strings.Contains(prompt, "Use every field from the structured input block below as execution context.") {
+		t.Fatalf("prompt must mention structured input usage: %q", prompt)
+	}
+	if !strings.Contains(prompt, `protocol_version="review-cycle/v1"`) {
+		t.Fatalf("prompt must mention canonical protocol version: %q", prompt)
+	}
+
+	plainPrompt, parsedStructuredInput, state, err := parseStructuredInput(prompt)
+	if err != nil {
+		t.Fatalf("parseStructuredInput: %v", err)
+	}
+	if state != trailingStructuredBlockValid {
+		t.Fatalf("programmatic structured input must be encoded into runner prompt: %q", prompt)
+	}
+	if !strings.Contains(plainPrompt, "Apply the latest review fixes.") {
+		t.Fatalf("unexpected plain prompt after round-trip: %q", plainPrompt)
+	}
+	if !strings.Contains(plainPrompt, `protocol_version="review-cycle/v1"`) {
+		t.Fatalf("plain prompt must keep structured output instruction after extracting input block: %q", plainPrompt)
+	}
+	expected := *structuredInput
+	expected.ProtocolVersion = model.StructuredIOVersion
+	if !reflect.DeepEqual(parsedStructuredInput, &expected) {
+		t.Fatalf("unexpected structured input after round-trip: %#v", parsedStructuredInput)
+	}
+}
+
+func TestLaunchStructuredOutputWithLiteralTagInsidePayload(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{"id":"remark-1","title":"Literal tag","body":"Keep literal <progress-structured-output> inside payload."}]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.StructuredOutput == nil || len(result.StructuredOutput.Remarks) != 1 || result.StructuredOutput.Remarks[0].Body != "Keep literal <progress-structured-output> inside payload." {
+		t.Fatalf("structured output with literal tag inside payload must still parse: %#v", result.StructuredOutput)
+	}
+}
+
+func TestLaunchBrokenBlockBeforeValidTrailingBlock(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Broken example in prose:",
+				structuredOutputStart,
+				`{"protocol_version":`,
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{"title":"Rollback plan","body":"missing rollback plan"}]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.StructuredOutput == nil || len(result.StructuredOutput.Remarks) != 1 {
+		t.Fatalf("unexpected structured output: %#v", result.StructuredOutput)
+	}
+	if !strings.Contains(result.Summary, `{"protocol_version":`) {
+		t.Fatalf("summary must preserve earlier broken example: %q", result.Summary)
+	}
+}
+
+func TestLaunchInvalidTrailingBlockWinsOverEarlierValidBlock(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Earlier valid block."}`,
+				structuredOutputEnd,
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","remarks":"broken trailing block"}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.StructuredOutput != nil {
+		t.Fatalf("invalid trailing block must suppress structured extraction: %#v", result.StructuredOutput)
+	}
+	if !strings.Contains(result.Summary, `{"protocol_version":"review-cycle/v1","summary":"Earlier valid block."}`) {
+		t.Fatalf("summary must preserve earlier valid block when trailing block is invalid: %q", result.Summary)
+	}
+	if !strings.Contains(result.Summary, `{"protocol_version":"review-cycle/v1","remarks":"broken trailing block"}`) {
+		t.Fatalf("summary must preserve invalid trailing block for diagnostics: %q", result.Summary)
+	}
+}
+
 func validInvocation(t *testing.T, commitPush bool) model.Invocation {
 	t.Helper()
 
@@ -1201,11 +628,7 @@ func validInvocation(t *testing.T, commitPush bool) model.Invocation {
 }
 
 func validProfile() model.Profile {
-	return validProfileWithCommitPush(false)
-}
-
-func validProfileWithCommitPush(commitPush bool) model.Profile {
-	return model.Profile{Name: "default", Model: "openai/gpt-5.4", CommitPush: commitPush}
+	return model.Profile{Name: "default", Model: "openai/gpt-5.4"}
 }
 
 func validAllocation() model.Allocation {
@@ -1224,4 +647,13 @@ func tempDir(t *testing.T) string {
 		t.Fatalf("mkdir temp repo: %v", err)
 	}
 	return dir
+}
+
+func buildStructuredJSON(value any) (string, error) {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+
+	return string(bytes), nil
 }

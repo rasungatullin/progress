@@ -262,6 +262,36 @@ func TestRunnerRunIssueViewRejectsInvalidInputs(t *testing.T) {
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 }
 
+func TestRunnerRunIssueViewUsesConfiguredDefaultRepository(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return []byte(`{"default_repo":"owner/name"}`), nil }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"issue", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,labels,assignees,author,url,createdAt,updatedAt"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `{"number":123}`}
+	}
+
+	_, config, err := runner.RunIssueView(context.Background(), "", 123)
+	if err != nil {
+		t.Fatalf("run issue view: %v", err)
+	}
+	if config.DefaultRepo != "owner/name" {
+		t.Fatalf("unexpected default repo: %q", config.DefaultRepo)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
 func TestRunnerRunPRCreateBuildsCommand(t *testing.T) {
 	t.Parallel()
 
@@ -315,7 +345,6 @@ func TestRunnerRunPRCreateRejectsInvalidInputs(t *testing.T) {
 	_, _, err = runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Base: "main", Head: "main", Title: "Title", Body: "Body"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 }
-
 func assertGitHubErrorCode(t *testing.T, err error, code string) {
 	t.Helper()
 

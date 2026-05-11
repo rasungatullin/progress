@@ -1,64 +1,86 @@
 package model
 
+import "encoding/json"
+
 type LaunchSpec struct {
 	Directory                string
 	Runner                   string
 	Model                    string
 	Prompt                   string
-	StructuredInput          *ReviewCycleEnvelope
+	StructuredInput          *StructuredInput
 	StructuredOutput         bool
-	StructuredProtocol       string
-	StructuredMode           string
 	StructuredOutputRequired bool
 	CommitPush               bool
 	CommitMessage            string
 }
 
-const ReviewCycleProtocolVersion = "review-cycle/v1"
+const StructuredIOVersion = "review-cycle/v1"
 
-const (
-	StructuredProtocolLegacy      = "legacy"
-	StructuredProtocolReviewCycle = "review-cycle"
-)
+type StructuredExtensions map[string]json.RawMessage
 
-const (
-	ReviewCycleModeReview   = "review"
-	ReviewCycleModeReply    = "reply"
-	ReviewCycleModeFix      = "fix"
-	ReviewCycleModeReReview = "re-review"
-)
+type StructuredInput struct {
+	ProtocolVersion    string               `json:"protocol_version,omitempty"`
+	Task               string               `json:"task,omitempty"`
+	Constraints        []string             `json:"constraints,omitempty"`
+	ProjectContext     []StructuredContext  `json:"project_context,omitempty"`
+	OperationalContext []StructuredContext  `json:"operational_context,omitempty"`
+	PreviousRunResults []StructuredResult   `json:"previous_run_results,omitempty"`
+	ReviewRemarks      []StructuredRemark   `json:"review_remarks,omitempty"`
+	ReviewResponses    []StructuredResponse `json:"review_responses,omitempty"`
+	IntegrationActions []StructuredAction   `json:"integration_actions,omitempty"`
+	Extensions         StructuredExtensions `json:"extensions,omitempty"`
+}
 
-type ReviewCycleEnvelope struct {
+type StructuredOutput struct {
 	ProtocolVersion string                `json:"protocol_version,omitempty"`
-	Mode            string                `json:"mode,omitempty"`
 	Summary         string                `json:"summary,omitempty"`
-	Remarks         []ReviewCycleRemark   `json:"remarks,omitempty"`
-	Questions       []ReviewCycleQuestion `json:"questions,omitempty"`
-	FollowUpActions []ReviewCycleAction   `json:"follow_up_actions,omitempty"`
-	Changes         []ReviewCycleChange   `json:"changes,omitempty"`
+	Remarks         []StructuredRemark    `json:"remarks,omitempty"`
+	Questions       []StructuredQuestion  `json:"questions,omitempty"`
+	FollowUpActions []StructuredAction    `json:"follow_up_actions,omitempty"`
+	Changes         []StructuredChange    `json:"changes,omitempty"`
+	Commands        []StructuredCommand   `json:"commands,omitempty"`
+	Conclusion      *StructuredConclusion `json:"conclusion,omitempty"`
+	Extensions      StructuredExtensions  `json:"extensions,omitempty"`
 }
 
-type ReviewCycleRemark struct {
-	ID             string `json:"id,omitempty"`
-	Status         string `json:"status,omitempty"`
-	ResponseStatus string `json:"response_status,omitempty"`
-	Severity       string `json:"severity,omitempty"`
-	Type           string `json:"type,omitempty"`
-	Title          string `json:"title,omitempty"`
-	Body           string `json:"body,omitempty"`
-	Reply          string `json:"reply,omitempty"`
-	FixSummary     string `json:"fix_summary,omitempty"`
+type StructuredContext struct {
+	Title string `json:"title,omitempty"`
+	Body  string `json:"body,omitempty"`
 }
 
-type ReviewCycleQuestion struct {
+type StructuredResult struct {
+	Summary string `json:"summary,omitempty"`
+	Body    string `json:"body,omitempty"`
+}
+
+type StructuredRemark struct {
+	ID         string `json:"id,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Severity   string `json:"severity,omitempty"`
+	Type       string `json:"type,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Body       string `json:"body,omitempty"`
+	Answer     string `json:"answer,omitempty"`
+	Resolution string `json:"resolution,omitempty"`
+}
+
+type StructuredResponse struct {
+	ID       string `json:"id,omitempty"`
+	RemarkID string `json:"remark_id,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Summary  string `json:"summary,omitempty"`
+	Body     string `json:"body,omitempty"`
+}
+
+type StructuredQuestion struct {
 	ID     string `json:"id,omitempty"`
 	Status string `json:"status,omitempty"`
 	Title  string `json:"title,omitempty"`
 	Body   string `json:"body,omitempty"`
-	Reply  string `json:"reply,omitempty"`
+	Answer string `json:"answer,omitempty"`
 }
 
-type ReviewCycleAction struct {
+type StructuredAction struct {
 	ID     string `json:"id,omitempty"`
 	Status string `json:"status,omitempty"`
 	Type   string `json:"type,omitempty"`
@@ -66,8 +88,21 @@ type ReviewCycleAction struct {
 	Body   string `json:"body,omitempty"`
 }
 
-type ReviewCycleChange struct {
+type StructuredChange struct {
 	Summary string `json:"summary,omitempty"`
+}
+
+type StructuredCommand struct {
+	Name  string   `json:"name,omitempty"`
+	Args  []string `json:"args,omitempty"`
+	Title string   `json:"title,omitempty"`
+	Body  string   `json:"body,omitempty"`
+}
+
+type StructuredConclusion struct {
+	Status  string `json:"status,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Body    string `json:"body,omitempty"`
 }
 
 type WorkplaceSpec struct {
@@ -118,10 +153,7 @@ type Workplace struct {
 }
 
 type LaunchResult struct {
-	Status          string
-	Summary         string
-	ReviewCycle     *ReviewCycleEnvelope
-	CriticalRemarks []string
-	MinorRemarks    []string
-	Questions       []string
+	Status           string
+	Summary          string
+	StructuredOutput *StructuredOutput
 }

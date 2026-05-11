@@ -121,7 +121,7 @@ func (r *Runner) RunRepoView(ctx context.Context, repository string) (CommandRes
 }
 
 func (r *Runner) RunIssueView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
-	repository, err := normalizeRepository(repository)
+	number, err := normalizeIssueNumber(number)
 	if err != nil {
 		result := CommandResult{Command: defaultCommand, ExitCode: -1}
 		return result, resolvedConfig{}, &Error{
@@ -131,17 +131,26 @@ func (r *Runner) RunIssueView(ctx context.Context, repository string, number int
 		}
 	}
 
-	number, err = normalizeIssueNumber(number)
+	config, err := r.loadConfig(ctx)
 	if err != nil {
-		result := CommandResult{Command: defaultCommand, ExitCode: -1}
-		return result, resolvedConfig{}, &Error{
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
 			Code:    ErrorCodeInvalidRequest,
 			Message: err.Error(),
 			Result:  result,
 		}
 	}
 
-	return r.runCommandWithConfig(ctx, []string{"issue", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,labels,assignees,author,url,createdAt,updatedAt"})
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"issue", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,labels,assignees,author,url,createdAt,updatedAt"})
+}
+
+func resolveRepository(repository string, fallback string) (string, error) {
+	return normalizeRepository(firstNonEmpty(repository, fallback))
 }
 
 func (r *Runner) RunPRCreate(ctx context.Context, repository string, request PRCreateRequest) (CommandResult, resolvedConfig, error) {
@@ -237,6 +246,11 @@ func (r *Runner) runCommandWithConfig(ctx context.Context, args []string) (Comma
 	if err != nil {
 		return CommandResult{}, resolvedConfig{}, err
 	}
+
+	return r.runCommandWithResolvedConfig(ctx, config, args)
+}
+
+func (r *Runner) runCommandWithResolvedConfig(ctx context.Context, config resolvedConfig, args []string) (CommandResult, resolvedConfig, error) {
 
 	path, err := r.lookPath(config.Command)
 	if err != nil {
