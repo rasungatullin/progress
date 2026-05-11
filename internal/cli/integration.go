@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -120,10 +121,6 @@ func newIntegrationGitHubRepoGetCommand() *cobra.Command {
 		Use:   "get",
 		Short: "Получение сведений о репозитории GitHub",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if strings.TrimSpace(flags.repo) == "" {
-				return fmt.Errorf("--repo is required")
-			}
-
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(context.Background(), integration.Request{
 				System:     "github",
@@ -329,7 +326,7 @@ func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 				cmd.Printf("assignee_url=%s\n", assignee.URL)
 			}
 		}
-		printMultilineField(cmd, "body", issue.Body)
+		printIssueBody(cmd, issue.Body)
 		return
 	}
 
@@ -363,14 +360,22 @@ func printGitHubPullRequestStatus(cmd *cobra.Command, response integration.Respo
 }
 
 func printMultilineField(cmd *cobra.Command, key string, value string) {
-	for _, line := range strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	if value == "" {
+		return
+	}
+	for _, line := range strings.Split(value, "\n") {
 		cmd.Printf("%s=%s\n", key, line)
 	}
+}
+
+func printIssueBody(cmd *cobra.Command, value string) {
+	printMultilineField(cmd, "body", value)
+	if value == "" {
+		return
+	}
+
+	cmd.Printf("body_raw=%s\n", strconv.Quote(strings.ReplaceAll(value, "\r\n", "\n")))
 }
 
 func validateSingleLineFlagValue(name string, value string) error {

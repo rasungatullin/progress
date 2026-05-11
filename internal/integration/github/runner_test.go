@@ -193,6 +193,33 @@ func TestRunnerRunRepoViewRejectsEmptyRepository(t *testing.T) {
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 }
 
+func TestRunnerRunRepoViewUsesConfiguredDefaultRepository(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return []byte(`{"default_repo":"owner/name"}`), nil }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"repo", "view", "owner/name", "--json", "name,owner,description,defaultBranchRef,url"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `{"name":"name"}`}
+	}
+
+	_, config, err := runner.RunRepoView(context.Background(), "")
+	if err != nil {
+		t.Fatalf("run repo view: %v", err)
+	}
+	if config.DefaultRepo != "owner/name" {
+		t.Fatalf("unexpected default repo: %q", config.DefaultRepo)
+	}
+}
+
 func TestRunnerRunRepoViewRejectsMalformedRepositoryFormat(t *testing.T) {
 	t.Parallel()
 

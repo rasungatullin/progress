@@ -199,7 +199,7 @@ func TestIntegrationGitHubRepoGetCommandPrintsNormalizedRepository(t *testing.T)
 	}
 }
 
-func TestIntegrationGitHubRepoGetCommandRequiresRepoFlag(t *testing.T) {
+func TestIntegrationGitHubRepoGetCommandAllowsOmittedRepoFlag(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -207,12 +207,19 @@ func TestIntegrationGitHubRepoGetCommandRequiresRepoFlag(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"integration", "github", "repo", "get"})
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected github repo get error")
+	provider := &capturingCLIProvider{response: integration.Response{RepositoryRef: &integration.TrackerRepository{System: "github", FullName: "owner/name", Owner: "owner", Name: "name", URL: "https://github.com/owner/name"}}}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github repo get command without repo: %v", err)
 	}
-	if err.Error() != "--repo is required" {
-		t.Fatalf("unexpected github repo get error: %v", err)
+	if provider.request.Repository != "" {
+		t.Fatalf("expected empty repository request so provider layer can resolve fallback, got %q", provider.request.Repository)
 	}
 }
 
@@ -394,7 +401,7 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedIssue(t *testing.T) {
 				Repository: "owner/name",
 				Number:     123,
 				Title:      "Fix integration",
-				Body:       "Line one\nLine two",
+				Body:       "Line one\n\n  indented line\nLine two",
 				State:      "OPEN",
 				Labels:     []string{"bug", "integration"},
 				Assignees: []integration.TrackerUser{{
@@ -440,7 +447,10 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedIssue(t *testing.T) {
 		"created_at=2026-05-01T10:00:00Z\n",
 		"updated_at=2026-05-02T10:00:00Z\n",
 		"body=Line one\n",
+		"body=\n",
+		"body=  indented line\n",
 		"body=Line two\n",
+		"body_raw=\"Line one\\n\\n  indented line\\nLine two\"\n",
 	} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("github issue get output must include %q, got %q", fragment, output)
