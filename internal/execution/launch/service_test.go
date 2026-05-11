@@ -230,12 +230,18 @@ func TestLaunchStructuredOutputRequiredMissingFails(t *testing.T) {
 	invocation := validInvocation(t, false)
 	invocation.Launch.StructuredOutputRequired = true
 
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
 	if err == nil {
 		t.Fatal("expected required structured output error")
 	}
 	if !strings.Contains(err.Error(), "structured output is required") || !strings.Contains(err.Error(), "missing") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("unexpected result status: %#v", result)
+	}
+	if !strings.Contains(result.Summary, "Applied the requested changes.") {
+		t.Fatalf("summary must preserve plain runner output: %q", result.Summary)
 	}
 }
 
@@ -287,12 +293,18 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 			invocation := validInvocation(t, false)
 			invocation.Launch.StructuredOutputRequired = true
 
-			_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+			result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
 			if err == nil {
 				t.Fatal("expected required structured output error")
 			}
 			if !strings.Contains(err.Error(), "structured output is required") || !strings.Contains(err.Error(), tc.expectPart) {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.Status != "failed" {
+				t.Fatalf("unexpected result status: %#v", result)
+			}
+			if !strings.Contains(result.Summary, tc.payload) {
+				t.Fatalf("summary must preserve invalid structured payload: %q", result.Summary)
 			}
 		})
 	}

@@ -64,7 +64,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 
 	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState, structuredOutputErr := parseStructuredOutput(runnerOutput)
 	if err := validateStructuredOutputRequirement(in.Launch, rawStructuredOutput, structuredOutputState, structuredOutputErr); err != nil {
-		return model.LaunchResult{}, err
+		return model.LaunchResult{Status: "failed", Summary: strings.TrimSpace(plainRunnerOutput)}, err
 	}
 
 	commitPush := in.Launch.CommitPush || profile.CommitPush

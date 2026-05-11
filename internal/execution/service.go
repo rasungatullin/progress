@@ -130,7 +130,7 @@ func (s *Service) Launch(ctx context.Context, in Invocation, profile Profile, al
 
 	result, err := s.launcher.Launch(ctx, in, profile, allocation, workplace)
 	if err != nil {
-		return LaunchResult{}, err
+		return result, err
 	}
 
 	s.logger.Printf("Запуск выполнения завершён: каталог=%q состояние=%q", in.Launch.Directory, result.Status)

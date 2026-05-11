@@ -26,6 +26,32 @@ type launchFlags struct {
 	commitMessage            string
 }
 
+type executionCommandService interface {
+	Start(context.Context, execution.Invocation) (execution.LaunchResult, error)
+	Dispatch(context.Context, execution.Invocation) []string
+	ResolveProfile(context.Context, execution.Invocation) (execution.Profile, error)
+	AllocateResources(context.Context, execution.Invocation, execution.Profile) (execution.Allocation, error)
+	PrepareWorkplace(context.Context, execution.Invocation, execution.Profile, execution.Allocation) (execution.Workplace, error)
+	LaunchDirect(context.Context, execution.Invocation) (execution.LaunchResult, error)
+}
+
+type executionServiceFactoryFunc func(*cobra.Command) executionCommandService
+
+type executionServiceFactoryContextKey struct{}
+
+var executionServiceFactory = func(cmd *cobra.Command) executionCommandService {
+	return execution.NewService(logging.New(cmd.ErrOrStderr()))
+}
+
+func setExecutionServiceFactory(cmd *cobra.Command, factory executionServiceFactoryFunc) {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cmd.SetContext(context.WithValue(ctx, executionServiceFactoryContextKey{}, factory))
+}
+
 func newExecutionCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "execution",
@@ -54,6 +80,7 @@ func newExecutionStartCommand() *cobra.Command {
 			service := newExecutionService(cmd)
 			result, err := service.Start(context.Background(), invocationFromLaunchFlags(flags))
 			if err != nil {
+				printLaunchResultOnError(cmd, result)
 				return err
 			}
 
@@ -163,6 +190,7 @@ func newExecutionLaunchCommand() *cobra.Command {
 
 			result, err := service.LaunchDirect(context.Background(), in)
 			if err != nil {
+				printLaunchResultOnError(cmd, result)
 				return err
 			}
 
@@ -175,8 +203,12 @@ func newExecutionLaunchCommand() *cobra.Command {
 	return cmd
 }
 
-func newExecutionService(cmd *cobra.Command) *execution.Service {
-	return execution.NewService(logging.New(cmd.ErrOrStderr()))
+func newExecutionService(cmd *cobra.Command) executionCommandService {
+	if factory, ok := cmd.Context().Value(executionServiceFactoryContextKey{}).(executionServiceFactoryFunc); ok && factory != nil {
+		return factory(cmd)
+	}
+
+	return executionServiceFactory(cmd)
 }
 
 func newLaunchFlags() *launchFlags {
@@ -259,6 +291,14 @@ func printLaunchResult(cmd *cobra.Command, result execution.LaunchResult) {
 	cmd.Printf("state=%s\n", result.Status)
 	printLaunchSummary(cmd, result.Summary)
 	printLaunchStructuredOutput(cmd, result)
+}
+
+func printLaunchResultOnError(cmd *cobra.Command, result execution.LaunchResult) {
+	if strings.TrimSpace(result.Status) == "" && strings.TrimSpace(result.Summary) == "" && result.StructuredOutput == nil {
+		return
+	}
+
+	printLaunchResult(cmd, result)
 }
 
 func printLaunchSummary(cmd *cobra.Command, summary string) {

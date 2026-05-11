@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -138,6 +140,47 @@ func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
 	}
 	if !strings.Contains(output, "commit-push=false\n") {
 		t.Fatalf("profile output must include commit-push flag, got %q", output)
+	}
+}
+
+func TestExecutionLaunchCommandPrintsSummaryOnStructuredOutputError(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "launch", "--dir", "/tmp/work", "--prompt", "ship it"})
+
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			launchDirect: func(context.Context, execution.Invocation) (execution.LaunchResult, error) {
+				return execution.LaunchResult{
+					Status:  "failed",
+					Summary: "Applied the requested changes.\n<progress-structured-output>\n{\"protocol_version\":\"review-cycle/v1\",\"remarks\":[{}]}\n</progress-structured-output>",
+				}, errors.New("structured output is required but payload does not match structured output schema: structured output remarks[0] must include at least one non-empty field")
+			},
+		}
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected launch error")
+	}
+	if !strings.Contains(err.Error(), "structured output is required") {
+		t.Fatalf("unexpected command error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "state=failed\n") {
+		t.Fatalf("output must include failed state: %q", output)
+	}
+	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nApplied the requested changes.\n<progress-structured-output>") {
+		t.Fatalf("output must include summary even on error: %q", output)
+	}
+	if strings.Contains(output, "structured-output:\n") {
+		t.Fatalf("output must not print structured section for invalid payload: %q", output)
 	}
 }
 
@@ -283,4 +326,55 @@ func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
 	if strings.Contains(output, "line three\nprotocol-version=") {
 		t.Fatalf("structured lines must not be ambiguous continuation of summary: %q", output)
 	}
+}
+
+type executionCommandServiceStub struct {
+	start            func(context.Context, execution.Invocation) (execution.LaunchResult, error)
+	dispatch         func(context.Context, execution.Invocation) []string
+	resolveProfile   func(context.Context, execution.Invocation) (execution.Profile, error)
+	allocateResource func(context.Context, execution.Invocation, execution.Profile) (execution.Allocation, error)
+	prepareWorkplace func(context.Context, execution.Invocation, execution.Profile, execution.Allocation) (execution.Workplace, error)
+	launchDirect     func(context.Context, execution.Invocation) (execution.LaunchResult, error)
+}
+
+func (s executionCommandServiceStub) Start(ctx context.Context, in execution.Invocation) (execution.LaunchResult, error) {
+	if s.start == nil {
+		return execution.LaunchResult{}, errors.New("unexpected Start call")
+	}
+	return s.start(ctx, in)
+}
+
+func (s executionCommandServiceStub) Dispatch(ctx context.Context, in execution.Invocation) []string {
+	if s.dispatch == nil {
+		return nil
+	}
+	return s.dispatch(ctx, in)
+}
+
+func (s executionCommandServiceStub) ResolveProfile(ctx context.Context, in execution.Invocation) (execution.Profile, error) {
+	if s.resolveProfile == nil {
+		return execution.Profile{}, errors.New("unexpected ResolveProfile call")
+	}
+	return s.resolveProfile(ctx, in)
+}
+
+func (s executionCommandServiceStub) AllocateResources(ctx context.Context, in execution.Invocation, profile execution.Profile) (execution.Allocation, error) {
+	if s.allocateResource == nil {
+		return execution.Allocation{}, errors.New("unexpected AllocateResources call")
+	}
+	return s.allocateResource(ctx, in, profile)
+}
+
+func (s executionCommandServiceStub) PrepareWorkplace(ctx context.Context, in execution.Invocation, profile execution.Profile, allocation execution.Allocation) (execution.Workplace, error) {
+	if s.prepareWorkplace == nil {
+		return execution.Workplace{}, errors.New("unexpected PrepareWorkplace call")
+	}
+	return s.prepareWorkplace(ctx, in, profile, allocation)
+}
+
+func (s executionCommandServiceStub) LaunchDirect(ctx context.Context, in execution.Invocation) (execution.LaunchResult, error) {
+	if s.launchDirect == nil {
+		return execution.LaunchResult{}, errors.New("unexpected LaunchDirect call")
+	}
+	return s.launchDirect(ctx, in)
 }
