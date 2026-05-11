@@ -626,7 +626,6 @@ func TestIntegrationGitHubPRCreateCommandRequiresFlags(t *testing.T) {
 		{name: "base", args: []string{"integration", "github", "pr", "create", "--repo", "owner/name"}, want: "--base is required"},
 		{name: "head", args: []string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main"}, want: "--head is required"},
 		{name: "title", args: []string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature"}, want: "--title is required"},
-		{name: "body", args: []string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature", "--title", "Title"}, want: "--body is required"},
 	}
 
 	for _, tt := range tests {
@@ -647,6 +646,30 @@ func TestIntegrationGitHubPRCreateCommandRequiresFlags(t *testing.T) {
 				t.Fatalf("unexpected github pr create error: %v", err)
 			}
 		})
+	}
+}
+
+func TestIntegrationGitHubPRCreateCommandAllowsEmptyBody(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature", "--title", "Title"})
+
+	provider := &capturingCLIProvider{response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{System: "github", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", State: "OPEN", Number: 42, URL: "https://github.com/owner/name/pull/42", Command: "gh", ExitCode: 0, Message: "GitHub pull request created for owner/name feature -> main"}}}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github pr create command: %v", err)
+	}
+	if provider.request.Body != "" {
+		t.Fatalf("expected empty body request, got %q", provider.request.Body)
 	}
 }
 
@@ -772,6 +795,17 @@ func (validatingCLIProvider) Execute(_ context.Context, req integration.Provider
 			},
 		},
 	}, assertErr("GitHub repository must use owner/name format")
+}
+
+type capturingCLIProvider struct {
+	request  integration.ProviderRequest
+	response integration.Response
+	err      error
+}
+
+func (p *capturingCLIProvider) Execute(_ context.Context, req integration.ProviderRequest) (integration.Response, error) {
+	p.request = req
+	return p.response, p.err
 }
 
 func TestIntegrationDispatcherCommandPrintsDiagnosticsOnInvalidRequest(t *testing.T) {

@@ -248,7 +248,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 			status.Diagnostics = append(status.Diagnostics, "gh issue view reported that no GitHub login is configured")
 			response.IssueStatus = &status
 			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
-		case isIssueNotFound(result):
+		case isIssueNotFound(result), isRepoNotFound(result):
 			status.State = ErrorCodeNotFound
 			status.Message = fmt.Sprintf("GitHub issue not found: %s#%d", repository, number)
 			status.Diagnostics = append(status.Diagnostics, "gh issue view could not resolve the requested issue")
@@ -272,9 +272,9 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
 	}
 
-	if raw.Number <= 0 || strings.TrimSpace(raw.Title) == "" || raw.Author == nil {
+	if raw.Number <= 0 || strings.TrimSpace(raw.Title) == "" {
 		status.State = StateExternalFailure
-		status.Message = "unexpected GitHub CLI JSON response: missing issue number, title, or author"
+		status.Message = "unexpected GitHub CLI JSON response: missing issue number or title"
 		status.Diagnostics = append(status.Diagnostics, "gh issue view returned an incomplete issue payload")
 		response.IssueStatus = &status
 		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
@@ -293,6 +293,11 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		assignees = append(assignees, normalizeTrackerUser(assignee))
 	}
 
+	author := model.TrackerUser{System: "github"}
+	if raw.Author != nil {
+		author = normalizeTrackerUser(*raw.Author)
+	}
+
 	response.Issue = &model.TrackerIssue{
 		System:     "github",
 		Repository: repository,
@@ -302,7 +307,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		State:      strings.TrimSpace(raw.State),
 		Labels:     labels,
 		Assignees:  assignees,
-		Author:     normalizeTrackerUser(*raw.Author),
+		Author:     author,
 		URL:        strings.TrimSpace(raw.URL),
 		CreatedAt:  strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:  strings.TrimSpace(raw.UpdatedAt),
