@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution"
-	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +26,6 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 		"--structured-output",
 		"--structured-output-required",
 		"--commit-push",
-		"--commit-message", "Custom message",
 	})
 	if err != nil {
 		t.Fatalf("parse flags: %v", err)
@@ -39,9 +37,6 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 	}
 	if !invocation.Launch.CommitPush {
 		t.Fatal("expected commit-push to be enabled")
-	}
-	if invocation.Launch.CommitMessage != "Custom message" {
-		t.Fatalf("unexpected commit message: %q", invocation.Launch.CommitMessage)
 	}
 	if invocation.Launch.Prompt != "ship it" {
 		t.Fatalf("unexpected prompt: %q", invocation.Launch.Prompt)
@@ -61,9 +56,6 @@ func TestNewLaunchFlagsDefaults(t *testing.T) {
 	if flags.commitPush {
 		t.Fatal("commit-push must be disabled by default")
 	}
-	if flags.commitMessage != "" {
-		t.Fatalf("commit-message flag value should be empty before binding, got %q", flags.commitMessage)
-	}
 
 	cmd := &cobra.Command{Use: "launch"}
 	bindLaunchFlags(cmd, flags)
@@ -74,9 +66,6 @@ func TestNewLaunchFlagsDefaults(t *testing.T) {
 	invocation := invocationFromLaunchFlags(flags)
 	if invocation.Launch.CommitPush {
 		t.Fatal("commit-push must stay disabled by default")
-	}
-	if invocation.Launch.CommitMessage != launch.DefaultCommitMessage {
-		t.Fatalf("unexpected default commit message: %q", invocation.Launch.CommitMessage)
 	}
 	if invocation.Launch.StructuredOutput {
 		t.Fatal("structured-output must be disabled by default")
@@ -114,6 +103,9 @@ func TestExecutionLaunchHelpIncludesStructuredFlags(t *testing.T) {
 		if strings.Contains(help, fragment) {
 			t.Fatalf("launch help must not include removed flag %q, got %q", fragment, help)
 		}
+	}
+	if strings.Contains(help, "--commit-message") {
+		t.Fatalf("launch help must not include removed flag %q, got %q", "--commit-message", help)
 	}
 }
 
@@ -221,6 +213,7 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 		StructuredOutput: &execution.StructuredOutput{
 			ProtocolVersion: execution.StructuredIOVersion,
 			Summary:         "Re-check after fixes.",
+			CommitMessage:   "Ship review fixes",
 			Remarks: []execution.StructuredRemark{{
 				ID:       "remark-1",
 				Status:   "resolved",
@@ -257,6 +250,9 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 	}
 	if !strings.Contains(output, "summary-field=Re-check after fixes.\n") {
 		t.Fatalf("output must include structured summary: %q", output)
+	}
+	if !strings.Contains(output, "commit-message=Ship review fixes\n") {
+		t.Fatalf("output must include structured commit message: %q", output)
 	}
 	if !strings.Contains(output, `remark={"id":"remark-1","status":"resolved","severity":"critical","title":"Rollback plan","body":"Confirmed in deploy docs."}`+"\n") {
 		t.Fatalf("output must include serialized remark: %q", output)

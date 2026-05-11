@@ -23,7 +23,6 @@ type launchFlags struct {
 	structuredOutput         bool
 	structuredOutputRequired bool
 	commitPush               bool
-	commitMessage            string
 }
 
 type executionCommandService interface {
@@ -233,7 +232,6 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
 	cmd.Flags().BoolVar(&flags.commitPush, "commit-push", false, "После успешного запуска выполнить git commit и git push")
-	cmd.Flags().StringVar(&flags.commitMessage, "commit-message", launch.DefaultCommitMessage, "Текст git commit при использовании --commit-push")
 	_ = cmd.MarkFlagRequired("dir")
 	_ = cmd.MarkFlagRequired("prompt")
 }
@@ -271,7 +269,6 @@ func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 			StructuredOutput:         flags.structuredOutput,
 			StructuredOutputRequired: flags.structuredOutputRequired,
 			CommitPush:               flags.commitPush,
-			CommitMessage:            flags.commitMessage,
 		},
 	}
 }
@@ -317,6 +314,7 @@ func printLaunchStructuredOutput(cmd *cobra.Command, result execution.LaunchResu
 func printStructuredOutputBlock(cmd *cobra.Command, output *execution.StructuredOutput) {
 	printLaunchResultSection(cmd, "protocol-version", []string{output.ProtocolVersion})
 	printLaunchResultSection(cmd, "summary-field", []string{output.Summary})
+	printLaunchResultSection(cmd, "commit-message", []string{output.CommitMessage})
 	printStructuredJSONSection(cmd, "remark", output.Remarks)
 	printStructuredJSONSection(cmd, "question", output.Questions)
 	printStructuredJSONSection(cmd, "follow-up-action", output.FollowUpActions)

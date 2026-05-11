@@ -11,7 +11,6 @@ type LaunchSpec struct {
 	StructuredOutput         bool
 	StructuredOutputRequired bool
 	CommitPush               bool
-	CommitMessage            string
 }
 
 const StructuredIOVersion = "review-cycle/v1"
@@ -34,6 +33,7 @@ type StructuredInput struct {
 type StructuredOutput struct {
 	ProtocolVersion string                `json:"protocol_version,omitempty"`
 	Summary         string                `json:"summary,omitempty"`
+	CommitMessage   string                `json:"commit_message,omitempty"`
 	Remarks         []StructuredRemark    `json:"remarks,omitempty"`
 	Questions       []StructuredQuestion  `json:"questions,omitempty"`
 	FollowUpActions []StructuredAction    `json:"follow_up_actions,omitempty"`

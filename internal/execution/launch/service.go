@@ -71,7 +71,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 
 	gitSummary := "git=disabled"
 	if commitPush {
-		result, err := s.commitAndPush(ctx, in)
+		result, err := s.commitAndPush(ctx, in, workplace, structuredOutput)
 		if err != nil {
 			return model.LaunchResult{}, err
 		}
@@ -487,7 +487,7 @@ func (r gitResult) summary() string {
 	return fmt.Sprintf("git=%s branch=%s", r.status, r.branch)
 }
 
-func (s *Service) commitAndPush(ctx context.Context, in model.Invocation) (gitResult, error) {
+func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) (gitResult, error) {
 	if !s.isGitRepository(ctx, in.Launch.Directory) {
 		return gitResult{}, fmt.Errorf("launch directory is not a git repository")
 	}
@@ -519,10 +519,7 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation) (gitRe
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
-	commitMessage := strings.TrimSpace(in.Launch.CommitMessage)
-	if commitMessage == "" {
-		commitMessage = DefaultCommitMessage
-	}
+	commitMessage := resolveCommitMessage(in, workplace, output)
 
 	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "commit", "-m", commitMessage); err != nil {
 		if isNoChangesAfterAddError(err) {
@@ -595,6 +592,42 @@ func isNoChangesAfterAddError(err error) bool {
 	return strings.Contains(message, "nothing to commit") || strings.Contains(message, "no changes added to commit")
 }
 
+func resolveCommitMessage(in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) string {
+	if output != nil {
+		if message := normalizeCommitMessage(output.CommitMessage); message != "" {
+			return message
+		}
+	}
+
+	if name := normalizeCommitMessage(in.Workplace.Name); name != "" {
+		return name
+	}
+
+	if name := worktreeDirectoryName(workplace.Name); name != "" {
+		return name
+	}
+
+	return DefaultCommitMessage
+}
+
+func normalizeCommitMessage(value string) string {
+	return strings.TrimSpace(value)
+}
+
+func worktreeDirectoryName(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+
+	name := filepath.Base(filepath.Clean(path))
+	if name == "." || name == string(filepath.Separator) {
+		return ""
+	}
+
+	return normalizeCommitMessage(name)
+}
+
 func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	prompt, err := buildRunnerPrompt(in.Launch)
 	if err != nil {
@@ -664,7 +697,7 @@ func buildStructuredOutputInstruction() string {
 	parts := []string{
 		"Return your normal answer, then append a trailing <progress-structured-output>...</progress-structured-output> JSON block.",
 		fmt.Sprintf("Use a JSON object with protocol_version=%q and a summary field.", model.StructuredIOVersion),
-		"Include remarks, questions, follow_up_actions, changes, commands, conclusion, and extensions when they are applicable.",
+		"Include commit_message, remarks, questions, follow_up_actions, changes, commands, conclusion, and extensions when they are applicable.",
 	}
 
 	return strings.Join(parts, " ")

@@ -19,7 +19,12 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 
 	service := &Service{
 		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return "runner output", nil
+			return strings.Join([]string{
+				"runner output",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"Ignored when git is disabled"}`,
+				structuredOutputEnd,
+			}, "\n"), nil
 		},
 		runGitOutput: func(context.Context, string, ...string) (string, error) {
 			t.Fatal("git must not be called when commit-push is disabled")
@@ -34,6 +39,9 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	if !strings.Contains(result.Summary, "git=disabled") {
 		t.Fatalf("summary must include disabled git state: %q", result.Summary)
 	}
+	if result.StructuredOutput == nil || result.StructuredOutput.CommitMessage != "Ignored when git is disabled" {
+		t.Fatalf("structured output must still be parsed when git stage is disabled: %#v", result.StructuredOutput)
+	}
 }
 
 func TestLaunchCommitPushWithChanges(t *testing.T) {
@@ -43,7 +51,12 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 	statusCalls := 0
 	service := &Service{
 		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return "runner output", nil
+			return strings.Join([]string{
+				"runner output",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"  Ship release notes  "}`,
+				structuredOutputEnd,
+			}, "\n"), nil
 		},
 		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
 			calls = append(calls, append([]string(nil), args...))
@@ -60,8 +73,8 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 				return "M  file.txt\n", nil
 			case "add -A":
 				return "", nil
-			case "commit -m Apply task result":
-				return "[feature/test abc123] Apply task result\n", nil
+			case "commit -m Ship release notes":
+				return "[feature/test abc123] Ship release notes\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "", nil
 			case "push -u origin feature/test":
@@ -86,9 +99,135 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"status", "--porcelain"},
 		{"add", "-A"},
 		{"status", "--porcelain"},
-		{"commit", "-m", "Apply task result"},
+		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
 		{"push", "-u", "origin", "feature/test"},
+	}
+	if !reflect.DeepEqual(calls, expectedCalls) {
+		t.Fatalf("unexpected git calls: %#v", calls)
+	}
+}
+
+func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, true)
+	invocation.Workplace.Name = "review-fixes"
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"runner output",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"   "}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain":
+				return "M  file.txt\n", nil
+			case "add -A":
+				return "", nil
+			case "commit -m review-fixes":
+				return "[feature/test abc123] review-fixes\n", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			case "push":
+				return "Everything up-to-date\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+}
+
+func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, true)
+	worktreeDir := filepath.Join(t.TempDir(), "structured-contract-v1-worktree")
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"runner output",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"\t"}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain":
+				return "M  file.txt\n", nil
+			case "add -A":
+				return "", nil
+			case "commit -m structured-contract-v1-worktree":
+				return "[feature/test abc123] structured-contract-v1-worktree\n", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			case "push":
+				return "Everything up-to-date\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	workplace := model.Workplace{Name: worktreeDir, Ready: true}
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+}
+
+func TestLaunchCommitPushSkipsCommitAndPushWhenNoChanges(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain":
+				return "\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !strings.Contains(result.Summary, "git=no-changes branch=feature/test") {
+		t.Fatalf("unexpected summary: %q", result.Summary)
+	}
+
+	expectedCalls := [][]string{
+		{"rev-parse", "--is-inside-work-tree"},
+		{"branch", "--show-current"},
+		{"status", "--porcelain"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -112,8 +251,8 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 				return "M  file.txt\n", nil
 			case "add -A":
 				return "", nil
-			case "commit -m Apply task result":
-				return "[feature/test abc123] Apply task result\n", nil
+			case "commit -m repo":
+				return "[feature/test abc123] repo\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "origin/feature/test\n", nil
 			case "push":
@@ -141,7 +280,7 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 			return strings.Join([]string{
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Main result.","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
+				`{"protocol_version":"review-cycle/v1","summary":"Main result.","commit_message":"Document deploy checklist","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -169,6 +308,9 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 	}
 	if result.StructuredOutput.Summary != "Main result." {
 		t.Fatalf("unexpected structured summary: %#v", result.StructuredOutput)
+	}
+	if result.StructuredOutput.CommitMessage != "Document deploy checklist" {
+		t.Fatalf("unexpected structured commit message: %#v", result.StructuredOutput)
 	}
 	if len(result.StructuredOutput.Remarks) != 1 || result.StructuredOutput.Remarks[0].Body != "Document rollback steps." {
 		t.Fatalf("unexpected remarks: %#v", result.StructuredOutput.Remarks)
@@ -495,6 +637,9 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	if !strings.Contains(prompt, `protocol_version="review-cycle/v1"`) {
 		t.Fatalf("prompt must mention canonical protocol version: %q", prompt)
 	}
+	if !strings.Contains(prompt, "Include commit_message") {
+		t.Fatalf("prompt must mention optional structured commit message: %q", prompt)
+	}
 
 	plainPrompt, parsedStructuredInput, state, err := parseStructuredInput(prompt)
 	if err != nil {
@@ -617,12 +762,11 @@ func validInvocation(t *testing.T, commitPush bool) model.Invocation {
 
 	return model.Invocation{
 		Launch: model.LaunchSpec{
-			Directory:     tempDir(t),
-			Runner:        RunnerOpenCode,
-			Model:         "openai/gpt-5.4",
-			Prompt:        "do work",
-			CommitPush:    commitPush,
-			CommitMessage: DefaultCommitMessage,
+			Directory:  tempDir(t),
+			Runner:     RunnerOpenCode,
+			Model:      "openai/gpt-5.4",
+			Prompt:     "do work",
+			CommitPush: commitPush,
 		},
 	}
 }
