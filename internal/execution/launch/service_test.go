@@ -762,12 +762,11 @@ func validInvocation(t *testing.T, commitPush bool) model.Invocation {
 
 	return model.Invocation{
 		Launch: model.LaunchSpec{
-			Directory:     tempDir(t),
-			Runner:        RunnerOpenCode,
-			Model:         "openai/gpt-5.4",
-			Prompt:        "do work",
-			CommitPush:    commitPush,
-			CommitMessage: DefaultCommitMessage,
+			Directory:  tempDir(t),
+			Runner:     RunnerOpenCode,
+			Model:      "openai/gpt-5.4",
+			Prompt:     "do work",
+			CommitPush: commitPush,
 		},
 	}
 }

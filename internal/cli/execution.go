@@ -23,7 +23,6 @@ type launchFlags struct {
 	structuredOutput         bool
 	structuredOutputRequired bool
 	commitPush               bool
-	commitMessage            string
 }
 
 type executionCommandService interface {
@@ -233,7 +232,6 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
 	cmd.Flags().BoolVar(&flags.commitPush, "commit-push", false, "После успешного запуска выполнить git commit и git push")
-	cmd.Flags().StringVar(&flags.commitMessage, "commit-message", launch.DefaultCommitMessage, "Резервное нейтральное сообщение git commit")
 	_ = cmd.MarkFlagRequired("dir")
 	_ = cmd.MarkFlagRequired("prompt")
 }
@@ -271,7 +269,6 @@ func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 			StructuredOutput:         flags.structuredOutput,
 			StructuredOutputRequired: flags.structuredOutputRequired,
 			CommitPush:               flags.commitPush,
-			CommitMessage:            flags.commitMessage,
 		},
 	}
 }

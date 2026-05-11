@@ -11,7 +11,6 @@ type LaunchSpec struct {
 	StructuredOutput         bool
 	StructuredOutputRequired bool
 	CommitPush               bool
-	CommitMessage            string
 }
 
 const StructuredIOVersion = "review-cycle/v1"

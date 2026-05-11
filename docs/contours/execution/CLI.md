@@ -82,7 +82,7 @@ CLI рассматривается как основной ручной инте
 
 Подробное описание механизма структурированного ввода и вывода, потока данных и требований к расширяемости вынесено в `docs/contours/execution/STRUCTURED_IO.md`. В настоящем документе фиксируются только CLI-аспекты этого механизма.
 
-В текущей реализации команда принимает `--dir`, `--runner`, `--model`, `--prompt`, а также опциональные флаги `--structured-output`, `--structured-output-required`, `--commit-push` и `--commit-message`.
+В текущей реализации команда принимает `--dir`, `--runner`, `--model`, `--prompt`, а также опциональные флаги `--structured-output`, `--structured-output-required` и `--commit-push`.
 
 Эффективный `commit-push` для стадии запуска определяется по простому правилу: git-стадия включается, если `--commit-push` передан явно либо если включён одноимённый флаг у выбранного исполнительного профиля.
 
@@ -253,8 +253,7 @@ progress execution launch --dir .progress/workplaces/feature-brief --prompt "П�
 progress execution launch \
   --dir .progress/workplaces/feature-brief \
   --prompt "Подготовь изменения" \
-  --commit-push \
-  --commit-message "Apply task result"
+  --commit-push
 ```
 
 Ожидаемое поведение:
