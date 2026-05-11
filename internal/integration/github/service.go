@@ -171,9 +171,17 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 		}
 	}
 
-	status.State = "OPEN"
 	status.URL = extractFirstURL(result.Stdout)
 	status.Number = pullRequestNumberFromURL(status.URL)
+	if status.URL == "" || status.Number <= 0 {
+		status.State = StateExternalFailure
+		status.Message = "unexpected GitHub CLI response: missing pull request URL or number"
+		status.Diagnostics = append(status.Diagnostics, "gh pr create returned a success exit code without a parseable pull request URL")
+		response.PullRequestStatus = &status
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+	}
+
+	status.State = "OPEN"
 	status.Message = fmt.Sprintf("GitHub pull request created for %s %s -> %s", repository, prRequest.Head, prRequest.Base)
 	status.Diagnostics = append(status.Diagnostics, "gh pr create completed successfully")
 	response.PullRequestStatus = &status

@@ -203,6 +203,9 @@ func expectedResult(resource string, operation string) string {
 		if operation == "search" {
 			return "tracker-search-result[]"
 		}
+		if operation == "create" {
+			return "integration-pull-request-status"
+		}
 		return "tracker-pull-request"
 	case "comment":
 		return "tracker-comment[]"

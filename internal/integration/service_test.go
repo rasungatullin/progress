@@ -128,6 +128,20 @@ func TestNewServiceRegistersGitHubProvider(t *testing.T) {
 	}
 }
 
+func TestDispatchPRCreateUsesStatusResultContract(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "pr", Operation: "create"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	if route.ExpectedResult != "integration-pull-request-status" {
+		t.Fatalf("unexpected expected result: %q", route.ExpectedResult)
+	}
+}
+
 func TestExecutePropagatesProviderError(t *testing.T) {
 	t.Parallel()
 

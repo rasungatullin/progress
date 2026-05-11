@@ -645,6 +645,74 @@ func TestServicePRCreateMapsNoCommitsBetweenBranches(t *testing.T) {
 	}
 }
 
+func TestServicePRCreateRejectsSuccessfulResponseWithoutParseablePRURL(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   "created pull request successfully",
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", Body: "Body"})
+	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
+	if response.PullRequestStatus == nil {
+		t.Fatal("expected pull request status")
+	}
+	if response.PullRequestStatus.State != StateExternalFailure {
+		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+	}
+	if response.PullRequestStatus.Message != "unexpected GitHub CLI response: missing pull request URL or number" {
+		t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+	}
+	if response.PullRequestStatus.URL != "" {
+		t.Fatalf("unexpected url: %q", response.PullRequestStatus.URL)
+	}
+	if response.PullRequestStatus.Number != 0 {
+		t.Fatalf("unexpected number: %d", response.PullRequestStatus.Number)
+	}
+}
+
+func TestServicePRCreateMapsMissingRepositoryOrBranchToNotFound(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		stderr string
+	}{
+		{name: "repository", stderr: "GraphQL: Could not resolve to a Repository with the name 'owner/name'."},
+		{name: "base branch", stderr: "GraphQL: Base ref must be a branch (not found)"},
+		{name: "head branch", stderr: "GraphQL: Head ref must be a branch (not found)"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &stubRunner{result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 1, Stderr: tt.stderr}}
+			service := NewService()
+			service.runner = stub
+
+			response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", Body: "Body"})
+			assertGitHubErrorCode(t, err, ErrorCodeNotFound)
+			if response.PullRequestStatus == nil {
+				t.Fatal("expected pull request status")
+			}
+			if response.PullRequestStatus.State != ErrorCodeNotFound {
+				t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+			}
+			if response.PullRequestStatus.Message != "GitHub repository or branch not found for pull request creation: owner/name feature -> main" {
+				t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+			}
+		})
+	}
+}
+
 type stubRunner struct {
 	result CommandResult
 	config resolvedConfig
