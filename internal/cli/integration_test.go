@@ -527,6 +527,203 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedErrorResult(t *testing.
 	}
 }
 
+func TestIntegrationGitHubPRCreateCommandPrintsNormalizedSuccessResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature/branch", "--title", "Add integration", "--body", "Implements pr create", "--draft"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			PullRequestStatus: &integration.PullRequestStatus{
+				System:     "github",
+				Repository: "owner/name",
+				Base:       "main",
+				Head:       "feature/branch",
+				Title:      "Add integration",
+				Draft:      true,
+				Number:     42,
+				State:      "OPEN",
+				URL:        "https://github.com/owner/name/pull/42",
+				Command:    "gh",
+				Path:       "/usr/local/bin/gh",
+				ExitCode:   0,
+				Message:    "GitHub pull request created for owner/name feature/branch -> main",
+				Diagnostics: []string{
+					"repository=owner/name",
+					"gh pr create completed successfully",
+				},
+				Stdout: "https://github.com/owner/name/pull/42",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github pr create command: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=pr\n",
+		"operation=create\n",
+		"repository=owner/name\n",
+		"base=main\n",
+		"head=feature/branch\n",
+		"title=Add integration\n",
+		"draft=true\n",
+		"state=OPEN\n",
+		"number=42\n",
+		"url=https://github.com/owner/name/pull/42\n",
+		"command=gh\n",
+		"path=/usr/local/bin/gh\n",
+		"exit-code=0\n",
+		"message=GitHub pull request created for owner/name feature/branch -> main\n",
+		"diagnostic=repository=owner/name\n",
+		"diagnostic=gh pr create completed successfully\n",
+		"stdout=https://github.com/owner/name/pull/42\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github pr create output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
+func TestIntegrationGitHubPRCreateCommandRejectsUnsafeTitle(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature", "--title", "bad\ntitle", "--body", "Body"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github pr create error")
+	}
+	if err.Error() != "--title must not contain control characters or line breaks" {
+		t.Fatalf("unexpected github pr create error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output, got %q", stdout.String())
+	}
+}
+
+func TestIntegrationGitHubPRCreateCommandRequiresFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "repo", args: []string{"integration", "github", "pr", "create"}, want: "--repo is required"},
+		{name: "base", args: []string{"integration", "github", "pr", "create", "--repo", "owner/name"}, want: "--base is required"},
+		{name: "head", args: []string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main"}, want: "--head is required"},
+		{name: "title", args: []string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature"}, want: "--title is required"},
+		{name: "body", args: []string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature", "--title", "Title"}, want: "--body is required"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := NewRootCommand()
+			stdout := &bytes.Buffer{}
+			stderr := &bytes.Buffer{}
+			cmd.SetOut(stdout)
+			cmd.SetErr(stderr)
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected github pr create error")
+			}
+			if err.Error() != tt.want {
+				t.Fatalf("unexpected github pr create error: %v", err)
+			}
+		})
+	}
+}
+
+func TestIntegrationGitHubPRCreateCommandPrintsNormalizedErrorResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature", "--title", "Title", "--body", "Body"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			PullRequestStatus: &integration.PullRequestStatus{
+				System:     "github",
+				Repository: "owner/name",
+				Base:       "main",
+				Head:       "feature",
+				Title:      "Title",
+				Draft:      false,
+				State:      "already-exists",
+				Number:     15,
+				URL:        "https://github.com/owner/name/pull/15",
+				Command:    "gh",
+				Path:       "/usr/local/bin/gh",
+				ExitCode:   1,
+				Message:    "GitHub pull request already exists for owner/name feature -> main",
+				Diagnostics: []string{
+					"repository=owner/name",
+					"gh pr create reported an existing pull request between the requested branches",
+				},
+				Stderr: "a pull request for branch \"feature\" into branch \"main\" already exists",
+			},
+		},
+		err: assertErr("GitHub pull request already exists for owner/name feature -> main"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github pr create error")
+	}
+	if err.Error() != "GitHub pull request already exists for owner/name feature -> main" {
+		t.Fatalf("unexpected github pr create error: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=pr\n",
+		"operation=create\n",
+		"repository=owner/name\n",
+		"base=main\n",
+		"head=feature\n",
+		"title=Title\n",
+		"draft=false\n",
+		"state=already-exists\n",
+		"number=15\n",
+		"url=https://github.com/owner/name/pull/15\n",
+		"command=gh\n",
+		"path=/usr/local/bin/gh\n",
+		"exit-code=1\n",
+		"message=GitHub pull request already exists for owner/name feature -> main\n",
+		"diagnostic=repository=owner/name\n",
+		"diagnostic=gh pr create reported an existing pull request between the requested branches\n",
+		"stderr=a pull request for branch \"feature\" into branch \"main\" already exists\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github pr create output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
 type stubCLIProvider struct {
 	response integration.Response
 	err      error

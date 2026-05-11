@@ -6,6 +6,11 @@ type Request struct {
 	Operation  string
 	Repository string
 	Number     int
+	Base       string
+	Head       string
+	Title      string
+	Body       string
+	Draft      bool
 	Query      string
 	Limit      int
 }
@@ -16,27 +21,33 @@ type ProviderRequest struct {
 	Operation  string
 	Repository string
 	Number     int
+	Base       string
+	Head       string
+	Title      string
+	Body       string
+	Draft      bool
 	Query      string
 	Limit      int
 	Route      Route
 }
 
 type Response struct {
-	System           string
-	Resource         string
-	Operation        string
-	Route            Route
-	AuthStatus       *AuthStatus
-	RepositoryStatus *RepositoryStatus
-	IssueStatus      *IssueStatus
-	Issue            *TrackerIssue
-	PullRequest      *TrackerPullRequest
-	Comments         []TrackerComment
-	Reviews          []TrackerReview
-	RepositoryRef    *TrackerRepository
-	SearchResults    []TrackerSearchResult
-	Artifacts        []Artifact
-	Metadata         map[string]string
+	System            string
+	Resource          string
+	Operation         string
+	Route             Route
+	AuthStatus        *AuthStatus
+	RepositoryStatus  *RepositoryStatus
+	IssueStatus       *IssueStatus
+	PullRequestStatus *PullRequestStatus
+	Issue             *TrackerIssue
+	PullRequest       *TrackerPullRequest
+	Comments          []TrackerComment
+	Reviews           []TrackerReview
+	RepositoryRef     *TrackerRepository
+	SearchResults     []TrackerSearchResult
+	Artifacts         []Artifact
+	Metadata          map[string]string
 }
 
 type AuthStatus struct {
@@ -71,6 +82,25 @@ type IssueStatus struct {
 	Repository  string
 	Number      int
 	State       string
+	Command     string
+	Path        string
+	ExitCode    int
+	Message     string
+	Diagnostics []string
+	Stdout      string
+	Stderr      string
+}
+
+type PullRequestStatus struct {
+	System      string
+	Repository  string
+	Base        string
+	Head        string
+	Title       string
+	Draft       bool
+	Number      int
+	State       string
+	URL         string
 	Command     string
 	Path        string
 	ExitCode    int

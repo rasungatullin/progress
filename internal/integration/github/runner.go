@@ -22,6 +22,7 @@ const (
 	ErrorCodeNotInstalled    = "gh-not-installed"
 	ErrorCodeAuthRequired    = "auth-required"
 	ErrorCodeNotFound        = "not-found"
+	ErrorCodeAlreadyExists   = "already-exists"
 	ErrorCodeTimeout         = "timeout"
 	ErrorCodeExternalFailure = "unexpected-external-failure"
 	ErrorCodeInvalidRequest  = "invalid-request"
@@ -152,6 +153,43 @@ func resolveRepository(repository string, fallback string) (string, error) {
 	return normalizeRepository(firstNonEmpty(repository, fallback))
 }
 
+func (r *Runner) RunPRCreate(ctx context.Context, repository string, request PRCreateRequest) (CommandResult, resolvedConfig, error) {
+	repository, err := normalizeRepository(repository)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	request, err = normalizePRCreateRequest(request)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	args := []string{"pr", "create", "--repo", repository, "--base", request.Base, "--head", request.Head, "--title", request.Title, "--body", request.Body}
+	if request.Draft {
+		args = append(args, "--draft")
+	}
+
+	return r.runCommandWithConfig(ctx, args)
+}
+
+type PRCreateRequest struct {
+	Base  string
+	Head  string
+	Title string
+	Body  string
+	Draft bool
+}
+
 func normalizeRepository(repository string) (string, error) {
 	repository = strings.TrimSpace(repository)
 	if repository == "" {
@@ -176,6 +214,31 @@ func normalizeIssueNumber(number int) (int, error) {
 	}
 
 	return number, nil
+}
+
+func normalizePRCreateRequest(request PRCreateRequest) (PRCreateRequest, error) {
+	request.Base = strings.TrimSpace(request.Base)
+	request.Head = strings.TrimSpace(request.Head)
+	request.Title = strings.TrimSpace(request.Title)
+	request.Body = strings.TrimSpace(request.Body)
+
+	if request.Base == "" {
+		return PRCreateRequest{}, fmt.Errorf("GitHub pull request base branch is required")
+	}
+	if request.Head == "" {
+		return PRCreateRequest{}, fmt.Errorf("GitHub pull request head branch is required")
+	}
+	if request.Title == "" {
+		return PRCreateRequest{}, fmt.Errorf("GitHub pull request title is required")
+	}
+	if request.Body == "" {
+		return PRCreateRequest{}, fmt.Errorf("GitHub pull request body is required")
+	}
+	if request.Base == request.Head {
+		return PRCreateRequest{}, fmt.Errorf("GitHub pull request base and head branches must differ")
+	}
+
+	return request, nil
 }
 
 func (r *Runner) runCommandWithConfig(ctx context.Context, args []string) (CommandResult, resolvedConfig, error) {
