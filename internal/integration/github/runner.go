@@ -107,17 +107,22 @@ func (r *Runner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConf
 }
 
 func (r *Runner) RunRepoView(ctx context.Context, repository string) (CommandResult, resolvedConfig, error) {
-	repository, err := normalizeRepository(repository)
+	config, err := r.loadConfig(ctx)
 	if err != nil {
-		result := CommandResult{Command: defaultCommand, ExitCode: -1}
-		return result, resolvedConfig{}, &Error{
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
 			Code:    ErrorCodeInvalidRequest,
 			Message: err.Error(),
 			Result:  result,
 		}
 	}
 
-	return r.runCommandWithConfig(ctx, []string{"repo", "view", repository, "--json", "name,owner,description,defaultBranchRef,url"})
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"repo", "view", repository, "--json", "name,owner,description,defaultBranchRef,url"})
 }
 
 func (r *Runner) RunIssueView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {

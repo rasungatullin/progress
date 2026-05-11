@@ -303,7 +303,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		Repository: repository,
 		Number:     raw.Number,
 		Title:      strings.TrimSpace(raw.Title),
-		Body:       strings.TrimSpace(raw.Body),
+		Body:       raw.Body,
 		State:      strings.TrimSpace(raw.State),
 		Labels:     labels,
 		Assignees:  assignees,
@@ -400,17 +400,22 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 }
 
 func (s *Service) executeRepoGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
-	repository, err := normalizeRepository(req.Repository)
-	if err != nil {
-		status := repositoryErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository))
-		status.State = ErrorCodeInvalidRequest
-		status.Message = err.Error()
-		status.Diagnostics = append(status.Diagnostics, "repository request rejected before invoking gh")
-		response.RepositoryStatus = &status
-		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	repository := strings.TrimSpace(req.Repository)
+	if repository != "" {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			status := repositoryErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository))
+			status.State = ErrorCodeInvalidRequest
+			status.Message = err.Error()
+			status.Diagnostics = append(status.Diagnostics, "repository request rejected before invoking gh")
+			response.RepositoryStatus = &status
+			return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+		}
 	}
 
 	result, config, err := s.runner.RunRepoView(ctx, repository)
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
 	if err != nil && result.ExitCode == 0 {
 		result.ExitCode = -1
 	}

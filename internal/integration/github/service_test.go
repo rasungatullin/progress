@@ -409,11 +409,50 @@ func TestServiceRepoGetSuccess(t *testing.T) {
 	}
 }
 
-func TestServiceRepoGetRejectsEmptyRepository(t *testing.T) {
+func TestServiceRepoGetUsesConfiguredDefaultRepository(t *testing.T) {
 	t.Parallel()
 
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"name":"progress","owner":{"login":"rasungatullin"},"description":"Repository description","defaultBranchRef":{"name":"main"},"url":"https://github.com/rasungatullin/progress"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "rasungatullin/progress"},
+	}
 	service := NewService()
-	service.runner = &stubRunner{}
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.RepositoryRef == nil {
+		t.Fatal("expected repository")
+	}
+	if response.RepositoryRef.FullName != "rasungatullin/progress" {
+		t.Fatalf("unexpected full name: %q", response.RepositoryRef.FullName)
+	}
+	if stub.repo != "" {
+		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
+	}
+}
+
+func TestServiceRepoGetFailsCleanlyWithoutRepositoryOrDefault(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", ExitCode: -1},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+		err: &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: "GitHub repository is required",
+			Result:  CommandResult{Command: "gh", ExitCode: -1},
+		},
+	}
+	service := NewService()
+	service.runner = stub
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
@@ -425,6 +464,9 @@ func TestServiceRepoGetRejectsEmptyRepository(t *testing.T) {
 	}
 	if response.RepositoryStatus.Message != "GitHub repository is required" {
 		t.Fatalf("unexpected message: %q", response.RepositoryStatus.Message)
+	}
+	if response.RepositoryStatus.Repository != "" {
+		t.Fatalf("expected empty repository target, got %q", response.RepositoryStatus.Repository)
 	}
 }
 
