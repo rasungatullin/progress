@@ -123,10 +123,11 @@ func newIntegrationGitHubRepoGetCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(context.Background(), integration.Request{
-				System:     "github",
-				Resource:   "repo",
-				Operation:  "get",
-				Repository: flags.repo,
+				System:       "github",
+				Resource:     "repo",
+				Operation:    "get",
+				Repository:   flags.repo,
+				RepoProvided: cmd.Flags().Changed("repo"),
 			})
 			printGitHubRepository(cmd, response)
 			if err != nil {
@@ -364,15 +365,16 @@ func printMultilineField(cmd *cobra.Command, key string, value string) {
 	if value == "" {
 		return
 	}
-	for _, line := range strings.Split(value, "\n") {
-		cmd.Printf("%s=%s\n", key, line)
-	}
+	cmd.Printf("%s=%s\n", key, value)
 }
 
 func printIssueBody(cmd *cobra.Command, value string) {
-	printMultilineField(cmd, "body", value)
+	value = strings.ReplaceAll(value, "\r\n", "\n")
 	if value == "" {
 		return
+	}
+	for _, line := range strings.Split(value, "\n") {
+		cmd.Printf("body=%s\n", line)
 	}
 
 	cmd.Printf("body_raw=%s\n", strconv.Quote(strings.ReplaceAll(value, "\r\n", "\n")))

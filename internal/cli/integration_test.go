@@ -150,6 +150,55 @@ func TestIntegrationGitHubAuthStatusCommandReturnsNormalizedError(t *testing.T) 
 	}
 }
 
+func TestIntegrationGitHubAuthStatusCommandPreservesGenericMultilineFields(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "auth", "status"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			AuthStatus: &integration.AuthStatus{
+				System:        "github",
+				State:         "ready",
+				Available:     true,
+				Authenticated: true,
+				Command:       "gh",
+				Path:          "/usr/local/bin/gh",
+				ExitCode:      0,
+				Message:       "ok",
+				Stdout:        "line one\nline two",
+				Stderr:        "err one\nerr two",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github auth status command: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "stdout=line one\nline two\n") {
+		t.Fatalf("expected auth stdout to remain a single multiline field, got %q", output)
+	}
+	if strings.Contains(output, "stdout=line two\n") {
+		t.Fatalf("unexpected split auth stdout field: %q", output)
+	}
+	if !strings.Contains(output, "stderr=err one\nerr two\n") {
+		t.Fatalf("expected auth stderr to remain a single multiline field, got %q", output)
+	}
+	if strings.Contains(output, "stderr=err two\n") {
+		t.Fatalf("unexpected split auth stderr field: %q", output)
+	}
+}
+
 func TestIntegrationGitHubRepoGetCommandPrintsNormalizedRepository(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
@@ -199,6 +248,45 @@ func TestIntegrationGitHubRepoGetCommandPrintsNormalizedRepository(t *testing.T)
 	}
 }
 
+func TestIntegrationGitHubRepoGetCommandPreservesDescriptionMultilineField(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "repo", "get", "--repo", "rasungatullin/progress"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			RepositoryRef: &integration.TrackerRepository{
+				System:      "github",
+				FullName:    "rasungatullin/progress",
+				Owner:       "rasungatullin",
+				Name:        "progress",
+				Description: "line one\nline two",
+				URL:         "https://github.com/rasungatullin/progress",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github repo get command: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "description=line one\nline two\n") {
+		t.Fatalf("expected description to remain a single multiline field, got %q", output)
+	}
+	if strings.Contains(output, "description=line two\n") {
+		t.Fatalf("unexpected split description field: %q", output)
+	}
+}
+
 func TestIntegrationGitHubRepoGetCommandAllowsOmittedRepoFlag(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
@@ -220,6 +308,40 @@ func TestIntegrationGitHubRepoGetCommandAllowsOmittedRepoFlag(t *testing.T) {
 	}
 	if provider.request.Repository != "" {
 		t.Fatalf("expected empty repository request so provider layer can resolve fallback, got %q", provider.request.Repository)
+	}
+	if provider.request.RepoProvided {
+		t.Fatal("expected omitted repo flag to stay false")
+	}
+}
+
+func TestIntegrationGitHubRepoGetCommandPassesExplicitEmptyRepoToProvider(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "repo", "get", "--repo="})
+
+	provider := &capturingCLIProvider{response: integration.Response{RepositoryStatus: &integration.RepositoryStatus{System: "github", State: "invalid-request", Command: "gh", ExitCode: -1, Message: "GitHub repository is required"}}, err: assertErr("GitHub repository is required")}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github repo get error")
+	}
+	if err.Error() != "GitHub repository is required" {
+		t.Fatalf("unexpected github repo get error: %v", err)
+	}
+	if provider.request.Repository != "" {
+		t.Fatalf("expected explicit empty repository request, got %q", provider.request.Repository)
+	}
+	if !provider.request.RepoProvided {
+		t.Fatal("expected explicit repo flag to stay true")
 	}
 }
 
@@ -754,6 +876,52 @@ func TestIntegrationGitHubPRCreateCommandPrintsNormalizedErrorResult(t *testing.
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("github pr create output must include %q, got %q", fragment, output)
 		}
+	}
+}
+
+func TestIntegrationGitHubPRCreateCommandPreservesGenericMultilineStderrField(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature", "--title", "Title", "--body", "Body"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			PullRequestStatus: &integration.PullRequestStatus{
+				System:     "github",
+				Repository: "owner/name",
+				Base:       "main",
+				Head:       "feature",
+				Title:      "Title",
+				State:      "already-exists",
+				Command:    "gh",
+				Path:       "/usr/local/bin/gh",
+				ExitCode:   1,
+				Message:    "failed",
+				Stderr:     "line one\nline two",
+			},
+		},
+		err: assertErr("failed"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github pr create error")
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "stderr=line one\nline two\n") {
+		t.Fatalf("expected pr stderr to remain a single multiline field, got %q", output)
+	}
+	if strings.Contains(output, "stderr=line two\n") {
+		t.Fatalf("unexpected split pr stderr field: %q", output)
 	}
 }
 

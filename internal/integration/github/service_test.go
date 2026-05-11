@@ -439,6 +439,31 @@ func TestServiceRepoGetUsesConfiguredDefaultRepository(t *testing.T) {
 	}
 }
 
+func TestServiceRepoGetRejectsExplicitEmptyRepositoryWithoutUsingDefault(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "rasungatullin/progress"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "repo", Operation: "get", RepoProvided: true})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if response.RepositoryStatus == nil {
+		t.Fatal("expected repository status")
+	}
+	if response.RepositoryStatus.State != ErrorCodeInvalidRequest {
+		t.Fatalf("unexpected state: %q", response.RepositoryStatus.State)
+	}
+	if response.RepositoryStatus.Message != "GitHub repository is required" {
+		t.Fatalf("unexpected message: %q", response.RepositoryStatus.Message)
+	}
+	if stub.repoCalls != 0 {
+		t.Fatalf("runner must not be invoked for explicit empty repository, got %d calls", stub.repoCalls)
+	}
+}
+
 func TestServiceRepoGetFailsCleanlyWithoutRepositoryOrDefault(t *testing.T) {
 	t.Parallel()
 
@@ -875,16 +900,17 @@ func TestServicePRCreateMapsMissingRepositoryOrBranchToNotFound(t *testing.T) {
 }
 
 type stubRunner struct {
-	result CommandResult
-	config resolvedConfig
-	err    error
-	repo   string
-	number int
-	base   string
-	head   string
-	title  string
-	body   string
-	draft  bool
+	result    CommandResult
+	config    resolvedConfig
+	err       error
+	repo      string
+	repoCalls int
+	number    int
+	base      string
+	head      string
+	title     string
+	body      string
+	draft     bool
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -892,6 +918,7 @@ func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConf
 }
 
 func (r *stubRunner) RunRepoView(_ context.Context, repository string) (CommandResult, resolvedConfig, error) {
+	r.repoCalls++
 	r.repo = repository
 	return r.result, r.config, r.err
 }

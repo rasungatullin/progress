@@ -153,18 +153,19 @@ func normalizeSystem(system string) string {
 
 func normalizeRequest(req Request) (ProviderRequest, error) {
 	normalized := ProviderRequest{
-		System:     normalizeSystem(req.System),
-		Resource:   normalizeResource(req.Resource),
-		Operation:  normalizeOperation(req.Operation),
-		Repository: strings.TrimSpace(req.Repository),
-		Number:     req.Number,
-		Base:       strings.TrimSpace(req.Base),
-		Head:       strings.TrimSpace(req.Head),
-		Title:      strings.TrimSpace(req.Title),
-		Body:       strings.TrimSpace(req.Body),
-		Draft:      req.Draft,
-		Query:      strings.TrimSpace(req.Query),
-		Limit:      req.Limit,
+		System:       normalizeSystem(req.System),
+		Resource:     normalizeResource(req.Resource),
+		Operation:    normalizeOperation(req.Operation),
+		Repository:   strings.TrimSpace(req.Repository),
+		RepoProvided: req.RepoProvided,
+		Number:       req.Number,
+		Base:         strings.TrimSpace(req.Base),
+		Head:         strings.TrimSpace(req.Head),
+		Title:        strings.TrimSpace(req.Title),
+		Body:         strings.TrimSpace(req.Body),
+		Draft:        req.Draft,
+		Query:        strings.TrimSpace(req.Query),
+		Limit:        req.Limit,
 	}
 
 	if normalized.System == "" {
