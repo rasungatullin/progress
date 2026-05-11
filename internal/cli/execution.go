@@ -233,7 +233,7 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
 	cmd.Flags().BoolVar(&flags.commitPush, "commit-push", false, "После успешного запуска выполнить git commit и git push")
-	cmd.Flags().StringVar(&flags.commitMessage, "commit-message", launch.DefaultCommitMessage, "Текст git commit при использовании --commit-push")
+	cmd.Flags().StringVar(&flags.commitMessage, "commit-message", launch.DefaultCommitMessage, "Резервное нейтральное сообщение git commit")
 	_ = cmd.MarkFlagRequired("dir")
 	_ = cmd.MarkFlagRequired("prompt")
 }
@@ -317,6 +317,7 @@ func printLaunchStructuredOutput(cmd *cobra.Command, result execution.LaunchResu
 func printStructuredOutputBlock(cmd *cobra.Command, output *execution.StructuredOutput) {
 	printLaunchResultSection(cmd, "protocol-version", []string{output.ProtocolVersion})
 	printLaunchResultSection(cmd, "summary-field", []string{output.Summary})
+	printLaunchResultSection(cmd, "commit-message", []string{output.CommitMessage})
 	printStructuredJSONSection(cmd, "remark", output.Remarks)
 	printStructuredJSONSection(cmd, "question", output.Questions)
 	printStructuredJSONSection(cmd, "follow-up-action", output.FollowUpActions)

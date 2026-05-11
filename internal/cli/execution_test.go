@@ -221,6 +221,7 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 		StructuredOutput: &execution.StructuredOutput{
 			ProtocolVersion: execution.StructuredIOVersion,
 			Summary:         "Re-check after fixes.",
+			CommitMessage:   "Ship review fixes",
 			Remarks: []execution.StructuredRemark{{
 				ID:       "remark-1",
 				Status:   "resolved",
@@ -257,6 +258,9 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 	}
 	if !strings.Contains(output, "summary-field=Re-check after fixes.\n") {
 		t.Fatalf("output must include structured summary: %q", output)
+	}
+	if !strings.Contains(output, "commit-message=Ship review fixes\n") {
+		t.Fatalf("output must include structured commit message: %q", output)
 	}
 	if !strings.Contains(output, `remark={"id":"remark-1","status":"resolved","severity":"critical","title":"Rollback plan","body":"Confirmed in deploy docs."}`+"\n") {
 		t.Fatalf("output must include serialized remark: %q", output)

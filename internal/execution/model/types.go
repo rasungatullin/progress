@@ -34,6 +34,7 @@ type StructuredInput struct {
 type StructuredOutput struct {
 	ProtocolVersion string                `json:"protocol_version,omitempty"`
 	Summary         string                `json:"summary,omitempty"`
+	CommitMessage   string                `json:"commit_message,omitempty"`
 	Remarks         []StructuredRemark    `json:"remarks,omitempty"`
 	Questions       []StructuredQuestion  `json:"questions,omitempty"`
 	FollowUpActions []StructuredAction    `json:"follow_up_actions,omitempty"`

@@ -95,7 +95,7 @@ CLI рассматривается как основной ручной инте
 Поддерживается один канонический structured output:
 
 1. runner должен вернуть JSON-объект с `protocol_version="review-cycle/v1"` и непустым `summary`;
-2. при необходимости объект дополняется секциями `remarks`, `questions`, `follow_up_actions`, `changes`, `commands`, `conclusion`, `extensions`.
+2. при необходимости объект дополняется полем `commit_message` и секциями `remarks`, `questions`, `follow_up_actions`, `changes`, `commands`, `conclusion`, `extensions`.
 
 Флаг `--structured-output-required` включает строгую валидацию результата: ошибкой запуска считается отсутствие trailing structured block, невалидный JSON block, пустой или бессмысленный payload, неизвестные top-level поля, пустые объектные элементы внутри секций structured output, а также отсутствие обязательных `protocol_version="review-cycle/v1"` и `summary`. При этом свободный текст ответа не теряется: если trailing block невалиден, он остаётся в `summary`, а strict-режим возвращает диагностичную schema-level ошибку.
 
@@ -113,7 +113,7 @@ CLI рассматривается как основной ручной инте
 
 Канонический structured input является единственным внутренним представлением входного контекста. Поддерживается следующая схема верхнего уровня: `protocol_version`, `task`, `constraints[]`, `project_context[]`, `operational_context[]`, `previous_run_results[]`, `review_remarks[]`, `review_responses[]`, `integration_actions[]`, `extensions`.
 
-Канонический structured output является единственным внутренним представлением структурированного результата. Поддерживается следующая схема верхнего уровня: `protocol_version`, `summary`, `remarks[]`, `questions[]`, `follow_up_actions[]`, `changes[]`, `commands[]`, `conclusion`, `extensions`. Для `remarks[]` доступны поля `id`, `status`, `severity`, `type`, `title`, `body`, `answer`, `resolution`. Для дальнейшего расширения верхнеуровневый контейнер `extensions` сохраняется отдельной ветвью, а повторяемые секции вынесены в самостоятельные типы.
+Канонический structured output является единственным внутренним представлением структурированного результата. Поддерживается следующая схема верхнего уровня: `protocol_version`, `summary`, `commit_message`, `remarks[]`, `questions[]`, `follow_up_actions[]`, `changes[]`, `commands[]`, `conclusion`, `extensions`. Поле `commit_message` остаётся необязательным и используется только как кандидат для git commit при включённом `commit-push`. Для `remarks[]` доступны поля `id`, `status`, `severity`, `type`, `title`, `body`, `answer`, `resolution`. Для дальнейшего расширения верхнеуровневый контейнер `extensions` сохраняется отдельной ветвью, а повторяемые секции вынесены в самостоятельные типы.
 
 Основное назначение структурированного вывода состоит в том, чтобы результат можно было использовать в следующих каскадах без повторного разбора свободного текста. Например:
 
@@ -128,7 +128,7 @@ CLI рассматривается как основной ручной инте
 
 Целевой механизм должен быть расширяемым через конфигурацию. Это означает, что схема структурированного ввода и вывода, правила включения отдельных секций в `prompt` и набор допустимых команд или заключений не должны быть жёстко зашиты только в одном исполнительном пути. При этом в текущей реализации исполнительный профиль не управляет structured input или structured output: фактическое поведение определяется самим `prompt`, программным `LaunchSpec.StructuredInput` и флагами `--structured-output` и `--structured-output-required`.
 
-В CLI итог печатается в виде отдельного блока `summary<<PROGRESS_SUMMARY ... PROGRESS_SUMMARY`, после которого при наличии структурированных данных выводится секция `structured-output:`. Для канонического structured output CLI дополнительно печатает строки `protocol-version=...`, `summary-field=...` и JSON-строки `remark=...`, `question=...`, `follow-up-action=...`, `change=...`, `command=...`, `conclusion=...`, `extension=...`. Эти JSON-строки выводятся без дополнительной whitespace-нормализации, чтобы payload оставался lossless.
+В CLI итог печатается в виде отдельного блока `summary<<PROGRESS_SUMMARY ... PROGRESS_SUMMARY`, после которого при наличии структурированных данных выводится секция `structured-output:`. Для канонического structured output CLI дополнительно печатает строки `protocol-version=...`, `summary-field=...`, `commit-message=...` и JSON-строки `remark=...`, `question=...`, `follow-up-action=...`, `change=...`, `command=...`, `conclusion=...`, `extension=...`. Эти JSON-строки выводятся без дополнительной whitespace-нормализации, чтобы payload оставался lossless.
 
 Если режим `commit-push` эффективно включён, то после успешного завершения исполнительного модуля команда:
 
@@ -139,7 +139,14 @@ CLI рассматривается как основной ручной инте
 5. если upstream у текущей ветки ещё не настроен, выполняет `git push -u origin <branch>`;
 6. если изменений нет, корректно пропускает commit и push.
 
-По умолчанию для `--commit-message` используется нейтральное значение `Apply task result`.
+Сообщение коммита выбирается детерминированно и нормализуется через `strings.TrimSpace` в таком порядке:
+
+1. `structured_output.commit_message`;
+2. `Invocation.Workplace.Name` как каноническое имя запуска или рабочего места;
+3. базовое имя подготовленного `workplace` каталога;
+4. нейтральный fallback `Apply task result`, только если все предыдущие источники пустые или состоят из whitespace.
+
+Пустой или состоящий только из пробелов `commit_message` не считается валидным и не блокирует переход к следующему источнику. Если `commit-push` не включён, structured output с `commit_message` по-прежнему парсится и печатается в CLI, но git-стадия не запускается.
 
 ## 4. Схема дерева команд
 
