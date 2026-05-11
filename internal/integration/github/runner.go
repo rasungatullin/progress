@@ -231,9 +231,6 @@ func normalizePRCreateRequest(request PRCreateRequest) (PRCreateRequest, error) 
 	if request.Title == "" {
 		return PRCreateRequest{}, fmt.Errorf("GitHub pull request title is required")
 	}
-	if request.Body == "" {
-		return PRCreateRequest{}, fmt.Errorf("GitHub pull request body is required")
-	}
 	if request.Base == request.Head {
 		return PRCreateRequest{}, fmt.Errorf("GitHub pull request base and head branches must differ")
 	}

@@ -202,9 +202,6 @@ func newIntegrationGitHubPRCreateCommand() *cobra.Command {
 			if err := validateSingleLineFlagValue("title", flags.title); err != nil {
 				return err
 			}
-			if !cmd.Flags().Changed("body") || strings.TrimSpace(flags.body) == "" {
-				return fmt.Errorf("--body is required")
-			}
 
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(context.Background(), integration.Request{

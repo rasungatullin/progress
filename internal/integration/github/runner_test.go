@@ -340,7 +340,9 @@ func TestRunnerRunPRCreateRejectsInvalidInputs(t *testing.T) {
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 
 	_, _, err = runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Base: "main", Head: "feature", Title: "Title"})
-	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if err != nil {
+		t.Fatalf("empty body must be accepted: %v", err)
+	}
 
 	_, _, err = runner.RunPRCreate(context.Background(), "owner/name", PRCreateRequest{Base: "main", Head: "main", Title: "Title", Body: "Body"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)

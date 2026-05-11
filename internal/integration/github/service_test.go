@@ -228,6 +228,33 @@ func TestServiceIssueGetMapsNotFound(t *testing.T) {
 	}
 }
 
+func TestServiceIssueGetMapsRepositoryNotFound(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 1,
+			Stderr:   "GraphQL: Could not resolve to a Repository with the name 'missing/repo'.",
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "missing/repo", Number: 123})
+	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != ErrorCodeNotFound {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+	if response.IssueStatus.Repository != "missing/repo" || response.IssueStatus.Number != 123 {
+		t.Fatalf("unexpected issue target: %#v", response.IssueStatus)
+	}
+}
+
 func TestServiceIssueGetMapsAuthRequired(t *testing.T) {
 	t.Parallel()
 
@@ -310,6 +337,39 @@ func TestServiceIssueGetUsesConfiguredDefaultRepository(t *testing.T) {
 	}
 	if stub.repo != "" {
 		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
+	}
+}
+
+func TestServiceIssueGetAllowsNilAuthor(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"number":123,"title":"Fix integration","body":"","state":"OPEN","labels":[],"assignees":[],"author":null,"url":"https://github.com/owner/name/issues/123","createdAt":"2026-05-01T10:00:00Z","updatedAt":"2026-05-02T10:00:00Z"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.Issue == nil {
+		t.Fatal("expected issue")
+	}
+	if response.Issue.Author.System != "github" {
+		t.Fatalf("unexpected author system: %#v", response.Issue.Author)
+	}
+	if response.Issue.Author.Login != "" || response.Issue.Author.Name != "" || response.Issue.Author.URL != "" {
+		t.Fatalf("expected empty author fields for nil author payload, got %#v", response.Issue.Author)
+	}
+	if response.IssueStatus != nil {
+		t.Fatal("did not expect issue status on success")
 	}
 }
 
@@ -596,7 +656,6 @@ func TestServicePRCreateRejectsInvalidFields(t *testing.T) {
 		{name: "missing base", request: model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Head: "feature", Title: "Title", Body: "Body"}, message: "GitHub pull request base branch is required"},
 		{name: "missing head", request: model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Title: "Title", Body: "Body"}, message: "GitHub pull request head branch is required"},
 		{name: "missing title", request: model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Body: "Body"}, message: "GitHub pull request title is required"},
-		{name: "missing body", request: model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title"}, message: "GitHub pull request body is required"},
 		{name: "same branches", request: model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "main", Title: "Title", Body: "Body"}, message: "GitHub pull request base and head branches must differ"},
 	}
 
@@ -615,6 +674,36 @@ func TestServicePRCreateRejectsInvalidFields(t *testing.T) {
 				t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
 			}
 		})
+	}
+}
+
+func TestServicePRCreateAcceptsEmptyBody(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   "https://github.com/owner/name/pull/42",
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature/branch", Title: "Add integration"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.PullRequestStatus == nil {
+		t.Fatal("expected pull request status")
+	}
+	if response.PullRequestStatus.State != "OPEN" {
+		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+	}
+	if stub.body != "" {
+		t.Fatalf("expected empty body to pass through, got %q", stub.body)
 	}
 }
 
