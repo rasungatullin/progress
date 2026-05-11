@@ -84,14 +84,18 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 }
 
 func (s *Service) executeIssueGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
-	repository, err := normalizeRepository(req.Repository)
-	if err != nil {
-		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
-		status.State = ErrorCodeInvalidRequest
-		status.Message = err.Error()
-		status.Diagnostics = append(status.Diagnostics, "issue request rejected before invoking gh")
-		response.IssueStatus = &status
-		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	repository := strings.TrimSpace(req.Repository)
+	if repository != "" {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status.State = ErrorCodeInvalidRequest
+			status.Message = err.Error()
+			status.Diagnostics = append(status.Diagnostics, "issue request rejected before invoking gh")
+			response.IssueStatus = &status
+			return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+		}
 	}
 
 	number, err := normalizeIssueNumber(req.Number)
@@ -105,6 +109,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 	}
 
 	result, config, err := s.runner.RunIssueView(ctx, repository, number)
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
 	if err != nil && result.ExitCode == 0 {
 		result.ExitCode = -1
 	}
