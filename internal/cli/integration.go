@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/rasungatullin/progress/internal/integration"
 	"github.com/rasungatullin/progress/internal/logging"
@@ -198,6 +199,9 @@ func newIntegrationGitHubPRCreateCommand() *cobra.Command {
 			if !cmd.Flags().Changed("title") || strings.TrimSpace(flags.title) == "" {
 				return fmt.Errorf("--title is required")
 			}
+			if err := validateSingleLineFlagValue("title", flags.title); err != nil {
+				return err
+			}
 			if !cmd.Flags().Changed("body") || strings.TrimSpace(flags.body) == "" {
 				return fmt.Errorf("--body is required")
 			}
@@ -370,4 +374,14 @@ func printMultilineField(cmd *cobra.Command, key string, value string) {
 
 		cmd.Printf("%s=%s\n", key, line)
 	}
+}
+
+func validateSingleLineFlagValue(name string, value string) error {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("--%s must not contain control characters or line breaks", name)
+		}
+	}
+
+	return nil
 }

@@ -508,7 +508,7 @@ func TestServicePRCreateSuccess(t *testing.T) {
 	if response.PullRequestStatus == nil {
 		t.Fatal("expected pull request status")
 	}
-	if response.PullRequestStatus.State != "created" {
+	if response.PullRequestStatus.State != "OPEN" {
 		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
 	}
 	if response.PullRequestStatus.URL != "https://github.com/owner/name/pull/42" {
@@ -520,8 +520,8 @@ func TestServicePRCreateSuccess(t *testing.T) {
 	if response.PullRequestStatus.Draft != true {
 		t.Fatal("expected draft status")
 	}
-	if response.PullRequest == nil || response.PullRequest.BaseRef != "main" || response.PullRequest.HeadRef != "feature/branch" {
-		t.Fatalf("unexpected pull request payload: %#v", response.PullRequest)
+	if response.PullRequest != nil {
+		t.Fatalf("did not expect pull request payload: %#v", response.PullRequest)
 	}
 	if stub.repo != "owner/name" || stub.base != "main" || stub.head != "feature/branch" || stub.title != "Add integration" || stub.body != "Implements pr create" || !stub.draft {
 		t.Fatalf("unexpected pr create request: %#v", stub)
@@ -622,6 +622,26 @@ func TestServicePRCreateMapsAlreadyExists(t *testing.T) {
 	}
 	if response.PullRequestStatus.Number != 15 {
 		t.Fatalf("unexpected number: %d", response.PullRequestStatus.Number)
+	}
+}
+
+func TestServicePRCreateMapsNoCommitsBetweenBranches(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 1, Stderr: "GraphQL: No commits between main and feature"}}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", Body: "Body"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if response.PullRequestStatus == nil {
+		t.Fatal("expected pull request status")
+	}
+	if response.PullRequestStatus.State != ErrorCodeInvalidRequest {
+		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+	}
+	if response.PullRequestStatus.Message != "GitHub pull request cannot be created because feature has no commits ahead of main" {
+		t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
 	}
 }
 

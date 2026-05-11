@@ -546,7 +546,7 @@ func TestIntegrationGitHubPRCreateCommandPrintsNormalizedSuccessResult(t *testin
 				Title:      "Add integration",
 				Draft:      true,
 				Number:     42,
-				State:      "created",
+				State:      "OPEN",
 				URL:        "https://github.com/owner/name/pull/42",
 				Command:    "gh",
 				Path:       "/usr/local/bin/gh",
@@ -579,7 +579,7 @@ func TestIntegrationGitHubPRCreateCommandPrintsNormalizedSuccessResult(t *testin
 		"head=feature/branch\n",
 		"title=Add integration\n",
 		"draft=true\n",
-		"state=created\n",
+		"state=OPEN\n",
 		"number=42\n",
 		"url=https://github.com/owner/name/pull/42\n",
 		"command=gh\n",
@@ -593,6 +593,26 @@ func TestIntegrationGitHubPRCreateCommandPrintsNormalizedSuccessResult(t *testin
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("github pr create output must include %q, got %q", fragment, output)
 		}
+	}
+}
+
+func TestIntegrationGitHubPRCreateCommandRejectsUnsafeTitle(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "create", "--repo", "owner/name", "--base", "main", "--head", "feature", "--title", "bad\ntitle", "--body", "Body"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github pr create error")
+	}
+	if err.Error() != "--title must not contain control characters or line breaks" {
+		t.Fatalf("unexpected github pr create error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output, got %q", stdout.String())
 	}
 }
 

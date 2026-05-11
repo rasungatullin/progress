@@ -142,6 +142,12 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 			status.Diagnostics = append(status.Diagnostics, "gh pr create reported that no GitHub login is configured")
 			response.PullRequestStatus = &status
 			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
+		case isPRCreateNoCommits(result):
+			status.State = ErrorCodeInvalidRequest
+			status.Message = fmt.Sprintf("GitHub pull request cannot be created because %s has no commits ahead of %s", prRequest.Head, prRequest.Base)
+			status.Diagnostics = append(status.Diagnostics, "gh pr create reported no commits between the requested branches")
+			response.PullRequestStatus = &status
+			return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: result}
 		case isRepoNotFound(result), isPRCreateBranchNotFound(result):
 			status.State = ErrorCodeNotFound
 			status.Message = fmt.Sprintf("GitHub repository or branch not found for pull request creation: %s %s -> %s", repository, prRequest.Head, prRequest.Base)
@@ -165,23 +171,12 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 		}
 	}
 
-	status.State = "created"
+	status.State = "OPEN"
 	status.URL = extractFirstURL(result.Stdout)
 	status.Number = pullRequestNumberFromURL(status.URL)
 	status.Message = fmt.Sprintf("GitHub pull request created for %s %s -> %s", repository, prRequest.Head, prRequest.Base)
 	status.Diagnostics = append(status.Diagnostics, "gh pr create completed successfully")
 	response.PullRequestStatus = &status
-	response.PullRequest = &model.TrackerPullRequest{
-		System:     "github",
-		Repository: repository,
-		Number:     status.Number,
-		Title:      prRequest.Title,
-		Body:       prRequest.Body,
-		State:      status.State,
-		BaseRef:    prRequest.Base,
-		HeadRef:    prRequest.Head,
-		URL:        status.URL,
-	}
 	return response, nil
 }
 
@@ -653,9 +648,13 @@ func isPRCreateBranchNotFound(result CommandResult) bool {
 	message := strings.ToLower(result.Stdout + "\n" + result.Stderr)
 	return strings.Contains(message, "head sha can't be blank") ||
 		strings.Contains(message, "base sha can't be blank") ||
-		strings.Contains(message, "no commits between") ||
 		strings.Contains(message, "head ref must be a branch") ||
 		strings.Contains(message, "not found") && strings.Contains(message, "branch")
+}
+
+func isPRCreateNoCommits(result CommandResult) bool {
+	message := strings.ToLower(result.Stdout + "\n" + result.Stderr)
+	return strings.Contains(message, "no commits between")
 }
 
 func extractFirstURL(value string) string {
