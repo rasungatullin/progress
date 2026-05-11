@@ -1,34 +1,36 @@
 package model
 
 type Request struct {
-	System     string
-	Resource   string
-	Operation  string
-	Repository string
-	Number     int
-	Base       string
-	Head       string
-	Title      string
-	Body       string
-	Draft      bool
-	Query      string
-	Limit      int
+	System       string
+	Resource     string
+	Operation    string
+	Repository   string
+	RepoProvided bool
+	Number       int
+	Base         string
+	Head         string
+	Title        string
+	Body         string
+	Draft        bool
+	Query        string
+	Limit        int
 }
 
 type ProviderRequest struct {
-	System     string
-	Resource   string
-	Operation  string
-	Repository string
-	Number     int
-	Base       string
-	Head       string
-	Title      string
-	Body       string
-	Draft      bool
-	Query      string
-	Limit      int
-	Route      Route
+	System       string
+	Resource     string
+	Operation    string
+	Repository   string
+	RepoProvided bool
+	Number       int
+	Base         string
+	Head         string
+	Title        string
+	Body         string
+	Draft        bool
+	Query        string
+	Limit        int
+	Route        Route
 }
 
 type Response struct {

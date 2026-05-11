@@ -187,11 +187,12 @@ func TestExecutePassesNormalizedRequestToProvider(t *testing.T) {
 	service.RegisterProvider("github", provider)
 
 	_, err := service.Execute(context.Background(), Request{
-		System:     " GitHub ",
-		Resource:   " Issue ",
-		Operation:  " GET ",
-		Repository: " owner/name ",
-		Query:      " is:open ",
+		System:       " GitHub ",
+		Resource:     " Issue ",
+		Operation:    " GET ",
+		Repository:   " owner/name ",
+		RepoProvided: true,
+		Query:        " is:open ",
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -208,6 +209,9 @@ func TestExecutePassesNormalizedRequestToProvider(t *testing.T) {
 	}
 	if provider.seen.Repository != "owner/name" {
 		t.Fatalf("unexpected normalized repository: %q", provider.seen.Repository)
+	}
+	if !provider.seen.RepoProvided {
+		t.Fatal("expected repo-provided flag to be preserved")
 	}
 	if provider.seen.Query != "is:open" {
 		t.Fatalf("unexpected normalized query: %q", provider.seen.Query)
