@@ -164,6 +164,7 @@ func normalizeStructuredOutputFields(fields []string) ([]string, error) {
 	}
 
 	allowed := map[string]struct{}{
+		"summary":           {},
 		"commit_message":    {},
 		"remarks":           {},
 		"questions":         {},

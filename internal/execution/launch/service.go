@@ -745,6 +745,7 @@ func normalizeStructuredOutputInstructionFields(fields []string) ([]string, erro
 	}
 
 	allowed := map[string]struct{}{
+		"summary":           {},
 		"commit_message":    {},
 		"remarks":           {},
 		"questions":         {},
@@ -770,6 +771,10 @@ func normalizeStructuredOutputInstructionFields(fields []string) ([]string, erro
 		}
 
 		seen[field] = struct{}{}
+		if field == "summary" {
+			continue
+		}
+
 		normalized = append(normalized, field)
 	}
 

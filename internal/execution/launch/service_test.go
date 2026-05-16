@@ -725,30 +725,22 @@ func TestBuildRunnerPromptAllowsNoOptionalStructuredOutputFields(t *testing.T) {
 	}
 }
 
-func TestLaunchRejectsInvalidStructuredOutputFields(t *testing.T) {
+func TestBuildRunnerPromptTreatsSummaryAsMandatoryEvenWhenSelected(t *testing.T) {
 	t.Parallel()
 
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			t.Fatal("runner must not be called when structured output fields are invalid")
-			return "", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
+	prompt, err := buildRunnerPrompt(model.LaunchSpec{
+		Prompt:                 "Apply the latest review fixes.",
+		StructuredOutput:       true,
+		StructuredOutputFields: []string{"summary"},
+	})
+	if err != nil {
+		t.Fatalf("buildRunnerPrompt: %v", err)
 	}
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredOutput = true
-	invocation.Launch.StructuredOutputFields = []string{"summary"}
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected invalid structured output fields error")
+	if !strings.Contains(prompt, `protocol_version="review-cycle/v1" and a summary field`) {
+		t.Fatalf("prompt must keep summary as mandatory: %q", prompt)
 	}
-	if !strings.Contains(err.Error(), `invalid structured output fields: unsupported field "summary"`) {
-		t.Fatalf("unexpected error: %v", err)
+	if strings.Contains(prompt, "Include ") {
+		t.Fatalf("prompt must not treat summary as an optional field: %q", prompt)
 	}
 }
 

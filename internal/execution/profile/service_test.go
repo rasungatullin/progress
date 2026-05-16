@@ -127,7 +127,7 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
-func TestResolveProfileRejectsInvalidStructuredOutputFields(t *testing.T) {
+func TestResolveProfileAllowsSummaryInStructuredOutputFields(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
@@ -140,12 +140,12 @@ func TestResolveProfileRejectsInvalidStructuredOutputFields(t *testing.T) {
 		}
 	}`)
 
-	_, err := service.Resolve(context.Background(), model.Invocation{})
-	if err == nil {
-		t.Fatal("expected invalid structured-output-fields error")
+	profile, err := service.Resolve(context.Background(), model.Invocation{})
+	if err != nil {
+		t.Fatalf("resolve profile: %v", err)
 	}
-	if !strings.Contains(err.Error(), `invalid structured-output-fields: unsupported field "summary"`) {
-		t.Fatalf("unexpected error: %v", err)
+	if !equalStrings(profile.StructuredOutputFields, []string{"summary"}) {
+		t.Fatalf("unexpected structured-output-fields: %#v", profile.StructuredOutputFields)
 	}
 }
 
