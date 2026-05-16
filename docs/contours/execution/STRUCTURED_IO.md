@@ -98,14 +98,17 @@ flowchart TD
 
 ## 7. Управление через профиль и флаги запуска
 
-В текущей реализации structured input и structured output управляются только параметрами конкретного запуска:
+В текущей реализации structured input управляется параметрами конкретного запуска, а structured output дополнительно может управляться исполнителным профилем:
 
 - текстовым `prompt`;
 - программным `LaunchSpec.StructuredInput`;
 - флагом или полем `structured-output`;
-- флагом или полем `structured-output-required`.
+- флагом или полем `structured-output-required`;
+- полями resolved profile `structured-output`, `structured-output-required`, `structured-output-fields`.
 
-Исполнительный профиль сейчас не меняет structured input, structured output или правила сборки prompt. Профиль влияет только на выбор модели и git-поведение запуска.
+Для `structured-output` и `structured-output-required` используется OR-семантика между конкретным запуском и resolved profile. Если профиль включает `structured-output-required`, executor не только валидирует результат строже, но и сам добавляет structured output instruction в prompt даже без явного CLI-флага.
+
+Поле `structured-output-fields` задаётся только в профиле и влияет исключительно на prompt-инструкцию: оно определяет, какие optional top-level canonical fields runner должен по возможности заполнить. Канонический parser `review-cycle/v1` при этом не сужается и по-прежнему принимает любой валидный payload с дополнительными поддерживаемыми секциями.
 
 ## 8. Расширяемость через конфигурацию
 

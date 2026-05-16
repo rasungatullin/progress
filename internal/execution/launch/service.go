@@ -52,6 +52,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	if err != nil {
 		return model.LaunchResult{}, err
 	}
+	in.Launch = applyProfileStructuredOutput(in.Launch, profile)
 
 	if err := validateLaunch(in, workplace); err != nil {
 		return model.LaunchResult{}, err
@@ -660,13 +661,13 @@ func buildRunnerPrompt(spec model.LaunchSpec) (string, error) {
 	}
 
 	if spec.StructuredInput == nil {
-		if spec.StructuredOutput {
-			parts = append(parts, buildStructuredOutputInstruction())
+		if structuredOutputEnabled(spec) {
+			parts = append(parts, buildStructuredOutputInstruction(spec.StructuredOutputFields))
 		}
 		return joinSummary(parts...), nil
 	}
-	if spec.StructuredOutput {
-		parts = append(parts, buildStructuredOutputInstruction())
+	if structuredOutputEnabled(spec) {
+		parts = append(parts, buildStructuredOutputInstruction(spec.StructuredOutputFields))
 	}
 
 	canonical, err := canonicalizeStructuredInput(*spec.StructuredInput)
@@ -690,17 +691,89 @@ func buildRunnerPrompt(spec model.LaunchSpec) (string, error) {
 }
 
 func validateStructuredOutputSettings(spec model.LaunchSpec) error {
+	if _, err := normalizeStructuredOutputInstructionFields(spec.StructuredOutputFields); err != nil {
+		return fmt.Errorf("invalid structured output fields: %w", err)
+	}
+
 	return nil
 }
 
-func buildStructuredOutputInstruction() string {
+func buildStructuredOutputInstruction(fields []string) string {
 	parts := []string{
 		"Return your normal answer, then append a trailing <progress-structured-output>...</progress-structured-output> JSON block.",
 		fmt.Sprintf("Use a JSON object with protocol_version=%q and a summary field.", model.StructuredIOVersion),
-		"Include commit_message, remarks, questions, follow_up_actions, changes, commands, conclusion, and extensions when they are applicable.",
+	}
+
+	optionalFields := structuredOutputInstructionFields(fields)
+	if len(optionalFields) != 0 {
+		parts = append(parts, fmt.Sprintf("Include %s when they are applicable.", strings.Join(optionalFields, ", ")))
 	}
 
 	return strings.Join(parts, " ")
+}
+
+func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) model.LaunchSpec {
+	if profile.StructuredOutput || profile.StructuredOutputRequired {
+		spec.StructuredOutput = spec.StructuredOutput || profile.StructuredOutput || profile.StructuredOutputRequired
+	}
+	spec.StructuredOutputRequired = spec.StructuredOutputRequired || profile.StructuredOutputRequired
+	if spec.StructuredOutputFields == nil && profile.StructuredOutputFields != nil {
+		spec.StructuredOutputFields = append([]string(nil), profile.StructuredOutputFields...)
+	}
+
+	return spec
+}
+
+func structuredOutputEnabled(spec model.LaunchSpec) bool {
+	return spec.StructuredOutput || spec.StructuredOutputRequired
+}
+
+func structuredOutputInstructionFields(fields []string) []string {
+	if fields == nil {
+		return []string{"commit_message", "remarks", "questions", "follow_up_actions", "changes", "commands", "conclusion", "extensions"}
+	}
+	if normalized, err := normalizeStructuredOutputInstructionFields(fields); err == nil {
+		return normalized
+	}
+
+	return fields
+}
+
+func normalizeStructuredOutputInstructionFields(fields []string) ([]string, error) {
+	if fields == nil {
+		return nil, nil
+	}
+
+	allowed := map[string]struct{}{
+		"commit_message":    {},
+		"remarks":           {},
+		"questions":         {},
+		"follow_up_actions": {},
+		"changes":           {},
+		"commands":          {},
+		"conclusion":        {},
+		"extensions":        {},
+	}
+
+	seen := make(map[string]struct{}, len(fields))
+	normalized := make([]string, 0, len(fields))
+	for index, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			return nil, fmt.Errorf("field at index %d must be non-empty", index)
+		}
+		if _, ok := allowed[field]; !ok {
+			return nil, fmt.Errorf("unsupported field %q", field)
+		}
+		if _, ok := seen[field]; ok {
+			continue
+		}
+
+		seen[field] = struct{}{}
+		normalized = append(normalized, field)
+	}
+
+	return normalized, nil
 }
 
 func runGitOutput(ctx context.Context, dir string, args ...string) (string, error) {

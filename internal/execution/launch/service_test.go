@@ -387,6 +387,35 @@ func TestLaunchStructuredOutputRequiredMissingFails(t *testing.T) {
 	}
 }
 
+func TestLaunchStructuredOutputRequiredFromProfileUsesORSemantics(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "Applied the requested changes.", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), model.Profile{
+		Name:                     "review",
+		Model:                    "openai/gpt-5.4",
+		StructuredOutputRequired: true,
+	}, validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected required structured output error")
+	}
+	if !strings.Contains(err.Error(), "structured output is required") || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("unexpected result status: %#v", result)
+	}
+}
+
 func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 	t.Parallel()
 
@@ -624,9 +653,10 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	}
 
 	prompt, err := buildRunnerPrompt(model.LaunchSpec{
-		Prompt:           "Apply the latest review fixes.",
-		StructuredInput:  structuredInput,
-		StructuredOutput: true,
+		Prompt:                 "Apply the latest review fixes.",
+		StructuredInput:        structuredInput,
+		StructuredOutput:       true,
+		StructuredOutputFields: []string{"remarks", "commands"},
 	})
 	if err != nil {
 		t.Fatalf("buildRunnerPrompt: %v", err)
@@ -637,8 +667,11 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	if !strings.Contains(prompt, `protocol_version="review-cycle/v1"`) {
 		t.Fatalf("prompt must mention canonical protocol version: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Include commit_message") {
-		t.Fatalf("prompt must mention optional structured commit message: %q", prompt)
+	if !strings.Contains(prompt, "Include remarks, commands when they are applicable.") {
+		t.Fatalf("prompt must mention selected structured output fields: %q", prompt)
+	}
+	if strings.Contains(prompt, "commit_message") {
+		t.Fatalf("prompt must not request unselected structured output fields: %q", prompt)
 	}
 
 	plainPrompt, parsedStructuredInput, state, err := parseStructuredInput(prompt)
@@ -658,6 +691,110 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	expected.ProtocolVersion = model.StructuredIOVersion
 	if !reflect.DeepEqual(parsedStructuredInput, &expected) {
 		t.Fatalf("unexpected structured input after round-trip: %#v", parsedStructuredInput)
+	}
+}
+
+func TestBuildRunnerPromptKeepsFullFieldListWhenSelectionNotConfigured(t *testing.T) {
+	t.Parallel()
+
+	prompt, err := buildRunnerPrompt(model.LaunchSpec{
+		Prompt:           "Apply the latest review fixes.",
+		StructuredOutput: true,
+	})
+	if err != nil {
+		t.Fatalf("buildRunnerPrompt: %v", err)
+	}
+	if !strings.Contains(prompt, "Include commit_message, remarks, questions, follow_up_actions, changes, commands, conclusion, extensions when they are applicable.") {
+		t.Fatalf("prompt must keep full optional field list by default: %q", prompt)
+	}
+}
+
+func TestBuildRunnerPromptAllowsNoOptionalStructuredOutputFields(t *testing.T) {
+	t.Parallel()
+
+	prompt, err := buildRunnerPrompt(model.LaunchSpec{
+		Prompt:                 "Apply the latest review fixes.",
+		StructuredOutput:       true,
+		StructuredOutputFields: []string{},
+	})
+	if err != nil {
+		t.Fatalf("buildRunnerPrompt: %v", err)
+	}
+	if strings.Contains(prompt, "Include ") {
+		t.Fatalf("prompt must omit optional field instruction when the selection is explicitly empty: %q", prompt)
+	}
+}
+
+func TestLaunchRejectsInvalidStructuredOutputFields(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			t.Fatal("runner must not be called when structured output fields are invalid")
+			return "", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutput = true
+	invocation.Launch.StructuredOutputFields = []string{"summary"}
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected invalid structured output fields error")
+	}
+	if !strings.Contains(err.Error(), `invalid structured output fields: unsupported field "summary"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLaunchAppliesProfileStructuredOutputFieldSelectionToPromptOnly(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
+			prompt, err := buildRunnerPrompt(in.Launch)
+			if err != nil {
+				t.Fatalf("buildRunnerPrompt inside runner stub: %v", err)
+			}
+			if !strings.Contains(prompt, "Include remarks, commands when they are applicable.") {
+				t.Fatalf("prompt must request only selected fields: %q", prompt)
+			}
+			if strings.Contains(prompt, "commit_message") {
+				t.Fatalf("prompt must not request unselected fields: %q", prompt)
+			}
+
+			return strings.Join([]string{
+				"Applied the requested changes.",
+				structuredOutputStart,
+				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"Extra fields are still accepted.","remarks":[{"title":"Rollback plan"}],"commands":[{"name":"open-pr"}]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), model.Profile{
+		Name:                   "review",
+		Model:                  "openai/gpt-5.4",
+		StructuredOutput:       true,
+		StructuredOutputFields: []string{"remarks", "commands"},
+	}, validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.StructuredOutput == nil {
+		t.Fatal("structured output must still parse")
+	}
+	if result.StructuredOutput.CommitMessage != "Extra fields are still accepted." {
+		t.Fatalf("parser must still accept extra canonical sections: %#v", result.StructuredOutput)
 	}
 }
 

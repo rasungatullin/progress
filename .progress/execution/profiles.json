@@ -11,6 +11,8 @@
     "coder": {
       "description": "Профиль кодера с обязательным commit и push",
       "model": "openai/gpt-5.3-codex-spark",
+      "structured-output": true,
+      "structured-output-fields": ["commit_message", "changes", "remarks", "commands"],
       "commit-push": true
     },
     "local": {
