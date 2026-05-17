@@ -72,7 +72,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 					return " M file.txt\n", nil
 				}
 				return "M  file.txt\n", nil
-			case "add -A":
+			case "add -A -- . :(exclude).progress/runner-output":
 				return "", nil
 			case "commit -m Ship release notes":
 				return "[feature/test abc123] Ship release notes\n", nil
@@ -98,7 +98,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"rev-parse", "--is-inside-work-tree"},
 		{"branch", "--show-current"},
 		{"status", "--porcelain"},
-		{"add", "-A"},
+		{"add", "-A", "--", ".", runnerOutputExcludePathspec},
 		{"status", "--porcelain"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
@@ -106,6 +106,53 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
+	}
+}
+
+func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
+	t.Parallel()
+
+	worktree := tempDir(t)
+	invocation := validInvocation(t, true)
+	invocation.Launch.Directory = worktree
+	workplace := model.Workplace{Name: worktree, Ready: true}
+
+	var addArgs []string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain":
+				if addArgs == nil {
+					return " M file.txt\n", nil
+				}
+				return "M  file.txt\n", nil
+			case "add -A -- . :(exclude).progress/runner-output":
+				addArgs = append([]string(nil), args...)
+				return "", nil
+			case "commit -m repo":
+				return "[feature/test abc123] repo\n", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			case "push":
+				return "Everything up-to-date\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", ".", runnerOutputExcludePathspec}) {
+		t.Fatalf("git add must exclude raw runner output path: %#v", addArgs)
 	}
 }
 
@@ -132,7 +179,7 @@ func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *te
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A":
+			case "add -A -- . :(exclude).progress/runner-output":
 				return "", nil
 			case "commit -m review-fixes":
 				return "[feature/test abc123] review-fixes\n", nil
@@ -174,7 +221,7 @@ func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *te
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A":
+			case "add -A -- . :(exclude).progress/runner-output":
 				return "", nil
 			case "commit -m structured-contract-v1-worktree":
 				return "[feature/test abc123] structured-contract-v1-worktree\n", nil
@@ -235,6 +282,47 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenNoChanges(t *testing.T) {
 	}
 }
 
+func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyRunnerOutputChanges(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain":
+				return "?? .progress/runner-output/raw-output.txt\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !strings.Contains(result.Summary, "git=no-changes branch=feature/test") {
+		t.Fatalf("unexpected summary: %q", result.Summary)
+	}
+
+	expectedCalls := [][]string{
+		{"rev-parse", "--is-inside-work-tree"},
+		{"branch", "--show-current"},
+		{"status", "--porcelain"},
+	}
+	if !reflect.DeepEqual(calls, expectedCalls) {
+		t.Fatalf("unexpected git calls: %#v", calls)
+	}
+}
+
 func TestLaunchPushErrorReturned(t *testing.T) {
 	t.Parallel()
 
@@ -250,7 +338,7 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A":
+			case "add -A -- . :(exclude).progress/runner-output":
 				return "", nil
 			case "commit -m repo":
 				return "[feature/test abc123] repo\n", nil
@@ -264,12 +352,18 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 		},
 	}
 
-	_, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), validAllocation(), validWorkplace(t))
+	result, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), validAllocation(), validWorkplace(t))
 	if err == nil {
 		t.Fatal("expected push error")
 	}
 	if !strings.Contains(err.Error(), "git push failed") || !strings.Contains(err.Error(), "remote rejected") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("result status must signal failed launch: %#v", result)
+	}
+	if strings.TrimSpace(result.RawOutputPath) == "" {
+		t.Fatalf("raw output path must be preserved when commit/push fails: %#v", result)
 	}
 }
 
@@ -295,11 +389,21 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if !strings.Contains(result.Summary, "Applied the requested changes.") {
-		t.Fatalf("summary must keep plain runner output: %q", result.Summary)
+	if !strings.Contains(result.Summary, "result=Main result.") {
+		t.Fatalf("summary must include compact structured result: %q", result.Summary)
 	}
-	if strings.Contains(result.Summary, structuredOutputStart) {
-		t.Fatalf("summary must not keep structured block markers: %q", result.Summary)
+	if strings.Contains(result.Summary, "Applied the requested changes.") {
+		t.Fatalf("summary must not include full plain runner output for valid structured runs: %q", result.Summary)
+	}
+	if strings.TrimSpace(result.RawOutputPath) == "" {
+		t.Fatalf("raw output path must be present: %#v", result)
+	}
+	rawBytes, readErr := os.ReadFile(result.RawOutputPath)
+	if readErr != nil {
+		t.Fatalf("read raw output: %v", readErr)
+	}
+	if !strings.Contains(string(rawBytes), "Applied the requested changes.") || !strings.Contains(string(rawBytes), structuredOutputStart) {
+		t.Fatalf("raw output must preserve full runner output: %q", string(rawBytes))
 	}
 	if result.StructuredOutput == nil {
 		t.Fatal("structured output must be parsed")
@@ -426,6 +530,9 @@ func TestLaunchStructuredOutputRequiredMissingFails(t *testing.T) {
 	}
 	if !strings.Contains(result.Summary, "Applied the requested changes.") {
 		t.Fatalf("summary must preserve plain runner output: %q", result.Summary)
+	}
+	if strings.TrimSpace(result.RawOutputPath) == "" {
+		t.Fatalf("raw output path must be present on failure: %#v", result)
 	}
 }
 
@@ -887,8 +994,8 @@ func TestLaunchBrokenBlockBeforeValidTrailingBlock(t *testing.T) {
 	if result.StructuredOutput == nil || len(result.StructuredOutput.Remarks) != 1 {
 		t.Fatalf("unexpected structured output: %#v", result.StructuredOutput)
 	}
-	if !strings.Contains(result.Summary, `{"protocol_version":`) {
-		t.Fatalf("summary must preserve earlier broken example: %q", result.Summary)
+	if strings.Contains(result.Summary, `{"protocol_version":`) {
+		t.Fatalf("successful structured run summary must stay compact: %q", result.Summary)
 	}
 }
 

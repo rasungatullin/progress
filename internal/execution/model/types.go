@@ -168,5 +168,6 @@ type Workplace struct {
 type LaunchResult struct {
 	Status           string
 	Summary          string
+	RawOutputPath    string
 	StructuredOutput *StructuredOutput
 }

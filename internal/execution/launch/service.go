@@ -28,6 +28,8 @@ const structuredInputStart = "<progress-structured-input>"
 
 const structuredInputEnd = "</progress-structured-input>"
 
+const runnerOutputExcludePathspec = ":(exclude).progress/runner-output"
+
 type trailingStructuredBlockState int
 
 const (
@@ -64,10 +66,11 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	if err != nil {
 		return model.LaunchResult{}, err
 	}
+	rawOutputPath := persistRunnerOutput(workplace.Name, runnerOutput)
 
 	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState, structuredOutputErr := parseStructuredOutput(runnerOutput)
 	if err := validateStructuredOutputRequirement(in.Launch, rawStructuredOutput, structuredOutputState, structuredOutputErr); err != nil {
-		return model.LaunchResult{Status: "failed", Summary: strings.TrimSpace(plainRunnerOutput)}, err
+		return model.LaunchResult{Status: "failed", Summary: strings.TrimSpace(plainRunnerOutput), RawOutputPath: rawOutputPath}, err
 	}
 
 	commitPush := in.Launch.CommitPush || profile.CommitPush
@@ -76,7 +79,15 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	if commitPush {
 		result, err := s.commitAndPush(ctx, in, workplace, structuredOutput)
 		if err != nil {
-			return model.LaunchResult{}, err
+			launchResult := model.LaunchResult{
+				Status:        "failed",
+				Summary:       strings.TrimSpace(plainRunnerOutput),
+				RawOutputPath: rawOutputPath,
+			}
+			if structuredOutputState == trailingStructuredBlockValid {
+				launchResult.StructuredOutput = structuredOutput
+			}
+			return launchResult, err
 		}
 
 		gitSummary = result.summary()
@@ -92,7 +103,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		gitSummary,
 	)
 
-	result := model.LaunchResult{Status: "completed", Summary: joinSummary(summary, plainRunnerOutput)}
+	result := model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutputPath: rawOutputPath}
 	if structuredOutputState == trailingStructuredBlockValid {
 		result.StructuredOutput = structuredOutput
 	}
@@ -440,6 +451,18 @@ func joinSummary(parts ...string) string {
 	return strings.Join(filtered, "\n")
 }
 
+func buildLaunchSummary(baseSummary, plainRunnerOutput string, state trailingStructuredBlockState, structuredOutput *model.StructuredOutput) string {
+	if state == trailingStructuredBlockValid && structuredOutput != nil {
+		return joinSummary(baseSummary, "result="+normalizeSummaryValue(structuredOutput.Summary))
+	}
+
+	return joinSummary(baseSummary, plainRunnerOutput)
+}
+
+func normalizeSummaryValue(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
 func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 	if !workplace.Ready {
 		return fmt.Errorf("workplace is not ready")
@@ -518,7 +541,7 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
-	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "add", "-A"); err != nil {
+	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "add", "-A", "--", ".", runnerOutputExcludePathspec); err != nil {
 		return gitResult{}, fmt.Errorf("git add failed: %w", err)
 	}
 
@@ -587,7 +610,54 @@ func (s *Service) hasChanges(ctx context.Context, dir string) (bool, error) {
 		return false, fmt.Errorf("inspect git changes: %w", err)
 	}
 
-	return strings.TrimSpace(output) != "", nil
+	for _, line := range strings.Split(output, "\n") {
+		if statusLineHasUserChanges(line) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func statusLineHasUserChanges(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+
+	if isRunnerOutputStatusLine(line) {
+		return false
+	}
+
+	return true
+}
+
+func isRunnerOutputStatusLine(line string) bool {
+	if len(line) < 4 {
+		return false
+	}
+
+	pathValue := strings.TrimSpace(line[3:])
+	if pathValue == "" {
+		return false
+	}
+
+	if strings.Contains(pathValue, " -> ") {
+		for _, part := range strings.Split(pathValue, " -> ") {
+			if !isRunnerOutputPath(part) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	return isRunnerOutputPath(pathValue)
+}
+
+func isRunnerOutputPath(pathValue string) bool {
+	pathValue = strings.Trim(pathValue, "\"")
+	return pathValue == ".progress/runner-output" || strings.HasPrefix(pathValue, ".progress/runner-output/")
 }
 
 func (s *Service) hasUpstream(ctx context.Context, dir, branch string) (bool, error) {
@@ -658,6 +728,30 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+func persistRunnerOutput(workplaceDir, output string) string {
+	workplaceDir = strings.TrimSpace(workplaceDir)
+	if workplaceDir == "" || strings.TrimSpace(output) == "" {
+		return ""
+	}
+
+	rawDir := filepath.Join(workplaceDir, ".progress", "runner-output")
+	if err := os.MkdirAll(rawDir, 0o755); err != nil {
+		return ""
+	}
+
+	file, err := os.CreateTemp(rawDir, "execution-*.log")
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	if _, err := io.WriteString(file, output); err != nil {
+		return ""
+	}
+
+	return file.Name()
 }
 
 func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt string) (*exec.Cmd, error) {
