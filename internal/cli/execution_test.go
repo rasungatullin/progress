@@ -20,7 +20,7 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 
 	err := cmd.ParseFlags([]string{
 		"--dir", "/tmp/work",
-		"--runner", "opencode",
+		"--runner", "codex",
 		"--model", "openai/gpt-5.4",
 		"--prompt", "ship it",
 		"--structured-output",
@@ -34,6 +34,9 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 	invocation := invocationFromLaunchFlags(flags)
 	if invocation.Launch.Directory != "/tmp/work" {
 		t.Fatalf("unexpected directory: %q", invocation.Launch.Directory)
+	}
+	if invocation.Launch.Runner != "codex" {
+		t.Fatalf("unexpected runner: %q", invocation.Launch.Runner)
 	}
 	if !invocation.Launch.CommitPush {
 		t.Fatal("expected commit-push to be enabled")
@@ -126,6 +129,9 @@ func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
 	output := stdout.String()
 	if !strings.Contains(output, "description=Базовый профиль исполнения через облачную модель по умолчанию\n") {
 		t.Fatalf("profile output must include description, got %q", output)
+	}
+	if !strings.Contains(output, "runner=opencode\n") {
+		t.Fatalf("profile output must include resolved runner, got %q", output)
 	}
 	if !strings.Contains(output, "model=openai/gpt-5.4\n") {
 		t.Fatalf("profile output must include resolved model, got %q", output)

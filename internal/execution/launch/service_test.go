@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -324,6 +325,47 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 	if string(result.StructuredOutput.Extensions["custom"]) != `{"owner":"release"}` {
 		t.Fatalf("unexpected extensions: %#v", result.StructuredOutput.Extensions)
 	}
+}
+
+func TestValidateLaunchAcceptsCodexRunner(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+
+	if err := validateLaunch(invocation, validWorkplace(t)); err != nil {
+		t.Fatalf("validate launch: %v", err)
+	}
+}
+
+func TestBuildRunnerCommandOpenCode(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory: "/tmp/work",
+		Runner:    RunnerOpenCode,
+		Model:     "openai/gpt-5.4",
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	assertRunnerCommand(t, cmd, RunnerOpenCode, []string{"run", "--dir", "/tmp/work", "--model", "openai/gpt-5.4", "ship it"})
+}
+
+func TestBuildRunnerCommandCodex(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory: "/tmp/work",
+		Runner:    RunnerCodex,
+		Model:     "gpt-5.3-codex",
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.3-codex", "ship it"})
 }
 
 func TestLaunchStructuredOutputInvalidPreservesFreeText(t *testing.T) {
@@ -929,4 +971,14 @@ func buildStructuredJSON(value any) (string, error) {
 	}
 
 	return string(bytes), nil
+}
+
+func assertRunnerCommand(t *testing.T, cmd *exec.Cmd, expectedPath string, expectedArgs []string) {
+	t.Helper()
+	if filepath.Base(cmd.Path) != expectedPath {
+		t.Fatalf("unexpected command path: %q", cmd.Path)
+	}
+	if !reflect.DeepEqual(cmd.Args, append([]string{expectedPath}, expectedArgs...)) {
+		t.Fatalf("unexpected command args: %#v", cmd.Args)
+	}
 }

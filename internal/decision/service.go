@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/execution"
-	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/integration"
 )
 
@@ -162,7 +161,6 @@ func executionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Invocati
 			Name: fmt.Sprintf("task-%d", plan.TaskNumber),
 		},
 		Launch: execution.LaunchSpec{
-			Runner:           launch.RunnerOpenCode,
 			Prompt:           plan.Prompt,
 			StructuredOutput: true,
 		},

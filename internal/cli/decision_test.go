@@ -22,8 +22,7 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"decision", "start", "--task", "123"})
 
-	original := decisionServiceFactory
-	decisionServiceFactory = func(*cobra.Command) decisionStarter {
+	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter {
 		return stubDecisionStarter{result: decision.StartResult{
 			Ready: true,
 			Context: decision.DecisionContext{
@@ -45,8 +44,7 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 			},
 			Execution: &execution.LaunchResult{Status: "completed", Summary: "profile=default runner=opencode"},
 		}}
-	}
-	t.Cleanup(func() { decisionServiceFactory = original })
+	})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute decision start: %v", err)
@@ -103,11 +101,9 @@ func TestDecisionStartCommandPropagatesServiceError(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"decision", "start", "--task", "42"})
 
-	original := decisionServiceFactory
-	decisionServiceFactory = func(*cobra.Command) decisionStarter {
+	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter {
 		return stubDecisionStarter{err: assertErr("decision start failed")}
-	}
-	t.Cleanup(func() { decisionServiceFactory = original })
+	})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -131,8 +127,7 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"decision", "start", "--task", "77"})
 
-	original := decisionServiceFactory
-	decisionServiceFactory = func(*cobra.Command) decisionStarter {
+	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter {
 		return stubDecisionStarter{
 			result: decision.StartResult{
 				Context: decision.DecisionContext{
@@ -160,8 +155,7 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 			},
 			err: assertErr("execution failed"),
 		}
-	}
-	t.Cleanup(func() { decisionServiceFactory = original })
+	})
 
 	err := cmd.Execute()
 	if err == nil {

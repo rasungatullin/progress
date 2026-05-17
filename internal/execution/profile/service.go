@@ -50,6 +50,7 @@ func (s *Service) Resolve(ctx context.Context, in model.Invocation) (model.Profi
 	profile := model.Profile{
 		Name:                     name,
 		Description:              entry.Description,
+		Runner:                   firstNonEmpty(entry.Runner, config.Defaults.Runner),
 		Mode:                     firstNonEmpty(entry.Mode, config.Defaults.Mode),
 		Model:                    firstNonEmpty(entry.Model, config.Defaults.Model),
 		StructuredOutput:         resolveBool(config.Defaults.StructuredOutput, entry.StructuredOutput),
@@ -62,6 +63,10 @@ func (s *Service) Resolve(ctx context.Context, in model.Invocation) (model.Profi
 		return model.Profile{}, fmt.Errorf("execution profile %q has invalid structured-output-fields: %w", name, err)
 	}
 	profile.StructuredOutputFields = fields
+
+	if profile.Runner == "" {
+		return model.Profile{}, fmt.Errorf("execution profile %q has empty runner", name)
+	}
 
 	if profile.Mode == "" {
 		return model.Profile{}, fmt.Errorf("execution profile %q has empty mode", name)
