@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -25,6 +26,11 @@ type integrationFlags struct {
 	draft     bool
 }
 
+const (
+	integrationOutputText = "text"
+	integrationOutputJSON = "json"
+)
+
 var integrationServiceFactory = func(cmd *cobra.Command) *integration.Service {
 	return integration.NewService(logging.New(cmd.ErrOrStderr()))
 }
@@ -34,6 +40,7 @@ func newIntegrationCommand() *cobra.Command {
 		Use:   "integration",
 		Short: "Контур интеграции с внешними системами",
 	}
+	cmd.PersistentFlags().String("format", integrationOutputText, "Формат вывода: text (по умолчанию) или json")
 
 	cmd.AddCommand(newIntegrationDispatcherCommand())
 	cmd.AddCommand(newIntegrationGitHubCommand())
@@ -98,13 +105,20 @@ func newIntegrationGitHubAuthStatusCommand() *cobra.Command {
 		Use:   "status",
 		Short: "Проверка доступности gh и состояния авторизации",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(context.Background(), integration.Request{
 				System:    "github",
 				Resource:  "auth",
 				Operation: "status",
 			})
-			printGitHubAuthStatus(cmd, response)
+			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubAuthStatus); err != nil {
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -121,6 +135,11 @@ func newIntegrationGitHubRepoGetCommand() *cobra.Command {
 		Use:   "get",
 		Short: "Получение сведений о репозитории GitHub",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(context.Background(), integration.Request{
 				System:       "github",
@@ -129,7 +148,9 @@ func newIntegrationGitHubRepoGetCommand() *cobra.Command {
 				Repository:   flags.repo,
 				RepoProvided: cmd.Flags().Changed("repo"),
 			})
-			printGitHubRepository(cmd, response)
+			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubRepository); err != nil {
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -152,6 +173,10 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 			if !cmd.Flags().Changed("number") {
 				return fmt.Errorf("--number is required")
 			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
 
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(context.Background(), integration.Request{
@@ -162,7 +187,9 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 				RepoProvided: cmd.Flags().Changed("repo"),
 				Number:       flags.number,
 			})
-			printGitHubIssue(cmd, response)
+			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssue); err != nil {
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -198,6 +225,10 @@ func newIntegrationGitHubPRCreateCommand() *cobra.Command {
 			if err := validateSingleLineFlagValue("title", flags.title); err != nil {
 				return err
 			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
 
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(context.Background(), integration.Request{
@@ -211,7 +242,9 @@ func newIntegrationGitHubPRCreateCommand() *cobra.Command {
 				Body:       flags.body,
 				Draft:      flags.draft,
 			})
-			printGitHubPullRequestStatus(cmd, response)
+			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubPullRequestStatus); err != nil {
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -240,13 +273,20 @@ func newIntegrationDispatcherCommand() *cobra.Command {
 		Use:   "dispatcher",
 		Short: "Диагностика маршрута диспетчера интеграции",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
 			service := newIntegrationService(cmd)
 			route, err := service.Dispatch(context.Background(), integration.Request{
 				System:    flags.system,
 				Resource:  flags.resource,
 				Operation: flags.operation,
 			})
-			printIntegrationRoute(cmd, route)
+			if err := printIntegrationRouteOrJSON(cmd, route, format); err != nil {
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -270,6 +310,27 @@ func printIntegrationRoute(cmd *cobra.Command, route integration.Route) {
 	for _, diagnostic := range route.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}
+}
+
+func printIntegrationRouteOrJSON(cmd *cobra.Command, route integration.Route, format string) error {
+	if format == integrationOutputJSON {
+		return printIntegrationJSON(cmd, route)
+	}
+
+	printIntegrationRoute(cmd, route)
+	return nil
+}
+
+func printIntegrationResponseOrJSON(cmd *cobra.Command, response integration.Response, format string, textPrinter func(*cobra.Command, integration.Response)) error {
+	if format == integrationOutputJSON {
+		return printIntegrationJSON(cmd, response)
+	}
+
+	if textPrinter != nil {
+		textPrinter(cmd, response)
+	}
+
+	return nil
 }
 
 func printGitHubAuthStatus(cmd *cobra.Command, response integration.Response) {
@@ -386,4 +447,35 @@ func validateSingleLineFlagValue(name string, value string) error {
 	}
 
 	return nil
+}
+
+func printIntegrationJSON(cmd *cobra.Command, value any) error {
+	encoded, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	cmd.Println(string(encoded))
+	return nil
+}
+
+func integrationOutputFormat(cmd *cobra.Command) (string, error) {
+	flag := cmd.Flags().Lookup("format")
+	if flag == nil {
+		flag = cmd.InheritedFlags().Lookup("format")
+	}
+	if flag == nil {
+		return integrationOutputText, nil
+	}
+
+	format := strings.ToLower(strings.TrimSpace(flag.Value.String()))
+	if format == "" {
+		format = integrationOutputText
+	}
+
+	if format != integrationOutputText && format != integrationOutputJSON {
+		return "", fmt.Errorf("--format supports only text or json")
+	}
+
+	return format, nil
 }
