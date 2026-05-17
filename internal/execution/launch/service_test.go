@@ -72,7 +72,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 					return " M file.txt\n", nil
 				}
 				return "M  file.txt\n", nil
-			case "add -A":
+			case "add -A -- . :(exclude).progress/runner-output":
 				return "", nil
 			case "commit -m Ship release notes":
 				return "[feature/test abc123] Ship release notes\n", nil
@@ -98,7 +98,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"rev-parse", "--is-inside-work-tree"},
 		{"branch", "--show-current"},
 		{"status", "--porcelain"},
-		{"add", "-A"},
+		{"add", "-A", "--", ".", runnerOutputExcludePathspec},
 		{"status", "--porcelain"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
@@ -106,6 +106,53 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
+	}
+}
+
+func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
+	t.Parallel()
+
+	worktree := tempDir(t)
+	invocation := validInvocation(t, true)
+	invocation.Launch.Directory = worktree
+	workplace := model.Workplace{Name: worktree, Ready: true}
+
+	var addArgs []string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain":
+				if addArgs == nil {
+					return " M file.txt\n", nil
+				}
+				return "M  file.txt\n", nil
+			case "add -A -- . :(exclude).progress/runner-output":
+				addArgs = append([]string(nil), args...)
+				return "", nil
+			case "commit -m repo":
+				return "[feature/test abc123] repo\n", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			case "push":
+				return "Everything up-to-date\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", ".", runnerOutputExcludePathspec}) {
+		t.Fatalf("git add must exclude raw runner output path: %#v", addArgs)
 	}
 }
 
@@ -132,7 +179,7 @@ func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *te
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A":
+			case "add -A -- . :(exclude).progress/runner-output":
 				return "", nil
 			case "commit -m review-fixes":
 				return "[feature/test abc123] review-fixes\n", nil
@@ -174,7 +221,7 @@ func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *te
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A":
+			case "add -A -- . :(exclude).progress/runner-output":
 				return "", nil
 			case "commit -m structured-contract-v1-worktree":
 				return "[feature/test abc123] structured-contract-v1-worktree\n", nil
@@ -250,7 +297,7 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A":
+			case "add -A -- . :(exclude).progress/runner-output":
 				return "", nil
 			case "commit -m repo":
 				return "[feature/test abc123] repo\n", nil
@@ -264,12 +311,18 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 		},
 	}
 
-	_, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), validAllocation(), validWorkplace(t))
+	result, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), validAllocation(), validWorkplace(t))
 	if err == nil {
 		t.Fatal("expected push error")
 	}
 	if !strings.Contains(err.Error(), "git push failed") || !strings.Contains(err.Error(), "remote rejected") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("result status must signal failed launch: %#v", result)
+	}
+	if strings.TrimSpace(result.RawOutputPath) == "" {
+		t.Fatalf("raw output path must be preserved when commit/push fails: %#v", result)
 	}
 }
 

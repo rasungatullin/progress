@@ -28,6 +28,8 @@ const structuredInputStart = "<progress-structured-input>"
 
 const structuredInputEnd = "</progress-structured-input>"
 
+const runnerOutputExcludePathspec = ":(exclude).progress/runner-output"
+
 type trailingStructuredBlockState int
 
 const (
@@ -77,7 +79,15 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	if commitPush {
 		result, err := s.commitAndPush(ctx, in, workplace, structuredOutput)
 		if err != nil {
-			return model.LaunchResult{}, err
+			launchResult := model.LaunchResult{
+				Status:        "failed",
+				Summary:       strings.TrimSpace(plainRunnerOutput),
+				RawOutputPath: rawOutputPath,
+			}
+			if structuredOutputState == trailingStructuredBlockValid {
+				launchResult.StructuredOutput = structuredOutput
+			}
+			return launchResult, err
 		}
 
 		gitSummary = result.summary()
@@ -531,7 +541,7 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
-	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "add", "-A"); err != nil {
+	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "add", "-A", "--", ".", runnerOutputExcludePathspec); err != nil {
 		return gitResult{}, fmt.Errorf("git add failed: %w", err)
 	}
 
