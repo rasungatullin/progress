@@ -136,16 +136,16 @@ func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
 	if !strings.Contains(output, "model=openai/gpt-5.4\n") {
 		t.Fatalf("profile output must include resolved model, got %q", output)
 	}
-	if !strings.Contains(output, "structured-output=false\n") {
+	if !strings.Contains(output, "structured-output=true\n") {
 		t.Fatalf("profile output must include structured-output flag, got %q", output)
 	}
-	if !strings.Contains(output, "structured-output-required=false\n") {
+	if !strings.Contains(output, "structured-output-required=true\n") {
 		t.Fatalf("profile output must include structured-output-required flag, got %q", output)
 	}
-	if !strings.Contains(output, "structured-output-fields=\n") {
+	if !strings.Contains(output, "structured-output-fields=summary,commit_message,remarks,questions,follow_up_actions,changes,commands,conclusion,extensions\n") {
 		t.Fatalf("profile output must include structured-output-fields, got %q", output)
 	}
-	if !strings.Contains(output, "commit-push=false\n") {
+	if !strings.Contains(output, "commit-push=true\n") {
 		t.Fatalf("profile output must include commit-push flag, got %q", output)
 	}
 }

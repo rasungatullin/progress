@@ -142,7 +142,7 @@ func TestResolveProfileAllowsSummaryInStructuredOutputFields(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
-		"defaults": {"mode": "manual", "model": "openai/gpt-5.4"},
+		"defaults": {"runner": "opencode", "mode": "manual", "model": "openai/gpt-5.4"},
 		"profiles": {
 			"default": {
 				"description": "Cloud profile",
