@@ -330,6 +330,77 @@ func TestRunnerRunIssueViewUsesConfiguredDefaultRepository(t *testing.T) {
 	}
 }
 
+func TestRunnerRunPRViewBuildsJSONCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `{"number":123}`}
+	}
+
+	result, config, err := runner.RunPRView(context.Background(), "owner/name", 123)
+	if err != nil {
+		t.Fatalf("run pr view: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
+func TestRunnerRunPRViewRejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	_, _, err := runner.RunPRView(context.Background(), "owner", 123)
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+
+	_, _, err = runner.RunPRView(context.Background(), "owner/name", 0)
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+}
+
+func TestRunnerRunPRViewUsesConfiguredDefaultRepository(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return []byte(`{"default_repo":"owner/name"}`), nil }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `{"number":123}`}
+	}
+
+	_, config, err := runner.RunPRView(context.Background(), "", 123)
+	if err != nil {
+		t.Fatalf("run pr view: %v", err)
+	}
+	if config.DefaultRepo != "owner/name" {
+		t.Fatalf("unexpected default repo: %q", config.DefaultRepo)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
 func TestRunnerRunPRCreateBuildsCommand(t *testing.T) {
 	t.Parallel()
 

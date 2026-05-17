@@ -66,6 +66,7 @@ func newIntegrationGitHubPRCommand() *cobra.Command {
 		Short: "Операции с pull request GitHub",
 	}
 
+	cmd.AddCommand(newIntegrationGitHubPRGetCommand())
 	cmd.AddCommand(newIntegrationGitHubPRCreateCommand())
 	return cmd
 }
@@ -262,6 +263,46 @@ func newIntegrationGitHubPRCreateCommand() *cobra.Command {
 	return cmd
 }
 
+func newIntegrationGitHubPRGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "get",
+		Short: "Получение pull request GitHub по номеру",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("number") {
+				return fmt.Errorf("--number is required")
+			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				System:       "github",
+				Resource:     "pr",
+				Operation:    "get",
+				Repository:   flags.repo,
+				RepoProvided: cmd.Flags().Changed("repo"),
+				Number:       flags.number,
+			})
+			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubPullRequest); err != nil {
+				return err
+			}
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
+	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер pull request GitHub")
+	return cmd
+}
+
 func newIntegrationDispatcherCommand() *cobra.Command {
 	flags := &integrationFlags{
 		system:    "github",
@@ -412,6 +453,31 @@ func printGitHubPullRequestStatus(cmd *cobra.Command, response integration.Respo
 	}
 
 	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nbase=%s\nhead=%s\ntitle=%s\ndraft=%t\nstate=%s\nnumber=%d\nurl=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Base, status.Head, status.Title, status.Draft, status.State, status.Number, status.URL, status.Command, status.Path, status.ExitCode, status.Message)
+	for _, diagnostic := range status.Diagnostics {
+		cmd.Printf("diagnostic=%s\n", diagnostic)
+	}
+	printMultilineField(cmd, "stdout", status.Stdout)
+	printMultilineField(cmd, "stderr", status.Stderr)
+}
+
+func printGitHubPullRequest(cmd *cobra.Command, response integration.Response) {
+	pr := response.PullRequest
+	if pr != nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\ntitle=%s\nstate=%s\nauthor_login=%s\nauthor_name=%s\nauthor_url=%s\nreview_decision=%s\nbase_ref=%s\nhead_ref=%s\nurl=%s\ncreated_at=%s\nupdated_at=%s\n", pr.System, response.Resource, response.Operation, pr.Repository, pr.Number, pr.Title, pr.State, pr.Author.Login, pr.Author.Name, pr.Author.URL, pr.ReviewDecision, pr.BaseRef, pr.HeadRef, pr.URL, pr.CreatedAt, pr.UpdatedAt)
+		for _, label := range pr.Labels {
+			cmd.Printf("label=%s\n", label)
+		}
+		printIssueBody(cmd, pr.Body)
+		return
+	}
+
+	status := response.PullRequestStatus
+	if status == nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nmessage=GitHub pr get did not return a normalized pull request\n", response.System, response.Resource, response.Operation)
+		return
+	}
+
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}
