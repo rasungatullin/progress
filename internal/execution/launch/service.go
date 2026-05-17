@@ -610,7 +610,54 @@ func (s *Service) hasChanges(ctx context.Context, dir string) (bool, error) {
 		return false, fmt.Errorf("inspect git changes: %w", err)
 	}
 
-	return strings.TrimSpace(output) != "", nil
+	for _, line := range strings.Split(output, "\n") {
+		if statusLineHasUserChanges(line) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func statusLineHasUserChanges(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+
+	if isRunnerOutputStatusLine(line) {
+		return false
+	}
+
+	return true
+}
+
+func isRunnerOutputStatusLine(line string) bool {
+	if len(line) < 4 {
+		return false
+	}
+
+	pathValue := strings.TrimSpace(line[3:])
+	if pathValue == "" {
+		return false
+	}
+
+	if strings.Contains(pathValue, " -> ") {
+		for _, part := range strings.Split(pathValue, " -> ") {
+			if !isRunnerOutputPath(part) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	return isRunnerOutputPath(pathValue)
+}
+
+func isRunnerOutputPath(pathValue string) bool {
+	pathValue = strings.Trim(pathValue, "\"")
+	return pathValue == ".progress/runner-output" || strings.HasPrefix(pathValue, ".progress/runner-output/")
 }
 
 func (s *Service) hasUpstream(ctx context.Context, dir, branch string) (bool, error) {
