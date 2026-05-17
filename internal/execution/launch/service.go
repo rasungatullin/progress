@@ -3,6 +3,7 @@ package launch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -425,16 +426,29 @@ func decodeJSONStrict(raw string, target any) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		return err
+		return formatStrictJSONError(err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		if err == nil {
 			return fmt.Errorf("unexpected trailing JSON tokens")
 		}
-		return err
+		return formatStrictJSONError(err)
 	}
 
 	return nil
+}
+
+func formatStrictJSONError(err error) error {
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		field := strings.TrimSpace(typeErr.Field)
+		if field == "" {
+			field = "(root)"
+		}
+		return fmt.Errorf("type mismatch at %s: expected %s but got %s", field, typeErr.Type, typeErr.Value)
+	}
+
+	return err
 }
 
 func joinSummary(parts ...string) string {
@@ -819,6 +833,9 @@ func buildStructuredOutputInstruction(fields []string) string {
 	parts := []string{
 		"Return your normal answer, then append a trailing <progress-structured-output>...</progress-structured-output> JSON block.",
 		fmt.Sprintf("Use a JSON object with protocol_version=%q and a summary field.", model.StructuredIOVersion),
+		"Use arrays of objects for remarks/questions/follow_up_actions/changes/commands and a conclusion object.",
+		"Object forms: remarks[{id,status,severity,type,title,body,answer,resolution}], questions[{id,status,title,body,answer}], follow_up_actions[{id,status,type,title,body}], changes[{summary}], commands[{name,args,title,body}], conclusion{status,summary,body}.",
+		"Canonical compact JSON example: {\"protocol_version\":\"review-cycle/v1\",\"summary\":\"Implemented changes.\",\"remarks\":[{\"id\":\"remark-1\",\"title\":\"Rollback plan\"}],\"questions\":[{\"id\":\"question-1\",\"title\":\"Need extra test?\"}],\"follow_up_actions\":[{\"id\":\"action-1\",\"status\":\"pending\",\"title\":\"Update checklist\"}],\"changes\":[{\"summary\":\"Updated structured output instruction\"}],\"commands\":[{\"name\":\"go test\",\"args\":[\"./...\"]}],\"conclusion\":{\"status\":\"ok\",\"summary\":\"Ready for review\"}}.",
 	}
 
 	optionalFields := structuredOutputInstructionFields(fields)

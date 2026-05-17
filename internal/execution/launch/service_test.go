@@ -584,6 +584,11 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 			expectPart: `unknown field "unknown"`,
 		},
 		{
+			name:       "summary type mismatch",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":42}`,
+			expectPart: "type mismatch at summary: expected string but got number",
+		},
+		{
 			name:       "meaningless remark object",
 			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{}]}`,
 			expectPart: "structured output remarks[0] must include at least one non-empty field",
@@ -818,6 +823,12 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	}
 	if !strings.Contains(prompt, "Include remarks, commands when they are applicable.") {
 		t.Fatalf("prompt must mention selected structured output fields: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Use arrays of objects for remarks/questions/follow_up_actions/changes/commands and a conclusion object.") {
+		t.Fatalf("prompt must describe canonical object forms: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Canonical compact JSON example:") {
+		t.Fatalf("prompt must include canonical compact JSON example: %q", prompt)
 	}
 	if strings.Contains(prompt, "commit_message") {
 		t.Fatalf("prompt must not request unselected structured output fields: %q", prompt)
