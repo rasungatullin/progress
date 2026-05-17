@@ -498,6 +498,37 @@ func TestServicePRGetRejectsExplicitEmptyRepositoryWithoutUsingDefault(t *testin
 	}
 }
 
+func TestServicePRGetMapsMissingPullRequestToNotFound(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 1,
+			Stderr:   "GraphQL: Could not resolve to a PullRequest with the number of 321.",
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Repository: "owner/name", Number: 321})
+	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
+	if response.PullRequestStatus == nil {
+		t.Fatal("expected pull request status")
+	}
+	if response.PullRequestStatus.State != ErrorCodeNotFound {
+		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+	}
+	if response.PullRequestStatus.Message != "GitHub pull request not found: owner/name#321" {
+		t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+	}
+	if stub.prViewCalls != 1 {
+		t.Fatalf("expected one pr view call, got %d", stub.prViewCalls)
+	}
+}
+
 func TestServicePullRequestGetAliasUsesPRHandler(t *testing.T) {
 	t.Parallel()
 

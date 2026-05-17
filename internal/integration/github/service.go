@@ -836,6 +836,7 @@ func isIssueNotFound(result CommandResult) bool {
 func isPRNotFound(result CommandResult) bool {
 	message := strings.ToLower(result.Stdout + "\n" + result.Stderr)
 	return strings.Contains(message, "could not resolve to a pull request") ||
+		strings.Contains(message, "could not resolve to a pullrequest") ||
 		strings.Contains(message, "could not resolve to an issue or pull request") ||
 		strings.Contains(message, "pull request not found") ||
 		strings.Contains(message, "http 404")
