@@ -186,7 +186,7 @@ type Service interface {
 Важно:
 
 - контур сам должен уметь определить, с какой системой работать, по настройкам и селектору;
-- явное указание `System` допустимо, но является опциональным override;
+- в текущем runtime-контракте `integration.Service` поле `System` обязательно и используется как явный селектор провайдера;
 - вызывающему коду не нужно заранее знать, GitHub это или иная система, если этого достаточно для настройки маршрутизации.
 
 ## 7. Типовой запрос
@@ -199,7 +199,7 @@ type Service interface {
 
 ```go
 type IssueGetRequest struct {
-    System     System // optional override
+    System     System // required in current runtime contract
     Repository string
     Number     int
     Fields     []string
@@ -209,7 +209,7 @@ type IssueGetRequest struct {
 
 Семантика полей:
 
-- `System` — опционально указывает конкретную интеграцию;
+- `System` — в текущем runtime-контракте обязателен и указывает конкретную интеграцию;
 - `Repository` — опорный контекст, если он нужен для разрешения объекта;
 - `Number` — канонический идентификатор задачи внутри контекста источника;
 - `Fields` — опциональный список требуемых полей;

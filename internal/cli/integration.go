@@ -149,20 +149,18 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 		Use:   "get",
 		Short: "Получение задачи GitHub по номеру",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !cmd.Flags().Changed("repo") || strings.TrimSpace(flags.repo) == "" {
-				return fmt.Errorf("--repo is required")
-			}
 			if !cmd.Flags().Changed("number") {
 				return fmt.Errorf("--number is required")
 			}
 
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(context.Background(), integration.Request{
-				System:     "github",
-				Resource:   "issue",
-				Operation:  "get",
-				Repository: flags.repo,
-				Number:     flags.number,
+				System:       "github",
+				Resource:     "issue",
+				Operation:    "get",
+				Repository:   flags.repo,
+				RepoProvided: cmd.Flags().Changed("repo"),
+				Number:       flags.number,
 			})
 			printGitHubIssue(cmd, response)
 			if err != nil {
