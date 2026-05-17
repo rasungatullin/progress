@@ -50,6 +50,7 @@ CLI рассматривается как основной ручной инте
     "runner": "opencode",
     "mode": "manual",
     "model": "openai/gpt-5.4",
+    "prompt-additions": [],
     "structured-output": false,
     "structured-output-required": false,
     "commit-push": false
@@ -66,6 +67,13 @@ CLI рассматривается как основной ручной инте
     "review": {
       "description": "Профиль ревью без автоматического commit и push",
       "model": "openai/gpt-5.5",
+      "prompt-additions": [
+        "Ты выполняешь code review. Не изменяй код и не коммить изменения.",
+        "Сначала собери контекст PR, issue, diff и предыдущих review comments, если они указаны во входе.",
+        "Приоритизируй bugs, behavioral regressions, missing tests, strict contract violations, security/privacy risks и risky side effects.",
+        "Если blocking issues не найдены, явно верни conclusion status=ok/approve.",
+        "Верни structured output с remarks, questions, follow_up_actions и conclusion."
+      ],
       "structured-output": true,
       "structured-output-required": true,
       "structured-output-fields": ["summary", "remarks", "questions", "follow_up_actions", "conclusion"],
@@ -91,11 +99,12 @@ CLI рассматривается как основной ручной инте
 3. `runner` может быть определён в `defaults` и переопределён в конкретном профиле;
 4. `model` может быть определена в `defaults` и переопределена в конкретном профиле;
 5. `structured-output` и `structured-output-required` наследуются из `defaults`, а затем объединяются с настройками конкретного запуска по OR-семантике;
-6. `structured-output-fields` наследуется из `defaults` или целиком переопределяется профилем, поддерживает `summary` и остальные канонические top-level поля, но влияет только на те дополнительные секции, которые executor отдельно перечисляет в prompt;
-7. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
-8. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
+6. `prompt-additions` наследуется из `defaults` и объединяется с additions конкретного профиля; additions из `defaults` идут первыми, profile additions идут после них;
+7. `structured-output-fields` наследуется из `defaults` или целиком переопределяется профилем, поддерживает `summary` и остальные канонические top-level поля, но влияет только на те дополнительные секции, которые executor отдельно перечисляет в prompt;
+8. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
+9. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
 
-В resolved profile команда явно возвращает `description`, `runner`, `mode`, `model`, `structured-output`, `structured-output-required`, `structured-output-fields` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
+В resolved profile команда явно возвращает `description`, `runner`, `mode`, `model`, `prompt-additions`, `structured-output`, `structured-output-required`, `structured-output-fields` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
 
 ### 3.4 `progress execution resources`
 
@@ -132,7 +141,11 @@ CLI рассматривается как основной ручной инте
 
 Если ни `--structured-output`, ни `--structured-output-required`, ни resolved profile не включают structured output, executor не добавляет в prompt никакой новой служебной structured-инструкции и поведение остаётся максимально близким к обычному текстовому запуску.
 
-Если `--structured-output`, `--structured-output-required` или resolved profile эффективно включают structured output, executor сам добавляет в итоговый prompt самодостаточную каноническую инструкцию, требующую trailing block `<progress-structured-output>...</progress-structured-output>` и канонический JSON-объект structured output. Инструкция всегда требует `protocol_version="review-cycle/v1"` и непустой `summary`, а формы object-секций и canonical JSON example строятся subset-aware: только для выбранных optional полей из `structured-output-fields` (или для полного набора, если поле не задано). В текущей реализации эта инструкция добавляется после текстовой части `--prompt`; если одновременно задан программный `LaunchSpec.StructuredInput`, блок `<progress-structured-input>...</progress-structured-input>` дописывается уже после этой инструкции.
+Если resolved profile содержит `prompt-additions`, executor добавляет их в итоговый prompt после пользовательского `--prompt` и до любых structured-инструкций. Эти additions остаются обычной текстовой инструкцией и не попадают внутрь `<progress-structured-input>...</progress-structured-input>`.
+
+Если `--structured-output`, `--structured-output-required` или resolved profile эффективно включают structured output, executor сам добавляет в итоговый prompt самодостаточную каноническую инструкцию, требующую trailing block `<progress-structured-output>...</progress-structured-output>` и канонический JSON-объект structured output. Инструкция всегда требует `protocol_version="review-cycle/v1"` и непустой `summary`, а формы object-секций и canonical JSON example строятся subset-aware: только для выбранных optional полей из `structured-output-fields` (или для полного набора, если поле не задано). В текущей реализации итоговый порядок такой: пользовательский `--prompt` -> `prompt-additions` профиля -> structured output instruction -> программный `<progress-structured-input>...</progress-structured-input>` block.
+
+Профиль `review` служит preset для code review и сам добавляет минимальный boilerplate про сбор контекста PR, запрет на изменение кода, приоритизацию bugs/regressions/missing tests, проверку закрытия предыдущих замечаний и требование вернуть approving conclusion при отсутствии blocking issues. Поэтому короткого вызова вроде `progress execution start --profile review --prompt "Проведи ревью PR #38 в rasungatullin/progress"` достаточно: profile additions автоматически расширят задачу до полноценной review-директивы.
 
 Поддерживается один канонический structured output:
 

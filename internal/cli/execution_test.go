@@ -136,6 +136,9 @@ func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
 	if !strings.Contains(output, "model=openai/gpt-5.4\n") {
 		t.Fatalf("profile output must include resolved model, got %q", output)
 	}
+	if !strings.Contains(output, "prompt-additions=\n") {
+		t.Fatalf("profile output must include prompt-additions field, got %q", output)
+	}
 	if !strings.Contains(output, "structured-output=true\n") {
 		t.Fatalf("profile output must include structured-output flag, got %q", output)
 	}

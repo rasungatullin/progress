@@ -53,6 +53,7 @@ func (s *Service) Resolve(ctx context.Context, in model.Invocation) (model.Profi
 		Runner:                   firstNonEmpty(entry.Runner, config.Defaults.Runner),
 		Mode:                     firstNonEmpty(entry.Mode, config.Defaults.Mode),
 		Model:                    firstNonEmpty(entry.Model, config.Defaults.Model),
+		PromptAdditions:          resolvePromptAdditions(config.Defaults.PromptAdditions, entry.PromptAdditions),
 		StructuredOutput:         resolveBool(config.Defaults.StructuredOutput, entry.StructuredOutput),
 		StructuredOutputRequired: resolveBool(config.Defaults.StructuredOutputRequired, entry.StructuredOutputRequired),
 		CommitPush:               resolveBool(config.Defaults.CommitPush, entry.CommitPush),
@@ -161,6 +162,42 @@ func resolveStructuredOutputFields(defaultValue, overrideValue *[]string) ([]str
 
 	fields := append([]string(nil), (*selected)...)
 	return normalizeStructuredOutputFields(fields)
+}
+
+func resolvePromptAdditions(defaultValue, overrideValue *[]string) []string {
+	merged := make([]string, 0)
+	if defaultValue != nil {
+		merged = append(merged, normalizePromptAdditions(*defaultValue)...)
+	}
+	if overrideValue != nil {
+		merged = append(merged, normalizePromptAdditions(*overrideValue)...)
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+
+	return merged
+}
+
+func normalizePromptAdditions(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+
+	return normalized
 }
 
 func normalizeStructuredOutputFields(fields []string) ([]string, error) {

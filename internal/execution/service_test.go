@@ -33,6 +33,26 @@ func TestServiceLaunchInheritsRunnerFromProfile(t *testing.T) {
 	}
 }
 
+func TestServiceLaunchPreservesExistingPromptBehaviorWithoutProfileAdditions(t *testing.T) {
+	t.Parallel()
+
+	launcher := &stubLauncher{}
+	service := &Service{logger: log.Default(), launcher: launcher}
+
+	_, err := service.Launch(context.Background(), Invocation{
+		Launch: LaunchSpec{
+			Directory: "/tmp/work",
+			Prompt:    "ship it",
+		},
+	}, Profile{Runner: "opencode", Model: "gpt-5.4"}, Allocation{}, Workplace{})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if len(launcher.invocation.Launch.PromptAdditions) != 0 {
+		t.Fatalf("prompt-additions must stay empty when profile does not define them: %#v", launcher.invocation.Launch.PromptAdditions)
+	}
+}
+
 type stubLauncher struct {
 	invocation model.Invocation
 }
