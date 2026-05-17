@@ -19,7 +19,8 @@
   },
   "profiles": {
     "default": {
-      "description": "Базовый профиль исполнения через облачную модель по умолчанию"
+      "description": "Базовый профиль исполнения через облачную модель по умолчанию",
+      "commit-push": true
     },
     "coder": {
       "description": "Профиль кодера с обязательным commit и push",
@@ -27,6 +28,14 @@
       "structured-output": true,
       "structured-output-fields": ["commit_message", "changes", "remarks", "commands"],
       "commit-push": true
+    },
+    "review": {
+      "description": "Профиль ревью без автоматического commit и push",
+      "model": "openai/gpt-5.5",
+      "structured-output": true,
+      "structured-output-required": true,
+      "structured-output-fields": ["summary", "remarks", "questions", "follow_up_actions", "conclusion"],
+      "commit-push": false
     },
     "local": {
       "description": "Локальный профиль исполнения через локальную модель",
