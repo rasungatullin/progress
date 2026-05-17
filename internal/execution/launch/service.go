@@ -470,10 +470,18 @@ func strictExpectedShapeForField(field string) (string, bool) {
 	}
 
 	switch strings.ToLower(segment) {
-	case "remarks", "questions", "follow_up_actions", "changes", "commands":
-		return "array of objects", true
+	case "remarks":
+		return "array of objects with id/status/severity/type/title/body/answer/resolution", true
+	case "questions":
+		return "array of objects with id/status/title/body/answer", true
+	case "follow_up_actions":
+		return "array of objects with id/status/type/title/body", true
+	case "changes":
+		return "array of objects with summary", true
+	case "commands":
+		return "array of objects with name/args/title/body", true
 	case "conclusion":
-		return "object", true
+		return "object with status/summary/body", true
 	default:
 		return "", false
 	}

@@ -591,17 +591,27 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 		{
 			name:       "remarks string type mismatch",
 			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":"not-an-array"}`,
-			expectPart: "type mismatch at remarks: expected array of objects but got string",
+			expectPart: "type mismatch at remarks: expected array of objects with id/status/severity/type/title/body/answer/resolution but got string",
 		},
 		{
 			name:       "remarks array of strings mismatch",
 			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":["bad-item"]}`,
-			expectPart: "type mismatch at remarks: expected array of objects but got string",
+			expectPart: "type mismatch at remarks: expected array of objects with id/status/severity/type/title/body/answer/resolution but got string",
+		},
+		{
+			name:       "commands string type mismatch",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","commands":"not-an-array"}`,
+			expectPart: "type mismatch at commands: expected array of objects with name/args/title/body but got string",
+		},
+		{
+			name:       "commands array of strings mismatch",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","commands":["bad-item"]}`,
+			expectPart: "type mismatch at commands: expected array of objects with name/args/title/body but got string",
 		},
 		{
 			name:       "conclusion string type mismatch",
 			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","conclusion":"not-an-object"}`,
-			expectPart: "type mismatch at conclusion: expected object but got string",
+			expectPart: "type mismatch at conclusion: expected object with status/summary/body but got string",
 		},
 		{
 			name:       "meaningless remark object",
