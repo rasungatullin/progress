@@ -445,10 +445,38 @@ func formatStrictJSONError(err error) error {
 		if field == "" {
 			field = "(root)"
 		}
+		if expectedShape, ok := strictExpectedShapeForField(field); ok {
+			return fmt.Errorf("type mismatch at %s: expected %s but got %s", field, expectedShape, typeErr.Value)
+		}
 		return fmt.Errorf("type mismatch at %s: expected %s but got %s", field, typeErr.Type, typeErr.Value)
 	}
 
 	return err
+}
+
+func strictExpectedShapeForField(field string) (string, bool) {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return "", false
+	}
+
+	segment := field
+	if dot := strings.Index(segment, "."); dot >= 0 {
+		segment = segment[:dot]
+	}
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return "", false
+	}
+
+	switch strings.ToLower(segment) {
+	case "remarks", "questions", "follow_up_actions", "changes", "commands":
+		return "array of objects", true
+	case "conclusion":
+		return "object", true
+	default:
+		return "", false
+	}
 }
 
 func joinSummary(parts ...string) string {
@@ -833,17 +861,75 @@ func buildStructuredOutputInstruction(fields []string) string {
 	parts := []string{
 		"Return your normal answer, then append a trailing <progress-structured-output>...</progress-structured-output> JSON block.",
 		fmt.Sprintf("Use a JSON object with protocol_version=%q and a summary field.", model.StructuredIOVersion),
-		"Use arrays of objects for remarks/questions/follow_up_actions/changes/commands and a conclusion object.",
-		"Object forms: remarks[{id,status,severity,type,title,body,answer,resolution}], questions[{id,status,title,body,answer}], follow_up_actions[{id,status,type,title,body}], changes[{summary}], commands[{name,args,title,body}], conclusion{status,summary,body}.",
-		"Canonical compact JSON example: {\"protocol_version\":\"review-cycle/v1\",\"summary\":\"Implemented changes.\",\"remarks\":[{\"id\":\"remark-1\",\"title\":\"Rollback plan\"}],\"questions\":[{\"id\":\"question-1\",\"title\":\"Need extra test?\"}],\"follow_up_actions\":[{\"id\":\"action-1\",\"status\":\"pending\",\"title\":\"Update checklist\"}],\"changes\":[{\"summary\":\"Updated structured output instruction\"}],\"commands\":[{\"name\":\"go test\",\"args\":[\"./...\"]}],\"conclusion\":{\"status\":\"ok\",\"summary\":\"Ready for review\"}}.",
 	}
 
 	optionalFields := structuredOutputInstructionFields(fields)
 	if len(optionalFields) != 0 {
 		parts = append(parts, fmt.Sprintf("Include %s when they are applicable.", strings.Join(optionalFields, ", ")))
 	}
+	if forms := selectedStructuredObjectForms(optionalFields); len(forms) != 0 {
+		parts = append(parts, "Object forms: "+strings.Join(forms, ", ")+".")
+	}
+	parts = append(parts, "Canonical compact JSON example: "+buildStructuredOutputCanonicalExample(optionalFields)+".")
 
 	return strings.Join(parts, " ")
+}
+
+func selectedStructuredObjectForms(fields []string) []string {
+	fieldForms := []struct {
+		field string
+		form  string
+	}{
+		{field: "remarks", form: "remarks[{id,status,severity,type,title,body,answer,resolution}]"},
+		{field: "questions", form: "questions[{id,status,title,body,answer}]"},
+		{field: "follow_up_actions", form: "follow_up_actions[{id,status,type,title,body}]"},
+		{field: "changes", form: "changes[{summary}]"},
+		{field: "commands", form: "commands[{name,args,title,body}]"},
+		{field: "conclusion", form: "conclusion{status,summary,body}"},
+	}
+
+	lookup := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		lookup[field] = struct{}{}
+	}
+
+	forms := make([]string, 0, len(fieldForms))
+	for _, item := range fieldForms {
+		if _, ok := lookup[item.field]; ok {
+			forms = append(forms, item.form)
+		}
+	}
+
+	return forms
+}
+
+func buildStructuredOutputCanonicalExample(fields []string) string {
+	parts := []string{
+		`{"protocol_version":"review-cycle/v1","summary":"Implemented changes."`,
+	}
+	for _, field := range fields {
+		switch field {
+		case "commit_message":
+			parts = append(parts, `,"commit_message":"Apply requested review fixes"`)
+		case "remarks":
+			parts = append(parts, `,"remarks":[{"id":"remark-1","title":"Rollback plan"}]`)
+		case "questions":
+			parts = append(parts, `,"questions":[{"id":"question-1","title":"Need extra test?"}]`)
+		case "follow_up_actions":
+			parts = append(parts, `,"follow_up_actions":[{"id":"action-1","status":"pending","title":"Update checklist"}]`)
+		case "changes":
+			parts = append(parts, `,"changes":[{"summary":"Updated structured output instruction"}]`)
+		case "commands":
+			parts = append(parts, `,"commands":[{"name":"go test","args":["./..."]}]`)
+		case "conclusion":
+			parts = append(parts, `,"conclusion":{"status":"ok","summary":"Ready for review"}`)
+		case "extensions":
+			parts = append(parts, `,"extensions":{"custom":{"owner":"review-cycle"}}`)
+		}
+	}
+	parts = append(parts, "}")
+
+	return strings.Join(parts, "")
 }
 
 func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) model.LaunchSpec {

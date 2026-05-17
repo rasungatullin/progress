@@ -589,6 +589,21 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 			expectPart: "type mismatch at summary: expected string but got number",
 		},
 		{
+			name:       "remarks string type mismatch",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":"not-an-array"}`,
+			expectPart: "type mismatch at remarks: expected array of objects but got string",
+		},
+		{
+			name:       "remarks array of strings mismatch",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":["bad-item"]}`,
+			expectPart: "type mismatch at remarks: expected array of objects but got string",
+		},
+		{
+			name:       "conclusion string type mismatch",
+			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","conclusion":"not-an-object"}`,
+			expectPart: "type mismatch at conclusion: expected object but got string",
+		},
+		{
 			name:       "meaningless remark object",
 			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{}]}`,
 			expectPart: "structured output remarks[0] must include at least one non-empty field",
@@ -824,14 +839,17 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	if !strings.Contains(prompt, "Include remarks, commands when they are applicable.") {
 		t.Fatalf("prompt must mention selected structured output fields: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Use arrays of objects for remarks/questions/follow_up_actions/changes/commands and a conclusion object.") {
-		t.Fatalf("prompt must describe canonical object forms: %q", prompt)
+	if !strings.Contains(prompt, "Object forms: remarks[{id,status,severity,type,title,body,answer,resolution}], commands[{name,args,title,body}].") {
+		t.Fatalf("prompt must describe selected object forms: %q", prompt)
 	}
 	if !strings.Contains(prompt, "Canonical compact JSON example:") {
 		t.Fatalf("prompt must include canonical compact JSON example: %q", prompt)
 	}
 	if strings.Contains(prompt, "commit_message") {
 		t.Fatalf("prompt must not request unselected structured output fields: %q", prompt)
+	}
+	if strings.Contains(prompt, "questions[{") || strings.Contains(prompt, "conclusion{") {
+		t.Fatalf("prompt must not describe unselected object forms: %q", prompt)
 	}
 
 	plainPrompt, parsedStructuredInput, state, err := parseStructuredInput(prompt)
@@ -867,6 +885,9 @@ func TestBuildRunnerPromptKeepsFullFieldListWhenSelectionNotConfigured(t *testin
 	if !strings.Contains(prompt, "Include commit_message, remarks, questions, follow_up_actions, changes, commands, conclusion, extensions when they are applicable.") {
 		t.Fatalf("prompt must keep full optional field list by default: %q", prompt)
 	}
+	if !strings.Contains(prompt, "Object forms: remarks[{id,status,severity,type,title,body,answer,resolution}], questions[{id,status,title,body,answer}], follow_up_actions[{id,status,type,title,body}], changes[{summary}], commands[{name,args,title,body}], conclusion{status,summary,body}.") {
+		t.Fatalf("prompt must keep full object forms when selection is not configured: %q", prompt)
+	}
 }
 
 func TestBuildRunnerPromptAllowsNoOptionalStructuredOutputFields(t *testing.T) {
@@ -882,6 +903,12 @@ func TestBuildRunnerPromptAllowsNoOptionalStructuredOutputFields(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Include ") {
 		t.Fatalf("prompt must omit optional field instruction when the selection is explicitly empty: %q", prompt)
+	}
+	if strings.Contains(prompt, "Object forms:") {
+		t.Fatalf("prompt must omit object forms when no optional fields are selected: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Canonical compact JSON example: {\"protocol_version\":\"review-cycle/v1\",\"summary\":\"Implemented changes.\"}.") {
+		t.Fatalf("prompt must keep compact mandatory-only example when selection is empty: %q", prompt)
 	}
 }
 

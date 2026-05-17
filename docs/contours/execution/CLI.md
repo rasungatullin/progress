@@ -132,7 +132,7 @@ CLI рассматривается как основной ручной инте
 
 Если ни `--structured-output`, ни `--structured-output-required`, ни resolved profile не включают structured output, executor не добавляет в prompt никакой новой служебной structured-инструкции и поведение остаётся максимально близким к обычному текстовому запуску.
 
-Если `--structured-output`, `--structured-output-required` или resolved profile эффективно включают structured output, executor сам добавляет в итоговый prompt самодостаточную каноническую инструкцию, требующую trailing block `<progress-structured-output>...</progress-structured-output>` и канонический JSON-объект structured output. Инструкция явно описывает формы массивов объектов (`remarks[]`, `questions[]`, `follow_up_actions[]`, `changes[]`, `commands[]`), отдельный объект `conclusion` и содержит компактный canonical JSON example, чтобы runner не зависел от внешнего контекста. В текущей реализации эта инструкция добавляется после текстовой части `--prompt`; если одновременно задан программный `LaunchSpec.StructuredInput`, блок `<progress-structured-input>...</progress-structured-input>` дописывается уже после этой инструкции.
+Если `--structured-output`, `--structured-output-required` или resolved profile эффективно включают structured output, executor сам добавляет в итоговый prompt самодостаточную каноническую инструкцию, требующую trailing block `<progress-structured-output>...</progress-structured-output>` и канонический JSON-объект structured output. Инструкция всегда требует `protocol_version="review-cycle/v1"` и непустой `summary`, а формы object-секций и canonical JSON example строятся subset-aware: только для выбранных optional полей из `structured-output-fields` (или для полного набора, если поле не задано). В текущей реализации эта инструкция добавляется после текстовой части `--prompt`; если одновременно задан программный `LaunchSpec.StructuredInput`, блок `<progress-structured-input>...</progress-structured-input>` дописывается уже после этой инструкции.
 
 Поддерживается один канонический structured output:
 
@@ -141,6 +141,11 @@ CLI рассматривается как основной ручной инте
 3. если в профиле задан `structured-output-fields`, executor просит у runner только перечисленные дополнительные поля; `summary` остаётся обязательным всегда, а parser по-прежнему принимает любой валидный канонический `review-cycle/v1` payload с дополнительными секциями.
 
 Флаг `--structured-output-required` и одноимённое поле профиля объединяются по OR-семантике и включают строгую валидацию результата: ошибкой запуска считается отсутствие trailing structured block, невалидный JSON block, пустой или бессмысленный payload, неизвестные top-level поля, пустые объектные элементы внутри секций structured output, а также отсутствие обязательных `protocol_version="review-cycle/v1"` и `summary`. Для `json.UnmarshalTypeError` strict parser возвращает более полезную диагностику в формате `type mismatch at <field>: expected <type> but got <json-kind>`. При этом свободный текст ответа не теряется: если trailing block невалиден, он остаётся в `summary`, а strict-режим возвращает диагностичную schema-level ошибку.
+
+Пример mismatch-диагностики для contract shape:
+
+- wrong short form: `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":"fixed"}`
+- strict error: `type mismatch at remarks: expected array of objects but got string`
 
 Структурированный ввод нужен для передачи в контур исполнения полноценного контекста задачи. В этом блоке могут находиться:
 
@@ -157,6 +162,11 @@ CLI рассматривается как основной ручной инте
 Канонический structured input является единственным внутренним представлением входного контекста. Поддерживается следующая схема верхнего уровня: `protocol_version`, `task`, `constraints[]`, `project_context[]`, `operational_context[]`, `previous_run_results[]`, `review_remarks[]`, `review_responses[]`, `integration_actions[]`, `extensions`.
 
 Канонический structured output является единственным внутренним представлением структурированного результата. Поддерживается следующая схема верхнего уровня: `protocol_version`, `summary`, `commit_message`, `remarks[]`, `questions[]`, `follow_up_actions[]`, `changes[]`, `commands[]`, `conclusion`, `extensions`. Поле `commit_message` остаётся необязательным и используется только как кандидат для git commit при включённом `commit-push`. Для `remarks[]` доступны поля `id`, `status`, `severity`, `type`, `title`, `body`, `answer`, `resolution`. Для дальнейшего расширения верхнеуровневый контейнер `extensions` сохраняется отдельной ветвью, а повторяемые секции вынесены в самостоятельные типы.
+
+Wrong vs right JSON example:
+
+- wrong short form: `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":["Fix docs"],"conclusion":"ready"}`
+- canonical form: `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{"title":"Fix docs"}],"conclusion":{"status":"ok","summary":"Ready for review"}}`
 
 Основное назначение структурированного вывода состоит в том, чтобы результат можно было использовать в следующих каскадах без повторного разбора свободного текста. Например:
 

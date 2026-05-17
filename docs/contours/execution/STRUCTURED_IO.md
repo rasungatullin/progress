@@ -89,7 +89,7 @@ flowchart TD
 2. структурированный ввод проходит единый канонический валидатор и нормализуется во внутреннюю модель; payload без содержательного контекста, например только с `protocol_version`, считается невалидным;
 3. по параметрам запуска определяется, какие секции должны участвовать в исполнительной директиве;
 4. контур исполнения собирает итоговую исполнительную директиву для исполнительного модуля;
-5. если включён `structured output`, в директиву после текстовой части prompt добавляется самодостаточная инструкция о структуре ожидаемого structured output: формы массивов объектов для `remarks[]`, `questions[]`, `follow_up_actions[]`, `changes[]`, `commands[]`, форма `conclusion` object и компактный canonical JSON example; при наличии программного structured input его блок дописывается после этой инструкции;
+5. если включён `structured output`, в директиву после текстовой части prompt добавляется самодостаточная инструкция о структуре ожидаемого structured output: обязательные `protocol_version="review-cycle/v1"` и `summary`, а также subset-aware формы object-секций и compact canonical JSON example только для выбранных optional полей (`structured-output-fields`); при наличии программного structured input его блок дописывается после этой инструкции;
 6. исполнительный модуль передаёт директиву вычислительному каскаду;
 7. после ответа вычислителя контур исполнения отделяет свободный текст от структурированного вывода;
 8. структурированный вывод разбирается и нормализуется;
@@ -109,6 +109,11 @@ flowchart TD
 Для `structured-output` и `structured-output-required` используется OR-семантика между конкретным запуском и resolved profile. Если профиль включает `structured-output-required`, executor не только валидирует результат строже, но и сам добавляет structured output instruction в prompt даже без явного CLI-флага.
 
 Поле `structured-output-fields` задаётся только в профиле и влияет исключительно на prompt-инструкцию: оно определяет, какие дополнительные top-level canonical fields runner должен по возможности заполнить. Значение `summary` допускается для совместимости с контрактом issue #28, но остаётся обязательным и не делает поле настраиваемым. Канонический parser `review-cycle/v1` при этом не сужается и по-прежнему принимает любой валидный payload с дополнительными поддерживаемыми секциями.
+
+Наглядный wrong-vs-right для review-cycle/v1:
+
+- wrong short form: `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":"fixed","conclusion":"ready"}`
+- canonical form: `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{"title":"Fixed"}],"conclusion":{"status":"ok","summary":"Ready for review"}}`
 
 ## 8. Расширяемость через конфигурацию
 
