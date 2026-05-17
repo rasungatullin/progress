@@ -190,7 +190,7 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 
 func (s *Service) executeIssueGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	repository := strings.TrimSpace(req.Repository)
-	if repository != "" {
+	if req.RepoProvided {
 		var err error
 		repository, err = normalizeRepository(repository)
 		if err != nil {

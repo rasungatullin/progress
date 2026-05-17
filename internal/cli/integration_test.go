@@ -597,6 +597,84 @@ func TestIntegrationGitHubIssueGetCommandRequiresFlags(t *testing.T) {
 	}
 }
 
+func TestIntegrationGitHubIssueGetCommandAllowsOmittedRepoFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--number", "123"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     123,
+				Title:      "Title",
+			},
+		},
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue get command without repo: %v", err)
+	}
+	if provider.request.Repository != "" {
+		t.Fatalf("expected empty repository request so provider layer can resolve fallback, got %q", provider.request.Repository)
+	}
+	if provider.request.RepoProvided {
+		t.Fatal("expected omitted repo flag to stay false")
+	}
+}
+
+func TestIntegrationGitHubIssueGetCommandPassesExplicitEmptyRepoToProvider(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--repo=", "--number", "123"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			IssueStatus: &integration.IssueStatus{
+				System:   "github",
+				State:    "invalid-request",
+				Command:  "gh",
+				ExitCode: -1,
+				Message:  "GitHub repository is required",
+			},
+		},
+		err: assertErr("GitHub repository is required"),
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github issue get error")
+	}
+	if err.Error() != "GitHub repository is required" {
+		t.Fatalf("unexpected github issue get error: %v", err)
+	}
+	if provider.request.Repository != "" {
+		t.Fatalf("expected explicit empty repository request, got %q", provider.request.Repository)
+	}
+	if !provider.request.RepoProvided {
+		t.Fatal("expected explicit repo flag to stay true")
+	}
+}
+
 func TestIntegrationGitHubIssueGetCommandPrintsNormalizedErrorResult(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}

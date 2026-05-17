@@ -169,7 +169,7 @@ func TestServiceIssueGetRejectsInvalidRepository(t *testing.T) {
 	service := NewService()
 	service.runner = &stubRunner{}
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner", RepoProvided: true, Number: 123})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -337,6 +337,31 @@ func TestServiceIssueGetUsesConfiguredDefaultRepository(t *testing.T) {
 	}
 	if stub.repo != "" {
 		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
+	}
+}
+
+func TestServiceIssueGetRejectsExplicitEmptyRepositoryWithoutUsingDefault(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "owner/name"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Number: 123, RepoProvided: true})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != ErrorCodeInvalidRequest {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+	if response.IssueStatus.Message != "GitHub repository is required" {
+		t.Fatalf("unexpected message: %q", response.IssueStatus.Message)
+	}
+	if stub.issueCalls != 0 {
+		t.Fatalf("runner must not be invoked for explicit empty repository, got %d calls", stub.issueCalls)
 	}
 }
 
@@ -905,6 +930,7 @@ type stubRunner struct {
 	err       error
 	repo      string
 	repoCalls int
+	issueCalls int
 	number    int
 	base      string
 	head      string
@@ -924,6 +950,7 @@ func (r *stubRunner) RunRepoView(_ context.Context, repository string) (CommandR
 }
 
 func (r *stubRunner) RunIssueView(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	r.issueCalls++
 	r.repo = repository
 	r.number = number
 	return r.result, r.config, r.err
