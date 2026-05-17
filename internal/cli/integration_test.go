@@ -1132,6 +1132,272 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedErrorResult(t *testing.
 	}
 }
 
+func TestIntegrationGitHubPRGetCommandPrintsNormalizedPullRequest(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "get", "--repo", "owner/name", "--number", "42"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			PullRequest: &integration.TrackerPullRequest{
+				System:         "github",
+				Repository:     "owner/name",
+				Number:         42,
+				Title:          "Add integration",
+				Body:           "Line one\nLine two",
+				State:          "OPEN",
+				Author:         integration.TrackerUser{System: "github", Login: "bob", Name: "Bob", URL: "https://github.com/bob"},
+				ReviewDecision: "APPROVED",
+				BaseRef:        "main",
+				HeadRef:        "feature/pr-get",
+				Labels:         []string{"integration"},
+				URL:            "https://github.com/owner/name/pull/42",
+				CreatedAt:      "2026-05-01T10:00:00Z",
+				UpdatedAt:      "2026-05-02T10:00:00Z",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github pr get command: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=pr\n",
+		"operation=get\n",
+		"repository=owner/name\n",
+		"number=42\n",
+		"title=Add integration\n",
+		"state=OPEN\n",
+		"author_login=bob\n",
+		"author_name=Bob\n",
+		"author_url=https://github.com/bob\n",
+		"review_decision=APPROVED\n",
+		"base_ref=main\n",
+		"head_ref=feature/pr-get\n",
+		"label=integration\n",
+		"url=https://github.com/owner/name/pull/42\n",
+		"created_at=2026-05-01T10:00:00Z\n",
+		"updated_at=2026-05-02T10:00:00Z\n",
+		"body=Line one\n",
+		"body=Line two\n",
+		"body_raw=\"Line one\\nLine two\"\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github pr get output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
+func TestIntegrationGitHubPRGetCommandPrintsJSONResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "get", "--format", "json", "--repo", "owner/name", "--number", "42"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			PullRequest: &integration.TrackerPullRequest{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     42,
+				Title:      "Add integration",
+				State:      "OPEN",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github pr get command: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("pr get json parse: %v, output: %q", err, output)
+	}
+	if payload.PullRequest == nil {
+		t.Fatal("expected pull request in json response")
+	}
+	if payload.PullRequest.Number != 42 {
+		t.Fatalf("unexpected pull request number: %d", payload.PullRequest.Number)
+	}
+}
+
+func TestIntegrationGitHubPRGetCommandRequiresFlags(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "get", "--repo", "owner/name"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github pr get error")
+	}
+	if err.Error() != "--number is required" {
+		t.Fatalf("unexpected github pr get error: %v", err)
+	}
+}
+
+func TestIntegrationGitHubPRGetCommandAllowsOmittedRepoFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "get", "--number", "42"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			PullRequest: &integration.TrackerPullRequest{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     42,
+				Title:      "Title",
+			},
+		},
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github pr get command without repo: %v", err)
+	}
+	if provider.request.Repository != "" {
+		t.Fatalf("expected empty repository request so provider layer can resolve fallback, got %q", provider.request.Repository)
+	}
+	if provider.request.RepoProvided {
+		t.Fatal("expected omitted repo flag to stay false")
+	}
+}
+
+func TestIntegrationGitHubPRGetCommandPassesExplicitEmptyRepoToProvider(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "get", "--repo=", "--number", "42"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			PullRequestStatus: &integration.PullRequestStatus{
+				System:   "github",
+				State:    "invalid-request",
+				Command:  "gh",
+				ExitCode: -1,
+				Message:  "GitHub repository is required",
+			},
+		},
+		err: assertErr("GitHub repository is required"),
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github pr get error")
+	}
+	if err.Error() != "GitHub repository is required" {
+		t.Fatalf("unexpected github pr get error: %v", err)
+	}
+	if provider.request.Repository != "" {
+		t.Fatalf("expected explicit empty repository request, got %q", provider.request.Repository)
+	}
+	if !provider.request.RepoProvided {
+		t.Fatal("expected explicit repo flag to stay true")
+	}
+}
+
+func TestIntegrationGitHubPRGetCommandPrintsNormalizedErrorResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "get", "--repo", "owner/name", "--number", "42"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			PullRequestStatus: &integration.PullRequestStatus{
+				System:      "github",
+				Repository:  "owner/name",
+				Number:      42,
+				State:       "auth-required",
+				Command:     "gh",
+				Path:        "/usr/local/bin/gh",
+				ExitCode:    1,
+				Message:     "GitHub authentication is required",
+				Diagnostics: []string{"repository=owner/name", "number=42", "gh pr view reported that no GitHub login is configured"},
+				Stderr:      "You are not logged into any GitHub hosts. Run gh auth login.",
+			},
+		},
+		err: assertErr("GitHub authentication is required"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github pr get error")
+	}
+	if err.Error() != "GitHub authentication is required" {
+		t.Fatalf("unexpected github pr get error: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=pr\n",
+		"operation=get\n",
+		"repository=owner/name\n",
+		"number=42\n",
+		"state=auth-required\n",
+		"command=gh\n",
+		"path=/usr/local/bin/gh\n",
+		"exit-code=1\n",
+		"message=GitHub authentication is required\n",
+		"diagnostic=repository=owner/name\n",
+		"diagnostic=number=42\n",
+		"diagnostic=gh pr view reported that no GitHub login is configured\n",
+		"stderr=You are not logged into any GitHub hosts. Run gh auth login.\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github pr get output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
 func TestIntegrationGitHubPRCreateCommandPrintsNormalizedSuccessResult(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}

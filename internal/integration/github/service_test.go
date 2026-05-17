@@ -398,6 +398,133 @@ func TestServiceIssueGetAllowsNilAuthor(t *testing.T) {
 	}
 }
 
+func TestServicePRGetSuccess(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"number":321,"title":"Improve integration","body":"Line one\nLine two","state":"OPEN","labels":[{"name":"enhancement"}],"author":{"login":"bob","name":"Bob","url":"https://github.com/bob","isBot":false,"isActive":true},"reviewDecision":"REVIEW_REQUIRED","baseRefName":"main","headRefName":"feature/pr-get","url":"https://github.com/owner/name/pull/321","createdAt":"2026-05-01T10:00:00Z","updatedAt":"2026-05-02T10:00:00Z"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Repository: "owner/name", Number: 321})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.PullRequest == nil {
+		t.Fatal("expected pull request")
+	}
+	if response.PullRequest.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", response.PullRequest.Repository)
+	}
+	if response.PullRequest.Number != 321 {
+		t.Fatalf("unexpected number: %d", response.PullRequest.Number)
+	}
+	if response.PullRequest.BaseRef != "main" || response.PullRequest.HeadRef != "feature/pr-get" {
+		t.Fatalf("unexpected refs: %#v", response.PullRequest)
+	}
+	if response.PullRequest.Author.Login != "bob" {
+		t.Fatalf("unexpected author: %#v", response.PullRequest.Author)
+	}
+	if len(response.PullRequest.Labels) != 1 || response.PullRequest.Labels[0] != "enhancement" {
+		t.Fatalf("unexpected labels: %#v", response.PullRequest.Labels)
+	}
+	if stub.repo != "owner/name" || stub.number != 321 {
+		t.Fatalf("unexpected requested pull request: repo=%q number=%d", stub.repo, stub.number)
+	}
+	if response.PullRequestStatus != nil {
+		t.Fatal("did not expect pull request status on success")
+	}
+}
+
+func TestServicePRGetUsesConfiguredDefaultRepository(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"number":321,"title":"Improve integration","body":"","state":"OPEN","labels":[],"author":{"login":"bob","name":"Bob","url":"https://github.com/bob","isBot":false,"isActive":true},"reviewDecision":"","baseRefName":"main","headRefName":"feature/pr-get","url":"https://github.com/owner/name/pull/321","createdAt":"2026-05-01T10:00:00Z","updatedAt":"2026-05-02T10:00:00Z"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "owner/name"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Number: 321})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.PullRequest == nil {
+		t.Fatal("expected pull request")
+	}
+	if response.PullRequest.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", response.PullRequest.Repository)
+	}
+	if stub.repo != "" {
+		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
+	}
+}
+
+func TestServicePRGetRejectsExplicitEmptyRepositoryWithoutUsingDefault(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "owner/name"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Number: 321, RepoProvided: true})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if response.PullRequestStatus == nil {
+		t.Fatal("expected pull request status")
+	}
+	if response.PullRequestStatus.State != ErrorCodeInvalidRequest {
+		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+	}
+	if response.PullRequestStatus.Message != "GitHub repository is required" {
+		t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+	}
+	if stub.prViewCalls != 0 {
+		t.Fatalf("runner must not be invoked for explicit empty repository, got %d calls", stub.prViewCalls)
+	}
+}
+
+func TestServicePullRequestGetAliasUsesPRHandler(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"number":321,"title":"Improve integration","body":"","state":"OPEN","labels":[],"author":{"login":"bob","name":"Bob","url":"https://github.com/bob","isBot":false,"isActive":true},"reviewDecision":"","baseRefName":"main","headRefName":"feature/pr-get","url":"https://github.com/owner/name/pull/321","createdAt":"2026-05-01T10:00:00Z","updatedAt":"2026-05-02T10:00:00Z"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pull-request", Operation: "get", Repository: "owner/name", Number: 321})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.PullRequest == nil || response.PullRequest.Number != 321 {
+		t.Fatalf("expected pull request, got %#v", response.PullRequest)
+	}
+	if stub.prViewCalls != 1 {
+		t.Fatalf("expected one pr view call, got %d", stub.prViewCalls)
+	}
+}
+
 func TestServiceRepoGetSuccess(t *testing.T) {
 	t.Parallel()
 
@@ -925,18 +1052,19 @@ func TestServicePRCreateMapsMissingRepositoryOrBranchToNotFound(t *testing.T) {
 }
 
 type stubRunner struct {
-	result    CommandResult
-	config    resolvedConfig
-	err       error
-	repo      string
-	repoCalls int
-	issueCalls int
-	number    int
-	base      string
-	head      string
-	title     string
-	body      string
-	draft     bool
+	result      CommandResult
+	config      resolvedConfig
+	err         error
+	repo        string
+	repoCalls   int
+	issueCalls  int
+	prViewCalls int
+	number      int
+	base        string
+	head        string
+	title       string
+	body        string
+	draft       bool
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -951,6 +1079,13 @@ func (r *stubRunner) RunRepoView(_ context.Context, repository string) (CommandR
 
 func (r *stubRunner) RunIssueView(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
 	r.issueCalls++
+	r.repo = repository
+	r.number = number
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRView(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	r.prViewCalls++
 	r.repo = repository
 	r.number = number
 	return r.result, r.config, r.err

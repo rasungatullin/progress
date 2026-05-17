@@ -154,6 +154,35 @@ func (r *Runner) RunIssueView(ctx context.Context, repository string, number int
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"issue", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,labels,assignees,author,url,createdAt,updatedAt"})
 }
 
+func (r *Runner) RunPRView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"pr", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"})
+}
+
 func resolveRepository(repository string, fallback string) (string, error) {
 	return normalizeRepository(firstNonEmpty(repository, fallback))
 }
@@ -216,6 +245,14 @@ func isRepositoryPart(value string) bool {
 func normalizeIssueNumber(number int) (int, error) {
 	if number <= 0 {
 		return 0, fmt.Errorf("GitHub issue number must be greater than zero")
+	}
+
+	return number, nil
+}
+
+func normalizePullRequestNumber(number int) (int, error) {
+	if number <= 0 {
+		return 0, fmt.Errorf("GitHub pull request number must be greater than zero")
 	}
 
 	return number, nil
