@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -39,6 +40,299 @@ func TestIntegrationDispatcherCommandPrintsDiagnosticRoute(t *testing.T) {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("dispatcher output must include %q, got %q", fragment, output)
 		}
+	}
+}
+
+func TestIntegrationDispatcherCommandPrintsJSONRoute(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "dispatcher", "--format", "json", "--system", "github", "--resource", "issue", "--operation", "get"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute dispatcher command: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Route
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("dispatcher json parse: %v, output: %q", err, output)
+	}
+	if payload.System != "github" {
+		t.Fatalf("expected json route system github, got %q", payload.System)
+	}
+	if payload.Provider != "github" {
+		t.Fatalf("expected json route provider github, got %q", payload.Provider)
+	}
+	if payload.Resource != "issue" {
+		t.Fatalf("expected json route resource issue, got %q", payload.Resource)
+	}
+	if payload.Operation != "get" {
+		t.Fatalf("expected json route operation get, got %q", payload.Operation)
+	}
+	if payload.ExpectedResult == "" {
+		t.Fatal("expected non-empty json route expected-result")
+	}
+}
+
+func TestIntegrationDispatcherCommandPrintsJSONRouteOnInvalidRequest(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "dispatcher", "--format", "json", "--system", "", "--resource", "issue", "--operation", "get"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected dispatcher error")
+	}
+	if err.Error() != "invalid integration request: system is required" {
+		t.Fatalf("unexpected dispatcher error: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Route
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("dispatcher invalid request json parse: %v, output: %q", err, output)
+	}
+	if payload.System != "" {
+		t.Fatalf("expected empty system in json payload, got %q", payload.System)
+	}
+	if payload.Resource != "issue" {
+		t.Fatalf("expected json route resource issue, got %q", payload.Resource)
+	}
+	if payload.ProviderAvailable {
+		t.Fatal("expected provider unavailable for missing system")
+	}
+}
+
+func TestIntegrationCommandRejectsUnknownFormat(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "dispatcher", "--format", "xml", "--system", "github", "--resource", "issue", "--operation", "get"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected integration format error")
+	}
+	if err.Error() != "--format supports only text or json" {
+		t.Fatalf("unexpected integration format error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output, got %q", stdout.String())
+	}
+}
+
+func TestIntegrationGitHubAuthStatusCommandPrintsJSONResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "auth", "status", "--format", "json"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			AuthStatus: &integration.AuthStatus{
+				System:      "github",
+				State:       "ready",
+				Available:   true,
+				Command:     "gh",
+				Path:        "/usr/local/bin/gh",
+				ExitCode:    0,
+				Message:     "ok",
+				Stdout:      "Logged in\n",
+				Diagnostics: []string{"ok"},
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github auth status command: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("auth status json parse: %v, output: %q", err, output)
+	}
+	if payload.AuthStatus == nil {
+		t.Fatal("expected auth status in json response")
+	}
+	if payload.AuthStatus.State != "ready" {
+		t.Fatalf("expected auth status state ready, got %q", payload.AuthStatus.State)
+	}
+	if payload.AuthStatus.Command != "gh" {
+		t.Fatalf("expected auth status command gh, got %q", payload.AuthStatus.Command)
+	}
+}
+
+func TestIntegrationGitHubAuthStatusCommandPrintsJSONResultOnError(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "auth", "status", "--format", "json"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			AuthStatus: &integration.AuthStatus{
+				System:      "github",
+				State:       "auth-required",
+				Available:   true,
+				Command:     "gh",
+				Path:        "/usr/local/bin/gh",
+				ExitCode:    1,
+				Message:     "GitHub authentication is required",
+				Stderr:      "not logged in",
+				Diagnostics: []string{"diagnostic"},
+			},
+		},
+		err: assertErr("GitHub authentication is required"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github auth status error")
+	}
+	if err.Error() != "GitHub authentication is required" {
+		t.Fatalf("unexpected github auth status error: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("auth status error json parse: %v, output: %q", err, output)
+	}
+	if payload.AuthStatus == nil {
+		t.Fatal("expected auth status in json error response")
+	}
+	if payload.AuthStatus.State != "auth-required" {
+		t.Fatalf("expected auth status state auth-required, got %q", payload.AuthStatus.State)
+	}
+	if payload.AuthStatus.ExitCode != 1 {
+		t.Fatalf("expected auth status exit-code 1, got %d", payload.AuthStatus.ExitCode)
+	}
+}
+
+func TestIntegrationGitHubRepoGetCommandPrintsJSONResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "repo", "get", "--format", "json", "--repo", "owner/name"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			RepositoryRef: &integration.TrackerRepository{
+				System:        "github",
+				FullName:      "owner/name",
+				Owner:         "owner",
+				Name:          "name",
+				Description:   "desc",
+				DefaultBranch: "main",
+				URL:           "https://github.com/owner/name",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github repo get command: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("repo get json parse: %v, output: %q", err, output)
+	}
+	if payload.RepositoryRef == nil {
+		t.Fatal("expected repository in json response")
+	}
+	if payload.RepositoryRef.FullName != "owner/name" {
+		t.Fatalf("unexpected repository full name: %q", payload.RepositoryRef.FullName)
+	}
+}
+
+func TestIntegrationGitHubRepoGetCommandPrintsJSONNotFoundResultOnError(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "repo", "get", "--format", "json", "--repo", "missing/repo"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			RepositoryStatus: &integration.RepositoryStatus{
+				System:      "github",
+				Repository:  "missing/repo",
+				State:       "not-found",
+				Command:     "gh",
+				Path:        "/usr/local/bin/gh",
+				ExitCode:    1,
+				Message:     "GitHub repository not found: missing/repo",
+				Diagnostics: []string{"repository=missing/repo", "gh repo view could not resolve the requested repository"},
+				Stderr:      "GraphQL: Could not resolve to a Repository",
+			},
+		},
+		err: assertErr("GitHub repository not found: missing/repo"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github repo get error")
+	}
+	if err.Error() != "GitHub repository not found: missing/repo" {
+		t.Fatalf("unexpected github repo get error: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("repo get not-found json parse: %v, output: %q", err, output)
+	}
+	if payload.RepositoryStatus == nil {
+		t.Fatal("expected repository status in json error response")
+	}
+	if payload.RepositoryStatus.State != "not-found" {
+		t.Fatalf("unexpected repository status state: %q", payload.RepositoryStatus.State)
+	}
+	if payload.RepositoryStatus.ExitCode != 1 {
+		t.Fatalf("unexpected repository status exit-code: %d", payload.RepositoryStatus.ExitCode)
 	}
 }
 
@@ -580,6 +874,107 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedIssue(t *testing.T) {
 	}
 }
 
+func TestIntegrationGitHubIssueGetCommandPrintsJSONResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--format", "json", "--repo", "owner/name", "--number", "123"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     123,
+				Title:      "Fix integration",
+				Body:       "body",
+				State:      "OPEN",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue get command: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("issue get json parse: %v, output: %q", err, output)
+	}
+	if payload.Issue == nil {
+		t.Fatal("expected issue in json response")
+	}
+	if payload.Issue.Number != 123 {
+		t.Fatalf("unexpected issue number: %d", payload.Issue.Number)
+	}
+	if payload.Issue.State != "OPEN" {
+		t.Fatalf("unexpected issue state: %q", payload.Issue.State)
+	}
+}
+
+func TestIntegrationGitHubIssueGetCommandPrintsJSONMalformedResponseResultOnError(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--format", "json", "--repo", "owner/name", "--number", "123"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			IssueStatus: &integration.IssueStatus{
+				System:      "github",
+				Repository:  "owner/name",
+				Number:      123,
+				State:       "external-failure",
+				Command:     "gh",
+				Path:        "/usr/local/bin/gh",
+				ExitCode:    0,
+				Message:     "unexpected GitHub CLI JSON response: invalid character",
+				Diagnostics: []string{"gh issue view returned malformed JSON"},
+				Stdout:      "{not-json",
+			},
+		},
+		err: assertErr("unexpected GitHub CLI JSON response: invalid character"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github issue get error")
+	}
+	if err.Error() != "unexpected GitHub CLI JSON response: invalid character" {
+		t.Fatalf("unexpected github issue get error: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("issue get malformed response json parse: %v, output: %q", err, output)
+	}
+	if payload.IssueStatus == nil {
+		t.Fatal("expected issue status in json error response")
+	}
+	if payload.IssueStatus.State != "external-failure" {
+		t.Fatalf("unexpected issue status state: %q", payload.IssueStatus.State)
+	}
+	if payload.IssueStatus.Stdout != "{not-json" {
+		t.Fatalf("unexpected issue status stdout: %q", payload.IssueStatus.Stdout)
+	}
+}
+
 func TestIntegrationGitHubIssueGetCommandRequiresFlags(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
@@ -803,6 +1198,68 @@ func TestIntegrationGitHubPRCreateCommandPrintsNormalizedSuccessResult(t *testin
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("github pr create output must include %q, got %q", fragment, output)
 		}
+	}
+}
+
+func TestIntegrationGitHubPRCreateCommandPrintsJSONResultOnError(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "create", "--format", "json", "--repo", "owner/name", "--base", "main", "--head", "feature", "--title", "Title", "--body", "Body"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			PullRequestStatus: &integration.PullRequestStatus{
+				System:     "github",
+				Repository: "owner/name",
+				Base:       "main",
+				Head:       "feature",
+				Title:      "Title",
+				Draft:      false,
+				State:      "already-exists",
+				Number:     15,
+				URL:        "https://github.com/owner/name/pull/15",
+				Command:    "gh",
+				Path:       "/usr/local/bin/gh",
+				ExitCode:   1,
+				Message:    "GitHub pull request already exists",
+				Diagnostics: []string{
+					"repository=owner/name",
+				},
+				Stderr: "pull request already exists",
+			},
+		},
+		err: assertErr("GitHub pull request already exists"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github pr create error")
+	}
+	if err.Error() != "GitHub pull request already exists" {
+		t.Fatalf("unexpected github pr create error: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("pr create json parse: %v, output: %q", err, output)
+	}
+	if payload.PullRequestStatus == nil {
+		t.Fatal("expected pull request status in json response")
+	}
+	if payload.PullRequestStatus.State != "already-exists" {
+		t.Fatalf("unexpected pull request state: %q", payload.PullRequestStatus.State)
+	}
+	if payload.PullRequestStatus.ExitCode != 1 {
+		t.Fatalf("unexpected pull request exit-code: %d", payload.PullRequestStatus.ExitCode)
 	}
 }
 
