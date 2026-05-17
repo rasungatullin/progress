@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -221,7 +222,7 @@ func TestServiceStartFailsFastOnIssueRepositoryMismatch(t *testing.T) {
 	if result.Execution != nil {
 		t.Fatalf("execution must not start on repository mismatch: %#v", result.Execution)
 	}
-	if executionStub.invocation != (execution.Invocation{}) {
+	if !reflect.DeepEqual(executionStub.invocation, execution.Invocation{}) {
 		t.Fatalf("execution must not be invoked on repository mismatch: %#v", executionStub.invocation)
 	}
 }

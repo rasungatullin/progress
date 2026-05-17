@@ -17,6 +17,9 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 		"defaults": {
 			"mode": "manual",
 			"model": "openai/gpt-5.4",
+			"structured-output": true,
+			"structured-output-required": false,
+			"structured-output-fields": ["remarks", "commands", "remarks"],
 			"commit-push": false
 		},
 		"profiles": {
@@ -26,10 +29,14 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 			"coder": {
 				"description": "Coder profile",
 				"model": "openai/gpt-5.3-codex-spark",
+				"structured-output-required": true,
+				"structured-output-fields": ["commit_message", "changes"],
 				"commit-push": true
 			},
 			"local": {
 				"description": "Local profile",
+				"structured-output": false,
+				"structured-output-fields": [],
 				"model": "ollama/qwen3.5:2b"
 			}
 		}
@@ -55,6 +62,15 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	if defaultProfile.CommitPush {
 		t.Fatal("default profile commit-push must inherit false")
 	}
+	if !defaultProfile.StructuredOutput {
+		t.Fatal("default profile structured-output must inherit true")
+	}
+	if defaultProfile.StructuredOutputRequired {
+		t.Fatal("default profile structured-output-required must inherit false")
+	}
+	if !equalStrings(defaultProfile.StructuredOutputFields, []string{"remarks", "commands"}) {
+		t.Fatalf("unexpected default structured-output-fields: %#v", defaultProfile.StructuredOutputFields)
+	}
 
 	localProfile, err := service.Resolve(context.Background(), model.Invocation{Profile: ProfileLocal})
 	if err != nil {
@@ -73,6 +89,15 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	if localProfile.CommitPush {
 		t.Fatal("local profile commit-push must inherit false")
 	}
+	if localProfile.StructuredOutput {
+		t.Fatal("local profile structured-output must override defaults to false")
+	}
+	if localProfile.StructuredOutputRequired {
+		t.Fatal("local profile structured-output-required must inherit false")
+	}
+	if len(localProfile.StructuredOutputFields) != 0 {
+		t.Fatalf("local profile structured-output-fields must allow explicit empty override: %#v", localProfile.StructuredOutputFields)
+	}
 
 	coderProfile, err := service.Resolve(context.Background(), model.Invocation{Profile: "coder"})
 	if err != nil {
@@ -90,6 +115,37 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	}
 	if !coderProfile.CommitPush {
 		t.Fatal("coder profile commit-push must override defaults to true")
+	}
+	if !coderProfile.StructuredOutput {
+		t.Fatal("coder profile structured-output must inherit true from defaults")
+	}
+	if !coderProfile.StructuredOutputRequired {
+		t.Fatal("coder profile structured-output-required must override defaults to true")
+	}
+	if !equalStrings(coderProfile.StructuredOutputFields, []string{"commit_message", "changes"}) {
+		t.Fatalf("unexpected coder structured-output-fields: %#v", coderProfile.StructuredOutputFields)
+	}
+}
+
+func TestResolveProfileAllowsSummaryInStructuredOutputFields(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"mode": "manual", "model": "openai/gpt-5.4"},
+		"profiles": {
+			"default": {
+				"description": "Cloud profile",
+				"structured-output-fields": ["summary"]
+			}
+		}
+	}`)
+
+	profile, err := service.Resolve(context.Background(), model.Invocation{})
+	if err != nil {
+		t.Fatalf("resolve profile: %v", err)
+	}
+	if !equalStrings(profile.StructuredOutputFields, []string{"summary"}) {
+		t.Fatalf("unexpected structured-output-fields: %#v", profile.StructuredOutputFields)
 	}
 }
 
@@ -167,4 +223,17 @@ func newTestService(config string) *Service {
 			return []byte(config), nil
 		},
 	}
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+
+	return true
 }

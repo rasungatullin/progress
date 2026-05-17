@@ -10,6 +10,7 @@ type LaunchSpec struct {
 	StructuredInput          *StructuredInput
 	StructuredOutput         bool
 	StructuredOutputRequired bool
+	StructuredOutputFields   []string
 	CommitPush               bool
 }
 
@@ -117,11 +118,14 @@ type Invocation struct {
 }
 
 type Profile struct {
-	Name        string
-	Description string
-	Mode        string
-	Model       string
-	CommitPush  bool
+	Name                     string
+	Description              string
+	Mode                     string
+	Model                    string
+	StructuredOutput         bool
+	StructuredOutputRequired bool
+	StructuredOutputFields   []string
+	CommitPush               bool
 }
 
 type ProfileConfigFile struct {
@@ -130,16 +134,22 @@ type ProfileConfigFile struct {
 }
 
 type ProfileOptions struct {
-	Mode       string `json:"mode"`
-	Model      string `json:"model"`
-	CommitPush *bool  `json:"commit-push"`
+	Mode                     string    `json:"mode"`
+	Model                    string    `json:"model"`
+	StructuredOutput         *bool     `json:"structured-output"`
+	StructuredOutputRequired *bool     `json:"structured-output-required"`
+	StructuredOutputFields   *[]string `json:"structured-output-fields"`
+	CommitPush               *bool     `json:"commit-push"`
 }
 
 type ProfileConfig struct {
-	Description string `json:"description"`
-	Mode        string `json:"mode"`
-	Model       string `json:"model"`
-	CommitPush  *bool  `json:"commit-push"`
+	Description              string    `json:"description"`
+	Mode                     string    `json:"mode"`
+	Model                    string    `json:"model"`
+	StructuredOutput         *bool     `json:"structured-output"`
+	StructuredOutputRequired *bool     `json:"structured-output-required"`
+	StructuredOutputFields   *[]string `json:"structured-output-fields"`
+	CommitPush               *bool     `json:"commit-push"`
 }
 
 type Allocation struct {

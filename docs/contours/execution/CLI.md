@@ -49,11 +49,18 @@ CLI рассматривается как основной ручной инте
   "defaults": {
     "mode": "manual",
     "model": "openai/gpt-5.4",
+    "structured-output": false,
+    "structured-output-required": false,
     "commit-push": false
   },
   "profiles": {
     "default": {
       "description": "Базовый профиль исполнения через облачную модель по умолчанию"
+    },
+    "coder": {
+      "description": "Профиль кодера с обязательным structured output для каскадной обработки",
+      "structured-output": true,
+      "structured-output-fields": ["commit_message", "changes", "remarks", "commands"]
     },
     "local": {
       "description": "Локальный профиль исполнения через локальную модель",
@@ -68,10 +75,12 @@ CLI рассматривается как основной ручной инте
 1. если профиль не указан, используется `default`;
 2. профиль наследует незаданные поля из блока `defaults`;
 3. `model` может быть определена в `defaults` и переопределена в конкретном профиле;
-4. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
-5. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
+4. `structured-output` и `structured-output-required` наследуются из `defaults`, а затем объединяются с настройками конкретного запуска по OR-семантике;
+5. `structured-output-fields` наследуется из `defaults` или целиком переопределяется профилем, поддерживает `summary` и остальные канонические top-level поля, но влияет только на те дополнительные секции, которые executor отдельно перечисляет в prompt;
+6. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
+7. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
 
-В resolved profile команда явно возвращает `description`, `mode`, `model` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
+В resolved profile команда явно возвращает `description`, `mode`, `model`, `structured-output`, `structured-output-required`, `structured-output-fields` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
 
 ### 3.4 `progress execution resources`
 
@@ -101,16 +110,17 @@ CLI рассматривается как основной ручной инте
 
 В `--dry-run` команда обязана показать, какой запуск был бы выполнен, какой профиль, модель, движок, рабочий каталог и git-режим были бы выбраны, но не должна выполнять внешние модифицирующие действия.
 
-Если `--structured-output` не указан, executor не добавляет в prompt никакой новой служебной structured-инструкции и поведение остаётся максимально близким к обычному текстовому запуску.
+Если ни `--structured-output`, ни `--structured-output-required`, ни resolved profile не включают structured output, executor не добавляет в prompt никакой новой служебной structured-инструкции и поведение остаётся максимально близким к обычному текстовому запуску.
 
-Если `--structured-output` указан, executor сам добавляет в итоговый prompt короткую детерминированную инструкцию, требующую trailing block `<progress-structured-output>...</progress-structured-output>` и канонический JSON-объект structured output. В текущей реализации эта инструкция добавляется после текстовой части `--prompt`; если одновременно задан программный `LaunchSpec.StructuredInput`, блок `<progress-structured-input>...</progress-structured-input>` дописывается уже после этой инструкции.
+Если `--structured-output`, `--structured-output-required` или resolved profile эффективно включают structured output, executor сам добавляет в итоговый prompt короткую детерминированную инструкцию, требующую trailing block `<progress-structured-output>...</progress-structured-output>` и канонический JSON-объект structured output. В текущей реализации эта инструкция добавляется после текстовой части `--prompt`; если одновременно задан программный `LaunchSpec.StructuredInput`, блок `<progress-structured-input>...</progress-structured-input>` дописывается уже после этой инструкции.
 
 Поддерживается один канонический structured output:
 
 1. runner должен вернуть JSON-объект с `protocol_version="review-cycle/v1"` и непустым `summary`;
-2. при необходимости объект дополняется полем `commit_message` и секциями `remarks`, `questions`, `follow_up_actions`, `changes`, `commands`, `conclusion`, `extensions`.
+2. при необходимости объект дополняется полем `commit_message` и секциями `remarks`, `questions`, `follow_up_actions`, `changes`, `commands`, `conclusion`, `extensions`;
+3. если в профиле задан `structured-output-fields`, executor просит у runner только перечисленные дополнительные поля; `summary` остаётся обязательным всегда, а parser по-прежнему принимает любой валидный канонический `review-cycle/v1` payload с дополнительными секциями.
 
-Флаг `--structured-output-required` включает строгую валидацию результата: ошибкой запуска считается отсутствие trailing structured block, невалидный JSON block, пустой или бессмысленный payload, неизвестные top-level поля, пустые объектные элементы внутри секций structured output, а также отсутствие обязательных `protocol_version="review-cycle/v1"` и `summary`. При этом свободный текст ответа не теряется: если trailing block невалиден, он остаётся в `summary`, а strict-режим возвращает диагностичную schema-level ошибку.
+Флаг `--structured-output-required` и одноимённое поле профиля объединяются по OR-семантике и включают строгую валидацию результата: ошибкой запуска считается отсутствие trailing structured block, невалидный JSON block, пустой или бессмысленный payload, неизвестные top-level поля, пустые объектные элементы внутри секций structured output, а также отсутствие обязательных `protocol_version="review-cycle/v1"` и `summary`. При этом свободный текст ответа не теряется: если trailing block невалиден, он остаётся в `summary`, а strict-режим возвращает диагностичную schema-level ошибку.
 
 Структурированный ввод нужен для передачи в контур исполнения полноценного контекста задачи. В этом блоке могут находиться:
 
@@ -139,7 +149,7 @@ CLI рассматривается как основной ручной инте
 
 В параметр `--prompt` можно передавать блок структурированного ввода `<progress-structured-input>...</progress-structured-input>`. Исполнительный контур выделяет завершающий входной блок из `prompt`, пропускает его через тот же канонический валидатор, что и программный `LaunchSpec.StructuredInput`, и передаёт дальше уже нормализованную структуру. Невалидный trailing structured input block считается ошибкой запуска, а не игнорируется как обычный текст. Structured input без содержательного контекста, например payload только с `protocol_version`, валидным не считается. Если structured input задан программно, контур исполнения сам добавляет в prompt инструкцию про использование всех полей этого блока как исполнительного контекста, а затем дописывает сам блок `<progress-structured-input>...</progress-structured-input>`.
 
-Целевой механизм должен быть расширяемым через конфигурацию. Это означает, что схема структурированного ввода и вывода, правила включения отдельных секций в `prompt` и набор допустимых команд или заключений не должны быть жёстко зашиты только в одном исполнительном пути. При этом в текущей реализации исполнительный профиль не управляет structured input или structured output: фактическое поведение определяется самим `prompt`, программным `LaunchSpec.StructuredInput` и флагами `--structured-output` и `--structured-output-required`.
+Целевой механизм должен быть расширяемым через конфигурацию. Это означает, что схема структурированного ввода и вывода, правила включения отдельных секций в `prompt` и набор допустимых команд или заключений не должны быть жёстко зашиты только в одном исполнительном пути. В текущей реализации исполнительный профиль уже управляет включением `structured output`, strict-режимом и списком optional structured output fields для prompt-инструкции, а структурированный ввод по-прежнему определяется самим `prompt` и программным `LaunchSpec.StructuredInput`.
 
 В CLI итог печатается в виде отдельного блока `summary<<PROGRESS_SUMMARY ... PROGRESS_SUMMARY`, после которого при наличии структурированных данных выводится секция `structured-output:`. Для канонического structured output CLI дополнительно печатает строки `protocol-version=...`, `summary-field=...`, `commit-message=...` и JSON-строки `remark=...`, `question=...`, `follow-up-action=...`, `change=...`, `command=...`, `conclusion=...`, `extension=...`. Эти JSON-строки выводятся без дополнительной whitespace-нормализации, чтобы payload оставался lossless.
 
