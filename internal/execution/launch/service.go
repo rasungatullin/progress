@@ -826,6 +826,7 @@ func buildRunnerPrompt(spec model.LaunchSpec) (string, error) {
 	if prompt != "" {
 		parts = append(parts, prompt)
 	}
+	parts = append(parts, normalizePromptAdditions(spec.PromptAdditions)...)
 
 	if spec.StructuredInput == nil {
 		if structuredOutputEnabled(spec) {
@@ -941,6 +942,9 @@ func buildStructuredOutputCanonicalExample(fields []string) string {
 }
 
 func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) model.LaunchSpec {
+	if len(spec.PromptAdditions) == 0 && len(profile.PromptAdditions) != 0 {
+		spec.PromptAdditions = append([]string(nil), profile.PromptAdditions...)
+	}
 	if profile.StructuredOutput || profile.StructuredOutputRequired {
 		spec.StructuredOutput = spec.StructuredOutput || profile.StructuredOutput || profile.StructuredOutputRequired
 	}
@@ -950,6 +954,27 @@ func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) 
 	}
 
 	return spec
+}
+
+func normalizePromptAdditions(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+
+	return normalized
 }
 
 func structuredOutputEnabled(spec model.LaunchSpec) bool {

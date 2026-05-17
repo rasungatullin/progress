@@ -7,6 +7,7 @@ type LaunchSpec struct {
 	Runner                   string
 	Model                    string
 	Prompt                   string
+	PromptAdditions          []string
 	StructuredInput          *StructuredInput
 	StructuredOutput         bool
 	StructuredOutputRequired bool
@@ -123,6 +124,7 @@ type Profile struct {
 	Runner                   string
 	Mode                     string
 	Model                    string
+	PromptAdditions          []string
 	StructuredOutput         bool
 	StructuredOutputRequired bool
 	StructuredOutputFields   []string
@@ -138,6 +140,7 @@ type ProfileOptions struct {
 	Mode                     string    `json:"mode"`
 	Runner                   string    `json:"runner"`
 	Model                    string    `json:"model"`
+	PromptAdditions          *[]string `json:"prompt-additions"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`
@@ -149,6 +152,7 @@ type ProfileConfig struct {
 	Mode                     string    `json:"mode"`
 	Runner                   string    `json:"runner"`
 	Model                    string    `json:"model"`
+	PromptAdditions          *[]string `json:"prompt-additions"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`

@@ -882,6 +882,67 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	}
 }
 
+func TestBuildRunnerPromptPlacesPromptAdditionsBeforeStructuredSections(t *testing.T) {
+	t.Parallel()
+
+	prompt, err := buildRunnerPrompt(model.LaunchSpec{
+		Prompt:                 "Review PR #38.",
+		PromptAdditions:        []string{"Collect PR context first.", "Do not modify code."},
+		StructuredInput:        &model.StructuredInput{Task: "Check review remarks."},
+		StructuredOutput:       true,
+		StructuredOutputFields: []string{"remarks", "conclusion"},
+	})
+	if err != nil {
+		t.Fatalf("buildRunnerPrompt: %v", err)
+	}
+
+	userIndex := strings.Index(prompt, "Review PR #38.")
+	additionIndex := strings.Index(prompt, "Collect PR context first.")
+	secondAdditionIndex := strings.Index(prompt, "Do not modify code.")
+	structuredOutputIndex := strings.Index(prompt, "Return your normal answer")
+	structuredInputIndex := strings.Index(prompt, structuredInputStart)
+	if userIndex == -1 || additionIndex == -1 || secondAdditionIndex == -1 || structuredOutputIndex == -1 || structuredInputIndex == -1 {
+		t.Fatalf("prompt missing expected sections: %q", prompt)
+	}
+	if !(userIndex < additionIndex && additionIndex < secondAdditionIndex && secondAdditionIndex < structuredOutputIndex && structuredOutputIndex < structuredInputIndex) {
+		t.Fatalf("prompt sections must keep expected order, got %q", prompt)
+	}
+}
+
+func TestLaunchAppliesProfilePromptAdditionsToRunnerPrompt(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
+			prompt, err := buildRunnerPrompt(in.Launch)
+			if err != nil {
+				t.Fatalf("buildRunnerPrompt inside runner stub: %v", err)
+			}
+			if !strings.Contains(prompt, "Collect PR, issue, diff, and previous review comments first.") {
+				t.Fatalf("prompt must include profile prompt additions: %q", prompt)
+			}
+			if !strings.Contains(prompt, "Do not modify code.") {
+				t.Fatalf("prompt must include all profile prompt additions: %q", prompt)
+			}
+			return "review complete", nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Prompt = "Review PR #38."
+	if _, err := service.Launch(context.Background(), invocation, model.Profile{
+		Name:            "review",
+		Model:           "openai/gpt-5.5",
+		PromptAdditions: []string{"Collect PR, issue, diff, and previous review comments first.", "Do not modify code."},
+	}, validAllocation(), validWorkplace(t)); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+}
+
 func TestBuildRunnerPromptKeepsFullFieldListWhenSelectionNotConfigured(t *testing.T) {
 	t.Parallel()
 

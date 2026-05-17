@@ -18,6 +18,7 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 			"runner": "opencode",
 			"mode": "manual",
 			"model": "openai/gpt-5.4",
+			"prompt-additions": ["Default context.", "Always verify the result."],
 			"structured-output": true,
 			"structured-output-required": false,
 			"structured-output-fields": ["remarks", "commands", "remarks"],
@@ -31,6 +32,7 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 				"description": "Coder profile",
 				"runner": "codex",
 				"model": "openai/gpt-5.3-codex-spark",
+				"prompt-additions": ["Implement the requested change."],
 				"structured-output-required": true,
 				"structured-output-fields": ["commit_message", "changes"],
 				"commit-push": true
@@ -76,6 +78,9 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	if !equalStrings(defaultProfile.StructuredOutputFields, []string{"remarks", "commands"}) {
 		t.Fatalf("unexpected default structured-output-fields: %#v", defaultProfile.StructuredOutputFields)
 	}
+	if !equalStrings(defaultProfile.PromptAdditions, []string{"Default context.", "Always verify the result."}) {
+		t.Fatalf("unexpected default prompt-additions: %#v", defaultProfile.PromptAdditions)
+	}
 
 	localProfile, err := service.Resolve(context.Background(), model.Invocation{Profile: ProfileLocal})
 	if err != nil {
@@ -106,6 +111,9 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	if len(localProfile.StructuredOutputFields) != 0 {
 		t.Fatalf("local profile structured-output-fields must allow explicit empty override: %#v", localProfile.StructuredOutputFields)
 	}
+	if !equalStrings(localProfile.PromptAdditions, []string{"Default context.", "Always verify the result."}) {
+		t.Fatalf("unexpected local prompt-additions: %#v", localProfile.PromptAdditions)
+	}
 
 	coderProfile, err := service.Resolve(context.Background(), model.Invocation{Profile: "coder"})
 	if err != nil {
@@ -135,6 +143,60 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	}
 	if !equalStrings(coderProfile.StructuredOutputFields, []string{"commit_message", "changes"}) {
 		t.Fatalf("unexpected coder structured-output-fields: %#v", coderProfile.StructuredOutputFields)
+	}
+	if !equalStrings(coderProfile.PromptAdditions, []string{"Default context.", "Always verify the result.", "Implement the requested change."}) {
+		t.Fatalf("unexpected coder prompt-additions: %#v", coderProfile.PromptAdditions)
+	}
+}
+
+func TestResolveProfilePromptAdditionsKeepDefaultsWhenProfileListIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {
+			"runner": "opencode",
+			"mode": "manual",
+			"model": "openai/gpt-5.4",
+			"prompt-additions": ["Default context."]
+		},
+		"profiles": {
+			"default": {
+				"description": "Cloud profile",
+				"prompt-additions": []
+			}
+		}
+	}`)
+
+	profile, err := service.Resolve(context.Background(), model.Invocation{})
+	if err != nil {
+		t.Fatalf("resolve profile: %v", err)
+	}
+	if !equalStrings(profile.PromptAdditions, []string{"Default context."}) {
+		t.Fatalf("unexpected prompt-additions: %#v", profile.PromptAdditions)
+	}
+}
+
+func TestResolveProfileReviewPresetFromRepositoryConfig(t *testing.T) {
+	t.Parallel()
+
+	profile, err := NewService().Resolve(context.Background(), model.Invocation{Profile: "review"})
+	if err != nil {
+		t.Fatalf("resolve review profile: %v", err)
+	}
+	if len(profile.PromptAdditions) == 0 {
+		t.Fatal("review profile must define prompt-additions")
+	}
+	joined := strings.Join(profile.PromptAdditions, "\n")
+	for _, expected := range []string{
+		"Ты выполняешь code review.",
+		"Не изменяй код",
+		"bugs, behavioral regressions, missing tests",
+		"предыдущих review comments",
+		"conclusion status=ok/approve",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("review prompt-additions must include %q, got %q", expected, joined)
+		}
 	}
 }
 

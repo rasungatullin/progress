@@ -89,24 +89,28 @@ flowchart TD
 2. структурированный ввод проходит единый канонический валидатор и нормализуется во внутреннюю модель; payload без содержательного контекста, например только с `protocol_version`, считается невалидным;
 3. по параметрам запуска определяется, какие секции должны участвовать в исполнительной директиве;
 4. контур исполнения собирает итоговую исполнительную директиву для исполнительного модуля;
-5. если включён `structured output`, в директиву после текстовой части prompt добавляется самодостаточная инструкция о структуре ожидаемого structured output: обязательные `protocol_version="review-cycle/v1"` и `summary`, а также subset-aware формы object-секций и compact canonical JSON example только для выбранных optional полей (`structured-output-fields`); при наличии программного structured input его блок дописывается после этой инструкции;
-6. исполнительный модуль передаёт директиву вычислительному каскаду;
-7. после ответа вычислителя контур исполнения отделяет свободный текст от структурированного вывода;
-8. структурированный вывод разбирается и нормализуется;
-9. при включённом `commit-push` git-стадия выбирает commit message в порядке `structured_output.commit_message -> Invocation.Workplace.Name -> basename(prepared workplace path) -> default`, пропуская пустые и whitespace-only значения;
-10. итоговый текст и структурированные поля передаются в дальнейшую обработку.
+5. если профиль добавляет `prompt-additions`, они вставляются после пользовательской текстовой части prompt и до любых structured-инструкций;
+6. если включён `structured output`, в директиву после текстовой части prompt и profile additions добавляется самодостаточная инструкция о структуре ожидаемого structured output: обязательные `protocol_version="review-cycle/v1"` и `summary`, а также subset-aware формы object-секций и compact canonical JSON example только для выбранных optional полей (`structured-output-fields`); при наличии программного structured input его блок дописывается после этой инструкции;
+7. исполнительный модуль передаёт директиву вычислительному каскаду;
+8. после ответа вычислителя контур исполнения отделяет свободный текст от структурированного вывода;
+9. структурированный вывод разбирается и нормализуется;
+10. при включённом `commit-push` git-стадия выбирает commit message в порядке `structured_output.commit_message -> Invocation.Workplace.Name -> basename(prepared workplace path) -> default`, пропуская пустые и whitespace-only значения;
+11. итоговый текст и структурированные поля передаются в дальнейшую обработку.
 
 ## 7. Управление через профиль и флаги запуска
 
 В текущей реализации structured input управляется параметрами конкретного запуска, а structured output дополнительно может управляться исполнителным профилем:
 
 - текстовым `prompt`;
+- `prompt-additions` из resolved profile;
 - программным `LaunchSpec.StructuredInput`;
 - флагом или полем `structured-output`;
 - флагом или полем `structured-output-required`;
 - полями resolved profile `structured-output`, `structured-output-required`, `structured-output-fields`.
 
 Для `structured-output` и `structured-output-required` используется OR-семантика между конкретным запуском и resolved profile. Если профиль включает `structured-output-required`, executor не только валидирует результат строже, но и сам добавляет structured output instruction в prompt даже без явного CLI-флага.
+
+Поле `prompt-additions` задаётся в `defaults` и/или конкретном профиле. В текущей реализации используется merge-семантика: additions из `defaults` идут первыми, additions конкретного профиля идут после них. Этот текст остаётся обычной текстовой частью исполнительной директивы и не смешивается с canonical structured input block.
 
 Поле `structured-output-fields` задаётся только в профиле и влияет исключительно на prompt-инструкцию: оно определяет, какие дополнительные top-level canonical fields runner должен по возможности заполнить. Значение `summary` допускается для совместимости с контрактом issue #28, но остаётся обязательным и не делает поле настраиваемым. Канонический parser `review-cycle/v1` при этом не сужается и по-прежнему принимает любой валидный payload с дополнительными поддерживаемыми секциями.
 
