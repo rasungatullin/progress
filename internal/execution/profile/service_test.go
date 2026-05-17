@@ -15,6 +15,7 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 
 	service := newTestService(`{
 		"defaults": {
+			"runner": "opencode",
 			"mode": "manual",
 			"model": "openai/gpt-5.4",
 			"structured-output": true,
@@ -28,6 +29,7 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 			},
 			"coder": {
 				"description": "Coder profile",
+				"runner": "codex",
 				"model": "openai/gpt-5.3-codex-spark",
 				"structured-output-required": true,
 				"structured-output-fields": ["commit_message", "changes"],
@@ -52,6 +54,9 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	}
 	if defaultProfile.Description != "Cloud profile" {
 		t.Fatalf("unexpected default description: %q", defaultProfile.Description)
+	}
+	if defaultProfile.Runner != "opencode" {
+		t.Fatalf("unexpected default runner: %q", defaultProfile.Runner)
 	}
 	if defaultProfile.Mode != "manual" {
 		t.Fatalf("unexpected default mode: %q", defaultProfile.Mode)
@@ -80,6 +85,9 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	if localProfile.Description != "Local profile" {
 		t.Fatalf("unexpected local description: %q", localProfile.Description)
 	}
+	if localProfile.Runner != "opencode" {
+		t.Fatalf("unexpected local runner: %q", localProfile.Runner)
+	}
 	if localProfile.Mode != "manual" {
 		t.Fatalf("unexpected local mode: %q", localProfile.Mode)
 	}
@@ -107,6 +115,9 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	if coderProfile.Description != "Coder profile" {
 		t.Fatalf("unexpected coder description: %q", coderProfile.Description)
 	}
+	if coderProfile.Runner != "codex" {
+		t.Fatalf("unexpected coder runner: %q", coderProfile.Runner)
+	}
 	if coderProfile.Mode != "manual" {
 		t.Fatalf("unexpected coder mode: %q", coderProfile.Mode)
 	}
@@ -131,7 +142,7 @@ func TestResolveProfileAllowsSummaryInStructuredOutputFields(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
-		"defaults": {"mode": "manual", "model": "openai/gpt-5.4"},
+		"defaults": {"runner": "opencode", "mode": "manual", "model": "openai/gpt-5.4"},
 		"profiles": {
 			"default": {
 				"description": "Cloud profile",
@@ -153,7 +164,7 @@ func TestResolveProfileUnknownProfile(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
-		"defaults": {"mode": "manual", "model": "openai/gpt-5.4"},
+		"defaults": {"runner": "opencode", "mode": "manual", "model": "openai/gpt-5.4"},
 		"profiles": {"default": {"description": "Cloud profile"}}
 	}`)
 
@@ -162,6 +173,23 @@ func TestResolveProfileUnknownProfile(t *testing.T) {
 		t.Fatal("expected unknown profile error")
 	}
 	if !strings.Contains(err.Error(), "unknown execution profile: missing") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveProfileRequiresRunner(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"mode": "manual", "model": "openai/gpt-5.4"},
+		"profiles": {"default": {"description": "Cloud profile"}}
+	}`)
+
+	_, err := service.Resolve(context.Background(), model.Invocation{})
+	if err == nil {
+		t.Fatal("expected empty runner error")
+	}
+	if !strings.Contains(err.Error(), `execution profile "default" has empty runner`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

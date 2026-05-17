@@ -16,6 +16,8 @@ import (
 
 const RunnerOpenCode = "opencode"
 
+const RunnerCodex = "codex"
+
 const DefaultCommitMessage = "Apply task result"
 
 const structuredOutputStart = "<progress-structured-output>"
@@ -451,7 +453,7 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 		return fmt.Errorf("launch prompt is required")
 	}
 
-	if strings.TrimSpace(in.Launch.Runner) != RunnerOpenCode {
+	if !isSupportedRunner(in.Launch.Runner) {
 		return fmt.Errorf("unsupported runner: %s", in.Launch.Runner)
 	}
 
@@ -473,6 +475,15 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 	}
 
 	return nil
+}
+
+func isSupportedRunner(runner string) bool {
+	switch strings.TrimSpace(runner) {
+	case RunnerOpenCode, RunnerCodex:
+		return true
+	default:
+		return false
+	}
 }
 
 type gitResult struct {
@@ -635,14 +646,10 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 		return "", err
 	}
 
-	args := []string{
-		"run",
-		"--dir", in.Launch.Directory,
-		"--model", in.Launch.Model,
-		prompt,
+	cmd, err := buildRunnerCommand(ctx, in.Launch, prompt)
+	if err != nil {
+		return "", err
 	}
-
-	cmd := exec.CommandContext(ctx, in.Launch.Runner, args...)
 	cmd.Dir = in.Launch.Directory
 	cmd.Env = sanitizedEnv()
 	output, err := cmd.CombinedOutput()
@@ -651,6 +658,22 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt string) (*exec.Cmd, error) {
+	runner := strings.TrimSpace(spec.Runner)
+	var args []string
+
+	switch runner {
+	case RunnerOpenCode:
+		args = []string{"run", "--dir", spec.Directory, "--model", spec.Model, prompt}
+	case RunnerCodex:
+		args = []string{"exec", "-C", spec.Directory, "-m", spec.Model, prompt}
+	default:
+		return nil, fmt.Errorf("unsupported runner: %s", spec.Runner)
+	}
+
+	return exec.CommandContext(ctx, runner, args...), nil
 }
 
 func buildRunnerPrompt(spec model.LaunchSpec) (string, error) {

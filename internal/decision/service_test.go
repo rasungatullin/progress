@@ -96,8 +96,8 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if executionStub.invocation.Workplace.Name != "task-123" {
 		t.Fatalf("unexpected workplace name: %q", executionStub.invocation.Workplace.Name)
 	}
-	if executionStub.invocation.Launch.Runner != "opencode" {
-		t.Fatalf("unexpected execution runner: %q", executionStub.invocation.Launch.Runner)
+	if executionStub.invocation.Launch.Runner != "" {
+		t.Fatalf("expected execution runner to be inherited from profile, got %q", executionStub.invocation.Launch.Runner)
 	}
 	if executionStub.invocation.Launch.Model != "" {
 		t.Fatalf("expected model to be inherited from profile, got %q", executionStub.invocation.Launch.Model)

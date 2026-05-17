@@ -120,6 +120,7 @@ type Invocation struct {
 type Profile struct {
 	Name                     string
 	Description              string
+	Runner                   string
 	Mode                     string
 	Model                    string
 	StructuredOutput         bool
@@ -135,6 +136,7 @@ type ProfileConfigFile struct {
 
 type ProfileOptions struct {
 	Mode                     string    `json:"mode"`
+	Runner                   string    `json:"runner"`
 	Model                    string    `json:"model"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
@@ -145,6 +147,7 @@ type ProfileOptions struct {
 type ProfileConfig struct {
 	Description              string    `json:"description"`
 	Mode                     string    `json:"mode"`
+	Runner                   string    `json:"runner"`
 	Model                    string    `json:"model"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`

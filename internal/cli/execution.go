@@ -120,7 +120,7 @@ func newExecutionProfileCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("profile=%s\ndescription=%s\nmode=%s\nmodel=%s\nstructured-output=%t\nstructured-output-required=%t\nstructured-output-fields=%s\ncommit-push=%t\n", profile.Name, profile.Description, profile.Mode, profile.Model, profile.StructuredOutput, profile.StructuredOutputRequired, strings.Join(profile.StructuredOutputFields, ","), profile.CommitPush)
+			cmd.Printf("profile=%s\ndescription=%s\nrunner=%s\nmode=%s\nmodel=%s\nstructured-output=%t\nstructured-output-required=%t\nstructured-output-fields=%s\ncommit-push=%t\n", profile.Name, profile.Description, profile.Runner, profile.Mode, profile.Model, profile.StructuredOutput, profile.StructuredOutputRequired, strings.Join(profile.StructuredOutputFields, ","), profile.CommitPush)
 			return nil
 		},
 	}
@@ -220,7 +220,6 @@ func newLaunchFlags() *launchFlags {
 func newStartFlags() *launchFlags {
 	return &launchFlags{
 		profile: "default",
-		runner:  launch.RunnerOpenCode,
 	}
 }
 

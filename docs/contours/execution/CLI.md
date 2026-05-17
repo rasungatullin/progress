@@ -47,6 +47,7 @@ CLI рассматривается как основной ручной инте
 ```json
 {
   "defaults": {
+    "runner": "opencode",
     "mode": "manual",
     "model": "openai/gpt-5.4",
     "structured-output": false,
@@ -62,6 +63,19 @@ CLI рассматривается как основной ручной инте
       "structured-output": true,
       "structured-output-fields": ["commit_message", "changes", "remarks", "commands"]
     },
+    "review": {
+      "description": "Профиль ревью без автоматического commit и push",
+      "model": "openai/gpt-5.5",
+      "structured-output": true,
+      "structured-output-required": true,
+      "structured-output-fields": ["summary", "remarks", "questions", "follow_up_actions", "conclusion"],
+      "commit-push": false
+    },
+    "codex": {
+      "description": "Профиль исполнения через Codex CLI",
+      "runner": "codex",
+      "model": "gpt-5.3-codex"
+    },
     "local": {
       "description": "Локальный профиль исполнения через локальную модель",
       "model": "ollama/qwen3.5:2b"
@@ -74,13 +88,14 @@ CLI рассматривается как основной ручной инте
 
 1. если профиль не указан, используется `default`;
 2. профиль наследует незаданные поля из блока `defaults`;
-3. `model` может быть определена в `defaults` и переопределена в конкретном профиле;
-4. `structured-output` и `structured-output-required` наследуются из `defaults`, а затем объединяются с настройками конкретного запуска по OR-семантике;
-5. `structured-output-fields` наследуется из `defaults` или целиком переопределяется профилем, поддерживает `summary` и остальные канонические top-level поля, но влияет только на те дополнительные секции, которые executor отдельно перечисляет в prompt;
-6. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
-7. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
+3. `runner` может быть определён в `defaults` и переопределён в конкретном профиле;
+4. `model` может быть определена в `defaults` и переопределена в конкретном профиле;
+5. `structured-output` и `structured-output-required` наследуются из `defaults`, а затем объединяются с настройками конкретного запуска по OR-семантике;
+6. `structured-output-fields` наследуется из `defaults` или целиком переопределяется профилем, поддерживает `summary` и остальные канонические top-level поля, но влияет только на те дополнительные секции, которые executor отдельно перечисляет в prompt;
+7. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
+8. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
 
-В resolved profile команда явно возвращает `description`, `mode`, `model`, `structured-output`, `structured-output-required`, `structured-output-fields` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
+В resolved profile команда явно возвращает `description`, `runner`, `mode`, `model`, `structured-output`, `structured-output-required`, `structured-output-fields` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
 
 ### 3.4 `progress execution resources`
 
@@ -102,9 +117,14 @@ CLI рассматривается как основной ручной инте
 
 В текущей реализации команда принимает `--dir`, `--runner`, `--model`, `--prompt`, а также опциональные флаги `--structured-output`, `--structured-output-required` и `--commit-push`.
 
+Поддерживаются минимум два runner:
+
+1. `opencode` c командой `opencode run --dir <dir> --model <model> <prompt>`;
+2. `codex` c командой `codex exec -C <dir> -m <model> <prompt>`.
+
 Для `progress execution launch` git-стадия включается только явным флагом `--commit-push`. Эта команда является прямым изолированным запуском и не подтягивает исполнительный профиль.
 
-Наследование `commit-push` из профиля работает на полном маршруте `progress execution start`, где профиль действительно разрешается перед стадией `launch`.
+Наследование `runner`, `model` и `commit-push` из профиля работает на полном маршруте `progress execution start`, где профиль действительно разрешается перед стадией `launch`. Если пользователь передал `--runner` или `--model` явно, CLI override имеет приоритет над профилем.
 
 Если `--commit-push` не задан, команда выполняет только исполнительный модуль и возвращает его итоговое резюме.
 

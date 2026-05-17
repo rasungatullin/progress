@@ -17,8 +17,21 @@ type decisionFlags struct {
 	task int
 }
 
+type decisionServiceFactoryFunc func(*cobra.Command) decisionStarter
+
+type decisionServiceFactoryContextKey struct{}
+
 var decisionServiceFactory = func(cmd *cobra.Command) decisionStarter {
 	return decision.NewService(logging.New(cmd.ErrOrStderr()))
+}
+
+func setDecisionServiceFactory(cmd *cobra.Command, factory decisionServiceFactoryFunc) {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cmd.SetContext(context.WithValue(ctx, decisionServiceFactoryContextKey{}, factory))
 }
 
 func newDecisionCommand() *cobra.Command {
@@ -56,6 +69,10 @@ func newDecisionStartCommand() *cobra.Command {
 }
 
 func newDecisionService(cmd *cobra.Command) decisionStarter {
+	if factory, ok := cmd.Context().Value(decisionServiceFactoryContextKey{}).(decisionServiceFactoryFunc); ok && factory != nil {
+		return factory(cmd)
+	}
+
 	return decisionServiceFactory(cmd)
 }
 

@@ -84,7 +84,7 @@ func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
 }
 
 func (s *Service) LaunchDirect(ctx context.Context, in Invocation) (LaunchResult, error) {
-	profile := Profile{Name: "direct-launch", Mode: "manual", Model: in.Launch.Model, CommitPush: false}
+	profile := Profile{Name: "direct-launch", Runner: in.Launch.Runner, Mode: "manual", Model: in.Launch.Model, CommitPush: false}
 	allocation := Allocation{Resource: "external-launch", Reserved: true}
 	workplace := Workplace{Name: in.Launch.Directory, Ready: true}
 
@@ -122,6 +122,9 @@ func (s *Service) PrepareWorkplace(ctx context.Context, in Invocation, profile P
 }
 
 func (s *Service) Launch(ctx context.Context, in Invocation, profile Profile, allocation Allocation, workplace Workplace) (LaunchResult, error) {
+	if in.Launch.Runner == "" {
+		in.Launch.Runner = profile.Runner
+	}
 	if in.Launch.Model == "" {
 		in.Launch.Model = profile.Model
 	}

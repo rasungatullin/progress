@@ -20,7 +20,7 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 
 	err := cmd.ParseFlags([]string{
 		"--dir", "/tmp/work",
-		"--runner", "opencode",
+		"--runner", "codex",
 		"--model", "openai/gpt-5.4",
 		"--prompt", "ship it",
 		"--structured-output",
@@ -34,6 +34,9 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 	invocation := invocationFromLaunchFlags(flags)
 	if invocation.Launch.Directory != "/tmp/work" {
 		t.Fatalf("unexpected directory: %q", invocation.Launch.Directory)
+	}
+	if invocation.Launch.Runner != "codex" {
+		t.Fatalf("unexpected runner: %q", invocation.Launch.Runner)
 	}
 	if !invocation.Launch.CommitPush {
 		t.Fatal("expected commit-push to be enabled")
@@ -127,19 +130,22 @@ func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
 	if !strings.Contains(output, "description=Базовый профиль исполнения через облачную модель по умолчанию\n") {
 		t.Fatalf("profile output must include description, got %q", output)
 	}
+	if !strings.Contains(output, "runner=opencode\n") {
+		t.Fatalf("profile output must include resolved runner, got %q", output)
+	}
 	if !strings.Contains(output, "model=openai/gpt-5.4\n") {
 		t.Fatalf("profile output must include resolved model, got %q", output)
 	}
-	if !strings.Contains(output, "structured-output=false\n") {
+	if !strings.Contains(output, "structured-output=true\n") {
 		t.Fatalf("profile output must include structured-output flag, got %q", output)
 	}
-	if !strings.Contains(output, "structured-output-required=false\n") {
+	if !strings.Contains(output, "structured-output-required=true\n") {
 		t.Fatalf("profile output must include structured-output-required flag, got %q", output)
 	}
-	if !strings.Contains(output, "structured-output-fields=\n") {
+	if !strings.Contains(output, "structured-output-fields=summary,commit_message,remarks,questions,follow_up_actions,changes,commands,conclusion,extensions\n") {
 		t.Fatalf("profile output must include structured-output-fields, got %q", output)
 	}
-	if !strings.Contains(output, "commit-push=false\n") {
+	if !strings.Contains(output, "commit-push=true\n") {
 		t.Fatalf("profile output must include commit-push flag, got %q", output)
 	}
 }
