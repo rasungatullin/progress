@@ -185,12 +185,23 @@ func TestRunnerRunRepoViewBuildsJSONCommand(t *testing.T) {
 	}
 }
 
-func TestRunnerRunRepoViewRejectsEmptyRepository(t *testing.T) {
+func TestRunnerRunRepoViewRejectsEmptyRepositoryWithoutDefault(t *testing.T) {
 	t.Parallel()
 
 	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	called := false
+	runner.runCommand = func(context.Context, string, []string) commandRunner {
+		called = true
+		return commandRunner{}
+	}
+
 	_, _, err := runner.RunRepoView(context.Background(), " ")
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if called {
+		t.Fatal("did not expect gh invocation")
+	}
 }
 
 func TestRunnerRunRepoViewUsesConfiguredDefaultRepository(t *testing.T) {
@@ -211,7 +222,7 @@ func TestRunnerRunRepoViewUsesConfiguredDefaultRepository(t *testing.T) {
 		return commandRunner{stdout: `{"name":"name"}`}
 	}
 
-	_, config, err := runner.RunRepoView(context.Background(), "")
+	_, config, err := runner.RunRepoView(context.Background(), " ")
 	if err != nil {
 		t.Fatalf("run repo view: %v", err)
 	}
