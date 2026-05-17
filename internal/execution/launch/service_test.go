@@ -295,11 +295,21 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if !strings.Contains(result.Summary, "Applied the requested changes.") {
-		t.Fatalf("summary must keep plain runner output: %q", result.Summary)
+	if !strings.Contains(result.Summary, "result=Main result.") {
+		t.Fatalf("summary must include compact structured result: %q", result.Summary)
 	}
-	if strings.Contains(result.Summary, structuredOutputStart) {
-		t.Fatalf("summary must not keep structured block markers: %q", result.Summary)
+	if strings.Contains(result.Summary, "Applied the requested changes.") {
+		t.Fatalf("summary must not include full plain runner output for valid structured runs: %q", result.Summary)
+	}
+	if strings.TrimSpace(result.RawOutputPath) == "" {
+		t.Fatalf("raw output path must be present: %#v", result)
+	}
+	rawBytes, readErr := os.ReadFile(result.RawOutputPath)
+	if readErr != nil {
+		t.Fatalf("read raw output: %v", readErr)
+	}
+	if !strings.Contains(string(rawBytes), "Applied the requested changes.") || !strings.Contains(string(rawBytes), structuredOutputStart) {
+		t.Fatalf("raw output must preserve full runner output: %q", string(rawBytes))
 	}
 	if result.StructuredOutput == nil {
 		t.Fatal("structured output must be parsed")
@@ -426,6 +436,9 @@ func TestLaunchStructuredOutputRequiredMissingFails(t *testing.T) {
 	}
 	if !strings.Contains(result.Summary, "Applied the requested changes.") {
 		t.Fatalf("summary must preserve plain runner output: %q", result.Summary)
+	}
+	if strings.TrimSpace(result.RawOutputPath) == "" {
+		t.Fatalf("raw output path must be present on failure: %#v", result)
 	}
 }
 
@@ -887,8 +900,8 @@ func TestLaunchBrokenBlockBeforeValidTrailingBlock(t *testing.T) {
 	if result.StructuredOutput == nil || len(result.StructuredOutput.Remarks) != 1 {
 		t.Fatalf("unexpected structured output: %#v", result.StructuredOutput)
 	}
-	if !strings.Contains(result.Summary, `{"protocol_version":`) {
-		t.Fatalf("summary must preserve earlier broken example: %q", result.Summary)
+	if strings.Contains(result.Summary, `{"protocol_version":`) {
+		t.Fatalf("successful structured run summary must stay compact: %q", result.Summary)
 	}
 }
 

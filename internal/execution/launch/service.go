@@ -64,10 +64,11 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	if err != nil {
 		return model.LaunchResult{}, err
 	}
+	rawOutputPath := persistRunnerOutput(workplace.Name, runnerOutput)
 
 	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState, structuredOutputErr := parseStructuredOutput(runnerOutput)
 	if err := validateStructuredOutputRequirement(in.Launch, rawStructuredOutput, structuredOutputState, structuredOutputErr); err != nil {
-		return model.LaunchResult{Status: "failed", Summary: strings.TrimSpace(plainRunnerOutput)}, err
+		return model.LaunchResult{Status: "failed", Summary: strings.TrimSpace(plainRunnerOutput), RawOutputPath: rawOutputPath}, err
 	}
 
 	commitPush := in.Launch.CommitPush || profile.CommitPush
@@ -92,7 +93,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		gitSummary,
 	)
 
-	result := model.LaunchResult{Status: "completed", Summary: joinSummary(summary, plainRunnerOutput)}
+	result := model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutputPath: rawOutputPath}
 	if structuredOutputState == trailingStructuredBlockValid {
 		result.StructuredOutput = structuredOutput
 	}
@@ -440,6 +441,18 @@ func joinSummary(parts ...string) string {
 	return strings.Join(filtered, "\n")
 }
 
+func buildLaunchSummary(baseSummary, plainRunnerOutput string, state trailingStructuredBlockState, structuredOutput *model.StructuredOutput) string {
+	if state == trailingStructuredBlockValid && structuredOutput != nil {
+		return joinSummary(baseSummary, "result="+normalizeSummaryValue(structuredOutput.Summary))
+	}
+
+	return joinSummary(baseSummary, plainRunnerOutput)
+}
+
+func normalizeSummaryValue(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
 func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 	if !workplace.Ready {
 		return fmt.Errorf("workplace is not ready")
@@ -658,6 +671,30 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+func persistRunnerOutput(workplaceDir, output string) string {
+	workplaceDir = strings.TrimSpace(workplaceDir)
+	if workplaceDir == "" || strings.TrimSpace(output) == "" {
+		return ""
+	}
+
+	rawDir := filepath.Join(workplaceDir, ".progress", "runner-output")
+	if err := os.MkdirAll(rawDir, 0o755); err != nil {
+		return ""
+	}
+
+	file, err := os.CreateTemp(rawDir, "execution-*.log")
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	if _, err := io.WriteString(file, output); err != nil {
+		return ""
+	}
+
+	return file.Name()
 }
 
 func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt string) (*exec.Cmd, error) {

@@ -339,6 +339,25 @@ func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
 	}
 }
 
+func TestPrintLaunchResultIncludesRawOutputPath(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "launch"}
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+
+	printLaunchResult(cmd, execution.LaunchResult{
+		Status:        "completed",
+		Summary:       "Compact summary.",
+		RawOutputPath: "/tmp/progress/.progress/runner-output/execution-123.log",
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, "raw-output-path=/tmp/progress/.progress/runner-output/execution-123.log\n") {
+		t.Fatalf("output must include raw output path: %q", output)
+	}
+}
+
 type executionCommandServiceStub struct {
 	start            func(context.Context, execution.Invocation) (execution.LaunchResult, error)
 	dispatch         func(context.Context, execution.Invocation) []string
