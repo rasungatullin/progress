@@ -74,10 +74,6 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		Decision: &decision,
 	}
 
-	if err := s.validateIssueRepository(ctx, response.Issue); err != nil {
-		return result, err
-	}
-
 	launchResult, err := s.execution.Start(ctx, executionInvocationFromDecisionPlan(decision.ExecutionPlan))
 	if err != nil {
 		if launchResult.Status != "" || strings.TrimSpace(launchResult.Summary) != "" || launchResult.StructuredOutput != nil {
@@ -143,6 +139,7 @@ func buildExecuteDecision(issue *integration.TrackerIssue) Decision {
 		ExecutionPlan: &ExecutionPlan{
 			TaskNumber: issue.Number,
 			TaskTitle:  issue.Title,
+			Repository: strings.TrimSpace(issue.Repository),
 			Profile:    defaultExecutionProfile,
 			Prompt:     buildExecutionPrompt(issue),
 		},
@@ -155,8 +152,9 @@ func executionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Invocati
 	}
 
 	return execution.Invocation{
-		Task:    fmt.Sprintf("task-%d", plan.TaskNumber),
-		Profile: plan.Profile,
+		Task:       fmt.Sprintf("task-%d", plan.TaskNumber),
+		Profile:    plan.Profile,
+		Repository: execution.RepositorySpec{URL: plan.Repository},
 		Workplace: execution.WorkplaceSpec{
 			Name: fmt.Sprintf("task-%d", plan.TaskNumber),
 		},

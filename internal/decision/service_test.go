@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -69,6 +68,9 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Decision.ExecutionPlan == nil {
 		t.Fatal("expected execution plan")
 	}
+	if result.Decision.ExecutionPlan.Repository != "owner/name" {
+		t.Fatalf("unexpected execution repository: %q", result.Decision.ExecutionPlan.Repository)
+	}
 	if result.Decision.ExecutionPlan.Profile != defaultExecutionProfile {
 		t.Fatalf("unexpected execution profile: %q", result.Decision.ExecutionPlan.Profile)
 	}
@@ -92,6 +94,9 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	}
 	if executionStub.invocation.Profile != defaultExecutionProfile {
 		t.Fatalf("unexpected execution invocation profile: %q", executionStub.invocation.Profile)
+	}
+	if executionStub.invocation.Repository.URL != "owner/name" {
+		t.Fatalf("unexpected execution invocation repository: %q", executionStub.invocation.Repository.URL)
 	}
 	if executionStub.invocation.Workplace.Name != "task-123" {
 		t.Fatalf("unexpected workplace name: %q", executionStub.invocation.Workplace.Name)
@@ -184,7 +189,7 @@ func TestServiceStartPropagatesExecutionErrorWithDecisionContext(t *testing.T) {
 	}
 }
 
-func TestServiceStartFailsFastOnIssueRepositoryMismatch(t *testing.T) {
+func TestServiceStartPassesExternalRepositoryToExecution(t *testing.T) {
 	t.Parallel()
 
 	integrationStub := &stubIntegrationExecutor{
@@ -198,7 +203,7 @@ func TestServiceStartFailsFastOnIssueRepositoryMismatch(t *testing.T) {
 			},
 		},
 	}
-	executionStub := &stubExecutionStarter{}
+	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
 	service := &Service{
 		logger:      log.Default(),
 		integration: integrationStub,
@@ -207,23 +212,20 @@ func TestServiceStartFailsFastOnIssueRepositoryMismatch(t *testing.T) {
 	}
 
 	result, err := service.Start(context.Background(), StartInput{TaskNumber: 55})
-	if err == nil {
-		t.Fatal("expected repository mismatch error")
-	}
-	if err.Error() != `issue repository "owner/name" does not match current repository "other/repo"` {
-		t.Fatalf("unexpected repository mismatch error: %v", err)
+	if err != nil {
+		t.Fatalf("start: %v", err)
 	}
 	if !result.Ready {
-		t.Fatal("expected ready decision context even when execution is blocked")
+		t.Fatal("expected ready decision context")
 	}
 	if result.Decision == nil || result.Decision.Type != DecisionType(DecisionTypeExecute) {
-		t.Fatalf("expected execute decision to be preserved on repository mismatch, got %#v", result.Decision)
+		t.Fatalf("expected execute decision, got %#v", result.Decision)
 	}
-	if result.Execution != nil {
-		t.Fatalf("execution must not start on repository mismatch: %#v", result.Execution)
+	if result.Execution == nil || result.Execution.Status != "completed" {
+		t.Fatalf("expected execution result, got %#v", result.Execution)
 	}
-	if !reflect.DeepEqual(executionStub.invocation, execution.Invocation{}) {
-		t.Fatalf("execution must not be invoked on repository mismatch: %#v", executionStub.invocation)
+	if executionStub.invocation.Repository.URL != "owner/name" {
+		t.Fatalf("execution must receive issue repository, got %#v", executionStub.invocation)
 	}
 }
 

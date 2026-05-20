@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/execution"
@@ -16,6 +17,7 @@ const defaultLaunchModel = "openai/gpt-5.4"
 type launchFlags struct {
 	directory                string
 	name                     string
+	repo                     string
 	profile                  string
 	runner                   string
 	model                    string
@@ -168,7 +170,7 @@ func newExecutionWorkplaceCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("workplace=%s\nready=%t\n", workplace.Name, workplace.Ready)
+			cmd.Println(formatExecutionWorkplaceDiagnostics(workplace))
 			return nil
 		},
 	}
@@ -238,6 +240,7 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
 	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
 	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Тип исполнительного профиля")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
@@ -254,12 +257,14 @@ func bindProfileFlags(cmd *cobra.Command, flags *launchFlags) {
 func bindWorkplaceFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.directory, "dir", "", "Существующий рабочий каталог")
 	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
 }
 
 func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 	return execution.Invocation{
-		Profile:   flags.profile,
-		Workplace: execution.WorkplaceSpec{Name: flags.name},
+		Profile:    flags.profile,
+		Repository: execution.RepositorySpec{URL: flags.repo},
+		Workplace:  execution.WorkplaceSpec{Name: flags.name},
 		Launch: execution.LaunchSpec{
 			Directory:                flags.directory,
 			Runner:                   flags.runner,
@@ -278,8 +283,9 @@ func invocationFromProfileFlags(flags *launchFlags) execution.Invocation {
 
 func invocationFromWorkplaceFlags(flags *launchFlags) execution.Invocation {
 	return execution.Invocation{
-		Workplace: execution.WorkplaceSpec{Name: flags.name},
-		Launch:    execution.LaunchSpec{Directory: flags.directory},
+		Repository: execution.RepositorySpec{URL: flags.repo},
+		Workplace:  execution.WorkplaceSpec{Name: flags.name},
+		Launch:     execution.LaunchSpec{Directory: flags.directory},
 	}
 }
 
@@ -318,6 +324,19 @@ func printLaunchStructuredOutput(cmd *cobra.Command, result execution.LaunchResu
 
 	cmd.Println("structured-output:")
 	printStructuredOutputBlock(cmd, result.StructuredOutput)
+}
+
+func formatExecutionWorkplaceDiagnostics(workplace execution.Workplace) string {
+	lines := make([]string, 0, 4)
+	if strings.TrimSpace(workplace.RepositoryURL) != "" {
+		lines = append(lines, fmt.Sprintf("repository=%s", workplace.RepositoryURL))
+	}
+	if strings.TrimSpace(workplace.RepositoryRoot) != "" {
+		lines = append(lines, fmt.Sprintf("repository-root=%s", workplace.RepositoryRoot))
+	}
+	lines = append(lines, fmt.Sprintf("workplace=%s", workplace.Name))
+	lines = append(lines, fmt.Sprintf("ready=%t", workplace.Ready))
+	return strings.Join(lines, "\n")
 }
 
 func printStructuredOutputBlock(cmd *cobra.Command, output *execution.StructuredOutput) {

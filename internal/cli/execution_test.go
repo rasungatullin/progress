@@ -52,6 +52,87 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 	}
 }
 
+func TestBindStartFlagsAndInvocationIncludesRepo(t *testing.T) {
+	t.Parallel()
+
+	flags := newStartFlags()
+	cmd := &cobra.Command{Use: "start"}
+	bindStartFlags(cmd, flags)
+
+	err := cmd.ParseFlags([]string{"--name", "task-49", "--repo", "https://github.com/owner/name", "--prompt", "ship it"})
+	if err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	invocation := invocationFromLaunchFlags(flags)
+	if invocation.Workplace.Name != "task-49" {
+		t.Fatalf("unexpected workplace: %q", invocation.Workplace.Name)
+	}
+	if invocation.Repository.URL != "https://github.com/owner/name" {
+		t.Fatalf("unexpected repository: %q", invocation.Repository.URL)
+	}
+}
+
+func TestBindWorkplaceFlagsAndInvocationIncludesRepo(t *testing.T) {
+	t.Parallel()
+
+	flags := &launchFlags{}
+	cmd := &cobra.Command{Use: "workplace"}
+	bindWorkplaceFlags(cmd, flags)
+
+	err := cmd.ParseFlags([]string{"--name", "task-49", "--repo", "git@github.com:owner/name.git"})
+	if err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	invocation := invocationFromWorkplaceFlags(flags)
+	if invocation.Workplace.Name != "task-49" {
+		t.Fatalf("unexpected workplace: %q", invocation.Workplace.Name)
+	}
+	if invocation.Repository.URL != "git@github.com:owner/name.git" {
+		t.Fatalf("unexpected repository: %q", invocation.Repository.URL)
+	}
+}
+
+func TestExecutionWorkplaceCommandPrintsRepositoryDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "workplace", "--name", "task-49", "--repo", "owner/name"})
+
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			prepareWorkplace: func(context.Context, execution.Invocation, execution.Profile, execution.Allocation) (execution.Workplace, error) {
+				return execution.Workplace{
+					Name:           "/tmp/workplaces/github-owner-name/task-49",
+					RepositoryURL:  "https://github.com/owner/name.git",
+					RepositoryRoot: "/tmp/repositories/github-owner-name",
+					Ready:          true,
+				}, nil
+			},
+		}
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute workplace command: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "repository=https://github.com/owner/name.git\n") {
+		t.Fatalf("output must include repository: %q", output)
+	}
+	if !strings.Contains(output, "repository-root=/tmp/repositories/github-owner-name\n") {
+		t.Fatalf("output must include repository root: %q", output)
+	}
+	if !strings.Contains(output, "workplace=/tmp/workplaces/github-owner-name/task-49\nready=true\n") {
+		t.Fatalf("output must include workplace details: %q", output)
+	}
+}
+
 func TestNewLaunchFlagsDefaults(t *testing.T) {
 	t.Parallel()
 
