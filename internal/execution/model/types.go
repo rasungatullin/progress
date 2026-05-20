@@ -111,11 +111,16 @@ type WorkplaceSpec struct {
 	Name string
 }
 
+type RepositorySpec struct {
+	URL string
+}
+
 type Invocation struct {
-	Task      string
-	Profile   string
-	Workplace WorkplaceSpec
-	Launch    LaunchSpec
+	Task       string
+	Profile    string
+	Repository RepositorySpec
+	Workplace  WorkplaceSpec
+	Launch     LaunchSpec
 }
 
 type Profile struct {
@@ -165,8 +170,10 @@ type Allocation struct {
 }
 
 type Workplace struct {
-	Name  string
-	Ready bool
+	Name           string
+	RepositoryURL  string
+	RepositoryRoot string
+	Ready          bool
 }
 
 type LaunchResult struct {

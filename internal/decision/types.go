@@ -37,6 +37,7 @@ type DecisionReason struct {
 type ExecutionPlan struct {
 	TaskNumber int
 	TaskTitle  string
+	Repository string
 	Profile    string
 	Prompt     string
 }
