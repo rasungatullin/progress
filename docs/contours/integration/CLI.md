@@ -200,7 +200,9 @@ gh issue view 123 --repo owner/name --json number,title,body,state,labels,assign
 gh api repos/owner/name/issues/123/comments
 ```
 
-Если потребуется единообразие полей, адаптер должен сам преобразовать ответ в массив `TrackerComment`.
+Команда принимает `--repo` и обязательный `--number`. Если `--repo` не передан, адаптер может использовать `default_repo` из `.progress/integration/github.json`; если пользователь явно передал пустой `--repo=`, fallback не применяется и запрос отклоняется как `invalid-request`.
+
+Адаптер преобразует REST-ответ GitHub в массив `TrackerComment` с полями `System`, `Repository`, `Number`, `Author`, `Body`, `URL`, `CreatedAt` и `UpdatedAt`. В текстовом выводе команда печатает общий `comment_count`, затем поля каждого комментария и тело построчно.
 
 ### 7.6 `progress integration github issue search`
 

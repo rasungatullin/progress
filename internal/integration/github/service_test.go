@@ -111,7 +111,7 @@ func TestServiceRejectsUnsupportedOperation(t *testing.T) {
 	t.Parallel()
 
 	service := NewService()
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "search"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if response.Resource != "issue" {
 		t.Fatalf("unexpected resource: %q", response.Resource)
@@ -395,6 +395,138 @@ func TestServiceIssueGetAllowsNilAuthor(t *testing.T) {
 	}
 	if response.IssueStatus != nil {
 		t.Fatal("did not expect issue status on success")
+	}
+}
+
+func TestServiceIssueCommentsSuccess(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `[{"body":"First comment\nSecond line","html_url":"https://github.com/owner/name/issues/123#issuecomment-1","created_at":"2026-05-01T11:00:00Z","updated_at":"2026-05-01T12:00:00Z","user":{"login":"alice","html_url":"https://github.com/alice"}}]`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", Number: 123})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(response.Comments) != 1 {
+		t.Fatalf("expected one comment, got %#v", response.Comments)
+	}
+	comment := response.Comments[0]
+	if comment.Repository != "owner/name" || comment.Number != 123 {
+		t.Fatalf("unexpected target: %#v", comment)
+	}
+	if comment.Author.Login != "alice" || comment.Author.URL != "https://github.com/alice" {
+		t.Fatalf("unexpected author: %#v", comment.Author)
+	}
+	if comment.Body != "First comment\nSecond line" {
+		t.Fatalf("unexpected body: %q", comment.Body)
+	}
+	if comment.URL != "https://github.com/owner/name/issues/123#issuecomment-1" {
+		t.Fatalf("unexpected url: %q", comment.URL)
+	}
+	if response.Metadata["repository"] != "owner/name" || response.Metadata["number"] != "123" {
+		t.Fatalf("unexpected metadata: %#v", response.Metadata)
+	}
+	if response.IssueStatus != nil {
+		t.Fatal("did not expect issue status on success")
+	}
+	if stub.issueCommentCalls != 1 || stub.repo != "owner/name" || stub.number != 123 {
+		t.Fatalf("unexpected runner calls: %#v", stub)
+	}
+}
+
+func TestServiceIssueCommentsUsesConfiguredDefaultRepository(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `[]`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "owner/name"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Number: 123})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.Comments == nil || len(response.Comments) != 0 {
+		t.Fatalf("expected empty comments slice, got %#v", response.Comments)
+	}
+	if response.Metadata["repository"] != "owner/name" {
+		t.Fatalf("unexpected metadata: %#v", response.Metadata)
+	}
+	if stub.repo != "" {
+		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
+	}
+}
+
+func TestServiceIssueCommentsRejectsExplicitEmptyRepositoryWithoutUsingDefault(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "owner/name"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Number: 123, RepoProvided: true})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != ErrorCodeInvalidRequest {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+	if response.IssueStatus.Message != "GitHub repository is required" {
+		t.Fatalf("unexpected message: %q", response.IssueStatus.Message)
+	}
+	if stub.issueCommentCalls != 0 {
+		t.Fatalf("runner must not be invoked for explicit empty repository, got %d calls", stub.issueCommentCalls)
+	}
+}
+
+func TestServiceIssueCommentsMapsMalformedJSONToNormalizedError(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `{"body":"not an array"}`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", Number: 123})
+	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	if response.IssueStatus.State != StateExternalFailure {
+		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
+	}
+	if !strings.Contains(response.IssueStatus.Message, "unexpected GitHub CLI JSON response") {
+		t.Fatalf("unexpected message: %q", response.IssueStatus.Message)
+	}
+	if response.Comments != nil {
+		t.Fatal("did not expect comments")
 	}
 }
 
@@ -1083,19 +1215,20 @@ func TestServicePRCreateMapsMissingRepositoryOrBranchToNotFound(t *testing.T) {
 }
 
 type stubRunner struct {
-	result      CommandResult
-	config      resolvedConfig
-	err         error
-	repo        string
-	repoCalls   int
-	issueCalls  int
-	prViewCalls int
-	number      int
-	base        string
-	head        string
-	title       string
-	body        string
-	draft       bool
+	result            CommandResult
+	config            resolvedConfig
+	err               error
+	repo              string
+	repoCalls         int
+	issueCalls        int
+	issueCommentCalls int
+	prViewCalls       int
+	number            int
+	base              string
+	head              string
+	title             string
+	body              string
+	draft             bool
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -1110,6 +1243,13 @@ func (r *stubRunner) RunRepoView(_ context.Context, repository string) (CommandR
 
 func (r *stubRunner) RunIssueView(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
 	r.issueCalls++
+	r.repo = repository
+	r.number = number
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunIssueComments(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	r.issueCommentCalls++
 	r.repo = repository
 	r.number = number
 	return r.result, r.config, r.err

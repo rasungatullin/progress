@@ -78,6 +78,7 @@ func newIntegrationGitHubIssueCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newIntegrationGitHubIssueGetCommand())
+	cmd.AddCommand(newIntegrationGitHubIssueCommentsCommand())
 	return cmd
 }
 
@@ -189,6 +190,46 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 				Number:       flags.number,
 			})
 			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssue); err != nil {
+				return err
+			}
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
+	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер задачи GitHub")
+	return cmd
+}
+
+func newIntegrationGitHubIssueCommentsCommand() *cobra.Command {
+	flags := &integrationFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "comments",
+		Short: "Получение комментариев задачи GitHub",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("number") {
+				return fmt.Errorf("--number is required")
+			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				System:       "github",
+				Resource:     "issue",
+				Operation:    "comments",
+				Repository:   flags.repo,
+				RepoProvided: cmd.Flags().Changed("repo"),
+				Number:       flags.number,
+			})
+			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssueComments); err != nil {
 				return err
 			}
 			if err != nil {
@@ -445,6 +486,39 @@ func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 	printMultilineField(cmd, "stderr", status.Stderr)
 }
 
+func printGitHubIssueComments(cmd *cobra.Command, response integration.Response) {
+	if response.Comments != nil {
+		repository := ""
+		number := 0
+		if len(response.Comments) > 0 {
+			repository = response.Comments[0].Repository
+			number = response.Comments[0].Number
+		} else if response.Metadata != nil {
+			repository = response.Metadata["repository"]
+			number, _ = strconv.Atoi(response.Metadata["number"])
+		}
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\ncomment_count=%d\n", response.System, response.Resource, response.Operation, repository, number, len(response.Comments))
+		for _, comment := range response.Comments {
+			cmd.Printf("comment_author_login=%s\ncomment_author_name=%s\ncomment_author_url=%s\ncomment_url=%s\ncomment_created_at=%s\ncomment_updated_at=%s\n", comment.Author.Login, comment.Author.Name, comment.Author.URL, comment.URL, comment.CreatedAt, comment.UpdatedAt)
+			printCommentBody(cmd, comment.Body)
+		}
+		return
+	}
+
+	status := response.IssueStatus
+	if status == nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nmessage=GitHub issue comments did not return normalized comments\n", response.System, response.Resource, response.Operation)
+		return
+	}
+
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	for _, diagnostic := range status.Diagnostics {
+		cmd.Printf("diagnostic=%s\n", diagnostic)
+	}
+	printMultilineField(cmd, "stdout", status.Stdout)
+	printMultilineField(cmd, "stderr", status.Stderr)
+}
+
 func printGitHubPullRequestStatus(cmd *cobra.Command, response integration.Response) {
 	status := response.PullRequestStatus
 	if status == nil {
@@ -503,6 +577,18 @@ func printIssueBody(cmd *cobra.Command, value string) {
 	}
 
 	cmd.Printf("body_raw=%s\n", strconv.Quote(strings.ReplaceAll(value, "\r\n", "\n")))
+}
+
+func printCommentBody(cmd *cobra.Command, value string) {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	if value == "" {
+		return
+	}
+	for _, line := range strings.Split(value, "\n") {
+		cmd.Printf("comment_body=%s\n", line)
+	}
+
+	cmd.Printf("comment_body_raw=%s\n", strconv.Quote(strings.ReplaceAll(value, "\r\n", "\n")))
 }
 
 func validateSingleLineFlagValue(name string, value string) error {
