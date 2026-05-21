@@ -19,6 +19,7 @@ type launchFlags struct {
 	name                     string
 	repo                     string
 	profile                  string
+	executionProfile         string
 	reviewProfile            string
 	maxExecutions            int
 	runner                   string
@@ -63,6 +64,7 @@ func newExecutionCommand() *cobra.Command {
 
 	cmd.AddCommand(
 		newExecutionStartCommand(),
+		newExecutionReviewCycleCommand(),
 		newExecutionDispatcherCommand(),
 		newExecutionProfileCommand(),
 		newExecutionResourcesCommand(),
@@ -81,17 +83,7 @@ func newExecutionStartCommand() *cobra.Command {
 		Short: "Полный запуск контура исполнения",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			invocation := invocationFromLaunchFlags(flags)
-			var (
-				result execution.LaunchResult
-				err    error
-			)
-
-			if strings.TrimSpace(flags.reviewProfile) == "" {
-				result, err = service.Start(context.Background(), invocation)
-			} else {
-				result, err = execution.RunReviewCycle(context.Background(), service, invocation, flags.reviewProfile, flags.maxExecutions)
-			}
+			result, err := service.Start(context.Background(), invocationFromLaunchFlags(flags))
 			if err != nil {
 				printLaunchResultOnError(cmd, result)
 				return err
@@ -103,6 +95,29 @@ func newExecutionStartCommand() *cobra.Command {
 	}
 
 	bindStartFlags(cmd, flags)
+	return cmd
+}
+
+func newExecutionReviewCycleCommand() *cobra.Command {
+	flags := newReviewCycleFlags()
+
+	cmd := &cobra.Command{
+		Use:   "review-cycle",
+		Short: "Цикл исполнения с автоматическим ревью",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			service := newExecutionService(cmd)
+			result, err := execution.RunReviewCycle(context.Background(), service, invocationFromReviewCycleFlags(flags), flags.reviewProfile, flags.maxExecutions)
+			if err != nil {
+				printLaunchResultOnError(cmd, result)
+				return err
+			}
+
+			printLaunchResult(cmd, result)
+			return nil
+		},
+	}
+
+	bindReviewCycleFlags(cmd, flags)
 	return cmd
 }
 
@@ -233,8 +248,14 @@ func newLaunchFlags() *launchFlags {
 
 func newStartFlags() *launchFlags {
 	return &launchFlags{
-		profile:       "default",
-		maxExecutions: execution.DefaultReviewCycleMaxExecutions,
+		profile: "default",
+	}
+}
+
+func newReviewCycleFlags() *launchFlags {
+	return &launchFlags{
+		executionProfile: "default",
+		maxExecutions:    execution.DefaultReviewCycleMaxExecutions,
 	}
 }
 
@@ -255,13 +276,27 @@ func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
 	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Тип исполнительного профиля")
-	cmd.Flags().StringVar(&flags.reviewProfile, "review-profile", "", "Профиль ревью для цикла исполнение -> ревью -> доработка")
-	cmd.Flags().IntVar(&flags.maxExecutions, "max-executions", flags.maxExecutions, "Максимальное число запусков исполнения в режиме саморевью")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
 	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
+	_ = cmd.MarkFlagRequired("prompt")
+}
+
+func bindReviewCycleFlags(cmd *cobra.Command, flags *launchFlags) {
+	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
+	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
+	cmd.Flags().StringVar(&flags.executionProfile, "execution-profile", flags.executionProfile, "Профиль исполнения")
+	cmd.Flags().StringVar(&flags.reviewProfile, "review-profile", "", "Профиль ревью")
+	cmd.Flags().IntVar(&flags.maxExecutions, "max-executions", flags.maxExecutions, "Максимальное число запусков исполнения")
+	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
+	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
+	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
+	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
+	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
+	_ = cmd.MarkFlagRequired("review-profile")
 	_ = cmd.MarkFlagRequired("prompt")
 }
 
@@ -290,6 +325,12 @@ func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 			CommitPush:               flags.commitPush,
 		},
 	}
+}
+
+func invocationFromReviewCycleFlags(flags *launchFlags) execution.Invocation {
+	invocation := invocationFromLaunchFlags(flags)
+	invocation.Profile = flags.executionProfile
+	return invocation
 }
 
 func invocationFromProfileFlags(flags *launchFlags) execution.Invocation {

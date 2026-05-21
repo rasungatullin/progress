@@ -73,7 +73,7 @@ func TestBindStartFlagsAndInvocationIncludesRepo(t *testing.T) {
 	}
 }
 
-func TestExecutionStartCommandRunsReviewCycleWhenReviewProfileIsSet(t *testing.T) {
+func TestExecutionReviewCycleCommandRunsCycleAboveStart(t *testing.T) {
 	t.Parallel()
 
 	cmd := NewRootCommand()
@@ -82,8 +82,8 @@ func TestExecutionStartCommandRunsReviewCycleWhenReviewProfileIsSet(t *testing.T
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{
-		"execution", "start",
-		"--profile", "coder",
+		"execution", "review-cycle",
+		"--execution-profile", "coder",
 		"--review-profile", "review",
 		"--max-executions", "3",
 		"--dir", "/tmp/work",
@@ -116,7 +116,7 @@ func TestExecutionStartCommandRunsReviewCycleWhenReviewProfileIsSet(t *testing.T
 	})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute start command: %v", err)
+		t.Fatalf("execute review-cycle command: %v", err)
 	}
 	if len(calls) != 2 {
 		t.Fatalf("expected execution and review start calls, got %d", len(calls))
@@ -140,7 +140,7 @@ func TestExecutionStartCommandRunsReviewCycleWhenReviewProfileIsSet(t *testing.T
 	}
 }
 
-func TestExecutionStartHelpIncludesReviewCycleFlags(t *testing.T) {
+func TestExecutionStartHelpDoesNotIncludeReviewCycleFlags(t *testing.T) {
 	t.Parallel()
 
 	cmd := NewRootCommand()
@@ -156,8 +156,30 @@ func TestExecutionStartHelpIncludesReviewCycleFlags(t *testing.T) {
 
 	help := stdout.String()
 	for _, fragment := range []string{"--review-profile", "--max-executions"} {
+		if strings.Contains(help, fragment) {
+			t.Fatalf("start help must not include review-cycle flag %q, got %q", fragment, help)
+		}
+	}
+}
+
+func TestExecutionReviewCycleHelpIncludesCycleFlags(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "review-cycle", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute review-cycle help: %v", err)
+	}
+
+	help := stdout.String()
+	for _, fragment := range []string{"--execution-profile", "--review-profile", "--max-executions"} {
 		if !strings.Contains(help, fragment) {
-			t.Fatalf("start help must include %q, got %q", fragment, help)
+			t.Fatalf("review-cycle help must include %q, got %q", fragment, help)
 		}
 	}
 }

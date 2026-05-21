@@ -13,6 +13,7 @@ CLI рассматривается как основной ручной инте
 В минимальной конфигурации предусматриваются следующие команды:
 
 - `progress execution start`;
+- `progress execution review-cycle`;
 - `progress execution dispatcher`;
 - `progress execution profile`;
 - `progress execution resources`;
@@ -34,26 +35,35 @@ CLI рассматривается как основной ручной инте
 
 В текущей реализации команда дополнительно поддерживает `--repo`. Если флаг не передан, подготовка рабочего места идёт относительно текущего git-репозитория процесса. Если `--repo` передан, контур нормализует GitHub shorthand `owner/name` или clone URL, materialize-ит локальный cache в `.progress/repositories/<repo-key>` текущего проекта, затем создаёт worktree в `.progress/workplaces/<repo-key>/<name>` и продолжает обычный flow `origin/HEAD -> git fetch -> git worktree add` уже для целевого репозитория.
 
-Дополнительно `start` поддерживает режим саморевью. Он включается только при передаче `--review-profile`. В этом режиме `--profile` остаётся профилем исполнения, `--review-profile` задаёт профиль ревью, а `--max-executions` ограничивает количество запусков исполнения. Значение `--max-executions` по умолчанию равно `5`.
+### 3.2 `progress execution review-cycle`
 
-Режим саморевью не вводит отдельный путь подготовки среды. Каждый шаг цикла вызывает тот же полный маршрут `start`: сначала исполнение, затем ревью. Если structured output ревью содержит `conclusion.status=ok`, `approve` или `approved`, цикл завершается успешно. Любой другой статус считается требованием доработки, и следующий запуск исполнения получает результаты предыдущего исполнения и замечания ревью через `StructuredInput.review_remarks` и `StructuredInput.previous_run_results`. Если лимит исполнений исчерпан без approving conclusion, итоговый статус команды становится `limit-reached`.
+Команда выполняет цикл над обычным полным запуском контура исполнения. Она находится над `progress execution start`: каждый шаг исполнения и каждый шаг ревью внутри цикла вызывают тот же маршрут полного запуска, но решение о повторении, остановке и передаче замечаний принимает внешний координатор `review-cycle`.
+
+Вход команды повторяет прикладной вход `start`: `--dir`, `--name`, `--repo`, `--runner`, `--model`, `--prompt`, `--structured-output` и `--structured-output-required`. Вместо одного `--profile` команда принимает два явных профиля:
+
+- `--execution-profile` — профиль исполнения;
+- `--review-profile` — профиль ревью.
+
+`--max-executions` ограничивает количество запусков исполнения. Значение по умолчанию равно `5`.
+
+`review-cycle` не вводит отдельный путь подготовки среды. Сначала запускается исполнение, затем ревью. Если structured output ревью содержит `conclusion.status=ok`, `approve` или `approved`, цикл завершается успешно. Любой другой статус считается требованием доработки, и следующий запуск исполнения получает результаты предыдущего исполнения и замечания ревью через `StructuredInput.review_remarks` и `StructuredInput.previous_run_results`. Если лимит исполнений исчерпан без approving conclusion, итоговый статус команды становится `limit-reached`.
 
 Пример:
 
 ```bash
-progress execution start \
-  --profile coder \
+progress execution review-cycle \
+  --execution-profile coder \
   --review-profile review \
   --max-executions 5 \
   --name review-cycle-task \
   --prompt "<task prompt with optional trailing structured input>"
 ```
 
-### 3.2 `progress execution dispatcher`
+### 3.3 `progress execution dispatcher`
 
 Команда вызывает диспетчер исполнения как отдельный модуль. Данный режим предназначен для диагностики маршрута исполнения, наблюдения за порядком стадий и последующей отладки правил диспетчеризации.
 
-### 3.3 `progress execution profile`
+### 3.4 `progress execution profile`
 
 Команда отдельно вызывает модуль выбора исполнительного профиля. Результатом является решение о том, какой профиль должен применяться к данному заданию и какие ограничения он накладывает.
 
@@ -123,11 +133,11 @@ progress execution start \
 
 В resolved profile команда явно возвращает `description`, `runner`, `mode`, `model`, `prompt-additions`, `structured-output`, `structured-output-required`, `structured-output-fields` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
 
-### 3.4 `progress execution resources`
+### 3.5 `progress execution resources`
 
 Команда отдельно вызывает подсистему ресурсного снабжения. Она предназначена для проверки доступности ресурсов и имитации резервирования без обязательного запуска всего исполнительного контура.
 
-### 3.5 `progress execution workplace`
+### 3.6 `progress execution workplace`
 
 Команда отдельно вызывает модуль подготовки исполнительного рабочего места. Она используется для проверки правил подготовки среды и воспроизводимости исполнительной конфигурации.
 
@@ -137,7 +147,7 @@ progress execution start \
 
 Если `--repo` передан, поддерживаются форматы `https://github.com/owner/name`, `https://github.com/owner/name.git`, `git@github.com:owner/name.git` и shorthand `owner/name`. После нормализации clone URL materialize-ится cache-копия репозитория в `.progress/repositories/<repo-key>`, затем worktree создаётся в `.progress/workplaces/<repo-key>/<name>`. Диагностический вывод команды дополнительно печатает выбранный `repository=` и локальный `repository-root=`.
 
-### 3.6 `progress execution launch`
+### 3.7 `progress execution launch`
 
 Команда вызывает модуль пуска задачи. Она соответствует последней стадии работы диспетчера после завершения аллокаций и подготовки рабочего места.
 
@@ -249,11 +259,12 @@ Wrong vs right JSON example:
 flowchart TD
     A[progress] --> B[execution]
     B --> C[start]
-    B --> D[dispatcher]
-    B --> E[profile]
-    B --> F[resources]
-    B --> G[workplace]
-    B --> H[launch]
+    B --> D[review-cycle]
+    B --> E[dispatcher]
+    B --> F[profile]
+    B --> G[resources]
+    B --> H[workplace]
+    B --> I[launch]
 ```
 
 ## 5. Порядок полного вызова
@@ -275,11 +286,11 @@ flowchart LR
     E --> F[result]
 ```
 
-Если для `start` задан `--review-profile`, внешний маршрут становится циклическим, но каждый отдельный запуск исполнения и ревью по-прежнему проходит тот же внутренний маршрут.
+Для `progress execution review-cycle` внешний маршрут становится циклическим, но каждый отдельный запуск исполнения и ревью по-прежнему проходит тот же внутренний маршрут полного запуска.
 
 ```mermaid
 flowchart TD
-    A[progress execution start with review-profile] --> B[execution start route]
+    A[progress execution review-cycle] --> B[execution start route]
     B --> C[review start route]
     C --> D{review conclusion}
     D -- ok/approve --> E[result completed]
