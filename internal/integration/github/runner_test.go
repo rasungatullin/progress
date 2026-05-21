@@ -341,7 +341,7 @@ func TestRunnerRunIssueCommentsBuildsAPICommand(t *testing.T) {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"api", "repos/owner/name/issues/123/comments"}
+		expected := []string{"api", "--paginate", "--slurp", "repos/owner/name/issues/123/comments"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}
@@ -382,7 +382,7 @@ func TestRunnerRunIssueCommentsUsesConfiguredDefaultRepository(t *testing.T) {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"api", "repos/owner/name/issues/123/comments"}
+		expected := []string{"api", "--paginate", "--slurp", "repos/owner/name/issues/123/comments"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}

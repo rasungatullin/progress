@@ -444,6 +444,36 @@ func TestServiceIssueCommentsSuccess(t *testing.T) {
 	}
 }
 
+func TestServiceIssueCommentsFlattensPaginatedSlurpPayload(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `[[{"body":"page one","html_url":"https://github.com/owner/name/issues/123#issuecomment-1","created_at":"2026-05-01T11:00:00Z","updated_at":"2026-05-01T12:00:00Z","user":{"login":"alice","html_url":"https://github.com/alice"}}],[{"body":"page two","html_url":"https://github.com/owner/name/issues/123#issuecomment-2","created_at":"2026-05-02T11:00:00Z","updated_at":"2026-05-02T12:00:00Z","user":{"login":"bob","html_url":"https://github.com/bob"}}]]`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", Number: 123})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(response.Comments) != 2 {
+		t.Fatalf("expected two comments, got %#v", response.Comments)
+	}
+	if response.Comments[0].Body != "page one" || response.Comments[1].Body != "page two" {
+		t.Fatalf("unexpected comment bodies: %#v", response.Comments)
+	}
+	if response.Comments[1].Author.Login != "bob" {
+		t.Fatalf("unexpected second author: %#v", response.Comments[1].Author)
+	}
+}
+
 func TestServiceIssueCommentsUsesConfiguredDefaultRepository(t *testing.T) {
 	t.Parallel()
 

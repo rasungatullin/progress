@@ -180,7 +180,7 @@ func (r *Runner) RunIssueComments(ctx context.Context, repository string, number
 		}
 	}
 
-	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", fmt.Sprintf("repos/%s/issues/%d/comments", repository, number)})
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--paginate", "--slurp", fmt.Sprintf("repos/%s/issues/%d/comments", repository, number)})
 }
 
 func (r *Runner) RunPRView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {

@@ -417,8 +417,8 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 		}
 	}
 
-	var raw []ghIssueComment
-	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+	raw, err := decodeIssueComments(result.Stdout)
+	if err != nil {
 		status.State = StateExternalFailure
 		status.Message = fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err)
 		status.Diagnostics = append(status.Diagnostics, "gh issue comments returned malformed JSON")
@@ -450,6 +450,23 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 		"number":     strconv.Itoa(number),
 	}
 	return response, nil
+}
+
+func decodeIssueComments(payload string) ([]ghIssueComment, error) {
+	var pages [][]ghIssueComment
+	if err := json.Unmarshal([]byte(payload), &pages); err == nil {
+		comments := make([]ghIssueComment, 0)
+		for _, page := range pages {
+			comments = append(comments, page...)
+		}
+		return comments, nil
+	}
+
+	var comments []ghIssueComment
+	if err := json.Unmarshal([]byte(payload), &comments); err != nil {
+		return nil, err
+	}
+	return comments, nil
 }
 
 func (s *Service) executePRGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
@@ -871,7 +888,7 @@ func issueCommentsErrorStatus(config resolvedConfig, result CommandResult, repos
 	if number > 0 {
 		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("number=%d", number))
 	}
-	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s api repos/%s/issues/%d/comments", status.Command, repository, number))
+	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s api --paginate --slurp repos/%s/issues/%d/comments", status.Command, repository, number))
 	return status
 }
 
