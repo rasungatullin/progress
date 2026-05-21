@@ -73,6 +73,95 @@ func TestBindStartFlagsAndInvocationIncludesRepo(t *testing.T) {
 	}
 }
 
+func TestExecutionStartCommandRunsReviewCycleWhenReviewProfileIsSet(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{
+		"execution", "start",
+		"--profile", "coder",
+		"--review-profile", "review",
+		"--max-executions", "3",
+		"--dir", "/tmp/work",
+		"--prompt", "ship it",
+	})
+
+	var calls []execution.Invocation
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			start: func(_ context.Context, in execution.Invocation) (execution.LaunchResult, error) {
+				calls = append(calls, in)
+				switch len(calls) {
+				case 1:
+					return execution.LaunchResult{Status: "completed", Summary: "execution done"}, nil
+				case 2:
+					return execution.LaunchResult{
+						Status:  "completed",
+						Summary: "review done",
+						StructuredOutput: &execution.StructuredOutput{
+							ProtocolVersion: execution.StructuredIOVersion,
+							Summary:         "Approved.",
+							Conclusion:      &execution.StructuredConclusion{Status: "ok"},
+						},
+					}, nil
+				default:
+					return execution.LaunchResult{}, errors.New("unexpected extra start call")
+				}
+			},
+		}
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute start command: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected execution and review start calls, got %d", len(calls))
+	}
+	if calls[0].Profile != "coder" || calls[1].Profile != "review" {
+		t.Fatalf("unexpected profile sequence: %#v", []string{calls[0].Profile, calls[1].Profile})
+	}
+	if calls[1].Launch.StructuredInput == nil {
+		t.Fatal("review run must receive structured input")
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "state=completed\n") {
+		t.Fatalf("output must include completed state: %q", output)
+	}
+	if !strings.Contains(output, "review-cycle execution-profile=coder review-profile=review max-executions=3 attempts=1") {
+		t.Fatalf("output must include review cycle summary: %q", output)
+	}
+	if !strings.Contains(output, "conclusion={\"status\":\"ok\"}\n") {
+		t.Fatalf("output must include final review structured output: %q", output)
+	}
+}
+
+func TestExecutionStartHelpIncludesReviewCycleFlags(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "start", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute start help: %v", err)
+	}
+
+	help := stdout.String()
+	for _, fragment := range []string{"--review-profile", "--max-executions"} {
+		if !strings.Contains(help, fragment) {
+			t.Fatalf("start help must include %q, got %q", fragment, help)
+		}
+	}
+}
+
 func TestBindWorkplaceFlagsAndInvocationIncludesRepo(t *testing.T) {
 	t.Parallel()
 

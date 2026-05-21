@@ -34,6 +34,21 @@ CLI рассматривается как основной ручной инте
 
 В текущей реализации команда дополнительно поддерживает `--repo`. Если флаг не передан, подготовка рабочего места идёт относительно текущего git-репозитория процесса. Если `--repo` передан, контур нормализует GitHub shorthand `owner/name` или clone URL, materialize-ит локальный cache в `.progress/repositories/<repo-key>` текущего проекта, затем создаёт worktree в `.progress/workplaces/<repo-key>/<name>` и продолжает обычный flow `origin/HEAD -> git fetch -> git worktree add` уже для целевого репозитория.
 
+Дополнительно `start` поддерживает режим саморевью. Он включается только при передаче `--review-profile`. В этом режиме `--profile` остаётся профилем исполнения, `--review-profile` задаёт профиль ревью, а `--max-executions` ограничивает количество запусков исполнения. Значение `--max-executions` по умолчанию равно `5`.
+
+Режим саморевью не вводит отдельный путь подготовки среды. Каждый шаг цикла вызывает тот же полный маршрут `start`: сначала исполнение, затем ревью. Если structured output ревью содержит `conclusion.status=ok`, `approve` или `approved`, цикл завершается успешно. Любой другой статус считается требованием доработки, и следующий запуск исполнения получает результаты предыдущего исполнения и замечания ревью через `StructuredInput.review_remarks` и `StructuredInput.previous_run_results`. Если лимит исполнений исчерпан без approving conclusion, итоговый статус команды становится `limit-reached`.
+
+Пример:
+
+```bash
+progress execution start \
+  --profile coder \
+  --review-profile review \
+  --max-executions 5 \
+  --name review-cycle-task \
+  --prompt "<task prompt with optional trailing structured input>"
+```
+
 ### 3.2 `progress execution dispatcher`
 
 Команда вызывает диспетчер исполнения как отдельный модуль. Данный режим предназначен для диагностики маршрута исполнения, наблюдения за порядком стадий и последующей отладки правил диспетчеризации.
@@ -258,6 +273,19 @@ flowchart LR
     C --> D[workplace]
     D --> E[launch]
     E --> F[result]
+```
+
+Если для `start` задан `--review-profile`, внешний маршрут становится циклическим, но каждый отдельный запуск исполнения и ревью по-прежнему проходит тот же внутренний маршрут.
+
+```mermaid
+flowchart TD
+    A[progress execution start with review-profile] --> B[execution start route]
+    B --> C[review start route]
+    C --> D{review conclusion}
+    D -- ok/approve --> E[result completed]
+    D -- needs changes --> F{execution limit reached}
+    F -- no --> B
+    F -- yes --> G[result limit-reached]
 ```
 
 ## 6. Порядки изолированного вызова

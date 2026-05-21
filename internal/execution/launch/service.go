@@ -348,35 +348,45 @@ func validateStructuredOutputPayload(payload model.StructuredOutput) error {
 }
 
 func prepareInvocation(in model.Invocation) (model.Invocation, error) {
-	plainPrompt, structuredInput, structuredInputState, structuredInputErr := parseStructuredInput(in.Launch.Prompt)
+	plainPrompt, structuredInput, err := NormalizeStructuredInput(in.Launch.Prompt, in.Launch.StructuredInput)
+	if err != nil {
+		return model.Invocation{}, err
+	}
+
+	in.Launch.Prompt = plainPrompt
+	in.Launch.StructuredInput = structuredInput
+	return in, nil
+}
+
+func NormalizeStructuredInput(prompt string, input *model.StructuredInput) (string, *model.StructuredInput, error) {
+	plainPrompt, structuredInput, structuredInputState, structuredInputErr := parseStructuredInput(prompt)
 	switch structuredInputState {
 	case trailingStructuredBlockValid:
-		in.Launch.Prompt = plainPrompt
-		if in.Launch.StructuredInput == nil {
-			in.Launch.StructuredInput = structuredInput
+		prompt = plainPrompt
+		if input == nil {
+			input = structuredInput
 		}
 	case trailingStructuredBlockInvalid:
 		if structuredInputErr != nil {
-			return model.Invocation{}, fmt.Errorf("invalid structured input: %w", structuredInputErr)
+			return "", nil, fmt.Errorf("invalid structured input: %w", structuredInputErr)
 		}
-		return model.Invocation{}, fmt.Errorf("invalid structured input: trailing %s block is invalid", structuredInputStart)
+		return "", nil, fmt.Errorf("invalid structured input: trailing %s block is invalid", structuredInputStart)
 	default:
-		if in.Launch.StructuredInput == nil {
-			return in, nil
+		if input == nil {
+			return prompt, nil, nil
 		}
 	}
 
-	if in.Launch.StructuredInput == nil {
-		return in, nil
+	if input == nil {
+		return prompt, nil, nil
 	}
 
-	canonical, err := canonicalizeStructuredInput(*in.Launch.StructuredInput)
+	canonical, err := canonicalizeStructuredInput(*input)
 	if err != nil {
-		return model.Invocation{}, fmt.Errorf("invalid structured input: %w", err)
+		return "", nil, fmt.Errorf("invalid structured input: %w", err)
 	}
-	in.Launch.StructuredInput = canonical
 
-	return in, nil
+	return prompt, canonical, nil
 }
 
 func validateStructuredOutputRequirement(spec model.LaunchSpec, rawPayload string, state trailingStructuredBlockState, parseErr error) error {

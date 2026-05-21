@@ -19,6 +19,8 @@ type launchFlags struct {
 	name                     string
 	repo                     string
 	profile                  string
+	reviewProfile            string
+	maxExecutions            int
 	runner                   string
 	model                    string
 	prompt                   string
@@ -79,7 +81,17 @@ func newExecutionStartCommand() *cobra.Command {
 		Short: "Полный запуск контура исполнения",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			result, err := service.Start(context.Background(), invocationFromLaunchFlags(flags))
+			invocation := invocationFromLaunchFlags(flags)
+			var (
+				result execution.LaunchResult
+				err    error
+			)
+
+			if strings.TrimSpace(flags.reviewProfile) == "" {
+				result, err = service.Start(context.Background(), invocation)
+			} else {
+				result, err = execution.RunReviewCycle(context.Background(), service, invocation, flags.reviewProfile, flags.maxExecutions)
+			}
 			if err != nil {
 				printLaunchResultOnError(cmd, result)
 				return err
@@ -221,7 +233,8 @@ func newLaunchFlags() *launchFlags {
 
 func newStartFlags() *launchFlags {
 	return &launchFlags{
-		profile: "default",
+		profile:       "default",
+		maxExecutions: execution.DefaultReviewCycleMaxExecutions,
 	}
 }
 
@@ -242,6 +255,8 @@ func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
 	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Тип исполнительного профиля")
+	cmd.Flags().StringVar(&flags.reviewProfile, "review-profile", "", "Профиль ревью для цикла исполнение -> ревью -> доработка")
+	cmd.Flags().IntVar(&flags.maxExecutions, "max-executions", flags.maxExecutions, "Максимальное число запусков исполнения в режиме саморевью")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
 	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
