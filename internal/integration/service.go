@@ -196,6 +196,9 @@ func normalizeOperation(operation string) string {
 func expectedResult(resource string, operation string) string {
 	switch resource {
 	case "issue":
+		if operation == "comments" {
+			return "tracker-comment[]"
+		}
 		if operation == "search" {
 			return "tracker-search-result[]"
 		}

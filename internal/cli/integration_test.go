@@ -1132,6 +1132,310 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedErrorResult(t *testing.
 	}
 }
 
+func TestIntegrationGitHubIssueCommentsCommandPrintsNormalizedComments(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "comments", "--repo", "owner/name", "--number", "123"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			System:    "github",
+			Resource:  "issue",
+			Operation: "comments",
+			Comments: []integration.TrackerComment{{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     123,
+				Author:     integration.TrackerUser{System: "github", Login: "alice", Name: "Alice", URL: "https://github.com/alice"},
+				Body:       "First line\nSecond line",
+				URL:        "https://github.com/owner/name/issues/123#issuecomment-1",
+				CreatedAt:  "2026-05-01T10:00:00Z",
+				UpdatedAt:  "2026-05-02T10:00:00Z",
+			}},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue comments command: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=issue\n",
+		"operation=comments\n",
+		"repository=owner/name\n",
+		"number=123\n",
+		"comment_count=1\n",
+		"comment_author_login=alice\n",
+		"comment_author_name=Alice\n",
+		"comment_author_url=https://github.com/alice\n",
+		"comment_url=https://github.com/owner/name/issues/123#issuecomment-1\n",
+		"comment_created_at=2026-05-01T10:00:00Z\n",
+		"comment_updated_at=2026-05-02T10:00:00Z\n",
+		"comment_body=First line\n",
+		"comment_body=Second line\n",
+		"comment_body_raw=\"First line\\nSecond line\"\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github issue comments output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
+func TestIntegrationGitHubIssueCommentsCommandPrintsEmptyResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "comments", "--repo", "owner/name", "--number", "123"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			System:    "github",
+			Resource:  "issue",
+			Operation: "comments",
+			Comments:  []integration.TrackerComment{},
+			Metadata: map[string]string{
+				"repository": "owner/name",
+				"number":     "123",
+			},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue comments command: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=issue\n",
+		"operation=comments\n",
+		"repository=owner/name\n",
+		"number=123\n",
+		"comment_count=0\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github issue comments output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
+func TestIntegrationGitHubIssueCommentsCommandPrintsJSONResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "comments", "--format", "json", "--repo", "owner/name", "--number", "123"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			Comments: []integration.TrackerComment{{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     123,
+				Author:     integration.TrackerUser{System: "github", Login: "alice"},
+				Body:       "body",
+			}},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue comments command: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("issue comments json parse: %v, output: %q", err, output)
+	}
+	if len(payload.Comments) != 1 {
+		t.Fatalf("expected one comment in json response, got %#v", payload.Comments)
+	}
+	if payload.Comments[0].Author.Login != "alice" {
+		t.Fatalf("unexpected comment author: %#v", payload.Comments[0].Author)
+	}
+}
+
+func TestIntegrationGitHubIssueCommentsCommandRequiresFlags(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "comments", "--repo", "owner/name"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github issue comments error")
+	}
+	if err.Error() != "--number is required" {
+		t.Fatalf("unexpected github issue comments error: %v", err)
+	}
+}
+
+func TestIntegrationGitHubIssueCommentsCommandAllowsOmittedRepoFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "comments", "--number", "123"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			System:    "github",
+			Resource:  "issue",
+			Operation: "comments",
+			Comments:  []integration.TrackerComment{},
+		},
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue comments command without repo: %v", err)
+	}
+	if provider.request.Repository != "" {
+		t.Fatalf("expected empty repository request so provider layer can resolve fallback, got %q", provider.request.Repository)
+	}
+	if provider.request.RepoProvided {
+		t.Fatal("expected omitted repo flag to stay false")
+	}
+	if provider.request.Operation != "comments" {
+		t.Fatalf("unexpected operation: %q", provider.request.Operation)
+	}
+}
+
+func TestIntegrationGitHubIssueCommentsCommandPassesExplicitEmptyRepoToProvider(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "comments", "--repo=", "--number", "123"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			IssueStatus: &integration.IssueStatus{
+				System:   "github",
+				State:    "invalid-request",
+				Command:  "gh",
+				ExitCode: -1,
+				Message:  "GitHub repository is required",
+			},
+		},
+		err: assertErr("GitHub repository is required"),
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github issue comments error")
+	}
+	if err.Error() != "GitHub repository is required" {
+		t.Fatalf("unexpected github issue comments error: %v", err)
+	}
+	if provider.request.Repository != "" {
+		t.Fatalf("expected explicit empty repository request, got %q", provider.request.Repository)
+	}
+	if !provider.request.RepoProvided {
+		t.Fatal("expected explicit repo flag to stay true")
+	}
+}
+
+func TestIntegrationGitHubIssueCommentsCommandPrintsNormalizedErrorResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "comments", "--repo", "owner/name", "--number", "123"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			IssueStatus: &integration.IssueStatus{
+				System:      "github",
+				Repository:  "owner/name",
+				Number:      123,
+				State:       "auth-required",
+				Command:     "gh",
+				Path:        "/usr/local/bin/gh",
+				ExitCode:    1,
+				Message:     "GitHub authentication is required",
+				Diagnostics: []string{"repository=owner/name", "number=123", "gh issue comments reported that no GitHub login is configured"},
+				Stderr:      "You are not logged into any GitHub hosts. Run gh auth login.",
+			},
+		},
+		err: assertErr("GitHub authentication is required"),
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github issue comments error")
+	}
+	if err.Error() != "GitHub authentication is required" {
+		t.Fatalf("unexpected github issue comments error: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=github\n",
+		"resource=issue\n",
+		"operation=comments\n",
+		"repository=owner/name\n",
+		"number=123\n",
+		"state=auth-required\n",
+		"command=gh\n",
+		"path=/usr/local/bin/gh\n",
+		"exit-code=1\n",
+		"message=GitHub authentication is required\n",
+		"diagnostic=repository=owner/name\n",
+		"diagnostic=number=123\n",
+		"diagnostic=gh issue comments reported that no GitHub login is configured\n",
+		"stderr=You are not logged into any GitHub hosts. Run gh auth login.\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github issue comments output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
 func TestIntegrationGitHubPRGetCommandPrintsNormalizedPullRequest(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}

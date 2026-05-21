@@ -15,6 +15,7 @@ type ghRunner interface {
 	RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error)
 	RunRepoView(context.Context, string) (CommandResult, resolvedConfig, error)
 	RunIssueView(context.Context, string, int) (CommandResult, resolvedConfig, error)
+	RunIssueComments(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRView(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRCreate(context.Context, string, PRCreateRequest) (CommandResult, resolvedConfig, error)
 }
@@ -53,8 +54,18 @@ type ghIssueUser struct {
 	Name     string `json:"name"`
 	Email    string `json:"email"`
 	URL      string `json:"url"`
+	HTMLURL  string `json:"html_url"`
 	IsBot    bool   `json:"isBot"`
 	IsActive bool   `json:"isActive"`
+}
+
+type ghIssueComment struct {
+	Body      string       `json:"body"`
+	URL       string       `json:"url"`
+	HTMLURL   string       `json:"html_url"`
+	CreatedAt string       `json:"created_at"`
+	UpdatedAt string       `json:"updated_at"`
+	User      *ghIssueUser `json:"user"`
 }
 
 type ghPRView struct {
@@ -94,6 +105,8 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executeRepoGet(ctx, response, req)
 	case req.Resource == "issue" && req.Operation == "get":
 		return s.executeIssueGet(ctx, response, req)
+	case req.Resource == "issue" && req.Operation == "comments":
+		return s.executeIssueComments(ctx, response, req)
 	case (req.Resource == "pr" || req.Resource == "pull-request") && req.Operation == "get":
 		return s.executePRGet(ctx, response, req)
 	case (req.Resource == "pr" || req.Resource == "pull-request") && req.Operation == "create":
@@ -327,6 +340,133 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		UpdatedAt:  strings.TrimSpace(raw.UpdatedAt),
 	}
 	return response, nil
+}
+
+func (s *Service) executeIssueComments(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository := strings.TrimSpace(req.Repository)
+	if req.RepoProvided {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status.State = ErrorCodeInvalidRequest
+			status.Message = err.Error()
+			status.Diagnostics = append(status.Diagnostics, "issue comments request rejected before invoking gh")
+			response.IssueStatus = &status
+			return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+		}
+	}
+
+	number, err := normalizeIssueNumber(req.Number)
+	if err != nil {
+		status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
+		status.State = ErrorCodeInvalidRequest
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "issue comments request rejected before invoking gh")
+		response.IssueStatus = &status
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	}
+
+	result, config, err := s.runner.RunIssueComments(ctx, repository, number)
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
+	if err != nil && result.ExitCode == 0 {
+		result.ExitCode = -1
+	}
+	if config.Command == "" {
+		config.Command = defaultCommand
+	}
+
+	status := issueCommentsErrorStatus(config, result, repository, number)
+	if err != nil {
+		var ghErr *Error
+		if errors.As(err, &ghErr) {
+			status.State = repositoryStateForErrorCode(ghErr.Code)
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "gh issue comments failed before returning a comments payload")
+			response.IssueStatus = &status
+			return response, ghErr
+		}
+
+		status.State = StateExternalFailure
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "gh issue comments failed before returning a comments payload")
+		response.IssueStatus = &status
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+	}
+
+	if result.ExitCode != 0 {
+		switch {
+		case isAuthRequired(result):
+			status.State = ErrorCodeAuthRequired
+			status.Message = "GitHub authentication is required"
+			status.Diagnostics = append(status.Diagnostics, "gh issue comments reported that no GitHub login is configured")
+			response.IssueStatus = &status
+			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
+		case isIssueNotFound(result), isRepoNotFound(result):
+			status.State = ErrorCodeNotFound
+			status.Message = fmt.Sprintf("GitHub issue not found: %s#%d", repository, number)
+			status.Diagnostics = append(status.Diagnostics, "gh issue comments could not resolve the requested issue")
+			response.IssueStatus = &status
+			return response, &Error{Code: ErrorCodeNotFound, Message: status.Message, Result: result}
+		default:
+			status.State = StateExternalFailure
+			status.Message = fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
+			status.Diagnostics = append(status.Diagnostics, "gh issue comments exited with a non-zero code")
+			response.IssueStatus = &status
+			return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+		}
+	}
+
+	raw, err := decodeIssueComments(result.Stdout)
+	if err != nil {
+		status.State = StateExternalFailure
+		status.Message = fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err)
+		status.Diagnostics = append(status.Diagnostics, "gh issue comments returned malformed JSON")
+		response.IssueStatus = &status
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+	}
+
+	comments := make([]model.TrackerComment, 0, len(raw))
+	for _, item := range raw {
+		author := model.TrackerUser{System: "github"}
+		if item.User != nil {
+			author = normalizeTrackerUser(*item.User)
+		}
+		comments = append(comments, model.TrackerComment{
+			System:     "github",
+			Repository: repository,
+			Number:     number,
+			Author:     author,
+			Body:       item.Body,
+			URL:        strings.TrimSpace(firstNonEmpty(item.HTMLURL, item.URL)),
+			CreatedAt:  strings.TrimSpace(item.CreatedAt),
+			UpdatedAt:  strings.TrimSpace(item.UpdatedAt),
+		})
+	}
+
+	response.Comments = comments
+	response.Metadata = map[string]string{
+		"repository": repository,
+		"number":     strconv.Itoa(number),
+	}
+	return response, nil
+}
+
+func decodeIssueComments(payload string) ([]ghIssueComment, error) {
+	var pages [][]ghIssueComment
+	if err := json.Unmarshal([]byte(payload), &pages); err == nil {
+		comments := make([]ghIssueComment, 0)
+		for _, page := range pages {
+			comments = append(comments, page...)
+		}
+		return comments, nil
+	}
+
+	var comments []ghIssueComment
+	if err := json.Unmarshal([]byte(payload), &comments); err != nil {
+		return nil, err
+	}
+	return comments, nil
 }
 
 func (s *Service) executePRGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
@@ -722,6 +862,36 @@ func issueErrorStatus(config resolvedConfig, result CommandResult, repository st
 	return status
 }
 
+func issueCommentsErrorStatus(config resolvedConfig, result CommandResult, repository string, number int) model.IssueStatus {
+	status := model.IssueStatus{
+		System:     "github",
+		Repository: repository,
+		Number:     number,
+		State:      StateExternalFailure,
+		Command:    config.Command,
+		Path:       result.Path,
+		ExitCode:   result.ExitCode,
+		Stdout:     result.Stdout,
+		Stderr:     result.Stderr,
+	}
+
+	if status.Command == "" {
+		status.Command = defaultCommand
+	}
+	if status.ExitCode == 0 {
+		status.ExitCode = -1
+	}
+
+	if repository != "" {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("repository=%s", repository))
+	}
+	if number > 0 {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("number=%d", number))
+	}
+	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s api --paginate --slurp repos/%s/issues/%d/comments", status.Command, repository, number))
+	return status
+}
+
 func prGetErrorStatus(config resolvedConfig, result CommandResult, repository string, number int) model.PullRequestStatus {
 	status := model.PullRequestStatus{
 		System:     "github",
@@ -795,7 +965,7 @@ func normalizeTrackerUser(raw ghIssueUser) model.TrackerUser {
 		Login:    strings.TrimSpace(raw.Login),
 		Name:     strings.TrimSpace(raw.Name),
 		Email:    strings.TrimSpace(raw.Email),
-		URL:      strings.TrimSpace(raw.URL),
+		URL:      strings.TrimSpace(firstNonEmpty(raw.URL, raw.HTMLURL)),
 		IsBot:    raw.IsBot,
 		IsActive: raw.IsActive,
 	}

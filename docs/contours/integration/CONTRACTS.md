@@ -158,6 +158,8 @@ type PullRequestComment struct {
 }
 ```
 
+В текущем runtime-срезе GitHub issue comments нормализуются в общий `TrackerComment`: `Repository` и `Number` задают исходную issue, `Author` хранит нормализованного пользователя, `URL` берётся из `html_url`, а `CreatedAt`/`UpdatedAt` сохраняются как строки из ответа GitHub.
+
 ## 6. Интерфейс контура
 
 Контур должен публиковать простой Go-интерфейс с предметными методами по основным сущностям первого среза.
