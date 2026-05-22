@@ -394,8 +394,10 @@ func TestPrintLaunchResultWithoutStructuredOutput(t *testing.T) {
 	cmd.SetOut(stdout)
 
 	printLaunchResult(cmd, execution.LaunchResult{
-		Status:  "completed",
-		Summary: "profile=default git=disabled\nApplied the requested changes.",
+		Status:        "completed",
+		Summary:       "profile=default git=disabled\nApplied the requested changes.",
+		RawOutputPath: "/tmp/progress/raw.log",
+		RunRecordPath: "/tmp/progress/execution.json",
 	})
 
 	output := stdout.String()
@@ -404,6 +406,12 @@ func TestPrintLaunchResultWithoutStructuredOutput(t *testing.T) {
 	}
 	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nprofile=default git=disabled\nApplied the requested changes.\nPROGRESS_SUMMARY\n") {
 		t.Fatalf("output must include summary: %q", output)
+	}
+	if !strings.Contains(output, "raw-output-path=/tmp/progress/raw.log\n") {
+		t.Fatalf("output must include raw output path: %q", output)
+	}
+	if !strings.Contains(output, "run-record-path=/tmp/progress/execution.json\n") {
+		t.Fatalf("output must include run record path: %q", output)
 	}
 	if strings.Contains(output, "structured-output:\n") {
 		t.Fatalf("output must omit structured section when values are absent: %q", output)

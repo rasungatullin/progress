@@ -37,6 +37,22 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
+	if result.RunRecordPath == "" {
+		t.Fatalf("run record path must be present")
+	}
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.Result.Status != "completed" {
+		t.Fatalf("unexpected run record status: %#v", record.Result)
+	}
+	if record.Invocation.Launch.Prompt != "do work" {
+		t.Fatalf("unexpected run record prompt: %#v", record.Invocation.Launch.Prompt)
+	}
+	if record.StructuredOutput == nil || record.StructuredOutput.Summary != "Done." {
+		t.Fatalf("unexpected run record structured output: %#v", record.StructuredOutput)
+	}
+	if strings.TrimSpace(record.Result.RawOutputPath) == "" {
+		t.Fatalf("run record must keep raw output path: %#v", record.Result)
+	}
 	if !strings.Contains(result.Summary, "git=disabled") {
 		t.Fatalf("summary must include disabled git state: %q", result.Summary)
 	}
@@ -72,7 +88,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 					return " M file.txt\n", nil
 				}
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
 				return "", nil
 			case "commit -m Ship release notes":
 				return "[feature/test abc123] Ship release notes\n", nil
@@ -98,7 +114,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"rev-parse", "--is-inside-work-tree"},
 		{"branch", "--show-current"},
 		{"status", "--porcelain"},
-		{"add", "-A", "--", ".", runnerOutputExcludePathspec},
+		{"add", "-A", "--", ".", runnerOutputExcludePathspec, executionRunsExcludePathspec},
 		{"status", "--porcelain"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
@@ -106,6 +122,16 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
+	}
+	if result.RunRecordPath == "" {
+		t.Fatalf("run record path must be present")
+	}
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.Result.Status != "completed" {
+		t.Fatalf("unexpected run record status: %#v", record.Result)
+	}
+	if !strings.Contains(record.Result.Summary, "git=committed+pushed branch=feature/test") {
+		t.Fatalf("run record summary must include git status: %#v", record.Result.Summary)
 	}
 }
 
@@ -133,7 +159,7 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 					return " M file.txt\n", nil
 				}
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
 				addArgs = append([]string(nil), args...)
 				return "", nil
 			case "commit -m repo":
@@ -151,7 +177,7 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", ".", runnerOutputExcludePathspec}) {
+	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", ".", runnerOutputExcludePathspec, executionRunsExcludePathspec}) {
 		t.Fatalf("git add must exclude raw runner output path: %#v", addArgs)
 	}
 }
@@ -179,7 +205,7 @@ func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *te
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
 				return "", nil
 			case "commit -m review-fixes":
 				return "[feature/test abc123] review-fixes\n", nil
@@ -221,7 +247,7 @@ func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *te
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
 				return "", nil
 			case "commit -m structured-contract-v1-worktree":
 				return "[feature/test abc123] structured-contract-v1-worktree\n", nil
@@ -323,6 +349,58 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyRunnerOutputChanges(t *testin
 	}
 }
 
+func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyExecutionRunRecordsChange(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain":
+				return "?? .progress/execution-runs/execution-123.json\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !strings.Contains(result.Summary, "git=no-changes branch=feature/test") {
+		t.Fatalf("unexpected summary: %q", result.Summary)
+	}
+
+	expectedCalls := [][]string{
+		{"rev-parse", "--is-inside-work-tree"},
+		{"branch", "--show-current"},
+		{"status", "--porcelain"},
+	}
+	if !reflect.DeepEqual(calls, expectedCalls) {
+		t.Fatalf("unexpected git calls: %#v", calls)
+	}
+}
+
+func TestLaunchCommitPushKeepsProgressConfigVisibleAsUserChange(t *testing.T) {
+	t.Parallel()
+
+	if !statusLineHasUserChanges(" M .progress/execution/profiles.json") {
+		t.Fatal("tracked progress execution config must remain visible to commit/push")
+	}
+	if statusLineHasUserChanges("?? .progress/execution-runs/execution-123.json") {
+		t.Fatal("execution run records must be ignored as runtime artifacts")
+	}
+}
+
 func TestLaunchPushErrorReturned(t *testing.T) {
 	t.Parallel()
 
@@ -338,7 +416,7 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
 				return "", nil
 			case "commit -m repo":
 				return "[feature/test abc123] repo\n", nil
@@ -364,6 +442,52 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 	}
 	if strings.TrimSpace(result.RawOutputPath) == "" {
 		t.Fatalf("raw output path must be preserved when commit/push fails: %#v", result)
+	}
+	if result.RunRecordPath == "" {
+		t.Fatalf("run record path must be present on push error: %#v", result)
+	}
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.Result.Status != "failed" {
+		t.Fatalf("unexpected run record status: %#v", record.Result)
+	}
+	if !strings.Contains(record.Error, "git push failed") {
+		t.Fatalf("unexpected run record error: %#v", record.Error)
+	}
+}
+
+func TestLaunchRunnerErrorReturned(t *testing.T) {
+	t.Parallel()
+
+	runnerErr := errors.New("launch runner failed")
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "", runnerErr
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when runner fails")
+			return "", nil
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	if err == nil {
+		t.Fatal("expected runner error")
+	}
+	if result.Status != "failed" {
+		t.Fatalf("result status must signal failed launch: %#v", result)
+	}
+	if !strings.Contains(result.Summary, "launch runner failed") {
+		t.Fatalf("result summary should include runner error: %#v", result)
+	}
+	if result.RunRecordPath == "" {
+		t.Fatalf("run record path must be present on runner error: %#v", result)
+	}
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.Result.Status != "failed" {
+		t.Fatalf("unexpected run record status: %#v", record.Result)
+	}
+	if !strings.Contains(record.Error, "launch runner failed") {
+		t.Fatalf("unexpected run record error: %#v", record.Error)
 	}
 }
 
@@ -527,6 +651,13 @@ func TestLaunchStructuredOutputRequiredMissingFails(t *testing.T) {
 	}
 	if result.Status != "failed" {
 		t.Fatalf("unexpected result status: %#v", result)
+	}
+	if result.RunRecordPath == "" {
+		t.Fatalf("run record path must be present on required output error")
+	}
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.Result.Status != "failed" || !strings.Contains(record.StructuredOutputErr, "missing") {
+		t.Fatalf("run record must include required output validation error: %#v", record)
 	}
 	if !strings.Contains(result.Summary, "Applied the requested changes.") {
 		t.Fatalf("summary must preserve plain runner output: %q", result.Summary)
@@ -793,8 +924,16 @@ func TestLaunchParsesStructuredInputFromPromptBlock(t *testing.T) {
 		structuredInputEnd,
 	}, "\n")
 
-	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t)); err != nil {
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
 		t.Fatalf("launch: %v", err)
+	}
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.Invocation.Launch.Prompt != "Reply to the latest review." {
+		t.Fatalf("run record must keep normalized plain prompt: %#v", record.Invocation.Launch.Prompt)
+	}
+	if !reflect.DeepEqual(record.StructuredInput, &structuredInput) {
+		t.Fatalf("run record must keep normalized structured input: %#v", record.StructuredInput)
 	}
 }
 
@@ -1142,6 +1281,48 @@ func TestLaunchInvalidTrailingBlockWinsOverEarlierValidBlock(t *testing.T) {
 	if !strings.Contains(result.Summary, `{"protocol_version":"review-cycle/v1","remarks":"broken trailing block"}`) {
 		t.Fatalf("summary must preserve invalid trailing block for diagnostics: %q", result.Summary)
 	}
+}
+
+type persistedLaunchRunRecord struct {
+	CreatedAt           string                  `json:"created_at"`
+	Invocation          model.Invocation        `json:"invocation"`
+	Profile             model.Profile           `json:"profile"`
+	Allocation          model.Allocation        `json:"allocation"`
+	Workplace           model.Workplace         `json:"workplace"`
+	StructuredInput     *model.StructuredInput  `json:"structured_input,omitempty"`
+	RawStructuredOutput string                  `json:"raw_structured_output"`
+	StructuredOutput    *model.StructuredOutput `json:"structured_output,omitempty"`
+	StructuredOutputErr string                  `json:"structured_output_error,omitempty"`
+	Error               string                  `json:"error,omitempty"`
+	Result              struct {
+		Status        string `json:"status"`
+		Summary       string `json:"summary"`
+		RawOutputPath string `json:"raw_output_path"`
+	} `json:"result"`
+}
+
+func readLaunchRunRecord(t *testing.T, path string) persistedLaunchRunRecord {
+	t.Helper()
+
+	if strings.TrimSpace(path) == "" {
+		t.Fatalf("expected run record path")
+	}
+
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read run record: %v", err)
+	}
+
+	var record persistedLaunchRunRecord
+	if err := json.Unmarshal(bytes, &record); err != nil {
+		t.Fatalf("parse run record: %v", err)
+	}
+
+	if strings.TrimSpace(record.CreatedAt) == "" {
+		t.Fatalf("run record missing created_at")
+	}
+
+	return record
 }
 
 func validInvocation(t *testing.T, commitPush bool) model.Invocation {

@@ -349,11 +349,12 @@ func printLaunchResult(cmd *cobra.Command, result execution.LaunchResult) {
 	cmd.Printf("state=%s\n", result.Status)
 	printLaunchSummary(cmd, result.Summary)
 	printLaunchRawOutputPath(cmd, result.RawOutputPath)
+	printLaunchRunRecordPath(cmd, result.RunRecordPath)
 	printLaunchStructuredOutput(cmd, result)
 }
 
 func printLaunchResultOnError(cmd *cobra.Command, result execution.LaunchResult) {
-	if strings.TrimSpace(result.Status) == "" && strings.TrimSpace(result.Summary) == "" && strings.TrimSpace(result.RawOutputPath) == "" && result.StructuredOutput == nil {
+	if strings.TrimSpace(result.Status) == "" && strings.TrimSpace(result.Summary) == "" && strings.TrimSpace(result.RawOutputPath) == "" && strings.TrimSpace(result.RunRecordPath) == "" && result.StructuredOutput == nil {
 		return
 	}
 
@@ -371,6 +372,15 @@ func printLaunchRawOutputPath(cmd *cobra.Command, path string) {
 	}
 
 	cmd.Printf("raw-output-path=%s\n", path)
+}
+
+func printLaunchRunRecordPath(cmd *cobra.Command, path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+
+	cmd.Printf("run-record-path=%s\n", path)
 }
 
 func printLaunchStructuredOutput(cmd *cobra.Command, result execution.LaunchResult) {
