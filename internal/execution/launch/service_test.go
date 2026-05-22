@@ -399,6 +399,12 @@ func TestLaunchCommitPushKeepsProgressConfigVisibleAsUserChange(t *testing.T) {
 	if statusLineHasUserChanges("?? .progress/execution-runs/execution-123.json") {
 		t.Fatal("execution run records must be ignored as runtime artifacts")
 	}
+	if statusLineHasUserChanges(" M .progress/execution-runs/execution-123.json") {
+		t.Fatal("unstaged execution run record changes must be ignored as runtime artifacts")
+	}
+	if statusLineHasUserChanges(" M .progress/runner-output/execution-123.log") {
+		t.Fatal("unstaged runner output changes must be ignored as runtime artifacts")
+	}
 }
 
 func TestLaunchPushErrorReturned(t *testing.T) {

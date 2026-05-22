@@ -71,7 +71,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	runnerOutput, err := s.runRunner(ctx, in)
 	if err != nil {
 		result := model.LaunchResult{
-			Status: "failed",
+			Status:  "failed",
 			Summary: strings.TrimSpace(err.Error()),
 		}
 		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
@@ -789,8 +789,7 @@ func (s *Service) hasChanges(ctx context.Context, dir string) (bool, error) {
 }
 
 func statusLineHasUserChanges(line string) bool {
-	line = strings.TrimSpace(line)
-	if line == "" {
+	if strings.TrimSpace(line) == "" {
 		return false
 	}
 
