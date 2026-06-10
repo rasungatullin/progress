@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
@@ -60,12 +61,16 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	var err error
 	in, err = prepareInvocation(in)
 	if err != nil {
-		return model.LaunchResult{}, err
+		result := failedLaunchResult(err)
+		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		return result, err
 	}
 	in.Launch = applyProfileStructuredOutput(in.Launch, profile)
 
 	if err := validateLaunch(in, workplace); err != nil {
-		return model.LaunchResult{}, err
+		result := failedLaunchResult(err)
+		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		return result, err
 	}
 
 	runnerOutput, err := s.runRunner(ctx, in)
@@ -137,6 +142,10 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, structuredOutputErr, nil)
 
 	return result, nil
+}
+
+func failedLaunchResult(err error) model.LaunchResult {
+	return model.LaunchResult{Status: "failed", Summary: strings.TrimSpace(err.Error())}
 }
 
 func parseStructuredOutput(output string) (string, string, *model.StructuredOutput, trailingStructuredBlockState, error) {
@@ -377,7 +386,7 @@ func validateStructuredOutputPayload(payload model.StructuredOutput) error {
 func prepareInvocation(in model.Invocation) (model.Invocation, error) {
 	plainPrompt, structuredInput, err := NormalizeStructuredInput(in.Launch.Prompt, in.Launch.StructuredInput)
 	if err != nil {
-		return model.Invocation{}, err
+		return in, err
 	}
 
 	in.Launch.Prompt = plainPrompt
@@ -661,8 +670,9 @@ func persistExecutionRunRecord(workplaceDir string, in model.Invocation, profile
 		launchErrText = launchErr.Error()
 	}
 
+	createdAt := time.Now().UTC().Format(time.RFC3339)
 	record := runRecord{
-		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+		CreatedAt:           createdAt,
 		Invocation:          in,
 		Profile:             profile,
 		Allocation:          allocation,
@@ -687,6 +697,22 @@ func persistExecutionRunRecord(workplaceDir string, in model.Invocation, profile
 	if _, err := io.WriteString(recordFile, string(payload)); err != nil {
 		return ""
 	}
+
+	_ = history.Store(context.Background(), workplaceDir, history.Run{
+		CreatedAt:           createdAt,
+		Status:              launchResult.Status,
+		Summary:             launchResult.Summary,
+		Name:                in.Workplace.Name,
+		ProfileName:         profile.Name,
+		Runner:              in.Launch.Runner,
+		Model:               in.Launch.Model,
+		LaunchDirectory:     in.Launch.Directory,
+		RawStructuredInput:  history.StructuredInputJSON(structuredInput),
+		RawOutputPath:       launchResult.RawOutputPath,
+		RawStructuredOutput: history.StructuredOutputJSON(structuredOutput, rawStructuredOutput),
+		RunRecordPath:       recordFile.Name(),
+		Error:               launchErrText,
+	})
 
 	return recordFile.Name()
 }

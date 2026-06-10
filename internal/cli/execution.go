@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/rasungatullin/progress/internal/execution"
+	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/logging"
 	"github.com/spf13/cobra"
@@ -28,6 +31,13 @@ type launchFlags struct {
 	structuredOutput         bool
 	structuredOutputRequired bool
 	commitPush               bool
+}
+
+type executionRunsFlags struct {
+	jsonOutput bool
+	limit      int
+	name       string
+	status     string
 }
 
 type executionCommandService interface {
@@ -70,8 +80,47 @@ func newExecutionCommand() *cobra.Command {
 		newExecutionResourcesCommand(),
 		newExecutionWorkplaceCommand(),
 		newExecutionLaunchCommand(),
+		newExecutionRunsCommand(),
 	)
 
+	return cmd
+}
+
+func newExecutionRunsCommand() *cobra.Command {
+	flags := executionRunsFlags{limit: 20}
+
+	cmd := &cobra.Command{
+		Use:   "runs",
+		Short: "История запусков execution",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+
+			runs, err := history.List(context.Background(), cwd, history.ListFilter{Limit: flags.limit, Name: flags.name, Status: flags.status})
+			if err != nil {
+				return err
+			}
+
+			if flags.jsonOutput {
+				payload, err := json.Marshal(runs)
+				if err != nil {
+					return err
+				}
+				cmd.Println(string(payload))
+				return nil
+			}
+
+			printExecutionRunsTable(cmd, runs)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&flags.jsonOutput, "json", false, "Вывести историю в JSON")
+	cmd.Flags().IntVar(&flags.limit, "limit", flags.limit, "Максимальное число записей")
+	cmd.Flags().StringVar(&flags.name, "name", "", "Фильтр по имени запуска")
+	cmd.Flags().StringVar(&flags.status, "status", "", "Фильтр по статусу запуска")
 	return cmd
 }
 
@@ -390,6 +439,19 @@ func printLaunchStructuredOutput(cmd *cobra.Command, result execution.LaunchResu
 
 	cmd.Println("structured-output:")
 	printStructuredOutputBlock(cmd, result.StructuredOutput)
+}
+
+func printExecutionRunsTable(cmd *cobra.Command, runs []history.ListedRun) {
+	writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(writer, "ID\tCREATED_AT\tSTATUS\tNAME\tPROFILE\tRUNNER\tSUMMARY")
+	for _, run := range runs {
+		fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", run.ID, run.CreatedAt, run.Status, run.Name, run.ProfileName, run.Runner, singleLine(run.Summary))
+	}
+	_ = writer.Flush()
+}
+
+func singleLine(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func formatExecutionWorkplaceDiagnostics(workplace execution.Workplace) string {

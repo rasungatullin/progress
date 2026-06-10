@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution"
+	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/spf13/cobra"
 )
 
@@ -181,6 +183,50 @@ func TestExecutionReviewCycleHelpIncludesCycleFlags(t *testing.T) {
 		if !strings.Contains(help, fragment) {
 			t.Fatalf("review-cycle help must include %q, got %q", fragment, help)
 		}
+	}
+}
+
+func TestExecutionRunsCommandPrintsJSONHistory(t *testing.T) {
+	root := t.TempDir()
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir temp root: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousDir)
+	})
+
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:       "2026-06-10T10:00:00Z",
+		Status:          "failed",
+		Summary:         "boom",
+		Name:            "task-54",
+		ProfileName:     "default",
+		Runner:          "opencode",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: root,
+		Error:           "boom",
+	}); err != nil {
+		t.Fatalf("store history: %v", err)
+	}
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "runs", "--json", "--status", "failed", "--name", "task-54"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute runs command: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, `"status":"failed"`) || !strings.Contains(output, `"name":"task-54"`) || !strings.Contains(output, `"error":"boom"`) {
+		t.Fatalf("unexpected runs json: %q", output)
 	}
 }
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 )
 
@@ -16,7 +18,10 @@ type reviewCycleStarter interface {
 
 func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocation, reviewProfile string, maxExecutions int) (LaunchResult, error) {
 	if starter == nil {
-		return LaunchResult{}, fmt.Errorf("review cycle starter is required")
+		err := fmt.Errorf("review cycle starter is required")
+		result := failedStartResult(err)
+		storeReviewCycleAggregate(ctx, in, result, err)
+		return result, err
 	}
 
 	executionProfile := strings.TrimSpace(in.Profile)
@@ -26,19 +31,27 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 
 	reviewProfile = strings.TrimSpace(reviewProfile)
 	if reviewProfile == "" {
-		return LaunchResult{}, fmt.Errorf("review profile is required")
+		err := fmt.Errorf("review profile is required")
+		result := failedStartResult(err)
+		storeReviewCycleAggregate(ctx, in, result, err)
+		return result, err
 	}
 
 	if maxExecutions == 0 {
 		maxExecutions = DefaultReviewCycleMaxExecutions
 	}
 	if maxExecutions < 0 {
-		return LaunchResult{}, fmt.Errorf("max executions must be positive")
+		err := fmt.Errorf("max executions must be positive")
+		result := failedStartResult(err)
+		storeReviewCycleAggregate(ctx, in, result, err)
+		return result, err
 	}
 
 	normalizedPrompt, structuredInput, err := launch.NormalizeStructuredInput(in.Launch.Prompt, in.Launch.StructuredInput)
 	if err != nil {
-		return LaunchResult{}, err
+		result := failedStartResult(err)
+		storeReviewCycleAggregate(ctx, in, result, err)
+		return result, err
 	}
 	in.Launch.Prompt = normalizedPrompt
 	in.Launch.StructuredInput = structuredInput
@@ -61,6 +74,7 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 		if err != nil {
 			attempts = append(attempts, formatReviewCycleAttempt(attempt, executionResult, LaunchResult{}, ""))
 			result := reviewCycleResult("failed", executionProfile, reviewProfile, maxExecutions, attempts, executionResult)
+			storeReviewCycleAggregate(ctx, in, result, err)
 			return result, err
 		}
 
@@ -75,14 +89,47 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 		attempts = append(attempts, formatReviewCycleAttempt(attempt, executionResult, reviewResult, conclusion))
 		if err != nil {
 			result := reviewCycleResult("failed", executionProfile, reviewProfile, maxExecutions, attempts, reviewResult)
+			storeReviewCycleAggregate(ctx, in, result, err)
 			return result, err
 		}
 		if isApprovingReviewStatus(conclusion) {
-			return reviewCycleResult("completed", executionProfile, reviewProfile, maxExecutions, attempts, reviewResult), nil
+			result := reviewCycleResult("completed", executionProfile, reviewProfile, maxExecutions, attempts, reviewResult)
+			storeReviewCycleAggregate(ctx, in, result, nil)
+			return result, nil
 		}
 	}
 
-	return reviewCycleResult("limit-reached", executionProfile, reviewProfile, maxExecutions, attempts, lastReview), nil
+	result := reviewCycleResult("limit-reached", executionProfile, reviewProfile, maxExecutions, attempts, lastReview)
+	storeReviewCycleAggregate(ctx, in, result, nil)
+	return result, nil
+}
+
+func storeReviewCycleAggregate(ctx context.Context, in Invocation, result LaunchResult, runErr error) {
+	root := executionHistoryRoot(in, Workplace{})
+	if root == "" {
+		return
+	}
+
+	errorText := ""
+	if runErr != nil {
+		errorText = strings.TrimSpace(runErr.Error())
+	}
+
+	_ = history.Store(ctx, root, history.Run{
+		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+		Status:              fallbackExecutionHistoryValue(result.Status),
+		Summary:             result.Summary,
+		Name:                in.Workplace.Name,
+		ProfileName:         fallbackExecutionHistoryValue(strings.TrimSpace(in.Profile)),
+		Runner:              fallbackExecutionHistoryValue(in.Launch.Runner),
+		Model:               fallbackExecutionHistoryValue(in.Launch.Model),
+		LaunchDirectory:     fallbackLaunchDirectory(in, root),
+		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
+		RawOutputPath:       result.RawOutputPath,
+		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, ""),
+		RunRecordPath:       result.RunRecordPath,
+		Error:               errorText,
+	})
 }
 
 func buildReviewCycleReviewPrompt(originalPrompt string, attempt int) string {

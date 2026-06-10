@@ -3,8 +3,12 @@ package execution
 import (
 	"context"
 	"log"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/rasungatullin/progress/internal/execution/dispatcher"
+	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
 	"github.com/rasungatullin/progress/internal/execution/profile"
@@ -77,7 +81,34 @@ func NewService(logger *log.Logger) *Service {
 }
 
 func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error) {
-	return s.dispatcher.Run(ctx, in, s)
+	s.logger.Printf("Контур исполнения принят к пуску: задача=%q", in.Task)
+
+	profile, err := s.ResolveProfile(ctx, in)
+	if err != nil {
+		result := failedStartResult(err)
+		s.storeFailedStart(ctx, in, Profile{}, Workplace{}, result, err)
+		return result, err
+	}
+
+	allocation, err := s.AllocateResources(ctx, in, profile)
+	if err != nil {
+		result := failedStartResult(err)
+		s.storeFailedStart(ctx, in, profile, Workplace{}, result, err)
+		return result, err
+	}
+
+	workplace, err := s.PrepareWorkplace(ctx, in, profile, allocation)
+	if err != nil {
+		result := failedStartResult(err)
+		s.storeFailedStart(ctx, in, profile, Workplace{}, result, err)
+		return result, err
+	}
+
+	if strings.TrimSpace(in.Launch.Directory) == "" {
+		in.Launch.Directory = workplace.Name
+	}
+
+	return s.Launch(ctx, in, profile, allocation, workplace)
 }
 
 func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
@@ -139,4 +170,69 @@ func (s *Service) Launch(ctx context.Context, in Invocation, profile Profile, al
 
 	s.logger.Printf("Запуск выполнения завершён: каталог=%q состояние=%q", in.Launch.Directory, result.Status)
 	return result, nil
+}
+
+func failedStartResult(err error) LaunchResult {
+	return LaunchResult{Status: "failed", Summary: strings.TrimSpace(err.Error())}
+}
+
+func (s *Service) storeFailedStart(ctx context.Context, in Invocation, profile Profile, workplace Workplace, result LaunchResult, launchErr error) {
+	root := executionHistoryRoot(in, workplace)
+	if root == "" {
+		return
+	}
+
+	runner := in.Launch.Runner
+	if strings.TrimSpace(runner) == "" {
+		runner = profile.Runner
+	}
+	modelName := in.Launch.Model
+	if strings.TrimSpace(modelName) == "" {
+		modelName = profile.Model
+	}
+	profileName := profile.Name
+	if strings.TrimSpace(profileName) == "" {
+		profileName = strings.TrimSpace(in.Profile)
+	}
+
+	_ = history.Store(ctx, root, history.Run{
+		CreatedAt:          time.Now().UTC().Format(time.RFC3339),
+		Status:             result.Status,
+		Summary:            result.Summary,
+		Name:               in.Workplace.Name,
+		ProfileName:        fallbackExecutionHistoryValue(profileName),
+		Runner:             fallbackExecutionHistoryValue(runner),
+		Model:              fallbackExecutionHistoryValue(modelName),
+		LaunchDirectory:    fallbackLaunchDirectory(in, root),
+		RawStructuredInput: history.StructuredInputJSON(in.Launch.StructuredInput),
+		Error:              strings.TrimSpace(launchErr.Error()),
+	})
+}
+
+func executionHistoryRoot(in Invocation, workplace Workplace) string {
+	if strings.TrimSpace(workplace.Name) != "" {
+		return workplace.Name
+	}
+	if strings.TrimSpace(in.Launch.Directory) != "" {
+		return in.Launch.Directory
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return wd
+}
+
+func fallbackLaunchDirectory(in Invocation, root string) string {
+	if strings.TrimSpace(in.Launch.Directory) != "" {
+		return in.Launch.Directory
+	}
+	return root
+}
+
+func fallbackExecutionHistoryValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
 }
