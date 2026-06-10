@@ -52,6 +52,64 @@ func TestStoreAndListExecutionRuns(t *testing.T) {
 	}
 }
 
+func TestBeginAndUpdateExecutionRunReusesRow(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	handle, err := Begin(context.Background(), root, Run{
+		CreatedAt:          "2026-06-10T10:00:00Z",
+		Status:             "running",
+		Summary:            "",
+		Name:               "task-58",
+		ProfileName:        "default",
+		Runner:             "opencode",
+		Model:              "openai/gpt-5.4",
+		LaunchDirectory:    root,
+		RawStructuredInput: `{"task":"Ship it"}`,
+	})
+	if err != nil {
+		t.Fatalf("begin run: %v", err)
+	}
+
+	runs, err := List(context.Background(), root, ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list running run: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Status != "running" {
+		t.Fatalf("expected one running run, got %#v", runs)
+	}
+
+	if err := Update(context.Background(), handle, Run{
+		Status:              "completed",
+		Summary:             "done",
+		Name:                "task-58",
+		ProfileName:         "coder",
+		Runner:              "opencode",
+		Model:               "openai/gpt-5.5",
+		LaunchDirectory:     filepath.Join(root, "workplace"),
+		RawStructuredInput:  `{"task":"Ship it","constraints":["minimal"]}`,
+		RawOutputPath:       filepath.Join(root, "output.log"),
+		RawStructuredOutput: `{"summary":"Done"}`,
+		RunRecordPath:       filepath.Join(root, "record.json"),
+	}); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+
+	runs, err = List(context.Background(), root, ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list updated run: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("update must reuse execution_runs row, got %d", len(runs))
+	}
+	if runs[0].ID != handle.RunID || runs[0].Status != "completed" || runs[0].ProfileName != "coder" || runs[0].Model != "openai/gpt-5.5" {
+		t.Fatalf("unexpected updated run: %#v", runs[0])
+	}
+	if runs[0].RawOutputPath == "" || runs[0].RawStructuredOutput != `{"summary":"Done"}` || runs[0].RunRecordPath == "" {
+		t.Fatalf("updated run must keep result metadata: %#v", runs[0])
+	}
+}
+
 func TestListInitializesEmptyExecutionHistory(t *testing.T) {
 	t.Parallel()
 
