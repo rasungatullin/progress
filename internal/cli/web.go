@@ -150,7 +150,7 @@ func (h *webServer) handleRuns(w http.ResponseWriter, r *http.Request) {
 	filter.Name = strings.TrimSpace(query.Get("name"))
 	filter.Status = strings.TrimSpace(query.Get("status"))
 
-	runs, err := history.List(r.Context(), root, filter)
+	runs, err := history.ListReadOnly(r.Context(), root, filter)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -194,7 +194,7 @@ func (h *webServer) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := history.Get(r.Context(), root, id)
+	run, err := history.GetReadOnly(r.Context(), root, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "run not found", http.StatusNotFound)
 		return
@@ -229,7 +229,7 @@ func handleRunRawOutput(w http.ResponseWriter, r *http.Request, h *webServer, pa
 		return
 	}
 
-	run, err := history.Get(r.Context(), root, id)
+	run, err := history.GetReadOnly(r.Context(), root, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "run not found", http.StatusNotFound)
 		return

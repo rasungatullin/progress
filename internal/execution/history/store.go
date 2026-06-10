@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -232,6 +234,23 @@ func List(ctx context.Context, root string, filter ListFilter) ([]ListedRun, err
 		return nil, err
 	}
 
+	return listWithDB(ctx, db, filter)
+}
+
+func ListReadOnly(ctx context.Context, root string, filter ListFilter) ([]ListedRun, error) {
+	db, err := openReadOnlyDB(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return []ListedRun{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	return listWithDB(ctx, db, filter)
+}
+
+func listWithDB(ctx context.Context, db *sql.DB, filter ListFilter) ([]ListedRun, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 20
@@ -295,6 +314,25 @@ func Get(ctx context.Context, root string, id int64) (ListedRun, error) {
 		return run, err
 	}
 
+	return getWithDB(ctx, db, id)
+}
+
+func GetReadOnly(ctx context.Context, root string, id int64) (ListedRun, error) {
+	db, err := openReadOnlyDB(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return ListedRun{}, sql.ErrNoRows
+	}
+	if err != nil {
+		return ListedRun{}, err
+	}
+	defer db.Close()
+
+	return getWithDB(ctx, db, id)
+}
+
+func getWithDB(ctx context.Context, db *sql.DB, id int64) (ListedRun, error) {
+	var run ListedRun
+
 	query := `SELECT r.id, r.created_at, r.status, r.summary, COALESCE(r.name, ''), r.profile_name, r.runner, q.model, q.launch_directory, q.raw_structured_input, COALESCE(s.raw_output_path, ''), COALESCE(s.raw_structured_output, ''), COALESCE(r.run_record_path, ''), COALESCE(r.error, '') FROM execution_runs r JOIN execution_requests q ON q.id = r.request_id LEFT JOIN execution_results s ON s.id = r.result_id WHERE r.id = ?`
 	row := db.QueryRowContext(ctx, query, id)
 	if err := row.Scan(&run.ID, &run.CreatedAt, &run.Status, &run.Summary, &run.Name, &run.ProfileName, &run.Runner, &run.Model, &run.LaunchDirectory, &run.RawStructuredInput, &run.RawOutputPath, &run.RawStructuredOutput, &run.RunRecordPath, &run.Error); err != nil {
@@ -302,6 +340,20 @@ func Get(ctx context.Context, root string, id int64) (ListedRun, error) {
 	}
 
 	return run, nil
+}
+
+func openReadOnlyDB(root string) (*sql.DB, error) {
+	dbPath := DatabasePath(root)
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, err
+	}
+
+	fileURL := url.URL{Scheme: "file", Path: dbPath}
+	query := fileURL.Query()
+	query.Set("mode", "ro")
+	fileURL.RawQuery = query.Encode()
+
+	return sql.Open("sqlite3", fileURL.String())
 }
 
 func ensureSchema(ctx context.Context, db *sql.DB) error {

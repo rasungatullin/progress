@@ -216,6 +216,47 @@ func TestWebHandlersServeWorkspaceRuns(t *testing.T) {
 	}
 }
 
+func TestWebHandlersDoNotCreateHistoryStateWhenDatabaseIsAbsent(t *testing.T) {
+	root := t.TempDir()
+	handler, err := newWebHandler(root)
+	if err != nil {
+		t.Fatalf("new web handler: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("runs endpoint status: %d", w.Code)
+	}
+
+	var runs []history.ListedRun
+	if err := json.NewDecoder(bytes.NewReader(w.Body.Bytes())).Decode(&runs); err != nil {
+		t.Fatalf("decode runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("expected no runs, got %d", len(runs))
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/runs/1", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("detail endpoint status: %d", w.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/runs/1/raw-output", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("raw output endpoint status: %d", w.Code)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".progress", "execution-runs")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no execution-runs directory, got err: %v", err)
+	}
+}
+
 func TestWebHandlersRejectUnknownWorkspace(t *testing.T) {
 	root := t.TempDir()
 	handler, err := newWebHandler(root)
