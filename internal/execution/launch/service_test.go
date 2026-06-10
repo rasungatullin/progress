@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
@@ -33,7 +34,9 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 		},
 	}
 
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	invocation := validInvocation(t, false)
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -58,6 +61,23 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	}
 	if result.StructuredOutput == nil || result.StructuredOutput.CommitMessage != "Ignored when git is disabled" {
 		t.Fatalf("structured output must still be parsed when git stage is disabled: %#v", result.StructuredOutput)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one sqlite history run, got %d", len(runs))
+	}
+	if runs[0].Status != "completed" || runs[0].ProfileName != "default" || runs[0].Runner != RunnerOpenCode {
+		t.Fatalf("unexpected sqlite history run: %#v", runs[0])
+	}
+	if runs[0].LaunchDirectory != invocation.Launch.Directory {
+		t.Fatalf("sqlite history must keep launch directory: %#v", runs[0])
+	}
+	if !strings.Contains(runs[0].RawStructuredOutput, `"summary":"Done."`) {
+		t.Fatalf("sqlite history must keep canonical structured output: %#v", runs[0])
 	}
 }
 
@@ -401,6 +421,9 @@ func TestLaunchCommitPushKeepsProgressConfigVisibleAsUserChange(t *testing.T) {
 	}
 	if statusLineHasUserChanges(" M .progress/execution-runs/execution-123.json") {
 		t.Fatal("unstaged execution run record changes must be ignored as runtime artifacts")
+	}
+	if statusLineHasUserChanges(" M .progress/execution-runs/execution.db") {
+		t.Fatal("sqlite execution history must be ignored as a runtime artifact")
 	}
 	if statusLineHasUserChanges(" M .progress/runner-output/execution-123.log") {
 		t.Fatal("unstaged runner output changes must be ignored as runtime artifacts")

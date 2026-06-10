@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
@@ -661,8 +662,9 @@ func persistExecutionRunRecord(workplaceDir string, in model.Invocation, profile
 		launchErrText = launchErr.Error()
 	}
 
+	createdAt := time.Now().UTC().Format(time.RFC3339)
 	record := runRecord{
-		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+		CreatedAt:           createdAt,
 		Invocation:          in,
 		Profile:             profile,
 		Allocation:          allocation,
@@ -687,6 +689,22 @@ func persistExecutionRunRecord(workplaceDir string, in model.Invocation, profile
 	if _, err := io.WriteString(recordFile, string(payload)); err != nil {
 		return ""
 	}
+
+	_ = history.Store(context.Background(), workplaceDir, history.Run{
+		CreatedAt:           createdAt,
+		Status:              launchResult.Status,
+		Summary:             launchResult.Summary,
+		Name:                in.Workplace.Name,
+		ProfileName:         profile.Name,
+		Runner:              in.Launch.Runner,
+		Model:               in.Launch.Model,
+		LaunchDirectory:     in.Launch.Directory,
+		RawStructuredInput:  history.StructuredInputJSON(structuredInput),
+		RawOutputPath:       launchResult.RawOutputPath,
+		RawStructuredOutput: history.StructuredOutputJSON(structuredOutput, rawStructuredOutput),
+		RunRecordPath:       recordFile.Name(),
+		Error:               launchErrText,
+	})
 
 	return recordFile.Name()
 }
