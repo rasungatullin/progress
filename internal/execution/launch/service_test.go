@@ -169,6 +169,35 @@ func TestLaunchRecordsInvalidStructuredInputInHistory(t *testing.T) {
 	}
 }
 
+func TestLaunchUnavailableDirectoryDoesNotCreateHistoryArtifacts(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			t.Fatal("runner must not start for unavailable launch directory")
+			return "", nil
+		},
+	}
+	missingDir := filepath.Join(t.TempDir(), "missing")
+	invocation := validInvocation(t, false)
+	invocation.Launch.Directory = missingDir
+	workplace := model.Workplace{Name: missingDir, Ready: true}
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err == nil {
+		t.Fatal("expected unavailable launch directory error")
+	}
+	if !strings.Contains(err.Error(), "launch directory is unavailable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RunRecordPath != "" {
+		t.Fatalf("run record must not be written under missing root: %#v", result)
+	}
+	if _, statErr := os.Stat(missingDir); !os.IsNotExist(statErr) {
+		t.Fatalf("launch must not create missing directory, stat err: %v", statErr)
+	}
+}
+
 func TestLaunchCommitPushWithChanges(t *testing.T) {
 	t.Parallel()
 

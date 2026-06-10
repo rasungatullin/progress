@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -107,6 +108,26 @@ func TestBeginAndUpdateExecutionRunReusesRow(t *testing.T) {
 	}
 	if runs[0].RawOutputPath == "" || runs[0].RawStructuredOutput != `{"summary":"Done"}` || runs[0].RunRecordPath == "" {
 		t.Fatalf("updated run must keep result metadata: %#v", runs[0])
+	}
+}
+
+func TestBeginDoesNotCreateMissingRoot(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "missing")
+	_, err := Begin(context.Background(), root, Run{
+		CreatedAt:       "2026-06-10T10:00:00Z",
+		Status:          "running",
+		ProfileName:     "default",
+		Runner:          "opencode",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: root,
+	})
+	if err == nil {
+		t.Fatal("expected missing root error")
+	}
+	if _, statErr := os.Stat(root); !os.IsNotExist(statErr) {
+		t.Fatalf("begin must not create missing root, stat err: %v", statErr)
 	}
 }
 

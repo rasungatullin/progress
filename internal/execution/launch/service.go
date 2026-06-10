@@ -645,7 +645,7 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 		},
 	}
 
-	if workplaceDir != "" {
+	if workplaceDir != "" && existingDirectory(workplaceDir) {
 		recordDir := filepath.Join(workplaceDir, ".progress", "execution-runs")
 		if err := os.MkdirAll(recordDir, 0o755); err == nil {
 			if recordFile, err := os.CreateTemp(recordDir, runRecordFilePrefix+"*.json"); err == nil {
@@ -677,6 +677,11 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 	})
 
 	return recordPath
+}
+
+func existingDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func fallbackHistoryValue(value string) string {

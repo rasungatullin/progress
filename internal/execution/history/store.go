@@ -101,6 +101,14 @@ func Store(ctx context.Context, root string, run Run) error {
 }
 
 func Begin(ctx context.Context, root string, run Run) (Handle, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return Handle{}, err
+	}
+	if !info.IsDir() {
+		return Handle{}, fmt.Errorf("history root is not a folder: %s", filepath.Clean(root))
+	}
+
 	dbPath := DatabasePath(root)
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return Handle{}, err
