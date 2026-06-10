@@ -143,7 +143,6 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 					Status:  "failed",
 					Summary: "Applied the requested changes.",
 					StructuredOutput: &execution.StructuredOutput{
-						ProtocolVersion: execution.StructuredIOVersion,
 						Summary:         "Need follow-up.",
 						Remarks: []execution.StructuredRemark{{
 							ID:    "remark-1",
@@ -172,7 +171,6 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 		"execution-status=failed\n",
 		"execution-summary=Applied the requested changes.\n",
 		"structured-output:\n",
-		"protocol-version=review-cycle/v1\n",
 		"summary-field=Need follow-up.\n",
 		`remark={"id":"remark-1","title":"Rollback plan","body":"Still missing."}` + "\n",
 	} {

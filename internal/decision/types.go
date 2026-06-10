@@ -35,11 +35,12 @@ type DecisionReason struct {
 }
 
 type ExecutionPlan struct {
-	TaskNumber int
-	TaskTitle  string
-	Repository string
-	Profile    string
-	Prompt     string
+	TaskNumber      int
+	TaskTitle       string
+	Repository      string
+	Profile         string
+	Prompt          string
+	StructuredInput *execution.StructuredInput
 }
 
 type Decision struct {

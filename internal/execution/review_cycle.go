@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rasungatullin/progress/internal/execution/history"
-	"github.com/rasungatullin/progress/internal/execution/launch"
 )
 
 const DefaultReviewCycleMaxExecutions = 5
@@ -47,16 +46,10 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 		return result, err
 	}
 
-	normalizedPrompt, structuredInput, err := launch.NormalizeStructuredInput(in.Launch.Prompt, in.Launch.StructuredInput)
-	if err != nil {
-		result := failedStartResult(err)
-		storeReviewCycleAggregate(ctx, in, result, err)
-		return result, err
+	originalTask := ""
+	if in.Launch.StructuredInput != nil {
+		originalTask = in.Launch.StructuredInput.Task
 	}
-	in.Launch.Prompt = normalizedPrompt
-	in.Launch.StructuredInput = structuredInput
-
-	originalPrompt := in.Launch.Prompt
 	attempts := make([]string, 0, maxExecutions)
 	var lastExecution LaunchResult
 	var lastReview LaunchResult
@@ -65,8 +58,7 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 		executionInvocation := in
 		executionInvocation.Profile = executionProfile
 		if attempt > 1 {
-			executionInvocation.Launch.Prompt = buildReviewCycleReworkPrompt(originalPrompt, attempt)
-			executionInvocation.Launch.StructuredInput = buildReviewCycleReworkInput(in.Launch.StructuredInput, originalPrompt, attempt, lastExecution, lastReview)
+			executionInvocation.Launch.StructuredInput = buildReviewCycleReworkInput(in.Launch.StructuredInput, originalTask, attempt, lastExecution, lastReview)
 		}
 
 		executionResult, err := starter.Start(ctx, executionInvocation)
@@ -80,8 +72,7 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 
 		reviewInvocation := in
 		reviewInvocation.Profile = reviewProfile
-		reviewInvocation.Launch.Prompt = buildReviewCycleReviewPrompt(originalPrompt, attempt)
-		reviewInvocation.Launch.StructuredInput = buildReviewCycleReviewInput(in.Launch.StructuredInput, originalPrompt, attempt, executionResult)
+		reviewInvocation.Launch.StructuredInput = buildReviewCycleReviewInput(in.Launch.StructuredInput, originalTask, attempt, executionResult)
 
 		reviewResult, err := starter.Start(ctx, reviewInvocation)
 		lastReview = reviewResult
@@ -132,40 +123,18 @@ func storeReviewCycleAggregate(ctx context.Context, in Invocation, result Launch
 	})
 }
 
-func buildReviewCycleReviewPrompt(originalPrompt string, attempt int) string {
-	return joinReviewCycleParts(
-		fmt.Sprintf("Проведи code review результата исполнения попытки %d в текущем рабочем каталоге.", attempt),
-		"Проверь соответствие исходной задаче, bugs, behavioral regressions, missing tests, strict contract violations, security/privacy risks и risky side effects.",
-		"Не изменяй файлы, не коммить изменения и не создавай PR.",
-		"Исходная задача:",
-		strings.TrimSpace(originalPrompt),
-		"Если blocking issues не найдены, верни conclusion.status=ok или approve. Если нужны доработки, верни actionable remarks.",
-	)
-}
-
-func buildReviewCycleReworkPrompt(originalPrompt string, attempt int) string {
-	return joinReviewCycleParts(
-		fmt.Sprintf("Исправь замечания ревью перед попыткой исполнения %d.", attempt),
-		"Сохрани уже сделанные корректные изменения и исправляй только замечания, влияющие на корректность задачи.",
-		"Исходная задача:",
-		strings.TrimSpace(originalPrompt),
-		"Используй structured input ниже как источник предыдущего результата и замечаний ревью.",
-	)
-}
-
-func buildReviewCycleReviewInput(base *StructuredInput, originalPrompt string, attempt int, executionResult LaunchResult) *StructuredInput {
+func buildReviewCycleReviewInput(base *StructuredInput, originalTask string, attempt int, executionResult LaunchResult) *StructuredInput {
 	input := cloneStructuredInput(base)
 	if input == nil {
 		input = &StructuredInput{}
 	}
-	input.ProtocolVersion = StructuredIOVersion
 	input.ProjectContext = appendStructuredTaskContext(input.ProjectContext, input.Task)
 	input.Task = fmt.Sprintf("Провести ревью результата исполнения попытки %d.", attempt)
 	input.Constraints = append(input.Constraints,
 		"Не изменять файлы во время ревью.",
 		"Вернуть conclusion.status=ok или approve, если blocking issues не найдены.",
 	)
-	input.ProjectContext = appendOriginalPromptContext(input.ProjectContext, originalPrompt)
+	input.ProjectContext = appendOriginalTaskContext(input.ProjectContext, originalTask)
 	input.PreviousRunResults = append(input.PreviousRunResults, StructuredResult{
 		Summary: fmt.Sprintf("execution attempt %d", attempt),
 		Body:    executionResult.Summary,
@@ -174,19 +143,18 @@ func buildReviewCycleReviewInput(base *StructuredInput, originalPrompt string, a
 	return input
 }
 
-func buildReviewCycleReworkInput(base *StructuredInput, originalPrompt string, attempt int, executionResult, reviewResult LaunchResult) *StructuredInput {
+func buildReviewCycleReworkInput(base *StructuredInput, originalTask string, attempt int, executionResult, reviewResult LaunchResult) *StructuredInput {
 	input := cloneStructuredInput(base)
 	if input == nil {
 		input = &StructuredInput{}
 	}
-	input.ProtocolVersion = StructuredIOVersion
 	input.ProjectContext = appendStructuredTaskContext(input.ProjectContext, input.Task)
 	input.Task = fmt.Sprintf("Доработать результат исполнения по замечаниям ревью перед попыткой %d.", attempt)
 	input.Constraints = append(input.Constraints,
 		"Сохранить корректные изменения предыдущих попыток.",
 		"Исправить actionable замечания ревью.",
 	)
-	input.ProjectContext = appendOriginalPromptContext(input.ProjectContext, originalPrompt)
+	input.ProjectContext = appendOriginalTaskContext(input.ProjectContext, originalTask)
 	input.PreviousRunResults = append(input.PreviousRunResults,
 		StructuredResult{Summary: fmt.Sprintf("previous execution before attempt %d", attempt), Body: executionResult.Summary},
 		StructuredResult{Summary: fmt.Sprintf("review before attempt %d", attempt), Body: reviewResult.Summary},
@@ -307,13 +275,13 @@ func cloneStructuredInput(input *StructuredInput) *StructuredInput {
 	return &cloned
 }
 
-func appendOriginalPromptContext(contexts []StructuredContext, originalPrompt string) []StructuredContext {
-	originalPrompt = strings.TrimSpace(originalPrompt)
-	if originalPrompt == "" {
+func appendOriginalTaskContext(contexts []StructuredContext, originalTask string) []StructuredContext {
+	originalTask = strings.TrimSpace(originalTask)
+	if originalTask == "" {
 		return contexts
 	}
 
-	return append(contexts, StructuredContext{Title: "Исходная задача", Body: originalPrompt})
+	return append(contexts, StructuredContext{Title: "Исходная задача", Body: originalTask})
 }
 
 func appendStructuredTaskContext(contexts []StructuredContext, task string) []StructuredContext {

@@ -13,8 +13,8 @@ func TestStoreAndListExecutionRuns(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	input := &model.StructuredInput{ProtocolVersion: model.StructuredIOVersion, Task: "Ship it"}
-	output := &model.StructuredOutput{ProtocolVersion: model.StructuredIOVersion, Summary: "Done"}
+	input := &model.StructuredInput{Task: "Ship it"}
+	output := &model.StructuredOutput{Summary: "Done"}
 
 	err := Store(context.Background(), root, Run{
 		CreatedAt:           "2026-06-10T10:00:00Z",
@@ -44,10 +44,10 @@ func TestStoreAndListExecutionRuns(t *testing.T) {
 	if runs[0].Name != "task-54" || runs[0].Status != "completed" || runs[0].Model != "openai/gpt-5.4" {
 		t.Fatalf("unexpected run: %#v", runs[0])
 	}
-	if runs[0].RawStructuredInput != `{"protocol_version":"review-cycle/v1","task":"Ship it"}` {
+	if runs[0].RawStructuredInput != `{"task":"Ship it"}` {
 		t.Fatalf("unexpected structured input json: %q", runs[0].RawStructuredInput)
 	}
-	if runs[0].RawStructuredOutput != `{"protocol_version":"review-cycle/v1","summary":"Done"}` {
+	if runs[0].RawStructuredOutput != `{"summary":"Done"}` {
 		t.Fatalf("unexpected structured output json: %q", runs[0].RawStructuredOutput)
 	}
 }

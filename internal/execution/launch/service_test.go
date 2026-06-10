@@ -24,7 +24,7 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 			return strings.Join([]string{
 				"runner output",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"Ignored when git is disabled"}`,
+				`{"summary":"Done.","commit_message":"Ignored when git is disabled"}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -91,12 +91,7 @@ func TestLaunchRecordsInvalidStructuredInputInHistory(t *testing.T) {
 		},
 	}
 	invocation := validInvocation(t, false)
-	invocation.Launch.Prompt = strings.Join([]string{
-		"do work",
-		structuredInputStart,
-		`{"protocol_version":"review-cycle/v1",`,
-		structuredInputEnd,
-	}, "\n")
+	invocation.Launch.StructuredInput = &model.StructuredInput{}
 	workplace := validWorkplace(t)
 
 	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
@@ -129,7 +124,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 			return strings.Join([]string{
 				"runner output",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"  Ship release notes  "}`,
+				`{"summary":"Done.","commit_message":"  Ship release notes  "}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -251,7 +246,7 @@ func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *te
 			return strings.Join([]string{
 				"runner output",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"   "}`,
+				`{"summary":"Done.","commit_message":"   "}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -293,7 +288,7 @@ func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *te
 			return strings.Join([]string{
 				"runner output",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"\t"}`,
+				`{"summary":"Done.","commit_message":"\t"}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -566,7 +561,7 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 			return strings.Join([]string{
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Main result.","commit_message":"Document deploy checklist","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
+				`{"summary":"Main result.","commit_message":"Document deploy checklist","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -598,9 +593,6 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 	}
 	if result.StructuredOutput == nil {
 		t.Fatal("structured output must be parsed")
-	}
-	if result.StructuredOutput.ProtocolVersion != model.StructuredIOVersion {
-		t.Fatalf("unexpected protocol version: %#v", result.StructuredOutput)
 	}
 	if result.StructuredOutput.Summary != "Main result." {
 		t.Fatalf("unexpected structured summary: %#v", result.StructuredOutput)
@@ -671,7 +663,7 @@ func TestLaunchStructuredOutputInvalidPreservesFreeText(t *testing.T) {
 			return strings.Join([]string{
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","remarks":[{}]}`,
+				`{"remarks":[{}]}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -688,7 +680,7 @@ func TestLaunchStructuredOutputInvalidPreservesFreeText(t *testing.T) {
 	if result.StructuredOutput != nil {
 		t.Fatalf("invalid structured output must not populate fields: %#v", result.StructuredOutput)
 	}
-	if !strings.Contains(result.Summary, `{"protocol_version":"review-cycle/v1","remarks":[{}]}`) {
+	if !strings.Contains(result.Summary, `{"remarks":[{}]}`) {
 		t.Fatalf("summary must preserve invalid block for diagnostics: %q", result.Summary)
 	}
 }
@@ -773,47 +765,47 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 	}{
 		{
 			name:       "empty summary",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":"ok","summary":""}`,
+			payload:    `{"summary":"ok","summary":""}`,
 			expectPart: "structured output must include a non-empty summary",
 		},
 		{
 			name:       "unknown field",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","unknown":true}`,
+			payload:    `{"summary":"Done.","unknown":true}`,
 			expectPart: `unknown field "unknown"`,
 		},
 		{
 			name:       "summary type mismatch",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":42}`,
+			payload:    `{"summary":42}`,
 			expectPart: "type mismatch at summary: expected string but got number",
 		},
 		{
 			name:       "remarks string type mismatch",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":"not-an-array"}`,
+			payload:    `{"summary":"Done.","remarks":"not-an-array"}`,
 			expectPart: "type mismatch at remarks: expected array of objects with id/status/severity/type/title/body/answer/resolution but got string",
 		},
 		{
 			name:       "remarks array of strings mismatch",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":["bad-item"]}`,
+			payload:    `{"summary":"Done.","remarks":["bad-item"]}`,
 			expectPart: "type mismatch at remarks: expected array of objects with id/status/severity/type/title/body/answer/resolution but got string",
 		},
 		{
 			name:       "commands string type mismatch",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","commands":"not-an-array"}`,
+			payload:    `{"summary":"Done.","commands":"not-an-array"}`,
 			expectPart: "type mismatch at commands: expected array of objects with name/args/title/body but got string",
 		},
 		{
 			name:       "commands array of strings mismatch",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","commands":["bad-item"]}`,
+			payload:    `{"summary":"Done.","commands":["bad-item"]}`,
 			expectPart: "type mismatch at commands: expected array of objects with name/args/title/body but got string",
 		},
 		{
 			name:       "conclusion string type mismatch",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","conclusion":"not-an-object"}`,
+			payload:    `{"summary":"Done.","conclusion":"not-an-object"}`,
 			expectPart: "type mismatch at conclusion: expected object with status/summary/body but got string",
 		},
 		{
 			name:       "meaningless remark object",
-			payload:    `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{}]}`,
+			payload:    `{"summary":"Done.","remarks":[{}]}`,
 			expectPart: "structured output remarks[0] must include at least one non-empty field",
 		},
 	}
@@ -858,35 +850,24 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 	}
 }
 
-func TestStructuredInputCanonicalValidatorSharedAcrossPromptAndProgrammaticPaths(t *testing.T) {
+func TestStructuredInputCanonicalValidatorRejectsEmptyProgrammaticInput(t *testing.T) {
 	t.Parallel()
 
-	rawPayload := `{"protocol_version":"review-cycle/v1"}`
-	_, promptErr := parseStructuredInputPayload(rawPayload)
-	if promptErr == nil {
-		t.Fatal("expected prompt structured input validation error")
-	}
-
 	_, programmaticErr := buildRunnerPrompt(model.LaunchSpec{
-		Prompt: "Apply the fixes.",
-		StructuredInput: &model.StructuredInput{
-			ProtocolVersion: model.StructuredIOVersion,
-		},
+		Prompt:          "Apply the fixes.",
+		StructuredInput: &model.StructuredInput{},
 	})
 	if programmaticErr == nil {
 		t.Fatal("expected programmatic structured input validation error")
 	}
 
-	expectPart := "structured input must include at least one non-empty field besides protocol_version"
-	if !strings.Contains(promptErr.Error(), expectPart) {
-		t.Fatalf("unexpected prompt validation error: %v", promptErr)
-	}
+	expectPart := "structured input must include at least one non-empty field"
 	if !strings.Contains(programmaticErr.Error(), expectPart) {
 		t.Fatalf("unexpected programmatic validation error: %v", programmaticErr)
 	}
 }
 
-func TestLaunchProgrammaticStructuredInputRejectsProtocolOnlyPayload(t *testing.T) {
+func TestLaunchProgrammaticStructuredInputRejectsEmptyPayload(t *testing.T) {
 	t.Parallel()
 
 	service := &Service{
@@ -901,7 +882,8 @@ func TestLaunchProgrammaticStructuredInputRejectsProtocolOnlyPayload(t *testing.
 	}
 
 	invocation := validInvocation(t, false)
-	invocation.Launch.StructuredInput = &model.StructuredInput{ProtocolVersion: model.StructuredIOVersion}
+	invocation.Launch.Prompt = ""
+	invocation.Launch.StructuredInput = &model.StructuredInput{}
 
 	workplace := validWorkplace(t)
 
@@ -909,7 +891,7 @@ func TestLaunchProgrammaticStructuredInputRejectsProtocolOnlyPayload(t *testing.
 	if err == nil {
 		t.Fatal("expected invalid structured input error")
 	}
-	if !strings.Contains(err.Error(), "structured input must include at least one non-empty field besides protocol_version") {
+	if !strings.Contains(err.Error(), "structured input must include at least one non-empty field") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -923,49 +905,17 @@ func TestLaunchProgrammaticStructuredInputRejectsProtocolOnlyPayload(t *testing.
 	if runs[0].Model != invocation.Launch.Model || runs[0].LaunchDirectory != invocation.Launch.Directory {
 		t.Fatalf("failed invalid structured input row must keep request metadata: %#v", runs[0])
 	}
-	if runs[0].RawStructuredInput != `{"protocol_version":"review-cycle/v1"}` {
+	if runs[0].RawStructuredInput != `{}` {
 		t.Fatalf("failed invalid structured input row must keep available structured input: %#v", runs[0])
 	}
 }
 
-func TestLaunchPromptStructuredInputRejectsProtocolOnlyPayload(t *testing.T) {
-	t.Parallel()
-
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			t.Fatal("runner must not be called when prompt structured input is invalid")
-			return "", nil
-		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
-	}
-
-	invocation := validInvocation(t, false)
-	invocation.Launch.Prompt = strings.Join([]string{
-		"Reply to the latest review.",
-		structuredInputStart,
-		`{"protocol_version":"review-cycle/v1"}`,
-		structuredInputEnd,
-	}, "\n")
-
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
-	if err == nil {
-		t.Fatal("expected invalid structured input error")
-	}
-	if !strings.Contains(err.Error(), "structured input must include at least one non-empty field besides protocol_version") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLaunchParsesStructuredInputFromPromptBlock(t *testing.T) {
+func TestLaunchKeepsProgrammaticStructuredInput(t *testing.T) {
 	t.Parallel()
 
 	structuredInput := model.StructuredInput{
-		ProtocolVersion: model.StructuredIOVersion,
-		Task:            "Answer review remarks.",
-		Constraints:     []string{"Do not change public API."},
+		Task:        "Answer review remarks.",
+		Constraints: []string{"Do not change public API."},
 		ReviewRemarks: []model.StructuredRemark{{
 			ID:       "remark-1",
 			Severity: "critical",
@@ -978,15 +928,10 @@ func TestLaunchParsesStructuredInputFromPromptBlock(t *testing.T) {
 		}},
 	}
 
-	payload, err := buildStructuredJSON(structuredInput)
-	if err != nil {
-		t.Fatalf("marshal structured input: %v", err)
-	}
-
 	service := &Service{
 		runRunner: func(_ context.Context, in model.Invocation) (string, error) {
 			if in.Launch.Prompt != "Reply to the latest review." {
-				t.Fatalf("runner must receive plain prompt without structured block: %q", in.Launch.Prompt)
+				t.Fatalf("runner must keep direct prompt: %q", in.Launch.Prompt)
 			}
 			if !reflect.DeepEqual(in.Launch.StructuredInput, &structuredInput) {
 				t.Fatalf("unexpected structured input: %#v", in.Launch.StructuredInput)
@@ -1000,12 +945,8 @@ func TestLaunchParsesStructuredInputFromPromptBlock(t *testing.T) {
 	}
 
 	invocation := validInvocation(t, false)
-	invocation.Launch.Prompt = strings.Join([]string{
-		"Reply to the latest review.",
-		structuredInputStart,
-		payload,
-		structuredInputEnd,
-	}, "\n")
+	invocation.Launch.Prompt = "Reply to the latest review."
+	invocation.Launch.StructuredInput = &structuredInput
 
 	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
 	if err != nil {
@@ -1013,7 +954,7 @@ func TestLaunchParsesStructuredInputFromPromptBlock(t *testing.T) {
 	}
 	record := readLaunchRunRecord(t, result.RunRecordPath)
 	if record.Invocation.Launch.Prompt != "Reply to the latest review." {
-		t.Fatalf("run record must keep normalized plain prompt: %#v", record.Invocation.Launch.Prompt)
+		t.Fatalf("run record must keep direct prompt: %#v", record.Invocation.Launch.Prompt)
 	}
 	if !reflect.DeepEqual(record.StructuredInput, &structuredInput) {
 		t.Fatalf("run record must keep normalized structured input: %#v", record.StructuredInput)
@@ -1062,11 +1003,8 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	if err != nil {
 		t.Fatalf("buildRunnerPrompt: %v", err)
 	}
-	if !strings.Contains(prompt, "Use every field from the structured input block below as execution context.") {
+	if !strings.Contains(prompt, "Use every field from the structured input JSON below as execution context.") {
 		t.Fatalf("prompt must mention structured input usage: %q", prompt)
-	}
-	if !strings.Contains(prompt, `protocol_version="review-cycle/v1"`) {
-		t.Fatalf("prompt must mention canonical protocol version: %q", prompt)
 	}
 	if !strings.Contains(prompt, "Include remarks, commands when they are applicable.") {
 		t.Fatalf("prompt must mention selected structured output fields: %q", prompt)
@@ -1084,23 +1022,12 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 		t.Fatalf("prompt must not describe unselected object forms: %q", prompt)
 	}
 
-	plainPrompt, parsedStructuredInput, state, err := parseStructuredInput(prompt)
+	payload, err := buildStructuredJSON(*structuredInput)
 	if err != nil {
-		t.Fatalf("parseStructuredInput: %v", err)
+		t.Fatalf("marshal structured input: %v", err)
 	}
-	if state != trailingStructuredBlockValid {
+	if !strings.Contains(prompt, payload) {
 		t.Fatalf("programmatic structured input must be encoded into runner prompt: %q", prompt)
-	}
-	if !strings.Contains(plainPrompt, "Apply the latest review fixes.") {
-		t.Fatalf("unexpected plain prompt after round-trip: %q", plainPrompt)
-	}
-	if !strings.Contains(plainPrompt, `protocol_version="review-cycle/v1"`) {
-		t.Fatalf("plain prompt must keep structured output instruction after extracting input block: %q", plainPrompt)
-	}
-	expected := *structuredInput
-	expected.ProtocolVersion = model.StructuredIOVersion
-	if !reflect.DeepEqual(parsedStructuredInput, &expected) {
-		t.Fatalf("unexpected structured input after round-trip: %#v", parsedStructuredInput)
 	}
 }
 
@@ -1122,7 +1049,7 @@ func TestBuildRunnerPromptPlacesPromptAdditionsBeforeStructuredSections(t *testi
 	additionIndex := strings.Index(prompt, "Collect PR context first.")
 	secondAdditionIndex := strings.Index(prompt, "Do not modify code.")
 	structuredOutputIndex := strings.Index(prompt, "Return your normal answer")
-	structuredInputIndex := strings.Index(prompt, structuredInputStart)
+	structuredInputIndex := strings.Index(prompt, `{"task":"Check review remarks."}`)
 	if userIndex == -1 || additionIndex == -1 || secondAdditionIndex == -1 || structuredOutputIndex == -1 || structuredInputIndex == -1 {
 		t.Fatalf("prompt missing expected sections: %q", prompt)
 	}
@@ -1200,7 +1127,7 @@ func TestBuildRunnerPromptAllowsNoOptionalStructuredOutputFields(t *testing.T) {
 	if strings.Contains(prompt, "Object forms:") {
 		t.Fatalf("prompt must omit object forms when no optional fields are selected: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Canonical compact JSON example: {\"protocol_version\":\"review-cycle/v1\",\"summary\":\"Implemented changes.\"}.") {
+	if !strings.Contains(prompt, "Canonical compact JSON example: {\"summary\":\"Implemented changes.\"}.") {
 		t.Fatalf("prompt must keep compact mandatory-only example when selection is empty: %q", prompt)
 	}
 }
@@ -1216,7 +1143,7 @@ func TestBuildRunnerPromptTreatsSummaryAsMandatoryEvenWhenSelected(t *testing.T)
 	if err != nil {
 		t.Fatalf("buildRunnerPrompt: %v", err)
 	}
-	if !strings.Contains(prompt, `protocol_version="review-cycle/v1" and a summary field`) {
+	if !strings.Contains(prompt, `a non-empty summary field`) {
 		t.Fatalf("prompt must keep summary as mandatory: %q", prompt)
 	}
 	if strings.Contains(prompt, "Include ") {
@@ -1243,7 +1170,7 @@ func TestLaunchAppliesProfileStructuredOutputFieldSelectionToPromptOnly(t *testi
 			return strings.Join([]string{
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","commit_message":"Extra fields are still accepted.","remarks":[{"title":"Rollback plan"}],"commands":[{"name":"open-pr"}]}`,
+				`{"summary":"Done.","commit_message":"Extra fields are still accepted.","remarks":[{"title":"Rollback plan"}],"commands":[{"name":"open-pr"}]}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -1278,7 +1205,7 @@ func TestLaunchStructuredOutputWithLiteralTagInsidePayload(t *testing.T) {
 			return strings.Join([]string{
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{"id":"remark-1","title":"Literal tag","body":"Keep literal <progress-structured-output> inside payload."}]}`,
+				`{"summary":"Done.","remarks":[{"id":"remark-1","title":"Literal tag","body":"Keep literal <progress-structured-output> inside payload."}]}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -1305,10 +1232,10 @@ func TestLaunchBrokenBlockBeforeValidTrailingBlock(t *testing.T) {
 			return strings.Join([]string{
 				"Broken example in prose:",
 				structuredOutputStart,
-				`{"protocol_version":`,
+				`{`,
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{"title":"Rollback plan","body":"missing rollback plan"}]}`,
+				`{"summary":"Done.","remarks":[{"title":"Rollback plan","body":"missing rollback plan"}]}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -1325,7 +1252,7 @@ func TestLaunchBrokenBlockBeforeValidTrailingBlock(t *testing.T) {
 	if result.StructuredOutput == nil || len(result.StructuredOutput.Remarks) != 1 {
 		t.Fatalf("unexpected structured output: %#v", result.StructuredOutput)
 	}
-	if strings.Contains(result.Summary, `{"protocol_version":`) {
+	if strings.Contains(result.Summary, `{`) {
 		t.Fatalf("successful structured run summary must stay compact: %q", result.Summary)
 	}
 }
@@ -1338,10 +1265,10 @@ func TestLaunchInvalidTrailingBlockWinsOverEarlierValidBlock(t *testing.T) {
 			return strings.Join([]string{
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","summary":"Earlier valid block."}`,
+				`{"summary":"Earlier valid block."}`,
 				structuredOutputEnd,
 				structuredOutputStart,
-				`{"protocol_version":"review-cycle/v1","remarks":"broken trailing block"}`,
+				`{"remarks":"broken trailing block"}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -1358,10 +1285,10 @@ func TestLaunchInvalidTrailingBlockWinsOverEarlierValidBlock(t *testing.T) {
 	if result.StructuredOutput != nil {
 		t.Fatalf("invalid trailing block must suppress structured extraction: %#v", result.StructuredOutput)
 	}
-	if !strings.Contains(result.Summary, `{"protocol_version":"review-cycle/v1","summary":"Earlier valid block."}`) {
+	if !strings.Contains(result.Summary, `{"summary":"Earlier valid block."}`) {
 		t.Fatalf("summary must preserve earlier valid block when trailing block is invalid: %q", result.Summary)
 	}
-	if !strings.Contains(result.Summary, `{"protocol_version":"review-cycle/v1","remarks":"broken trailing block"}`) {
+	if !strings.Contains(result.Summary, `{"remarks":"broken trailing block"}`) {
 		t.Fatalf("summary must preserve invalid trailing block for diagnostics: %q", result.Summary)
 	}
 }
