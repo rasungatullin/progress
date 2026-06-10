@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -145,14 +146,69 @@ func TestServiceStartUpdatesRunningHistoryRowOnSuccess(t *testing.T) {
 	}
 }
 
+func TestServiceStartEnrichesRunningHistoryRowBeforeLaunch(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	historyRoot := t.TempDir()
+	if err := os.Chdir(historyRoot); err != nil {
+		t.Fatalf("chdir history root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	workplaceDir := filepath.Join(historyRoot, "workplace")
+	launcher := &stubLauncher{beforeReturn: func() {
+		runs, err := history.List(context.Background(), historyRoot, history.ListFilter{Limit: 10})
+		if err != nil {
+			t.Fatalf("list running history: %v", err)
+		}
+		if len(runs) != 1 {
+			t.Fatalf("start must keep one running sqlite history run, got %d", len(runs))
+		}
+		if runs[0].Status != "running" || runs[0].LaunchDirectory != workplaceDir || runs[0].ProfileName != "coder" || runs[0].Runner != "opencode" || runs[0].Model != "openai/gpt-5.5" {
+			t.Fatalf("running start row must be enriched before launch returns: %#v", runs[0])
+		}
+	}}
+	service := &Service{
+		logger:     log.Default(),
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Runner: "opencode", Model: "openai/gpt-5.5"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "local-slot:coder", Reserved: true}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: workplaceDir, Ready: true}},
+		launcher:   launcher,
+	}
+
+	result, err := service.Start(context.Background(), Invocation{
+		Profile:   "coder",
+		Workplace: WorkplaceSpec{Name: "task-58"},
+		Launch: LaunchSpec{
+			StructuredInput: &StructuredInput{Task: "Ship it."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
 type stubLauncher struct {
-	invocation model.Invocation
-	result     model.LaunchResult
-	err        error
+	invocation   model.Invocation
+	result       model.LaunchResult
+	err          error
+	beforeReturn func()
 }
 
 func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, _ model.Profile, _ model.Allocation, _ model.Workplace) (model.LaunchResult, error) {
 	s.invocation = in
+	if s.beforeReturn != nil {
+		s.beforeReturn()
+	}
 	if s.result.Status == "" && s.err == nil {
 		return model.LaunchResult{Status: "completed"}, nil
 	}

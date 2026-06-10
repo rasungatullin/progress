@@ -107,6 +107,7 @@ func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error
 	if strings.TrimSpace(in.Launch.Directory) == "" {
 		in.Launch.Directory = workplace.Name
 	}
+	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, workplace, LaunchResult{Status: "running"}, nil)
 
 	launchCtx := launch.WithHistoryHandle(ctx, historyHandle)
 	result, err := s.Launch(launchCtx, in, profile, allocation, workplace)
