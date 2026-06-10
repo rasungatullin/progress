@@ -81,6 +81,61 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	}
 }
 
+func TestLaunchUpdatesExistingHistoryHandle(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"runner output",
+				structuredOutputStart,
+				`{"summary":"Done."}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	workplace := validWorkplace(t)
+	handle, err := history.Begin(context.Background(), workplace.Name, history.Run{
+		CreatedAt:          "2026-06-10T10:00:00Z",
+		Status:             "running",
+		Summary:            "",
+		Name:               "task-58",
+		ProfileName:        "default",
+		Runner:             invocation.Launch.Runner,
+		Model:              invocation.Launch.Model,
+		LaunchDirectory:    invocation.Launch.Directory,
+		RawStructuredInput: history.StructuredInputJSON(invocation.Launch.StructuredInput),
+	})
+	if err != nil {
+		t.Fatalf("begin history: %v", err)
+	}
+
+	result, err := service.Launch(WithHistoryHandle(context.Background(), handle), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("launch must update existing sqlite history run, got %d", len(runs))
+	}
+	if runs[0].ID != handle.RunID || runs[0].Status != "completed" || !strings.Contains(runs[0].RawStructuredOutput, `"summary":"Done."`) {
+		t.Fatalf("unexpected updated sqlite history run: %#v", runs[0])
+	}
+}
+
 func TestLaunchRecordsInvalidStructuredInputInHistory(t *testing.T) {
 	t.Parallel()
 
@@ -111,6 +166,35 @@ func TestLaunchRecordsInvalidStructuredInputInHistory(t *testing.T) {
 	}
 	if runs[0].Error == "" || runs[0].Summary == "" {
 		t.Fatalf("failed pre-launch row must keep error details: %#v", runs[0])
+	}
+}
+
+func TestLaunchUnavailableDirectoryDoesNotCreateHistoryArtifacts(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			t.Fatal("runner must not start for unavailable launch directory")
+			return "", nil
+		},
+	}
+	missingDir := filepath.Join(t.TempDir(), "missing")
+	invocation := validInvocation(t, false)
+	invocation.Launch.Directory = missingDir
+	workplace := model.Workplace{Name: missingDir, Ready: true}
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err == nil {
+		t.Fatal("expected unavailable launch directory error")
+	}
+	if !strings.Contains(err.Error(), "launch directory is unavailable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RunRecordPath != "" {
+		t.Fatalf("run record must not be written under missing root: %#v", result)
+	}
+	if _, statErr := os.Stat(missingDir); !os.IsNotExist(statErr) {
+		t.Fatalf("launch must not create missing directory, stat err: %v", statErr)
 	}
 }
 
@@ -531,7 +615,8 @@ func TestLaunchRunnerErrorReturned(t *testing.T) {
 		},
 	}
 
-	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), validWorkplace(t))
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), workplace)
 	if err == nil {
 		t.Fatal("expected runner error")
 	}
@@ -550,6 +635,17 @@ func TestLaunchRunnerErrorReturned(t *testing.T) {
 	}
 	if !strings.Contains(record.Error, "launch runner failed") {
 		t.Fatalf("unexpected run record error: %#v", record.Error)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runner failure must update one sqlite history run, got %d", len(runs))
+	}
+	if runs[0].Status != "failed" || runs[0].Error != runnerErr.Error() {
+		t.Fatalf("unexpected runner failure sqlite row: %#v", runs[0])
 	}
 }
 

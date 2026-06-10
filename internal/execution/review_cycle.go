@@ -16,10 +16,13 @@ type reviewCycleStarter interface {
 }
 
 func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocation, reviewProfile string, maxExecutions int) (LaunchResult, error) {
+	historyRoot := executionHistoryRoot(in, Workplace{})
+	historyHandle := beginReviewCycleAggregate(ctx, historyRoot, in)
+
 	if starter == nil {
 		err := fmt.Errorf("review cycle starter is required")
 		result := failedStartResult(err)
-		storeReviewCycleAggregate(ctx, in, result, err)
+		updateReviewCycleAggregate(ctx, historyRoot, historyHandle, in, result, err)
 		return result, err
 	}
 
@@ -32,7 +35,7 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 	if reviewProfile == "" {
 		err := fmt.Errorf("review profile is required")
 		result := failedStartResult(err)
-		storeReviewCycleAggregate(ctx, in, result, err)
+		updateReviewCycleAggregate(ctx, historyRoot, historyHandle, in, result, err)
 		return result, err
 	}
 
@@ -42,7 +45,7 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 	if maxExecutions < 0 {
 		err := fmt.Errorf("max executions must be positive")
 		result := failedStartResult(err)
-		storeReviewCycleAggregate(ctx, in, result, err)
+		updateReviewCycleAggregate(ctx, historyRoot, historyHandle, in, result, err)
 		return result, err
 	}
 
@@ -66,7 +69,7 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 		if err != nil {
 			attempts = append(attempts, formatReviewCycleAttempt(attempt, executionResult, LaunchResult{}, ""))
 			result := reviewCycleResult("failed", executionProfile, reviewProfile, maxExecutions, attempts, executionResult)
-			storeReviewCycleAggregate(ctx, in, result, err)
+			updateReviewCycleAggregate(ctx, historyRoot, historyHandle, in, result, err)
 			return result, err
 		}
 
@@ -80,23 +83,43 @@ func RunReviewCycle(ctx context.Context, starter reviewCycleStarter, in Invocati
 		attempts = append(attempts, formatReviewCycleAttempt(attempt, executionResult, reviewResult, conclusion))
 		if err != nil {
 			result := reviewCycleResult("failed", executionProfile, reviewProfile, maxExecutions, attempts, reviewResult)
-			storeReviewCycleAggregate(ctx, in, result, err)
+			updateReviewCycleAggregate(ctx, historyRoot, historyHandle, in, result, err)
 			return result, err
 		}
 		if isApprovingReviewStatus(conclusion) {
 			result := reviewCycleResult("completed", executionProfile, reviewProfile, maxExecutions, attempts, reviewResult)
-			storeReviewCycleAggregate(ctx, in, result, nil)
+			updateReviewCycleAggregate(ctx, historyRoot, historyHandle, in, result, nil)
 			return result, nil
 		}
 	}
 
 	result := reviewCycleResult("limit-reached", executionProfile, reviewProfile, maxExecutions, attempts, lastReview)
-	storeReviewCycleAggregate(ctx, in, result, nil)
+	updateReviewCycleAggregate(ctx, historyRoot, historyHandle, in, result, nil)
 	return result, nil
 }
 
-func storeReviewCycleAggregate(ctx context.Context, in Invocation, result LaunchResult, runErr error) {
-	root := executionHistoryRoot(in, Workplace{})
+func beginReviewCycleAggregate(ctx context.Context, root string, in Invocation) history.Handle {
+	if root == "" {
+		return history.Handle{}
+	}
+	handle, err := history.Begin(ctx, root, history.Run{
+		CreatedAt:          time.Now().UTC().Format(time.RFC3339),
+		Status:             "running",
+		Summary:            "",
+		Name:               in.Workplace.Name,
+		ProfileName:        fallbackExecutionHistoryValue(strings.TrimSpace(in.Profile)),
+		Runner:             fallbackExecutionHistoryValue(in.Launch.Runner),
+		Model:              fallbackExecutionHistoryValue(in.Launch.Model),
+		LaunchDirectory:    fallbackLaunchDirectory(in, root),
+		RawStructuredInput: history.StructuredInputJSON(in.Launch.StructuredInput),
+	})
+	if err != nil {
+		return history.Handle{}
+	}
+	return handle
+}
+
+func updateReviewCycleAggregate(ctx context.Context, root string, handle history.Handle, in Invocation, result LaunchResult, runErr error) {
 	if root == "" {
 		return
 	}
@@ -106,7 +129,7 @@ func storeReviewCycleAggregate(ctx context.Context, in Invocation, result Launch
 		errorText = strings.TrimSpace(runErr.Error())
 	}
 
-	_ = history.Store(ctx, root, history.Run{
+	_ = history.Update(ctx, handle, history.Run{
 		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
 		Status:              fallbackExecutionHistoryValue(result.Status),
 		Summary:             result.Summary,

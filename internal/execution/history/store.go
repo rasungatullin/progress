@@ -34,6 +34,12 @@ type Run struct {
 	Error               string
 }
 
+type Handle struct {
+	Root      string
+	RunID     int64
+	RequestID int64
+}
+
 type ListedRun struct {
 	ID                  int64  `json:"id"`
 	CreatedAt           string `json:"created_at"`
@@ -86,12 +92,80 @@ func StructuredOutputJSON(output *model.StructuredOutput, raw string) string {
 }
 
 func Store(ctx context.Context, root string, run Run) error {
-	dbPath := DatabasePath(root)
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+	handle, err := Begin(ctx, root, run)
+	if err != nil {
 		return err
 	}
 
+	return Update(ctx, handle, run)
+}
+
+func Begin(ctx context.Context, root string, run Run) (Handle, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return Handle{}, err
+	}
+	if !info.IsDir() {
+		return Handle{}, fmt.Errorf("history root is not a folder: %s", filepath.Clean(root))
+	}
+
+	dbPath := DatabasePath(root)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return Handle{}, err
+	}
+
 	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return Handle{}, err
+	}
+	defer db.Close()
+
+	if err := ensureSchema(ctx, db); err != nil {
+		return Handle{}, err
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return Handle{}, err
+	}
+	defer tx.Rollback()
+
+	requestResult, err := tx.ExecContext(ctx, `INSERT INTO execution_requests (model, launch_directory, raw_structured_input) VALUES (?, ?, ?)`, run.Model, run.LaunchDirectory, run.RawStructuredInput)
+	if err != nil {
+		return Handle{}, err
+	}
+	requestID, err := requestResult.LastInsertId()
+	if err != nil {
+		return Handle{}, err
+	}
+	runResult, err := tx.ExecContext(ctx, `INSERT INTO execution_runs (created_at, status, summary, name, profile_name, runner, request_id, result_id, run_record_path, error) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`, run.CreatedAt, run.Status, run.Summary, nullable(run.Name), run.ProfileName, run.Runner, requestID, nullable(run.RunRecordPath), nullable(run.Error))
+	if err != nil {
+		return Handle{}, err
+	}
+	runID, err := runResult.LastInsertId()
+	if err != nil {
+		return Handle{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Handle{}, err
+	}
+
+	handle := Handle{Root: root, RunID: runID, RequestID: requestID}
+	if hasResult(run) {
+		if err := Update(ctx, handle, run); err != nil {
+			return Handle{}, err
+		}
+	}
+	return handle, nil
+}
+
+func Update(ctx context.Context, handle Handle, run Run) error {
+	if strings.TrimSpace(handle.Root) == "" || handle.RunID == 0 || handle.RequestID == 0 {
+		return nil
+	}
+
+	db, err := sql.Open("sqlite3", DatabasePath(handle.Root))
 	if err != nil {
 		return err
 	}
@@ -107,30 +181,35 @@ func Store(ctx context.Context, root string, run Run) error {
 	}
 	defer tx.Rollback()
 
-	requestResult, err := tx.ExecContext(ctx, `INSERT INTO execution_requests (model, launch_directory, raw_structured_input) VALUES (?, ?, ?)`, run.Model, run.LaunchDirectory, run.RawStructuredInput)
-	if err != nil {
-		return err
-	}
-	requestID, err := requestResult.LastInsertId()
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE execution_requests SET model = ?, launch_directory = ?, raw_structured_input = ? WHERE id = ?`, run.Model, run.LaunchDirectory, run.RawStructuredInput, handle.RequestID); err != nil {
 		return err
 	}
 
 	var resultID any
 	if hasResult(run) {
-		resultResult, err := tx.ExecContext(ctx, `INSERT INTO execution_results (raw_output_path, raw_structured_output) VALUES (?, ?)`, run.RawOutputPath, run.RawStructuredOutput)
-		if err != nil {
+		var existingResultID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT result_id FROM execution_runs WHERE id = ?`, handle.RunID).Scan(&existingResultID); err != nil {
 			return err
 		}
-		id, err := resultResult.LastInsertId()
-		if err != nil {
-			return err
+		if existingResultID.Valid {
+			if _, err := tx.ExecContext(ctx, `UPDATE execution_results SET raw_output_path = ?, raw_structured_output = ? WHERE id = ?`, run.RawOutputPath, run.RawStructuredOutput, existingResultID.Int64); err != nil {
+				return err
+			}
+			resultID = existingResultID.Int64
+		} else {
+			resultResult, err := tx.ExecContext(ctx, `INSERT INTO execution_results (raw_output_path, raw_structured_output) VALUES (?, ?)`, run.RawOutputPath, run.RawStructuredOutput)
+			if err != nil {
+				return err
+			}
+			id, err := resultResult.LastInsertId()
+			if err != nil {
+				return err
+			}
+			resultID = id
 		}
-		resultID = id
 	}
 
-	_, err = tx.ExecContext(ctx, `INSERT INTO execution_runs (created_at, status, summary, name, profile_name, runner, request_id, result_id, run_record_path, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, run.CreatedAt, run.Status, run.Summary, nullable(run.Name), run.ProfileName, run.Runner, requestID, resultID, nullable(run.RunRecordPath), nullable(run.Error))
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE execution_runs SET status = ?, summary = ?, name = ?, profile_name = ?, runner = ?, result_id = ?, run_record_path = ?, error = ? WHERE id = ?`, run.Status, run.Summary, nullable(run.Name), run.ProfileName, run.Runner, resultID, nullable(run.RunRecordPath), nullable(run.Error), handle.RunID); err != nil {
 		return err
 	}
 

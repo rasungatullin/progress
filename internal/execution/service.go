@@ -80,33 +80,39 @@ func NewService(logger *log.Logger) *Service {
 
 func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error) {
 	s.logger.Printf("Контур исполнения принят к пуску: задача=%q", in.Task)
+	historyRoot := executionHistoryRoot(in, Workplace{})
+	historyHandle := s.beginStartHistory(ctx, historyRoot, in)
 
 	profile, err := s.ResolveProfile(ctx, in)
 	if err != nil {
 		result := failedStartResult(err)
-		s.storeFailedStart(ctx, in, Profile{}, Workplace{}, result, err)
+		s.updateStartHistory(ctx, historyRoot, historyHandle, in, Profile{}, Workplace{}, result, err)
 		return result, err
 	}
 
 	allocation, err := s.AllocateResources(ctx, in, profile)
 	if err != nil {
 		result := failedStartResult(err)
-		s.storeFailedStart(ctx, in, profile, Workplace{}, result, err)
+		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, Workplace{}, result, err)
 		return result, err
 	}
 
 	workplace, err := s.PrepareWorkplace(ctx, in, profile, allocation)
 	if err != nil {
 		result := failedStartResult(err)
-		s.storeFailedStart(ctx, in, profile, Workplace{}, result, err)
+		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, Workplace{}, result, err)
 		return result, err
 	}
 
 	if strings.TrimSpace(in.Launch.Directory) == "" {
 		in.Launch.Directory = workplace.Name
 	}
+	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, workplace, LaunchResult{Status: "running"}, nil)
 
-	return s.Launch(ctx, in, profile, allocation, workplace)
+	launchCtx := launch.WithHistoryHandle(ctx, historyHandle)
+	result, err := s.Launch(launchCtx, in, profile, allocation, workplace)
+	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, workplace, result, err)
+	return result, err
 }
 
 func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
@@ -174,10 +180,35 @@ func failedStartResult(err error) LaunchResult {
 	return LaunchResult{Status: "failed", Summary: strings.TrimSpace(err.Error())}
 }
 
-func (s *Service) storeFailedStart(ctx context.Context, in Invocation, profile Profile, workplace Workplace, result LaunchResult, launchErr error) {
-	root := executionHistoryRoot(in, workplace)
+func (s *Service) beginStartHistory(ctx context.Context, root string, in Invocation) history.Handle {
+	if root == "" {
+		return history.Handle{}
+	}
+
+	handle, err := history.Begin(ctx, root, history.Run{
+		CreatedAt:          time.Now().UTC().Format(time.RFC3339),
+		Status:             "running",
+		Summary:            "",
+		Name:               in.Workplace.Name,
+		ProfileName:        fallbackExecutionHistoryValue(strings.TrimSpace(in.Profile)),
+		Runner:             fallbackExecutionHistoryValue(in.Launch.Runner),
+		Model:              fallbackExecutionHistoryValue(in.Launch.Model),
+		LaunchDirectory:    fallbackLaunchDirectory(in, root),
+		RawStructuredInput: history.StructuredInputJSON(in.Launch.StructuredInput),
+	})
+	if err != nil {
+		return history.Handle{}
+	}
+	return handle
+}
+
+func (s *Service) updateStartHistory(ctx context.Context, root string, handle history.Handle, in Invocation, profile Profile, workplace Workplace, result LaunchResult, launchErr error) {
 	if root == "" {
 		return
+	}
+	errorText := ""
+	if launchErr != nil {
+		errorText = strings.TrimSpace(launchErr.Error())
 	}
 
 	runner := in.Launch.Runner
@@ -193,17 +224,20 @@ func (s *Service) storeFailedStart(ctx context.Context, in Invocation, profile P
 		profileName = strings.TrimSpace(in.Profile)
 	}
 
-	_ = history.Store(ctx, root, history.Run{
-		CreatedAt:          time.Now().UTC().Format(time.RFC3339),
-		Status:             result.Status,
-		Summary:            result.Summary,
-		Name:               in.Workplace.Name,
-		ProfileName:        fallbackExecutionHistoryValue(profileName),
-		Runner:             fallbackExecutionHistoryValue(runner),
-		Model:              fallbackExecutionHistoryValue(modelName),
-		LaunchDirectory:    fallbackLaunchDirectory(in, root),
-		RawStructuredInput: history.StructuredInputJSON(in.Launch.StructuredInput),
-		Error:              strings.TrimSpace(launchErr.Error()),
+	_ = history.Update(ctx, handle, history.Run{
+		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+		Status:              result.Status,
+		Summary:             result.Summary,
+		Name:                in.Workplace.Name,
+		ProfileName:         fallbackExecutionHistoryValue(profileName),
+		Runner:              fallbackExecutionHistoryValue(runner),
+		Model:               fallbackExecutionHistoryValue(modelName),
+		LaunchDirectory:     fallbackLaunchDirectory(in, root),
+		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
+		RawOutputPath:       result.RawOutputPath,
+		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, ""),
+		RunRecordPath:       result.RunRecordPath,
+		Error:               errorText,
 	})
 }
 

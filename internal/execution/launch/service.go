@@ -46,6 +46,17 @@ type Service struct {
 	runGitOutput func(context.Context, string, ...string) (string, error)
 }
 
+type historyHandleContextKey struct{}
+
+func WithHistoryHandle(ctx context.Context, handle history.Handle) context.Context {
+	return context.WithValue(ctx, historyHandleContextKey{}, handle)
+}
+
+func historyHandleFromContext(ctx context.Context) history.Handle {
+	handle, _ := ctx.Value(historyHandleContextKey{}).(history.Handle)
+	return handle
+}
+
 func NewService() *Service {
 	return &Service{
 		runRunner:    runRunner,
@@ -54,18 +65,23 @@ func NewService() *Service {
 }
 
 func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model.Profile, allocation model.Allocation, workplace model.Workplace) (model.LaunchResult, error) {
+	historyHandle := historyHandleFromContext(ctx)
+	if historyHandle.RunID == 0 {
+		historyHandle = beginExecutionHistoryRun(ctx, workplace.Name, in, profile, "running", "")
+	}
+
 	var err error
 	in, err = prepareInvocation(in)
 	if err != nil {
 		result := failedLaunchResult(err)
-		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
 	}
 	in.Launch = applyProfileStructuredOutput(in.Launch, profile)
 
 	if err := validateLaunch(in, workplace); err != nil {
 		result := failedLaunchResult(err)
-		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
 	}
 
@@ -75,7 +91,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			Status:  "failed",
 			Summary: strings.TrimSpace(err.Error()),
 		}
-		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
 	}
 	rawOutputPath := persistRunnerOutput(workplace.Name, runnerOutput)
@@ -93,7 +109,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		if structuredOutputState != trailingStructuredBlockValid {
 			result.StructuredOutput = nil
 		}
-		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, err, err)
+		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, err, err)
 		return result, err
 	}
 
@@ -114,7 +130,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			if structuredOutputState != trailingStructuredBlockValid {
 				launchResult.StructuredOutput = nil
 			}
-			launchResult.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, launchResult, rawStructuredOutput, structuredOutput, structuredOutputErr, err)
+			launchResult.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, launchResult, rawStructuredOutput, structuredOutput, structuredOutputErr, err)
 			return launchResult, err
 		}
 
@@ -135,7 +151,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	if structuredOutputState == trailingStructuredBlockValid {
 		result.StructuredOutput = structuredOutput
 	}
-	result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, structuredOutputErr, nil)
+	result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, structuredOutputErr, nil)
 
 	return result, nil
 }
@@ -565,22 +581,35 @@ func (r gitResult) summary() string {
 	return fmt.Sprintf("git=%s branch=%s", r.status, r.branch)
 }
 
-func persistExecutionRunRecord(workplaceDir string, in model.Invocation, profile model.Profile, allocation model.Allocation, workplace model.Workplace, launchResult model.LaunchResult, rawStructuredOutput string, structuredOutput *model.StructuredOutput, structuredOutputErr, launchErr error) string {
+func beginExecutionHistoryRun(ctx context.Context, workplaceDir string, in model.Invocation, profile model.Profile, status string, summary string) history.Handle {
 	workplaceDir = strings.TrimSpace(workplaceDir)
 	if workplaceDir == "" {
-		return ""
+		return history.Handle{}
 	}
-
-	recordDir := filepath.Join(workplaceDir, ".progress", "execution-runs")
-	if err := os.MkdirAll(recordDir, 0o755); err != nil {
-		return ""
+	if strings.TrimSpace(status) == "" {
+		status = "running"
 	}
-
-	recordFile, err := os.CreateTemp(recordDir, runRecordFilePrefix+"*.json")
+	createdAt := time.Now().UTC().Format(time.RFC3339)
+	handle, err := history.Begin(ctx, workplaceDir, history.Run{
+		CreatedAt:          createdAt,
+		Status:             status,
+		Summary:            summary,
+		Name:               in.Workplace.Name,
+		ProfileName:        fallbackHistoryValue(profile.Name),
+		Runner:             fallbackHistoryValue(in.Launch.Runner),
+		Model:              fallbackHistoryValue(in.Launch.Model),
+		LaunchDirectory:    in.Launch.Directory,
+		RawStructuredInput: history.StructuredInputJSON(in.Launch.StructuredInput),
+	})
 	if err != nil {
-		return ""
+		return history.Handle{}
 	}
-	defer recordFile.Close()
+	return handle
+}
+
+func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string, in model.Invocation, profile model.Profile, allocation model.Allocation, workplace model.Workplace, launchResult model.LaunchResult, rawStructuredOutput string, structuredOutput *model.StructuredOutput, structuredOutputErr, launchErr error) string {
+	workplaceDir = strings.TrimSpace(workplaceDir)
+	recordPath := ""
 
 	var structuredInput *model.StructuredInput
 	if in.Launch.StructuredInput != nil {
@@ -616,32 +645,50 @@ func persistExecutionRunRecord(workplaceDir string, in model.Invocation, profile
 		},
 	}
 
-	payload, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		return ""
+	if workplaceDir != "" && existingDirectory(workplaceDir) {
+		recordDir := filepath.Join(workplaceDir, ".progress", "execution-runs")
+		if err := os.MkdirAll(recordDir, 0o755); err == nil {
+			if recordFile, err := os.CreateTemp(recordDir, runRecordFilePrefix+"*.json"); err == nil {
+				payload, marshalErr := json.MarshalIndent(record, "", "  ")
+				if marshalErr == nil {
+					if _, writeErr := io.WriteString(recordFile, string(payload)); writeErr == nil {
+						recordPath = recordFile.Name()
+					}
+				}
+				_ = recordFile.Close()
+			}
+		}
 	}
 
-	if _, err := io.WriteString(recordFile, string(payload)); err != nil {
-		return ""
-	}
-
-	_ = history.Store(context.Background(), workplaceDir, history.Run{
+	_ = history.Update(context.Background(), historyHandle, history.Run{
 		CreatedAt:           createdAt,
 		Status:              launchResult.Status,
 		Summary:             launchResult.Summary,
 		Name:                in.Workplace.Name,
-		ProfileName:         profile.Name,
-		Runner:              in.Launch.Runner,
-		Model:               in.Launch.Model,
+		ProfileName:         fallbackHistoryValue(profile.Name),
+		Runner:              fallbackHistoryValue(in.Launch.Runner),
+		Model:               fallbackHistoryValue(in.Launch.Model),
 		LaunchDirectory:     in.Launch.Directory,
 		RawStructuredInput:  history.StructuredInputJSON(structuredInput),
 		RawOutputPath:       launchResult.RawOutputPath,
 		RawStructuredOutput: history.StructuredOutputJSON(structuredOutput, rawStructuredOutput),
-		RunRecordPath:       recordFile.Name(),
+		RunRecordPath:       recordPath,
 		Error:               launchErrText,
 	})
 
-	return recordFile.Name()
+	return recordPath
+}
+
+func existingDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func fallbackHistoryValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
 }
 
 func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) (gitResult, error) {

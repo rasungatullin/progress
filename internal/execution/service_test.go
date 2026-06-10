@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution/history"
@@ -93,13 +95,124 @@ func TestServiceStartRecordsProfileFailureInHistory(t *testing.T) {
 	}
 }
 
+func TestServiceStartUpdatesRunningHistoryRowOnSuccess(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	launcher := &stubLauncher{result: model.LaunchResult{
+		Status:        "completed",
+		Summary:       "launch complete",
+		RawOutputPath: filepath.Join(root, "output.log"),
+		StructuredOutput: &model.StructuredOutput{
+			Summary: "Done.",
+		},
+		RunRecordPath: filepath.Join(root, "record.json"),
+	}}
+	service := &Service{
+		logger:     log.Default(),
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Runner: "opencode", Model: "openai/gpt-5.5"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "local-slot:coder", Reserved: true}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		launcher:   launcher,
+	}
+
+	result, err := service.Start(context.Background(), Invocation{
+		Profile:   "coder",
+		Workplace: WorkplaceSpec{Name: "task-58"},
+		Launch: LaunchSpec{
+			Directory:       root,
+			StructuredInput: &StructuredInput{Task: "Ship it."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+
+	runs, err := history.List(context.Background(), root, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("start must update one sqlite history run, got %d", len(runs))
+	}
+	if runs[0].Status != "completed" || runs[0].Name != "task-58" || runs[0].ProfileName != "coder" || runs[0].Runner != "opencode" || runs[0].Model != "openai/gpt-5.5" {
+		t.Fatalf("unexpected start row: %#v", runs[0])
+	}
+	if runs[0].RawOutputPath == "" || runs[0].RawStructuredOutput != `{"summary":"Done."}` || runs[0].RunRecordPath == "" {
+		t.Fatalf("start row must keep result metadata: %#v", runs[0])
+	}
+}
+
+func TestServiceStartEnrichesRunningHistoryRowBeforeLaunch(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	historyRoot := t.TempDir()
+	if err := os.Chdir(historyRoot); err != nil {
+		t.Fatalf("chdir history root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	workplaceDir := filepath.Join(historyRoot, "workplace")
+	launcher := &stubLauncher{beforeReturn: func() {
+		runs, err := history.List(context.Background(), historyRoot, history.ListFilter{Limit: 10})
+		if err != nil {
+			t.Fatalf("list running history: %v", err)
+		}
+		if len(runs) != 1 {
+			t.Fatalf("start must keep one running sqlite history run, got %d", len(runs))
+		}
+		if runs[0].Status != "running" || runs[0].LaunchDirectory != workplaceDir || runs[0].ProfileName != "coder" || runs[0].Runner != "opencode" || runs[0].Model != "openai/gpt-5.5" {
+			t.Fatalf("running start row must be enriched before launch returns: %#v", runs[0])
+		}
+	}}
+	service := &Service{
+		logger:     log.Default(),
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Runner: "opencode", Model: "openai/gpt-5.5"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "local-slot:coder", Reserved: true}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: workplaceDir, Ready: true}},
+		launcher:   launcher,
+	}
+
+	result, err := service.Start(context.Background(), Invocation{
+		Profile:   "coder",
+		Workplace: WorkplaceSpec{Name: "task-58"},
+		Launch: LaunchSpec{
+			StructuredInput: &StructuredInput{Task: "Ship it."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
 type stubLauncher struct {
-	invocation model.Invocation
+	invocation   model.Invocation
+	result       model.LaunchResult
+	err          error
+	beforeReturn func()
 }
 
 func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, _ model.Profile, _ model.Allocation, _ model.Workplace) (model.LaunchResult, error) {
 	s.invocation = in
-	return model.LaunchResult{Status: "completed"}, nil
+	if s.beforeReturn != nil {
+		s.beforeReturn()
+	}
+	if s.result.Status == "" && s.err == nil {
+		return model.LaunchResult{Status: "completed"}, nil
+	}
+	return s.result, s.err
 }
 
 type stubProfileResolver struct {
@@ -112,4 +225,28 @@ func (s *stubProfileResolver) Resolve(context.Context, model.Invocation) (model.
 		return model.Profile{}, s.err
 	}
 	return s.profile, nil
+}
+
+type stubResourceProvider struct {
+	allocation model.Allocation
+	err        error
+}
+
+func (s *stubResourceProvider) Allocate(context.Context, model.Invocation, model.Profile) (model.Allocation, error) {
+	if s.err != nil {
+		return model.Allocation{}, s.err
+	}
+	return s.allocation, nil
+}
+
+type stubWorkplaceManager struct {
+	workplace model.Workplace
+	err       error
+}
+
+func (s *stubWorkplaceManager) Prepare(context.Context, model.Invocation, model.Profile, model.Allocation) (model.Workplace, error) {
+	if s.err != nil {
+		return model.Workplace{}, s.err
+	}
+	return s.workplace, nil
 }

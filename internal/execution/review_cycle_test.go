@@ -164,6 +164,14 @@ func TestRunReviewCycleRecordsLimitReachedAggregateInHistory(t *testing.T) {
 	if runs[0].Name != "task-54" || runs[0].ProfileName != "coder" || !strings.Contains(runs[0].Summary, "attempts=1") {
 		t.Fatalf("unexpected review-cycle aggregate row: %#v", runs[0])
 	}
+
+	allRuns, err := history.List(context.Background(), root, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list all sqlite history: %v", err)
+	}
+	if len(allRuns) != 1 {
+		t.Fatalf("review-cycle aggregate must update one row, got %d", len(allRuns))
+	}
 }
 
 func TestRunReviewCyclePreservesBaseStructuredInput(t *testing.T) {
