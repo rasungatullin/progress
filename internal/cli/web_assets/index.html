@@ -100,6 +100,28 @@
         flex-wrap: wrap;
       }
 
+      .filters {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: end;
+        margin-bottom: 12px;
+      }
+
+      .filters label {
+        display: grid;
+        gap: 4px;
+        font-size: 12px;
+        color: #475569;
+      }
+
+      input {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 8px;
+        min-width: 110px;
+      }
+
       button {
         border: none;
         border-radius: 8px;
@@ -130,6 +152,12 @@
 
         <div>
           <h2 style="margin-top: 0;">Runs</h2>
+          <form id="filters" class="filters">
+            <label>Name <input id="nameFilter" name="name" type="search" placeholder="task name" /></label>
+            <label>Status <input id="statusFilter" name="status" type="search" placeholder="completed" /></label>
+            <label>Limit <input id="limitFilter" name="limit" type="number" min="1" value="20" /></label>
+            <button type="submit">Apply filters</button>
+          </form>
           <table class="runs">
             <thead>
               <tr>
@@ -174,12 +202,31 @@
       const recordEl = document.getElementById('record');
       const rawEl = document.getElementById('raw');
       const rawButton = document.getElementById('rawButton');
+      const filtersEl = document.getElementById('filters');
+      const nameFilterEl = document.getElementById('nameFilter');
+      const statusFilterEl = document.getElementById('statusFilter');
+      const limitFilterEl = document.getElementById('limitFilter');
 
       let selectedRun = null;
       let selectedWorkspace = '';
 
       function textOrDash(value) {
         return value && value.length ? value : '-';
+      }
+
+      function appendCell(row, value) {
+        const cell = document.createElement('td');
+        cell.textContent = String(textOrDash(value));
+        row.appendChild(cell);
+      }
+
+      function prettyJSON(value, emptyText) {
+        if (!value) return emptyText;
+        try {
+          return JSON.stringify(JSON.parse(value), null, 2);
+        } catch {
+          return value;
+        }
       }
 
       function renderWorkspaces(items) {
@@ -221,7 +268,12 @@
       }
 
       async function renderRuns() {
-        const response = await fetch(`/api/runs?workspace=${encodeURIComponent(selectedWorkspace)}`);
+        const params = new URLSearchParams({ workspace: selectedWorkspace });
+        if (nameFilterEl.value.trim()) params.set('name', nameFilterEl.value.trim());
+        if (statusFilterEl.value.trim()) params.set('status', statusFilterEl.value.trim());
+        if (limitFilterEl.value.trim()) params.set('limit', limitFilterEl.value.trim());
+
+        const response = await fetch(`/api/runs?${params.toString()}`);
         if (!response.ok) {
           runInfoEl.textContent = `Failed to load runs (${response.status})`;
           return;
@@ -243,13 +295,11 @@
         runs.forEach(item => {
           const row = document.createElement('tr');
           row.className = 'run-row';
-          row.innerHTML = `
-            <td>${item.id}</td>
-            <td>${textOrDash(item.created_at)}</td>
-            <td>${textOrDash(item.status)}</td>
-            <td>${textOrDash(item.name)}</td>
-            <td>${textOrDash(item.summary)}</td>
-          `;
+          appendCell(row, item.id);
+          appendCell(row, item.created_at);
+          appendCell(row, item.status);
+          appendCell(row, item.name);
+          appendCell(row, item.summary);
           row.addEventListener('click', () => onSelectRun(item.id, row));
           runsEl.appendChild(row);
         });
@@ -274,9 +324,9 @@
           error: payload.error,
           raw_output_path: payload.raw_output_path,
         }, null, 2);
-        structuredInputEl.textContent = payload.raw_structured_input || '(structured input is empty)';
-        structuredOutputEl.textContent = payload.raw_structured_output || '(structured output is empty)';
-        recordEl.textContent = payload.run_record || payload.run_record_error || '(run record is empty)';
+        structuredInputEl.textContent = prettyJSON(payload.raw_structured_input, '(structured input is empty)');
+        structuredOutputEl.textContent = prettyJSON(payload.raw_structured_output, '(structured output is empty)');
+        recordEl.textContent = prettyJSON(payload.run_record, payload.run_record_error || '(run record is empty)');
         rawEl.textContent = '';
         rawButton.disabled = false;
         rawButton.dataset.runId = runID;
@@ -301,6 +351,11 @@
       }
 
       rawButton.addEventListener('click', loadRawOutput);
+      filtersEl.addEventListener('submit', async event => {
+        event.preventDefault();
+        clearSelection();
+        await renderRuns();
+      });
 
       async function init() {
         const ws = await fetch('/api/workspaces');

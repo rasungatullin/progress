@@ -240,6 +240,12 @@ func TestCollectWorkspaceRootsIncludesNestedWorkplaces(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".progress", "workplaces", "task-b"), 0o755); err != nil {
 		t.Fatalf("create direct workplace: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(root, ".progress", "workplaces", "task-b", ".git"), []byte("gitdir: ../.git/worktrees/task-b"), 0o600); err != nil {
+		t.Fatalf("create direct workplace git marker: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".progress", "workplaces", "task-b", "internal"), 0o755); err != nil {
+		t.Fatalf("create direct workplace child dir: %v", err)
+	}
 
 	paths, err := collectWorkspaceRoots(root)
 	if err != nil {

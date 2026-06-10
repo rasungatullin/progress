@@ -340,6 +340,11 @@ func collectWorkspaceRoots(root string) ([]string, error) {
 		}
 
 		firstLevel := filepath.Join(workplacesBase, entry.Name())
+		if isWorkspaceRoot(firstLevel) {
+			workspaces = append(workspaces, firstLevel)
+			continue
+		}
+
 		hasNested := false
 		nested, err := os.ReadDir(firstLevel)
 		if err == nil {
@@ -358,6 +363,15 @@ func collectWorkspaceRoots(root string) ([]string, error) {
 
 	sort.Strings(workspaces)
 	return uniqueStrings(workspaces), nil
+}
+
+func isWorkspaceRoot(path string) bool {
+	for _, marker := range []string{".git", ".progress"} {
+		if _, err := os.Stat(filepath.Join(path, marker)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func collectAllowedWorkRoots(root string) ([]string, error) {
