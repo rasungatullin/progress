@@ -1,0 +1,259 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/rasungatullin/progress/internal/execution/history"
+)
+
+func TestReadSafeTextAllowsAllowedFiles(t *testing.T) {
+	root := t.TempDir()
+
+	recordRoot := filepath.Join(root, ".progress", "execution-runs")
+	rawRoot := filepath.Join(root, ".progress", "runner-output")
+	if err := os.MkdirAll(recordRoot, 0o755); err != nil {
+		t.Fatalf("mkdir record root: %v", err)
+	}
+	if err := os.MkdirAll(rawRoot, 0o755); err != nil {
+		t.Fatalf("mkdir raw root: %v", err)
+	}
+
+	recordPath := filepath.Join(recordRoot, "execution-1.json")
+	rawPath := filepath.Join(rawRoot, "execution-1.log")
+	if err := os.WriteFile(recordPath, []byte(`{"name":"run"}`), 0o600); err != nil {
+		t.Fatalf("write record: %v", err)
+	}
+	if err := os.WriteFile(rawPath, []byte("runner output"), 0o600); err != nil {
+		t.Fatalf("write raw output: %v", err)
+	}
+
+	content, err := readSafeText(root, ".progress/execution-runs/execution-1.json")
+	if err != nil {
+		t.Fatalf("read allowed record: %v", err)
+	}
+	if strings.TrimSpace(content) != `{"name":"run"}` {
+		t.Fatalf("unexpected record content: %q", content)
+	}
+
+	content, err = readSafeText(root, rawPath)
+	if err != nil {
+		t.Fatalf("read allowed raw output: %v", err)
+	}
+	if strings.TrimSpace(content) != "runner output" {
+		t.Fatalf("unexpected raw output content: %q", content)
+	}
+}
+
+func TestReadSafeTextRejectsTraversalOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+
+	workplaces := filepath.Join(root, ".progress", "workplaces", "task-1")
+	if err := os.MkdirAll(filepath.Join(workplaces, ".progress", "execution-runs"), 0o755); err != nil {
+		t.Fatalf("prepare workplace execution-runs: %v", err)
+	}
+
+	evilTarget := filepath.Join(root, "outside.txt")
+	if err := os.WriteFile(evilTarget, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write evil file: %v", err)
+	}
+
+	evilPath := filepath.Join(workplaces, ".progress", "execution-runs", "linked.txt")
+	if err := os.Symlink(evilTarget, evilPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	_, err := readSafeText(root, evilPath)
+	if !errors.Is(err, errPathTraversal) {
+		t.Fatalf("expected traversal error, got: %v", err)
+	}
+}
+
+func TestWebHandlersServeExecutionRuns(t *testing.T) {
+	root := t.TempDir()
+
+	recordRoot := filepath.Join(root, ".progress", "execution-runs")
+	rawRoot := filepath.Join(root, ".progress", "runner-output")
+	if err := os.MkdirAll(recordRoot, 0o755); err != nil {
+		t.Fatalf("mkdir execution-runs: %v", err)
+	}
+	if err := os.MkdirAll(rawRoot, 0o755); err != nil {
+		t.Fatalf("mkdir runner-output: %v", err)
+	}
+
+	rawPath := filepath.Join(rawRoot, "execution-1.log")
+	if err := os.WriteFile(rawPath, []byte("full raw output"), 0o600); err != nil {
+		t.Fatalf("write raw output: %v", err)
+	}
+
+	recordPath := filepath.Join(recordRoot, "execution-1.json")
+	if err := os.WriteFile(recordPath, []byte(`{"x":1}`), 0o600); err != nil {
+		t.Fatalf("write execution record: %v", err)
+	}
+
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:           "2026-06-10T10:00:00Z",
+		Status:              "completed",
+		Summary:             "done",
+		Name:                "task-1",
+		ProfileName:         "default",
+		Runner:              "opencode",
+		Model:               "openai/gpt-5.4",
+		LaunchDirectory:     root,
+		RawOutputPath:       rawPath,
+		RawStructuredOutput: `{"summary":"ok"}`,
+		RunRecordPath:       recordPath,
+	}); err != nil {
+		t.Fatalf("store run: %v", err)
+	}
+
+	handler, err := newWebHandler(root)
+	if err != nil {
+		t.Fatalf("new web handler: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("runs endpoint status: %d", w.Code)
+	}
+
+	var runs []history.ListedRun
+	if err := json.NewDecoder(bytes.NewReader(w.Body.Bytes())).Decode(&runs); err != nil {
+		t.Fatalf("decode runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+
+	runID := runs[0].ID
+	request = httptest.NewRequest(http.MethodGet, "/api/runs/"+strconv.FormatInt(runID, 10), nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("run detail endpoint status: %d", w.Code)
+	}
+
+	var details struct {
+		RunRecord string `json:"run_record"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(w.Body.Bytes())).Decode(&details); err != nil {
+		t.Fatalf("decode run details: %v", err)
+	}
+	if details.RunRecord != "{\"x\":1}" {
+		t.Fatalf("unexpected run record: %q", details.RunRecord)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/runs/"+strconv.FormatInt(runID, 10)+"/raw-output", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("raw output status: %d", w.Code)
+	}
+	if strings.TrimSpace(w.Body.String()) != "full raw output" {
+		t.Fatalf("unexpected raw output body: %q", w.Body.String())
+	}
+}
+
+func TestWebHandlersServeWorkspaceRuns(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, ".progress", "workplaces", "repo", "task-a")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	if err := history.Store(context.Background(), workspace, history.Run{
+		CreatedAt:          "2026-06-10T11:00:00Z",
+		Status:             "failed",
+		Summary:            "broken",
+		Name:               "workspace-run",
+		ProfileName:        "default",
+		Runner:             "opencode",
+		Model:              "openai/gpt-5.4",
+		LaunchDirectory:    workspace,
+		RawStructuredInput: `{"task":"inspect"}`,
+		Error:              "boom",
+	}); err != nil {
+		t.Fatalf("store workspace run: %v", err)
+	}
+
+	handler, err := newWebHandler(root)
+	if err != nil {
+		t.Fatalf("new web handler: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/runs?workspace="+workspace, nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("workspace runs endpoint status: %d", w.Code)
+	}
+
+	var runs []history.ListedRun
+	if err := json.NewDecoder(bytes.NewReader(w.Body.Bytes())).Decode(&runs); err != nil {
+		t.Fatalf("decode workspace runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Name != "workspace-run" || runs[0].Error != "boom" {
+		t.Fatalf("unexpected workspace runs: %#v", runs)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/runs/"+strconv.FormatInt(runs[0].ID, 10)+"?workspace="+workspace, nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("workspace detail endpoint status: %d", w.Code)
+	}
+}
+
+func TestWebHandlersRejectUnknownWorkspace(t *testing.T) {
+	root := t.TempDir()
+	handler, err := newWebHandler(root)
+	if err != nil {
+		t.Fatalf("new web handler: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/runs?workspace="+filepath.Join(root, "unknown"), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown workspace status: %d", w.Code)
+	}
+}
+
+func TestCollectWorkspaceRootsIncludesNestedWorkplaces(t *testing.T) {
+	root := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(root, ".progress", "workplaces", "repo", "task-a"), 0o755); err != nil {
+		t.Fatalf("create nested workplace: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".progress", "workplaces", "task-b"), 0o755); err != nil {
+		t.Fatalf("create direct workplace: %v", err)
+	}
+
+	paths, err := collectWorkspaceRoots(root)
+	if err != nil {
+		t.Fatalf("collect workplaces: %v", err)
+	}
+	sort.Strings(paths)
+
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 workplace roots, got %d", len(paths))
+	}
+
+	expectedNested := filepath.Clean(filepath.Join(root, ".progress", "workplaces", "repo", "task-a"))
+	expectedDirect := filepath.Clean(filepath.Join(root, ".progress", "workplaces", "task-b"))
+	if paths[0] != expectedNested || paths[1] != expectedDirect {
+		t.Fatalf("expected nested and direct roots: %#v", paths)
+	}
+}

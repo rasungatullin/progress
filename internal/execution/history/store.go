@@ -277,6 +277,33 @@ func List(ctx context.Context, root string, filter ListFilter) ([]ListedRun, err
 	return runs, nil
 }
 
+func Get(ctx context.Context, root string, id int64) (ListedRun, error) {
+	var run ListedRun
+
+	dbPath := DatabasePath(root)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return run, err
+	}
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return run, err
+	}
+	defer db.Close()
+
+	if err := ensureSchema(ctx, db); err != nil {
+		return run, err
+	}
+
+	query := `SELECT r.id, r.created_at, r.status, r.summary, COALESCE(r.name, ''), r.profile_name, r.runner, q.model, q.launch_directory, q.raw_structured_input, COALESCE(s.raw_output_path, ''), COALESCE(s.raw_structured_output, ''), COALESCE(r.run_record_path, ''), COALESCE(r.error, '') FROM execution_runs r JOIN execution_requests q ON q.id = r.request_id LEFT JOIN execution_results s ON s.id = r.result_id WHERE r.id = ?`
+	row := db.QueryRowContext(ctx, query, id)
+	if err := row.Scan(&run.ID, &run.CreatedAt, &run.Status, &run.Summary, &run.Name, &run.ProfileName, &run.Runner, &run.Model, &run.LaunchDirectory, &run.RawStructuredInput, &run.RawOutputPath, &run.RawStructuredOutput, &run.RunRecordPath, &run.Error); err != nil {
+		return run, err
+	}
+
+	return run, nil
+}
+
 func ensureSchema(ctx context.Context, db *sql.DB) error {
 	statements := []string{
 		`PRAGMA foreign_keys = ON`,
