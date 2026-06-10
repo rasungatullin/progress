@@ -138,7 +138,12 @@ func Store(ctx context.Context, root string, run Run) error {
 }
 
 func List(ctx context.Context, root string, filter ListFilter) ([]ListedRun, error) {
-	db, err := sql.Open("sqlite3", DatabasePath(root))
+	dbPath := DatabasePath(root)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +204,9 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS execution_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, model TEXT NOT NULL, launch_directory TEXT NOT NULL, raw_structured_input TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS execution_results (id INTEGER PRIMARY KEY AUTOINCREMENT, raw_output_path TEXT NOT NULL, raw_structured_output TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS execution_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL, name TEXT, profile_name TEXT NOT NULL, runner TEXT NOT NULL, request_id INTEGER NOT NULL REFERENCES execution_requests(id), result_id INTEGER REFERENCES execution_results(id), run_record_path TEXT, error TEXT)`,
+		`CREATE INDEX IF NOT EXISTS execution_runs_created_at_idx ON execution_runs(created_at)`,
+		`CREATE INDEX IF NOT EXISTS execution_runs_name_idx ON execution_runs(name)`,
+		`CREATE INDEX IF NOT EXISTS execution_runs_status_idx ON execution_runs(status)`,
 	}
 
 	for _, statement := range statements {
