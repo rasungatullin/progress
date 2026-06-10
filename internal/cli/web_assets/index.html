@@ -165,6 +165,9 @@
                 <th>Created</th>
                 <th>Status</th>
                 <th>Name</th>
+                <th>Profile</th>
+                <th>Runner</th>
+                <th>Model</th>
                 <th>Summary</th>
               </tr>
             </thead>
@@ -284,7 +287,7 @@
         if (!runs.length) {
           const row = document.createElement('tr');
           const cell = document.createElement('td');
-          cell.colSpan = 5;
+          cell.colSpan = 8;
           cell.textContent = 'No runs yet.';
           cell.className = 'muted';
           row.appendChild(cell);
@@ -299,6 +302,9 @@
           appendCell(row, item.created_at);
           appendCell(row, item.status);
           appendCell(row, item.name);
+          appendCell(row, item.profile_name);
+          appendCell(row, item.runner);
+          appendCell(row, item.model);
           appendCell(row, item.summary);
           row.addEventListener('click', () => onSelectRun(item.id, row));
           runsEl.appendChild(row);
