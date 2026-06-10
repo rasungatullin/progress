@@ -903,12 +903,28 @@ func TestLaunchProgrammaticStructuredInputRejectsProtocolOnlyPayload(t *testing.
 	invocation := validInvocation(t, false)
 	invocation.Launch.StructuredInput = &model.StructuredInput{ProtocolVersion: model.StructuredIOVersion}
 
-	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	workplace := validWorkplace(t)
+
+	_, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
 	if err == nil {
 		t.Fatal("expected invalid structured input error")
 	}
 	if !strings.Contains(err.Error(), "structured input must include at least one non-empty field besides protocol_version") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10, Status: "failed"})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one failed sqlite history run, got %d", len(runs))
+	}
+	if runs[0].Model != invocation.Launch.Model || runs[0].LaunchDirectory != invocation.Launch.Directory {
+		t.Fatalf("failed invalid structured input row must keep request metadata: %#v", runs[0])
+	}
+	if runs[0].RawStructuredInput != `{"protocol_version":"review-cycle/v1"}` {
+		t.Fatalf("failed invalid structured input row must keep available structured input: %#v", runs[0])
 	}
 }
 

@@ -386,7 +386,7 @@ func validateStructuredOutputPayload(payload model.StructuredOutput) error {
 func prepareInvocation(in model.Invocation) (model.Invocation, error) {
 	plainPrompt, structuredInput, err := NormalizeStructuredInput(in.Launch.Prompt, in.Launch.StructuredInput)
 	if err != nil {
-		return model.Invocation{}, err
+		return in, err
 	}
 
 	in.Launch.Prompt = plainPrompt
