@@ -3,16 +3,16 @@ package model
 import "encoding/json"
 
 type LaunchSpec struct {
-	Directory                string
-	Runner                   string
-	Model                    string
-	Prompt                   string
-	PromptAdditions          []string
-	StructuredInput          *StructuredInput
-	StructuredOutput         bool
-	StructuredOutputRequired bool
-	StructuredOutputFields   []string
-	CommitPush               bool
+	Directory                string           `json:"directory,omitempty"`
+	Runner                   string           `json:"runner,omitempty"`
+	Model                    string           `json:"model,omitempty"`
+	Prompt                   string           `json:"prompt,omitempty"`
+	PromptAdditions          []string         `json:"prompt_additions,omitempty"`
+	StructuredInput          *StructuredInput `json:"structured_input,omitempty"`
+	StructuredOutput         bool             `json:"structured_output,omitempty"`
+	StructuredOutputRequired bool             `json:"structured_output_required,omitempty"`
+	StructuredOutputFields   []string         `json:"structured_output_fields,omitempty"`
+	CommitPush               bool             `json:"commit_push,omitempty"`
 }
 
 const StructuredIOVersion = "review-cycle/v1"
@@ -108,32 +108,32 @@ type StructuredConclusion struct {
 }
 
 type WorkplaceSpec struct {
-	Name string
+	Name string `json:"name,omitempty"`
 }
 
 type RepositorySpec struct {
-	URL string
+	URL string `json:"url,omitempty"`
 }
 
 type Invocation struct {
-	Task       string
-	Profile    string
-	Repository RepositorySpec
-	Workplace  WorkplaceSpec
-	Launch     LaunchSpec
+	Task       string         `json:"task,omitempty"`
+	Profile    string         `json:"profile,omitempty"`
+	Repository RepositorySpec `json:"repository,omitempty"`
+	Workplace  WorkplaceSpec  `json:"workplace,omitempty"`
+	Launch     LaunchSpec     `json:"launch,omitempty"`
 }
 
 type Profile struct {
-	Name                     string
-	Description              string
-	Runner                   string
-	Mode                     string
-	Model                    string
-	PromptAdditions          []string
-	StructuredOutput         bool
-	StructuredOutputRequired bool
-	StructuredOutputFields   []string
-	CommitPush               bool
+	Name                     string   `json:"name,omitempty"`
+	Description              string   `json:"description,omitempty"`
+	Runner                   string   `json:"runner,omitempty"`
+	Mode                     string   `json:"mode,omitempty"`
+	Model                    string   `json:"model,omitempty"`
+	PromptAdditions          []string `json:"prompt_additions,omitempty"`
+	StructuredOutput         bool     `json:"structured_output,omitempty"`
+	StructuredOutputRequired bool     `json:"structured_output_required,omitempty"`
+	StructuredOutputFields   []string `json:"structured_output_fields,omitempty"`
+	CommitPush               bool     `json:"commit_push,omitempty"`
 }
 
 type ProfileConfigFile struct {
@@ -165,20 +165,21 @@ type ProfileConfig struct {
 }
 
 type Allocation struct {
-	Resource string
-	Reserved bool
+	Resource string `json:"resource,omitempty"`
+	Reserved bool   `json:"reserved,omitempty"`
 }
 
 type Workplace struct {
-	Name           string
-	RepositoryURL  string
-	RepositoryRoot string
-	Ready          bool
+	Name           string `json:"name,omitempty"`
+	RepositoryURL  string `json:"repository_url,omitempty"`
+	RepositoryRoot string `json:"repository_root,omitempty"`
+	Ready          bool   `json:"ready,omitempty"`
 }
 
 type LaunchResult struct {
-	Status           string
-	Summary          string
-	RawOutputPath    string
-	StructuredOutput *StructuredOutput
+	Status           string            `json:"status,omitempty"`
+	Summary          string            `json:"summary,omitempty"`
+	RawOutputPath    string            `json:"raw_output_path,omitempty"`
+	StructuredOutput *StructuredOutput `json:"structured_output,omitempty"`
+	RunRecordPath    string            `json:"run_record_path,omitempty"`
 }

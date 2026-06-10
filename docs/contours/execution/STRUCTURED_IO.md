@@ -95,7 +95,12 @@ flowchart TD
 8. после ответа вычислителя контур исполнения отделяет свободный текст от структурированного вывода;
 9. структурированный вывод разбирается и нормализуется;
 10. при включённом `commit-push` git-стадия выбирает commit message в порядке `structured_output.commit_message -> Invocation.Workplace.Name -> basename(prepared workplace path) -> default`, пропуская пустые и whitespace-only значения;
-11. итоговый текст и структурированные поля передаются в дальнейшую обработку.
+11. после завершения запуска контур сохраняет локальный JSON record в `.progress/execution-runs/`, где фиксируются normalized `Invocation`, resolved profile, allocation, workplace, canonical structured input, raw structured output payload, parsed structured output и итоговый статус запуска;
+12. итоговый текст и структурированные поля передаются в дальнейшую обработку.
+
+Run record является runtime-артефактом диагностики, а не частью результата задачи. Он создаётся для обычного `progress execution start`, прямого `progress execution launch` и внутренних запусков `progress execution review-cycle`, потому что все эти маршруты сходятся в одном launch-модуле. Если strict structured output validation завершилась ошибкой, record всё равно сохраняет normalized input, raw output path, найденный raw structured payload и диагностическое поле ошибки. Ошибка записи самого record не должна валить основной запуск.
+
+Runtime-директории `.progress/runner-output/` и `.progress/execution-runs/` исключаются из auto `commit-push`, чтобы локальные диагностические файлы не попадали в ветки целевых репозиториев. Остальные проектные файлы `.progress`, например `.progress/execution/profiles.json`, остаются видимыми для git-стадии как обычные изменения.
 
 ## 7. Управление через профиль и флаги запуска
 
