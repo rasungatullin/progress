@@ -491,11 +491,18 @@ func appendExistingDirectory(values *[]string, path string) error {
 		return err
 	}
 
-	resolved := absPath
-	if target, err := filepath.EvalSymlinks(absPath); err == nil {
-		resolved = target
+	stat, err := os.Lstat(absPath)
+	if err != nil {
+		return err
+	}
+	if stat.Mode()&os.ModeSymlink != 0 {
+		return nil
 	}
 
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return err
+	}
 	if stat, err := os.Stat(resolved); err != nil {
 		return err
 	} else if !stat.IsDir() {

@@ -79,6 +79,38 @@ func TestReadSafeTextRejectsTraversalOutsideRoot(t *testing.T) {
 	}
 }
 
+func TestReadSafeTextRejectsSymlinkedArtifactDirectoryOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+
+	progressRoot := filepath.Join(root, ".progress")
+	if err := os.MkdirAll(progressRoot, 0o755); err != nil {
+		t.Fatalf("mkdir progress root: %v", err)
+	}
+
+	externalRawRoot := filepath.Join(t.TempDir(), "runner-output")
+	if err := os.MkdirAll(externalRawRoot, 0o755); err != nil {
+		t.Fatalf("mkdir external raw root: %v", err)
+	}
+	externalRawPath := filepath.Join(externalRawRoot, "execution-1.log")
+	if err := os.WriteFile(externalRawPath, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write external raw output: %v", err)
+	}
+
+	if err := os.Symlink(externalRawRoot, filepath.Join(progressRoot, "runner-output")); err != nil {
+		t.Fatalf("create runner-output symlink: %v", err)
+	}
+
+	_, err := readSafeText(root, externalRawPath)
+	if !errors.Is(err, errPathTraversal) {
+		t.Fatalf("expected traversal error for external symlink target, got: %v", err)
+	}
+
+	_, err = readSafeText(root, filepath.Join(root, ".progress", "runner-output", "execution-1.log"))
+	if !errors.Is(err, errPathTraversal) {
+		t.Fatalf("expected traversal error through symlinked artifact directory, got: %v", err)
+	}
+}
+
 func TestWebHandlersServeExecutionRuns(t *testing.T) {
 	root := t.TempDir()
 
