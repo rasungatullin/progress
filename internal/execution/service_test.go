@@ -2,9 +2,11 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"log"
 	"testing"
 
+	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
@@ -53,6 +55,44 @@ func TestServiceLaunchPreservesExistingPromptBehaviorWithoutProfileAdditions(t *
 	}
 }
 
+func TestServiceStartRecordsProfileFailureInHistory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	expectedErr := errors.New("profile unavailable")
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{err: expectedErr},
+	}
+
+	result, err := service.Start(context.Background(), Invocation{
+		Profile:   "missing",
+		Workplace: WorkplaceSpec{Name: "task-54"},
+		Launch: LaunchSpec{
+			Directory: root,
+			Runner:    "opencode",
+			Model:     "openai/gpt-5.4",
+		},
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected profile error, got %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("expected failed result, got %#v", result)
+	}
+
+	runs, err := history.List(context.Background(), root, history.ListFilter{Limit: 10, Status: "failed"})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one failed sqlite history run, got %d", len(runs))
+	}
+	if runs[0].Name != "task-54" || runs[0].Error != expectedErr.Error() || runs[0].LaunchDirectory != root {
+		t.Fatalf("unexpected failed start row: %#v", runs[0])
+	}
+}
+
 type stubLauncher struct {
 	invocation model.Invocation
 }
@@ -60,4 +100,16 @@ type stubLauncher struct {
 func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, _ model.Profile, _ model.Allocation, _ model.Workplace) (model.LaunchResult, error) {
 	s.invocation = in
 	return model.LaunchResult{Status: "completed"}, nil
+}
+
+type stubProfileResolver struct {
+	profile model.Profile
+	err     error
+}
+
+func (s *stubProfileResolver) Resolve(context.Context, model.Invocation) (model.Profile, error) {
+	if s.err != nil {
+		return model.Profile{}, s.err
+	}
+	return s.profile, nil
 }

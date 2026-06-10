@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/rasungatullin/progress/internal/execution/history"
 )
 
 func TestRunReviewCycleRepeatsUntilReviewApproves(t *testing.T) {
@@ -41,10 +43,11 @@ func TestRunReviewCycleRepeatsUntilReviewApproves(t *testing.T) {
 			},
 		},
 	}
+	root := t.TempDir()
 
 	result, err := RunReviewCycle(context.Background(), starter, Invocation{
 		Profile: "coder",
-		Launch:  LaunchSpec{Prompt: "Ship the cycle."},
+		Launch:  LaunchSpec{Directory: root, Prompt: "Ship the cycle."},
 	}, "review", 5)
 	if err != nil {
 		t.Fatalf("run review cycle: %v", err)
@@ -105,8 +108,9 @@ func TestRunReviewCycleStopsAtExecutionLimit(t *testing.T) {
 			},
 		},
 	}
+	root := t.TempDir()
 
-	result, err := RunReviewCycle(context.Background(), starter, Invocation{Profile: "coder", Launch: LaunchSpec{Prompt: "Ship it."}}, "review", 2)
+	result, err := RunReviewCycle(context.Background(), starter, Invocation{Profile: "coder", Launch: LaunchSpec{Directory: root, Prompt: "Ship it."}}, "review", 2)
 	if err != nil {
 		t.Fatalf("run review cycle: %v", err)
 	}
@@ -115,6 +119,53 @@ func TestRunReviewCycleStopsAtExecutionLimit(t *testing.T) {
 	}
 	if len(starter.calls) != 4 {
 		t.Fatalf("expected exactly two execution attempts and reviews, got %d calls", len(starter.calls))
+	}
+}
+
+func TestRunReviewCycleRecordsLimitReachedAggregateInHistory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	starter := &reviewCycleStarterStub{
+		results: []LaunchResult{
+			{Status: "completed", Summary: "execution attempt 1"},
+			{
+				Status: "completed",
+				StructuredOutput: &StructuredOutput{
+					ProtocolVersion: StructuredIOVersion,
+					Summary:         "Needs fixes.",
+					Conclusion:      &StructuredConclusion{Status: "needs-work"},
+				},
+			},
+		},
+	}
+
+	result, err := RunReviewCycle(context.Background(), starter, Invocation{
+		Profile:   "coder",
+		Workplace: WorkplaceSpec{Name: "task-54"},
+		Launch: LaunchSpec{
+			Directory: root,
+			Runner:    "opencode",
+			Model:     "openai/gpt-5.4",
+			Prompt:    "Ship it.",
+		},
+	}, "review", 1)
+	if err != nil {
+		t.Fatalf("run review cycle: %v", err)
+	}
+	if result.Status != "limit-reached" {
+		t.Fatalf("expected limit-reached status, got %#v", result)
+	}
+
+	runs, err := history.List(context.Background(), root, history.ListFilter{Limit: 10, Status: "limit-reached"})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one review-cycle aggregate row, got %d", len(runs))
+	}
+	if runs[0].Name != "task-54" || runs[0].ProfileName != "coder" || !strings.Contains(runs[0].Summary, "attempts=1") {
+		t.Fatalf("unexpected review-cycle aggregate row: %#v", runs[0])
 	}
 }
 
@@ -134,6 +185,7 @@ func TestRunReviewCyclePreservesTrailingStructuredInputFromPrompt(t *testing.T) 
 			},
 		},
 	}
+	root := t.TempDir()
 
 	prompt := strings.Join([]string{
 		"Ship the cycle.",
@@ -142,7 +194,7 @@ func TestRunReviewCyclePreservesTrailingStructuredInputFromPrompt(t *testing.T) 
 		"</progress-structured-input>",
 	}, "\n")
 
-	if _, err := RunReviewCycle(context.Background(), starter, Invocation{Profile: "coder", Launch: LaunchSpec{Prompt: prompt}}, "review", 5); err != nil {
+	if _, err := RunReviewCycle(context.Background(), starter, Invocation{Profile: "coder", Launch: LaunchSpec{Directory: root, Prompt: prompt}}, "review", 5); err != nil {
 		t.Fatalf("run review cycle: %v", err)
 	}
 	if len(starter.calls) != 2 {
@@ -181,8 +233,9 @@ func TestRunReviewCycleReturnsAccumulatedResultOnReviewError(t *testing.T) {
 		errAt: 2,
 		err:   expectedErr,
 	}
+	root := t.TempDir()
 
-	result, err := RunReviewCycle(context.Background(), starter, Invocation{Profile: "coder", Launch: LaunchSpec{Prompt: "Ship it."}}, "review", 5)
+	result, err := RunReviewCycle(context.Background(), starter, Invocation{Profile: "coder", Launch: LaunchSpec{Directory: root, Prompt: "Ship it."}}, "review", 5)
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected review error, got %v", err)
 	}

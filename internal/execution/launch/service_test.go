@@ -81,6 +81,44 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	}
 }
 
+func TestLaunchRecordsInvalidStructuredInputInHistory(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			t.Fatal("runner must not start for invalid structured input")
+			return "", nil
+		},
+	}
+	invocation := validInvocation(t, false)
+	invocation.Launch.Prompt = strings.Join([]string{
+		"do work",
+		structuredInputStart,
+		`{"protocol_version":"review-cycle/v1",`,
+		structuredInputEnd,
+	}, "\n")
+	workplace := validWorkplace(t)
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err == nil {
+		t.Fatal("expected invalid structured input error")
+	}
+	if result.Status != "failed" || strings.TrimSpace(result.RunRecordPath) == "" {
+		t.Fatalf("failed pre-launch result must include run record path: %#v", result)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10, Status: "failed"})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one failed sqlite history run, got %d", len(runs))
+	}
+	if runs[0].Error == "" || runs[0].Summary == "" {
+		t.Fatalf("failed pre-launch row must keep error details: %#v", runs[0])
+	}
+}
+
 func TestLaunchCommitPushWithChanges(t *testing.T) {
 	t.Parallel()
 

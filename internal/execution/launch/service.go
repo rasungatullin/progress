@@ -61,12 +61,16 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	var err error
 	in, err = prepareInvocation(in)
 	if err != nil {
-		return model.LaunchResult{}, err
+		result := failedLaunchResult(err)
+		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		return result, err
 	}
 	in.Launch = applyProfileStructuredOutput(in.Launch, profile)
 
 	if err := validateLaunch(in, workplace); err != nil {
-		return model.LaunchResult{}, err
+		result := failedLaunchResult(err)
+		result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		return result, err
 	}
 
 	runnerOutput, err := s.runRunner(ctx, in)
@@ -138,6 +142,10 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	result.RunRecordPath = persistExecutionRunRecord(workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, structuredOutputErr, nil)
 
 	return result, nil
+}
+
+func failedLaunchResult(err error) model.LaunchResult {
+	return model.LaunchResult{Status: "failed", Summary: strings.TrimSpace(err.Error())}
 }
 
 func parseStructuredOutput(output string) (string, string, *model.StructuredOutput, trailingStructuredBlockState, error) {
