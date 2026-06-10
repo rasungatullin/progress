@@ -37,8 +37,6 @@ type StructuredChange = model.StructuredChange
 type StructuredCommand = model.StructuredCommand
 type StructuredConclusion = model.StructuredConclusion
 
-const StructuredIOVersion = model.StructuredIOVersion
-
 type ProfileResolver interface {
 	Resolve(context.Context, Invocation) (Profile, error)
 }

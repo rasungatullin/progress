@@ -20,7 +20,7 @@
 - сведения о требуемых интеграционных действиях;
 - дополнительные поля, введённые конфигурационными расширениями.
 
-В текущей реализации этот канонический `structured input` выражается через единый JSON-контракт верхнего уровня с полями `protocol_version`, `task`, `constraints`, `project_context`, `operational_context`, `previous_run_results`, `review_remarks`, `review_responses`, `integration_actions`, `extensions`.
+В текущей реализации этот канонический `structured input` выражается через единый JSON-контракт верхнего уровня с полями `task`, `constraints`, `project_context`, `operational_context`, `previous_run_results`, `review_remarks`, `review_responses`, `integration_actions`, `extensions`.
 
 Основная цель структурированного ввода состоит в том, чтобы контур исполнения мог собрать из него итоговую исполнительную директиву, достаточную для целевого вычислительного каскада.
 
@@ -38,7 +38,7 @@
 - передачи команд следующему шагу, например на открытие запроса на слияние;
 - передачи заключений о готовности результата или необходимости доработки.
 
-В текущей реализации этот канонический `structured output` выражается через единый JSON-контракт верхнего уровня с полями `protocol_version`, `summary`, `commit_message`, `remarks`, `questions`, `follow_up_actions`, `changes`, `commands`, `conclusion`, `extensions`.
+В текущей реализации этот канонический `structured output` выражается через единый JSON-контракт верхнего уровня с полями `summary`, `commit_message`, `remarks`, `questions`, `follow_up_actions`, `changes`, `commands`, `conclusion`, `extensions`.
 
 ## 4. Ответственность контура исполнения
 
@@ -85,12 +85,12 @@ flowchart TD
 
 Минимальный поток работы со структурированным вводом и выводом выглядит следующим образом:
 
-1. контур исполнения принимает текстовую постановку и структурированный ввод;
-2. структурированный ввод проходит единый канонический валидатор и нормализуется во внутреннюю модель; payload без содержательного контекста, например только с `protocol_version`, считается невалидным;
+1. контур исполнения принимает structured input, собранный из `--input-file` и structured-input CLI-флагов либо переданный программно;
+2. структурированный ввод проходит единый канонический валидатор и нормализуется во внутреннюю модель; payload без содержательного контекста, например пустой объект, считается невалидным;
 3. по параметрам запуска определяется, какие секции должны участвовать в исполнительной директиве;
 4. контур исполнения собирает итоговую исполнительную директиву для исполнительного модуля;
-5. если профиль добавляет `prompt-additions`, они вставляются после пользовательской текстовой части prompt и до любых structured-инструкций;
-6. если включён `structured output`, в директиву после текстовой части prompt и profile additions добавляется самодостаточная инструкция о структуре ожидаемого structured output: обязательные `protocol_version="review-cycle/v1"` и `summary`, а также subset-aware формы object-секций и compact canonical JSON example только для выбранных optional полей (`structured-output-fields`); при наличии программного structured input его блок дописывается после этой инструкции;
+5. если профиль добавляет `prompt-additions`, они вставляются после задачи из structured input и до любых structured-инструкций;
+6. если включён `structured output`, в директиву после задачи и profile additions добавляется самодостаточная инструкция о структуре ожидаемого structured output: обязательный непустой `summary`, а также subset-aware формы object-секций и compact canonical JSON example только для выбранных optional полей (`structured-output-fields`); structured input добавляется в prompt как JSON-контекст;
 7. исполнительный модуль передаёт директиву вычислительному каскаду;
 8. после ответа вычислителя контур исполнения отделяет свободный текст от структурированного вывода;
 9. структурированный вывод разбирается и нормализуется;
@@ -104,9 +104,12 @@ Runtime-директории `.progress/runner-output/` и `.progress/execution-
 
 ## 7. Управление через профиль и флаги запуска
 
-В текущей реализации structured input управляется параметрами конкретного запуска, а structured output дополнительно может управляться исполнителным профилем:
+В текущей реализации structured input управляется параметрами полного маршрута, а structured output дополнительно может управляться исполнителным профилем:
 
-- текстовым `prompt`;
+- `--input-file` с JSON structured input;
+- `--task`;
+- повторяемым `--constraint`;
+- повторяемыми JSON-object флагами `--project-context`, `--operational-context`, `--previous-run-result`, `--review-remark`, `--review-response`, `--integration-action`;
 - `prompt-additions` из resolved profile;
 - программным `LaunchSpec.StructuredInput`;
 - флагом или полем `structured-output`;
@@ -115,14 +118,16 @@ Runtime-директории `.progress/runner-output/` и `.progress/execution-
 
 Для `structured-output` и `structured-output-required` используется OR-семантика между конкретным запуском и resolved profile. Если профиль включает `structured-output-required`, executor не только валидирует результат строже, но и сам добавляет structured output instruction в prompt даже без явного CLI-флага.
 
-Поле `prompt-additions` задаётся в `defaults` и/или конкретном профиле. В текущей реализации используется merge-семантика: additions из `defaults` идут первыми, additions конкретного профиля идут после них. Этот текст остаётся обычной текстовой частью исполнительной директивы и не смешивается с canonical structured input block.
+`--input-file` применяется первым. После этого scalar-флаги перезаписывают соответствующие поля, а repeated-флаги добавляют элементы к массивам. `extensions` на текущем этапе задаются только через файл.
 
-Поле `structured-output-fields` задаётся только в профиле и влияет исключительно на prompt-инструкцию: оно определяет, какие дополнительные top-level canonical fields runner должен по возможности заполнить. Значение `summary` допускается для совместимости с контрактом issue #28, но остаётся обязательным и не делает поле настраиваемым. Канонический parser `review-cycle/v1` при этом не сужается и по-прежнему принимает любой валидный payload с дополнительными поддерживаемыми секциями.
+Поле `prompt-additions` задаётся в `defaults` и/или конкретном профиле. В текущей реализации используется merge-семантика: additions из `defaults` идут первыми, additions конкретного профиля идут после них. Этот текст остаётся обычной текстовой частью исполнительной директивы и не смешивается с canonical structured input.
 
-Наглядный wrong-vs-right для review-cycle/v1:
+Поле `structured-output-fields` задаётся только в профиле и влияет исключительно на prompt-инструкцию: оно определяет, какие дополнительные top-level canonical fields runner должен по возможности заполнить. Значение `summary` допускается для совместимости с контрактом issue #28, но остаётся обязательным и не делает поле настраиваемым. Канонический parser при этом не сужается и по-прежнему принимает любой валидный payload с дополнительными поддерживаемыми секциями.
 
-- wrong short form: `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":"fixed","conclusion":"ready"}`
-- canonical form: `{"protocol_version":"review-cycle/v1","summary":"Done.","remarks":[{"title":"Fixed"}],"conclusion":{"status":"ok","summary":"Ready for review"}}`
+Наглядный wrong-vs-right:
+
+- wrong short form: `{"summary":"Done.","remarks":"fixed","conclusion":"ready"}`
+- canonical form: `{"summary":"Done.","remarks":[{"title":"Fixed"}],"conclusion":{"status":"ok","summary":"Ready for review"}}`
 
 ## 8. Расширяемость через конфигурацию
 

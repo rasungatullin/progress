@@ -15,12 +15,9 @@ type LaunchSpec struct {
 	CommitPush               bool             `json:"commit_push,omitempty"`
 }
 
-const StructuredIOVersion = "review-cycle/v1"
-
 type StructuredExtensions map[string]json.RawMessage
 
 type StructuredInput struct {
-	ProtocolVersion    string               `json:"protocol_version,omitempty"`
 	Task               string               `json:"task,omitempty"`
 	Constraints        []string             `json:"constraints,omitempty"`
 	ProjectContext     []StructuredContext  `json:"project_context,omitempty"`
@@ -33,7 +30,6 @@ type StructuredInput struct {
 }
 
 type StructuredOutput struct {
-	ProtocolVersion string                `json:"protocol_version,omitempty"`
 	Summary         string                `json:"summary,omitempty"`
 	CommitMessage   string                `json:"commit_message,omitempty"`
 	Remarks         []StructuredRemark    `json:"remarks,omitempty"`

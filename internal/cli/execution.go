@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -25,6 +26,15 @@ type launchFlags struct {
 	executionProfile         string
 	reviewProfile            string
 	maxExecutions            int
+	inputFile                string
+	task                     string
+	constraints              []string
+	projectContexts          []string
+	operationalContexts      []string
+	previousRunResults       []string
+	reviewRemarks            []string
+	reviewResponses          []string
+	integrationActions       []string
 	runner                   string
 	model                    string
 	prompt                   string
@@ -132,7 +142,12 @@ func newExecutionStartCommand() *cobra.Command {
 		Short: "Полный запуск контура исполнения",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			result, err := service.Start(context.Background(), invocationFromLaunchFlags(flags))
+			in, err := invocationFromStructuredFlags(flags)
+			if err != nil {
+				return err
+			}
+
+			result, err := service.Start(context.Background(), in)
 			if err != nil {
 				printLaunchResultOnError(cmd, result)
 				return err
@@ -155,7 +170,12 @@ func newExecutionReviewCycleCommand() *cobra.Command {
 		Short: "Цикл исполнения с автоматическим ревью",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			result, err := execution.RunReviewCycle(context.Background(), service, invocationFromReviewCycleFlags(flags), flags.reviewProfile, flags.maxExecutions)
+			in, err := invocationFromReviewCycleFlags(flags)
+			if err != nil {
+				return err
+			}
+
+			result, err := execution.RunReviewCycle(context.Background(), service, in, flags.reviewProfile, flags.maxExecutions)
 			if err != nil {
 				printLaunchResultOnError(cmd, result)
 				return err
@@ -327,10 +347,9 @@ func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Тип исполнительного профиля")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
-	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
+	bindStructuredInputFlags(cmd, flags)
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
-	_ = cmd.MarkFlagRequired("prompt")
 }
 
 func bindReviewCycleFlags(cmd *cobra.Command, flags *launchFlags) {
@@ -342,11 +361,22 @@ func bindReviewCycleFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().IntVar(&flags.maxExecutions, "max-executions", flags.maxExecutions, "Максимальное число запусков исполнения")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
-	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
+	bindStructuredInputFlags(cmd, flags)
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
 	_ = cmd.MarkFlagRequired("review-profile")
-	_ = cmd.MarkFlagRequired("prompt")
+}
+
+func bindStructuredInputFlags(cmd *cobra.Command, flags *launchFlags) {
+	cmd.Flags().StringVar(&flags.inputFile, "input-file", "", "Путь к JSON-файлу structured input")
+	cmd.Flags().StringVar(&flags.task, "task", "", "Текстовая постановка structured input")
+	cmd.Flags().StringArrayVar(&flags.constraints, "constraint", nil, "Ограничение structured input, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.projectContexts, "project-context", nil, "JSON object для project_context, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.operationalContexts, "operational-context", nil, "JSON object для operational_context, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.previousRunResults, "previous-run-result", nil, "JSON object для previous_run_results, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.reviewRemarks, "review-remark", nil, "JSON object для review_remarks, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.reviewResponses, "review-response", nil, "JSON object для review_responses, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.integrationActions, "integration-action", nil, "JSON object для integration_actions, флаг можно повторять")
 }
 
 func bindProfileFlags(cmd *cobra.Command, flags *launchFlags) {
@@ -376,10 +406,29 @@ func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 	}
 }
 
-func invocationFromReviewCycleFlags(flags *launchFlags) execution.Invocation {
+func invocationFromStructuredFlags(flags *launchFlags) (execution.Invocation, error) {
+	input, err := structuredInputFromFlags(flags)
+	if err != nil {
+		return execution.Invocation{}, err
+	}
+	input, err = launch.NormalizeStructuredInput(input)
+	if err != nil {
+		return execution.Invocation{}, err
+	}
+
 	invocation := invocationFromLaunchFlags(flags)
+	invocation.Launch.Prompt = ""
+	invocation.Launch.StructuredInput = input
+	return invocation, nil
+}
+
+func invocationFromReviewCycleFlags(flags *launchFlags) (execution.Invocation, error) {
+	invocation, err := invocationFromStructuredFlags(flags)
+	if err != nil {
+		return execution.Invocation{}, err
+	}
 	invocation.Profile = flags.executionProfile
-	return invocation
+	return invocation, nil
 }
 
 func invocationFromProfileFlags(flags *launchFlags) execution.Invocation {
@@ -392,6 +441,96 @@ func invocationFromWorkplaceFlags(flags *launchFlags) execution.Invocation {
 		Workplace:  execution.WorkplaceSpec{Name: flags.name},
 		Launch:     execution.LaunchSpec{Directory: flags.directory},
 	}
+}
+
+func structuredInputFromFlags(flags *launchFlags) (*execution.StructuredInput, error) {
+	input := execution.StructuredInput{}
+	if strings.TrimSpace(flags.inputFile) != "" {
+		loaded, err := readStructuredInputFile(flags.inputFile)
+		if err != nil {
+			return nil, err
+		}
+		input = loaded
+	}
+
+	if strings.TrimSpace(flags.task) != "" {
+		input.Task = strings.TrimSpace(flags.task)
+	}
+	for _, constraint := range flags.constraints {
+		constraint = strings.TrimSpace(constraint)
+		if constraint == "" {
+			return nil, fmt.Errorf("constraint must be non-empty")
+		}
+		input.Constraints = append(input.Constraints, constraint)
+	}
+
+	if err := appendStructuredJSONObjects(flags.projectContexts, "project-context", &input.ProjectContext); err != nil {
+		return nil, err
+	}
+	if err := appendStructuredJSONObjects(flags.operationalContexts, "operational-context", &input.OperationalContext); err != nil {
+		return nil, err
+	}
+	if err := appendStructuredJSONObjects(flags.previousRunResults, "previous-run-result", &input.PreviousRunResults); err != nil {
+		return nil, err
+	}
+	if err := appendStructuredJSONObjects(flags.reviewRemarks, "review-remark", &input.ReviewRemarks); err != nil {
+		return nil, err
+	}
+	if err := appendStructuredJSONObjects(flags.reviewResponses, "review-response", &input.ReviewResponses); err != nil {
+		return nil, err
+	}
+	if err := appendStructuredJSONObjects(flags.integrationActions, "integration-action", &input.IntegrationActions); err != nil {
+		return nil, err
+	}
+
+	return &input, nil
+}
+
+func readStructuredInputFile(path string) (execution.StructuredInput, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return execution.StructuredInput{}, fmt.Errorf("read structured input file %s: %w", path, err)
+	}
+
+	var input execution.StructuredInput
+	if err := decodeStrictJSON(content, &input); err != nil {
+		return execution.StructuredInput{}, fmt.Errorf("parse structured input file %s: %w", path, err)
+	}
+
+	return input, nil
+}
+
+func appendStructuredJSONObjects[T any](values []string, flagName string, target *[]T) error {
+	for index, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return fmt.Errorf("%s[%d] must be non-empty JSON object", flagName, index)
+		}
+
+		var decoded T
+		if err := decodeStrictJSON([]byte(value), &decoded); err != nil {
+			return fmt.Errorf("parse %s[%d]: %w", flagName, index, err)
+		}
+		*target = append(*target, decoded)
+	}
+
+	return nil
+}
+
+func decodeStrictJSON(content []byte, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(content)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing JSON tokens")
+		}
+		return err
+	}
+
+	return nil
 }
 
 func printLaunchResult(cmd *cobra.Command, result execution.LaunchResult) {
@@ -468,7 +607,6 @@ func formatExecutionWorkplaceDiagnostics(workplace execution.Workplace) string {
 }
 
 func printStructuredOutputBlock(cmd *cobra.Command, output *execution.StructuredOutput) {
-	printLaunchResultSection(cmd, "protocol-version", []string{output.ProtocolVersion})
 	printLaunchResultSection(cmd, "summary-field", []string{output.Summary})
 	printLaunchResultSection(cmd, "commit-message", []string{output.CommitMessage})
 	printStructuredJSONSection(cmd, "remark", output.Remarks)

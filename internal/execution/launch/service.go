@@ -27,10 +27,6 @@ const structuredOutputStart = "<progress-structured-output>"
 
 const structuredOutputEnd = "</progress-structured-output>"
 
-const structuredInputStart = "<progress-structured-input>"
-
-const structuredInputEnd = "</progress-structured-input>"
-
 const runnerOutputExcludePathspec = ":(exclude).progress/runner-output"
 
 const executionRunsExcludePathspec = ":(exclude).progress/execution-runs"
@@ -165,29 +161,6 @@ func parseStructuredOutput(output string) (string, string, *model.StructuredOutp
 	return plainOutput, rawPayload, parsed, trailingStructuredBlockValid, nil
 }
 
-func parseStructuredInput(prompt string) (string, *model.StructuredInput, trailingStructuredBlockState, error) {
-	plainPrompt, rawPayload, state, err := extractTrailingStructuredBlock(prompt, structuredInputStart, structuredInputEnd, func(rawPayload string) error {
-		_, err := parseStructuredInputPayload(rawPayload)
-		return err
-	})
-	if state != trailingStructuredBlockValid {
-		if err == nil && strings.TrimSpace(rawPayload) != "" {
-			_, err = parseStructuredInputPayload(rawPayload)
-		}
-		return prompt, nil, state, err
-	}
-
-	parsed, err := parseStructuredInputPayload(rawPayload)
-	if err != nil {
-		return prompt, nil, trailingStructuredBlockInvalid, err
-	}
-	if parsed == nil {
-		return prompt, nil, trailingStructuredBlockInvalid, fmt.Errorf("payload is empty")
-	}
-
-	return plainPrompt, parsed, trailingStructuredBlockValid, nil
-}
-
 func extractTrailingStructuredBlock(text, startTag, endTag string, validatePayload func(string) error) (string, string, trailingStructuredBlockState, error) {
 	trimmedText := strings.TrimRightFunc(text, unicode.IsSpace)
 	if !strings.HasSuffix(trimmedText, endTag) {
@@ -227,15 +200,6 @@ func extractTrailingStructuredBlock(text, startTag, endTag string, validatePaylo
 	}
 }
 
-func parseStructuredInputPayload(rawPayload string) (*model.StructuredInput, error) {
-	var payload model.StructuredInput
-	if err := decodeJSONStrict(rawPayload, &payload); err != nil {
-		return nil, err
-	}
-
-	return canonicalizeStructuredInput(payload)
-}
-
 func parseStructuredOutputPayload(rawPayload string) (*model.StructuredOutput, error) {
 	var payload model.StructuredOutput
 	if err := decodeJSONStrict(rawPayload, &payload); err != nil {
@@ -249,24 +213,11 @@ func parseStructuredOutputPayload(rawPayload string) (*model.StructuredOutput, e
 	return &payload, nil
 }
 
-func normalizeStructuredInput(payload model.StructuredInput) model.StructuredInput {
-	if payload.ProtocolVersion == "" && hasStructuredInputContent(payload) {
-		payload.ProtocolVersion = model.StructuredIOVersion
-	}
-
-	return payload
-}
-
-func hasStructuredInput(payload model.StructuredInput) bool {
-	return payload.ProtocolVersion != "" || payload.Task != "" || len(payload.Constraints) != 0 || len(payload.ProjectContext) != 0 || len(payload.OperationalContext) != 0 || len(payload.PreviousRunResults) != 0 || len(payload.ReviewRemarks) != 0 || len(payload.ReviewResponses) != 0 || len(payload.IntegrationActions) != 0 || len(payload.Extensions) != 0
-}
-
 func hasStructuredInputContent(payload model.StructuredInput) bool {
 	return payload.Task != "" || len(payload.Constraints) != 0 || len(payload.ProjectContext) != 0 || len(payload.OperationalContext) != 0 || len(payload.PreviousRunResults) != 0 || len(payload.ReviewRemarks) != 0 || len(payload.ReviewResponses) != 0 || len(payload.IntegrationActions) != 0 || len(payload.Extensions) != 0
 }
 
 func canonicalizeStructuredInput(payload model.StructuredInput) (*model.StructuredInput, error) {
-	payload = normalizeStructuredInput(payload)
 	if err := validateStructuredInputPayload(payload); err != nil {
 		return nil, err
 	}
@@ -275,11 +226,8 @@ func canonicalizeStructuredInput(payload model.StructuredInput) (*model.Structur
 }
 
 func validateStructuredInputPayload(payload model.StructuredInput) error {
-	if payload.ProtocolVersion != "" && payload.ProtocolVersion != model.StructuredIOVersion {
-		return fmt.Errorf("structured input must set protocol_version=%q", model.StructuredIOVersion)
-	}
 	if !hasStructuredInputContent(payload) {
-		return fmt.Errorf("structured input must include at least one non-empty field besides protocol_version")
+		return fmt.Errorf("structured input must include at least one non-empty field")
 	}
 	for index, value := range payload.Constraints {
 		if strings.TrimSpace(value) != "" {
@@ -335,9 +283,6 @@ func validateStructuredInputPayload(payload model.StructuredInput) error {
 }
 
 func validateStructuredOutputPayload(payload model.StructuredOutput) error {
-	if payload.ProtocolVersion != model.StructuredIOVersion {
-		return fmt.Errorf("structured output must set protocol_version=%q", model.StructuredIOVersion)
-	}
 	if strings.TrimSpace(payload.Summary) == "" {
 		return fmt.Errorf("structured output must include a non-empty summary")
 	}
@@ -384,45 +329,27 @@ func validateStructuredOutputPayload(payload model.StructuredOutput) error {
 }
 
 func prepareInvocation(in model.Invocation) (model.Invocation, error) {
-	plainPrompt, structuredInput, err := NormalizeStructuredInput(in.Launch.Prompt, in.Launch.StructuredInput)
-	if err != nil {
-		return in, err
+	if in.Launch.StructuredInput != nil {
+		structuredInput, err := NormalizeStructuredInput(in.Launch.StructuredInput)
+		if err != nil {
+			return in, err
+		}
+		in.Launch.StructuredInput = structuredInput
 	}
-
-	in.Launch.Prompt = plainPrompt
-	in.Launch.StructuredInput = structuredInput
 	return in, nil
 }
 
-func NormalizeStructuredInput(prompt string, input *model.StructuredInput) (string, *model.StructuredInput, error) {
-	plainPrompt, structuredInput, structuredInputState, structuredInputErr := parseStructuredInput(prompt)
-	switch structuredInputState {
-	case trailingStructuredBlockValid:
-		prompt = plainPrompt
-		if input == nil {
-			input = structuredInput
-		}
-	case trailingStructuredBlockInvalid:
-		if structuredInputErr != nil {
-			return "", nil, fmt.Errorf("invalid structured input: %w", structuredInputErr)
-		}
-		return "", nil, fmt.Errorf("invalid structured input: trailing %s block is invalid", structuredInputStart)
-	default:
-		if input == nil {
-			return prompt, nil, nil
-		}
-	}
-
+func NormalizeStructuredInput(input *model.StructuredInput) (*model.StructuredInput, error) {
 	if input == nil {
-		return prompt, nil, nil
+		return nil, nil
 	}
 
 	canonical, err := canonicalizeStructuredInput(*input)
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid structured input: %w", err)
+		return nil, fmt.Errorf("invalid structured input: %w", err)
 	}
 
-	return prompt, canonical, nil
+	return canonical, nil
 }
 
 func validateStructuredOutputRequirement(spec model.LaunchSpec, rawPayload string, state trailingStructuredBlockState, parseErr error) error {
@@ -996,10 +923,8 @@ func buildRunnerPrompt(spec model.LaunchSpec) (string, error) {
 	}
 
 	parts = append(parts,
-		"Use every field from the structured input block below as execution context.",
-		structuredInputStart,
+		"Use every field from the structured input JSON below as execution context.",
 		string(payload),
-		structuredInputEnd,
 	)
 
 	return joinSummary(parts...), nil
@@ -1016,7 +941,7 @@ func validateStructuredOutputSettings(spec model.LaunchSpec) error {
 func buildStructuredOutputInstruction(fields []string) string {
 	parts := []string{
 		"Return your normal answer, then append a trailing <progress-structured-output>...</progress-structured-output> JSON block.",
-		fmt.Sprintf("Use a JSON object with protocol_version=%q and a summary field.", model.StructuredIOVersion),
+		"Use a JSON object with a non-empty summary field.",
 	}
 
 	optionalFields := structuredOutputInstructionFields(fields)
@@ -1061,7 +986,7 @@ func selectedStructuredObjectForms(fields []string) []string {
 
 func buildStructuredOutputCanonicalExample(fields []string) string {
 	parts := []string{
-		`{"protocol_version":"review-cycle/v1","summary":"Implemented changes."`,
+		`{"summary":"Implemented changes."`,
 	}
 	for _, field := range fields {
 		switch field {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,17 +62,99 @@ func TestBindStartFlagsAndInvocationIncludesRepo(t *testing.T) {
 	cmd := &cobra.Command{Use: "start"}
 	bindStartFlags(cmd, flags)
 
-	err := cmd.ParseFlags([]string{"--name", "task-49", "--repo", "https://github.com/owner/name", "--prompt", "ship it"})
+	err := cmd.ParseFlags([]string{"--name", "task-49", "--repo", "https://github.com/owner/name", "--task", "ship it"})
 	if err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
 
-	invocation := invocationFromLaunchFlags(flags)
+	invocation, err := invocationFromStructuredFlags(flags)
+	if err != nil {
+		t.Fatalf("build invocation: %v", err)
+	}
 	if invocation.Workplace.Name != "task-49" {
 		t.Fatalf("unexpected workplace: %q", invocation.Workplace.Name)
 	}
 	if invocation.Repository.URL != "https://github.com/owner/name" {
 		t.Fatalf("unexpected repository: %q", invocation.Repository.URL)
+	}
+	if invocation.Launch.StructuredInput == nil || invocation.Launch.StructuredInput.Task != "ship it" {
+		t.Fatalf("unexpected structured input: %#v", invocation.Launch.StructuredInput)
+	}
+}
+
+func TestStructuredInputFlagsOverrideInputFile(t *testing.T) {
+	t.Parallel()
+
+	inputFile := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(inputFile, []byte(`{"task":"from file","constraints":["keep file"],"project_context":[{"title":"File","body":"Context"}],"extensions":{"custom":{"keep":true}}}`), 0o600); err != nil {
+		t.Fatalf("write input file: %v", err)
+	}
+
+	flags := newStartFlags()
+	cmd := &cobra.Command{Use: "start"}
+	bindStartFlags(cmd, flags)
+
+	err := cmd.ParseFlags([]string{
+		"--input-file", inputFile,
+		"--task", "from flag",
+		"--constraint", "keep flag",
+		"--project-context", `{"title":"Flag","body":"Context"}`,
+		"--review-remark", `{"id":"r1","severity":"blocking","body":"Fix it"}`,
+	})
+	if err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	invocation, err := invocationFromStructuredFlags(flags)
+	if err != nil {
+		t.Fatalf("build invocation: %v", err)
+	}
+	input := invocation.Launch.StructuredInput
+	if input == nil {
+		t.Fatal("expected structured input")
+	}
+	if input.Task != "from flag" {
+		t.Fatalf("task flag must override file task: %#v", input)
+	}
+	if len(input.Constraints) != 2 || input.Constraints[0] != "keep file" || input.Constraints[1] != "keep flag" {
+		t.Fatalf("constraints must append to file values: %#v", input.Constraints)
+	}
+	if len(input.ProjectContext) != 2 || input.ProjectContext[1].Title != "Flag" {
+		t.Fatalf("project contexts must append to file values: %#v", input.ProjectContext)
+	}
+	if len(input.ReviewRemarks) != 1 || input.ReviewRemarks[0].ID != "r1" {
+		t.Fatalf("review remarks must be parsed from JSON object flags: %#v", input.ReviewRemarks)
+	}
+	if string(input.Extensions["custom"]) != `{"keep":true}` {
+		t.Fatalf("extensions must be preserved from file: %#v", input.Extensions)
+	}
+}
+
+func TestExecutionStartRejectsEmptyStructuredInputBeforeServiceStart(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "start", "--dir", "/tmp/work", "--profile", "default"})
+
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			start: func(context.Context, execution.Invocation) (execution.LaunchResult, error) {
+				t.Fatal("service start must not be called for empty structured input")
+				return execution.LaunchResult{}, nil
+			},
+		}
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected empty structured input error")
+	}
+	if !strings.Contains(err.Error(), "structured input must include at least one non-empty field") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -89,7 +172,7 @@ func TestExecutionReviewCycleCommandRunsCycleAboveStart(t *testing.T) {
 		"--review-profile", "review",
 		"--max-executions", "3",
 		"--dir", "/tmp/work",
-		"--prompt", "ship it",
+		"--task", "ship it",
 	})
 
 	var calls []execution.Invocation
@@ -105,9 +188,8 @@ func TestExecutionReviewCycleCommandRunsCycleAboveStart(t *testing.T) {
 						Status:  "completed",
 						Summary: "review done",
 						StructuredOutput: &execution.StructuredOutput{
-							ProtocolVersion: execution.StructuredIOVersion,
-							Summary:         "Approved.",
-							Conclusion:      &execution.StructuredConclusion{Status: "ok"},
+							Summary:    "Approved.",
+							Conclusion: &execution.StructuredConclusion{Status: "ok"},
 						},
 					}, nil
 				default:
@@ -157,9 +239,9 @@ func TestExecutionStartHelpDoesNotIncludeReviewCycleFlags(t *testing.T) {
 	}
 
 	help := stdout.String()
-	for _, fragment := range []string{"--review-profile", "--max-executions"} {
+	for _, fragment := range []string{"--review-profile", "--max-executions", "--prompt"} {
 		if strings.Contains(help, fragment) {
-			t.Fatalf("start help must not include review-cycle flag %q, got %q", fragment, help)
+			t.Fatalf("start help must not include %q, got %q", fragment, help)
 		}
 	}
 }
@@ -183,6 +265,9 @@ func TestExecutionReviewCycleHelpIncludesCycleFlags(t *testing.T) {
 		if !strings.Contains(help, fragment) {
 			t.Fatalf("review-cycle help must include %q, got %q", fragment, help)
 		}
+	}
+	if strings.Contains(help, "--prompt") {
+		t.Fatalf("review-cycle help must not include prompt flag, got %q", help)
 	}
 }
 
@@ -406,7 +491,7 @@ func TestExecutionLaunchCommandPrintsSummaryOnStructuredOutputError(t *testing.T
 			launchDirect: func(context.Context, execution.Invocation) (execution.LaunchResult, error) {
 				return execution.LaunchResult{
 					Status:  "failed",
-					Summary: "Applied the requested changes.\n<progress-structured-output>\n{\"protocol_version\":\"review-cycle/v1\",\"remarks\":[{}]}\n</progress-structured-output>",
+					Summary: "Applied the requested changes.\n<progress-structured-output>\n{\"remarks\":[{}]}\n</progress-structured-output>",
 				}, errors.New("structured output is required but payload does not match structured output schema: structured output remarks[0] must include at least one non-empty field")
 			},
 		}
@@ -475,9 +560,8 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 		Status:  "completed",
 		Summary: "profile=default git=disabled\nApplied the requested changes.",
 		StructuredOutput: &execution.StructuredOutput{
-			ProtocolVersion: execution.StructuredIOVersion,
-			Summary:         "Re-check after fixes.",
-			CommitMessage:   "Ship review fixes",
+			Summary:       "Re-check after fixes.",
+			CommitMessage: "Ship review fixes",
 			Remarks: []execution.StructuredRemark{{
 				ID:       "remark-1",
 				Status:   "resolved",
@@ -508,9 +592,6 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 	output := stdout.String()
 	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nprofile=default git=disabled\nApplied the requested changes.\nPROGRESS_SUMMARY\nstructured-output:\n") {
 		t.Fatalf("output must separate summary from structured section: %q", output)
-	}
-	if !strings.Contains(output, "protocol-version=review-cycle/v1\n") {
-		t.Fatalf("output must include protocol version: %q", output)
 	}
 	if !strings.Contains(output, "summary-field=Re-check after fixes.\n") {
 		t.Fatalf("output must include structured summary: %q", output)
@@ -549,8 +630,7 @@ func TestPrintLaunchResultPreservesExtensionPayload(t *testing.T) {
 		Status:  "completed",
 		Summary: "Applied the requested changes.",
 		StructuredOutput: &execution.StructuredOutput{
-			ProtocolVersion: execution.StructuredIOVersion,
-			Summary:         "Done.",
+			Summary: "Done.",
 			Extensions: execution.StructuredExtensions{
 				"custom": []byte(`{"owner":"release","preserve":"keep   spaces"}`),
 			},
@@ -574,8 +654,7 @@ func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
 		Status:  "completed",
 		Summary: "line one\nline two\nline three",
 		StructuredOutput: &execution.StructuredOutput{
-			ProtocolVersion: execution.StructuredIOVersion,
-			Summary:         "Done.",
+			Summary: "Done.",
 		},
 	})
 
@@ -583,7 +662,7 @@ func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
 	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nline one\nline two\nline three\nPROGRESS_SUMMARY\nstructured-output:\n") {
 		t.Fatalf("multiline summary must stay inside explicit summary block: %q", output)
 	}
-	if strings.Contains(output, "line three\nprotocol-version=") {
+	if strings.Contains(output, "line three\nsummary-field=") {
 		t.Fatalf("structured lines must not be ambiguous continuation of summary: %q", output)
 	}
 }
