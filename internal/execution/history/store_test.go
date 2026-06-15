@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -140,6 +141,51 @@ func TestListInitializesEmptyExecutionHistory(t *testing.T) {
 	}
 	if len(runs) != 0 {
 		t.Fatalf("expected empty history, got %#v", runs)
+	}
+}
+
+func TestGetExecutionRunByID(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	ctx := context.Background()
+	if err := Store(ctx, root, Run{
+		CreatedAt:       "2026-06-10T10:00:00Z",
+		Status:          "completed",
+		Summary:         "first",
+		Name:            "task-1",
+		ProfileName:     "default",
+		Runner:          "opencode",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: root,
+	}); err != nil {
+		t.Fatalf("store first run: %v", err)
+	}
+	if err := Store(ctx, root, Run{
+		CreatedAt:       "2026-06-10T10:01:00Z",
+		Status:          "failed",
+		Summary:         "second",
+		Name:            "task-2",
+		ProfileName:     "review",
+		Runner:          "codex",
+		Model:           "openai/gpt-5.5",
+		LaunchDirectory: root,
+		Error:           "boom",
+	}); err != nil {
+		t.Fatalf("store second run: %v", err)
+	}
+
+	run, err := Get(ctx, root, 2)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.ID != 2 || run.Name != "task-2" || run.Status != "failed" || run.Summary != "second" || run.ProfileName != "review" || run.Runner != "codex" || run.Model != "openai/gpt-5.5" || run.Error != "boom" {
+		t.Fatalf("unexpected run: %#v", run)
+	}
+
+	_, err = Get(ctx, root, 99)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected sql.ErrNoRows for missing run, got %v", err)
 	}
 }
 

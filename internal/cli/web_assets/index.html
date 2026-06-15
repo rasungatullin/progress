@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Execution Runs</title>
+    <style>
+      :root {
+        font-family: "Inter", "Segoe UI", Arial, sans-serif;
+        color: #111827;
+        background: linear-gradient(140deg, #f9fafb 0%, #eef2ff 50%, #e0f2fe 100%);
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+
+      .container {
+        max-width: 980px;
+        margin: 0 auto;
+        display: grid;
+        gap: 16px;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 28px;
+      }
+
+      .panel {
+        background: #ffffffcc;
+        border: 1px solid #dbeafe;
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .runs {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .runs th,
+      .runs td {
+        text-align: left;
+        padding: 10px 8px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 14px;
+      }
+
+      .runs th {
+        background: #f1f5f9;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .runs tr:hover {
+        background: #f8fafc;
+      }
+
+      .run-row {
+        cursor: pointer;
+      }
+
+      .run-row.selected {
+        background: #dbeafe;
+      }
+
+      pre {
+        margin: 0;
+        background: #0f172a;
+        color: #f8fafc;
+        padding: 12px;
+        border-radius: 8px;
+        overflow: auto;
+        max-height: 320px;
+      }
+
+      .muted {
+        color: #64748b;
+      }
+
+      .actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .filters {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: end;
+        margin-bottom: 12px;
+      }
+
+      .filters label {
+        display: grid;
+        gap: 4px;
+        font-size: 12px;
+        color: #475569;
+      }
+
+      input {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 8px;
+        min-width: 110px;
+      }
+
+      button {
+        border: none;
+        border-radius: 8px;
+        padding: 8px 12px;
+        background: #1d4ed8;
+        color: #ffffff;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Execution Runs</h1>
+        <span class="muted">Read-only local UI</span>
+      </header>
+
+      <section class="panel grid">
+        <div>
+          <h2 style="margin-top: 0;">Workspaces</h2>
+          <ul id="workspaces"></ul>
+        </div>
+
+        <div>
+          <h2 style="margin-top: 0;">Runs</h2>
+          <form id="filters" class="filters">
+            <label>Name <input id="nameFilter" name="name" type="search" placeholder="task name" /></label>
+            <label>Status <input id="statusFilter" name="status" type="search" placeholder="completed" /></label>
+            <label>Limit <input id="limitFilter" name="limit" type="number" min="1" value="20" /></label>
+            <button type="submit">Apply filters</button>
+          </form>
+          <table class="runs">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Created</th>
+                <th>Status</th>
+                <th>Name</th>
+                <th>Profile</th>
+                <th>Runner</th>
+                <th>Model</th>
+                <th>Summary</th>
+              </tr>
+            </thead>
+            <tbody id="runs"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 style="margin-top: 0;">Run Details</h2>
+        <div id="runInfo" class="muted">Select a run to inspect details.</div>
+        <h3 style="margin-bottom: 8px;">Result</h3>
+        <pre id="result"></pre>
+        <h3 style="margin-bottom: 8px;">Structured input</h3>
+        <pre id="structuredInput"></pre>
+        <h3 style="margin-bottom: 8px;">Structured output</h3>
+        <pre id="structuredOutput"></pre>
+        <h3 style="margin-bottom: 8px;">Run record</h3>
+        <pre id="record"></pre>
+        <div class="actions" style="margin-top: 12px;">
+          <button id="rawButton" disabled>Load raw output</button>
+        </div>
+        <h3 style="margin-bottom: 8px;">Raw output</h3>
+        <pre id="raw"></pre>
+      </section>
+    </div>
+
+    <script>
+      const runsEl = document.getElementById('runs');
+      const workspacesEl = document.getElementById('workspaces');
+      const runInfoEl = document.getElementById('runInfo');
+      const resultEl = document.getElementById('result');
+      const structuredInputEl = document.getElementById('structuredInput');
+      const structuredOutputEl = document.getElementById('structuredOutput');
+      const recordEl = document.getElementById('record');
+      const rawEl = document.getElementById('raw');
+      const rawButton = document.getElementById('rawButton');
+      const filtersEl = document.getElementById('filters');
+      const nameFilterEl = document.getElementById('nameFilter');
+      const statusFilterEl = document.getElementById('statusFilter');
+      const limitFilterEl = document.getElementById('limitFilter');
+
+      let selectedRun = null;
+      let selectedWorkspace = '';
+
+      function textOrDash(value) {
+        return value && value.length ? value : '-';
+      }
+
+      function appendCell(row, value) {
+        const cell = document.createElement('td');
+        cell.textContent = String(textOrDash(value));
+        row.appendChild(cell);
+      }
+
+      function prettyJSON(value, emptyText) {
+        if (!value) return emptyText;
+        try {
+          return JSON.stringify(JSON.parse(value), null, 2);
+        } catch {
+          return value;
+        }
+      }
+
+      function renderWorkspaces(items) {
+        workspacesEl.innerHTML = '';
+        if (!items.length) {
+          const li = document.createElement('li');
+          li.textContent = 'No workspaces found.';
+          workspacesEl.appendChild(li);
+          return;
+        }
+
+        items.forEach(item => {
+          const li = document.createElement('li');
+          const button = document.createElement('button');
+          button.textContent = item.name;
+          button.title = item.path;
+          button.addEventListener('click', async () => {
+            selectedWorkspace = item.path;
+            clearSelection();
+            await renderRuns();
+          });
+          li.appendChild(button);
+          li.append(` ${item.path}`);
+          workspacesEl.appendChild(li);
+        });
+      }
+
+      function clearSelection() {
+        selectedRun = null;
+        runInfoEl.textContent = 'Select a run to inspect details.';
+        resultEl.textContent = '';
+        structuredInputEl.textContent = '';
+        structuredOutputEl.textContent = '';
+        recordEl.textContent = '';
+        rawEl.textContent = '';
+        rawButton.disabled = true;
+
+        Array.from(runsEl.children).forEach(row => row.classList.remove('selected'));
+      }
+
+      async function renderRuns() {
+        const params = new URLSearchParams({ workspace: selectedWorkspace });
+        if (nameFilterEl.value.trim()) params.set('name', nameFilterEl.value.trim());
+        if (statusFilterEl.value.trim()) params.set('status', statusFilterEl.value.trim());
+        if (limitFilterEl.value.trim()) params.set('limit', limitFilterEl.value.trim());
+
+        const response = await fetch(`/api/runs?${params.toString()}`);
+        if (!response.ok) {
+          runInfoEl.textContent = `Failed to load runs (${response.status})`;
+          return;
+        }
+
+        const runs = await response.json();
+        runsEl.innerHTML = '';
+        if (!runs.length) {
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = 8;
+          cell.textContent = 'No runs yet.';
+          cell.className = 'muted';
+          row.appendChild(cell);
+          runsEl.appendChild(row);
+          return;
+        }
+
+        runs.forEach(item => {
+          const row = document.createElement('tr');
+          row.className = 'run-row';
+          appendCell(row, item.id);
+          appendCell(row, item.created_at);
+          appendCell(row, item.status);
+          appendCell(row, item.name);
+          appendCell(row, item.profile_name);
+          appendCell(row, item.runner);
+          appendCell(row, item.model);
+          appendCell(row, item.summary);
+          row.addEventListener('click', () => onSelectRun(item.id, row));
+          runsEl.appendChild(row);
+        });
+      }
+
+      async function onSelectRun(runID, row) {
+        selectedRun = runID;
+        clearSelection();
+        if (row) row.classList.add('selected');
+
+        const response = await fetch(`/api/runs/${runID}?workspace=${encodeURIComponent(selectedWorkspace)}`);
+        if (!response.ok) {
+          runInfoEl.textContent = `Failed to load run #${runID} (${response.status})`;
+          return;
+        }
+
+        const payload = await response.json();
+        runInfoEl.textContent = `${payload.status} · ${payload.summary || '-'}${payload.error ? ` · ${payload.error}` : ''}`;
+        resultEl.textContent = JSON.stringify({
+          status: payload.status,
+          summary: payload.summary,
+          error: payload.error,
+          raw_output_path: payload.raw_output_path,
+        }, null, 2);
+        structuredInputEl.textContent = prettyJSON(payload.raw_structured_input, '(structured input is empty)');
+        structuredOutputEl.textContent = prettyJSON(payload.raw_structured_output, '(structured output is empty)');
+        recordEl.textContent = prettyJSON(payload.run_record, payload.run_record_error || '(run record is empty)');
+        rawEl.textContent = '';
+        rawButton.disabled = false;
+        rawButton.dataset.runId = runID;
+        rawButton.textContent = 'Load raw output';
+
+        if (!payload.raw_output_path) {
+          rawButton.disabled = true;
+          rawButton.textContent = 'Raw output unavailable';
+        }
+      }
+
+      async function loadRawOutput() {
+        const runID = rawButton.dataset.runId;
+        if (!runID) return;
+        const response = await fetch(`/api/runs/${runID}/raw-output?workspace=${encodeURIComponent(selectedWorkspace)}`);
+        if (!response.ok) {
+          rawEl.textContent = `Failed to load raw output (${response.status})`;
+          return;
+        }
+
+        rawEl.textContent = await response.text();
+      }
+
+      rawButton.addEventListener('click', loadRawOutput);
+      filtersEl.addEventListener('submit', async event => {
+        event.preventDefault();
+        clearSelection();
+        await renderRuns();
+      });
+
+      async function init() {
+        const ws = await fetch('/api/workspaces');
+        if (ws.ok) {
+          const workspaces = await ws.json();
+          if (workspaces.length) selectedWorkspace = workspaces[0].path;
+          renderWorkspaces(workspaces);
+        } else {
+          workspacesEl.innerHTML = '<li>Failed to load workspaces.</li>';
+        }
+
+        await renderRuns();
+      }
+
+      init();
+    </script>
+  </body>
+</html>
