@@ -41,7 +41,7 @@ CLI рассматривается как основной ручной инте
 
 Команда выполняет цикл над обычным полным запуском контура исполнения. Она находится над `progress execution start`: каждый шаг исполнения и каждый шаг ревью внутри цикла вызывают тот же маршрут полного запуска, но решение о повторении, остановке и передаче замечаний принимает внешний координатор `review-cycle`.
 
-Вход команды повторяет прикладной вход `start`: `--dir`, `--name`, `--repo`, `--runner`, `--model`, structured-input флаги, `--structured-output` и `--structured-output-required`. Вместо одного `--profile` команда принимает два явных профиля:
+Вход команды повторяет прикладной вход `start`: `--dir`, `--name`, `--repo`, `--runner`, `--model`, `--model-binding`, structured-input флаги, `--structured-output` и `--structured-output-required`. Вместо одного `--profile` команда принимает два явных профиля:
 
 - `--execution-profile` — профиль исполнения;
 - `--review-profile` — профиль ревью.
@@ -71,14 +71,14 @@ progress execution review-cycle \
 
 Профили исполнения загружаются из репозиторного файла `.progress/execution/profiles.json`. Файл является частью проекта и хранит как общие `defaults`, так и набор именованных профилей.
 
-Минимальная схема файла:
+Минимальная схема файла `.progress/execution/profiles.json`:
 
 ```json
 {
   "defaults": {
-    "runner": "opencode",
     "mode": "manual",
-    "model": "openai/gpt-5.4",
+    "model-binding": "default",
+    "allow-model-fallback": false,
     "prompt-additions": [],
     "structured-output": false,
     "structured-output-required": false,
@@ -90,12 +90,13 @@ progress execution review-cycle \
     },
     "coder": {
       "description": "Профиль кодера с обязательным structured output для каскадной обработки",
+      "model-binding": "coder",
       "structured-output": true,
       "structured-output-fields": ["commit_message", "changes", "remarks", "commands"]
     },
     "review": {
       "description": "Профиль ревью без автоматического commit и push",
-      "model": "openai/gpt-5.5",
+      "model-binding": "review",
       "prompt-additions": [
         "Ты выполняешь code review. Не изменяй код и не коммить изменения.",
         "Сначала собери контекст PR, issue, diff и предыдущих review comments, если они указаны во входе.",
@@ -107,37 +108,30 @@ progress execution review-cycle \
       "structured-output-required": true,
       "structured-output-fields": ["summary", "remarks", "questions", "follow_up_actions", "conclusion"],
       "commit-push": false
-    },
-    "codex": {
-      "description": "Профиль исполнения через Codex CLI",
-      "runner": "codex",
-      "model": "gpt-5.3-codex"
-    },
-    "local": {
-      "description": "Локальный профиль исполнения через локальную модель",
-      "model": "ollama/qwen3.5:2b"
     }
   }
 }
 ```
 
+Отдельный файл `.progress/execution/resources.json` хранит список доступных `runners`, `models`, `bindings` и опциональный `defaults.model-binding`. Поля `runners` и `models` задаются массивами строк, например `["opencode", "codex"]` и `["openai/gpt-5.4", "gpt-5.3-codex"]`. Семантические bindings вроде `default`, `coder` и `review` указывают на конкретную пару `runner/model`.
+
 Правила разрешения профиля:
 
 1. если профиль не указан, используется `default`;
 2. профиль наследует незаданные поля из блока `defaults`;
-3. `runner` может быть определён в `defaults` и переопределён в конкретном профиле;
-4. `model` может быть определена в `defaults` и переопределена в конкретном профиле;
+3. `model-binding` наследуется из `defaults` и может быть переопределён в конкретном профиле;
+4. `allow-model-fallback` наследуется из `defaults` и разрешает fallback на `resources.defaults.model-binding`, если профиль ссылается на неизвестный binding или не задаёт `model-binding`; если fallback запрещён, default binding использовать нельзя;
 5. `structured-output` и `structured-output-required` наследуются из `defaults`, а затем объединяются с настройками конкретного запуска по OR-семантике;
 6. `prompt-additions` наследуется из `defaults` и объединяется с additions конкретного профиля; additions из `defaults` идут первыми, profile additions идут после них;
 7. `structured-output-fields` наследуется из `defaults` или целиком переопределяется профилем, поддерживает `summary` и остальные канонические top-level поля, но влияет только на те дополнительные секции, которые executor отдельно перечисляет в prompt;
 8. `description` задаётся на уровне конкретного профиля и используется для CLI-диагностики;
 9. если конфиг отсутствует, повреждён или не содержит нужного профиля, команда возвращает диагностируемую ошибку.
 
-В resolved profile команда явно возвращает `description`, `runner`, `mode`, `model`, `prompt-additions`, `structured-output`, `structured-output-required`, `structured-output-fields` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
+В resolved profile команда явно возвращает `description`, `mode`, `model-binding`, `allow-model-fallback`, `prompt-additions`, `structured-output`, `structured-output-required`, `structured-output-fields` и `commit-push`. Значение `commit-push` по умолчанию безопасное и равно `false`, но может использоваться последующей стадией `launch` как унаследованный признак автокоммита и автопуша.
 
 ### 3.5 `progress execution resources`
 
-Команда отдельно вызывает подсистему ресурсного снабжения. Она предназначена для проверки доступности ресурсов и имитации резервирования без обязательного запуска всего исполнительного контура.
+Команда отдельно вызывает подсистему ресурсного снабжения. Она предназначена для проверки доступности ресурсов и имитации резервирования без обязательного запуска всего исполнительного контура. Команда поддерживает `--profile`, `--runner`, `--model` и `--model-binding`, а в выводе печатает `runner`, `model`, `model-binding`, `source` и `fallback-used`.
 
 ### 3.6 `progress execution workplace`
 
@@ -166,7 +160,7 @@ progress execution review-cycle \
 
 Для `progress execution launch` git-стадия включается только явным флагом `--commit-push`. Эта команда является прямым изолированным запуском и не подтягивает исполнительный профиль.
 
-Наследование `runner`, `model` и `commit-push` из профиля работает на полном маршруте `progress execution start`, где профиль действительно разрешается перед стадией `launch`. Если пользователь передал `--runner` или `--model` явно, CLI override имеет приоритет над профилем.
+На полном маршруте `progress execution start` конкретные `runner/model` берутся не из профиля, а из resolved allocation. Если пользователь передал `--model-binding`, он имеет приоритет над профилем. Если пользователь передал явные `--runner` и `--model`, подсистема ресурсов использует их без binding, но только если оба значения зарегистрированы в `resources.json`. Если fallback действительно нужен, но `resources.defaults.model-binding` не задан, подсистема ресурсов возвращает диагностируемую ошибку вместо молчаливого выбора модели.
 
 Если `--commit-push` не задан, команда выполняет только исполнительный модуль и возвращает его итоговое резюме.
 

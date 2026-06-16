@@ -12,7 +12,7 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
-func TestServiceLaunchInheritsRunnerFromProfile(t *testing.T) {
+func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 	t.Parallel()
 
 	launcher := &stubLauncher{}
@@ -21,19 +21,22 @@ func TestServiceLaunchInheritsRunnerFromProfile(t *testing.T) {
 	_, err := service.Launch(context.Background(), Invocation{
 		Launch: LaunchSpec{
 			Directory: "/tmp/work",
-			Model:     "",
+			Model:     "ignored",
 			Prompt:    "ship it",
 		},
-	}, Profile{Runner: "codex", Model: "gpt-5.3-codex"}, Allocation{}, Workplace{})
+	}, Profile{Mode: "manual"}, Allocation{Runner: "codex", Model: "gpt-5.3-codex", ModelBinding: "coder"}, Workplace{})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
 
 	if launcher.invocation.Launch.Runner != "codex" {
-		t.Fatalf("expected runner to be inherited from profile, got %q", launcher.invocation.Launch.Runner)
+		t.Fatalf("expected runner from allocation, got %q", launcher.invocation.Launch.Runner)
 	}
 	if launcher.invocation.Launch.Model != "gpt-5.3-codex" {
-		t.Fatalf("expected model to be inherited from profile, got %q", launcher.invocation.Launch.Model)
+		t.Fatalf("expected model from allocation, got %q", launcher.invocation.Launch.Model)
+	}
+	if launcher.invocation.Launch.ModelBinding != "coder" {
+		t.Fatalf("expected model-binding from allocation, got %q", launcher.invocation.Launch.ModelBinding)
 	}
 }
 
@@ -48,7 +51,7 @@ func TestServiceLaunchPreservesExistingPromptBehaviorWithoutProfileAdditions(t *
 			Directory: "/tmp/work",
 			Prompt:    "ship it",
 		},
-	}, Profile{Runner: "opencode", Model: "gpt-5.4"}, Allocation{}, Workplace{})
+	}, Profile{Mode: "manual"}, Allocation{Runner: "opencode", Model: "gpt-5.4"}, Workplace{})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -110,8 +113,8 @@ func TestServiceStartUpdatesRunningHistoryRowOnSuccess(t *testing.T) {
 	}}
 	service := &Service{
 		logger:     log.Default(),
-		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Runner: "opencode", Model: "openai/gpt-5.5"}},
-		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "local-slot:coder", Reserved: true}},
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
 		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
 		launcher:   launcher,
 	}
@@ -176,8 +179,8 @@ func TestServiceStartEnrichesRunningHistoryRowBeforeLaunch(t *testing.T) {
 	}}
 	service := &Service{
 		logger:     log.Default(),
-		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Runner: "opencode", Model: "openai/gpt-5.5"}},
-		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "local-slot:coder", Reserved: true}},
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
 		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: workplaceDir, Ready: true}},
 		launcher:   launcher,
 	}

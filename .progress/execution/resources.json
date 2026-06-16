@@ -1,0 +1,21 @@
+{
+  "defaults": {
+    "model-binding": "default"
+  },
+  "runners": ["opencode", "codex"],
+  "models": ["openai/gpt-5.4", "openai/gpt-5.5", "gpt-5.3-codex"],
+  "bindings": {
+    "default": {
+      "runner": "opencode",
+      "model": "openai/gpt-5.4"
+    },
+    "coder": {
+      "runner": "codex",
+      "model": "gpt-5.3-codex"
+    },
+    "review": {
+      "runner": "opencode",
+      "model": "openai/gpt-5.5"
+    }
+  }
+}
