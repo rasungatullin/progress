@@ -86,32 +86,37 @@ func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error
 	profile, err := s.ResolveProfile(ctx, in)
 	if err != nil {
 		result := failedStartResult(err)
-		s.updateStartHistory(ctx, historyRoot, historyHandle, in, Profile{}, Workplace{}, result, err)
+		s.updateStartHistory(ctx, historyRoot, historyHandle, in, Profile{}, Allocation{}, Workplace{}, result, err)
 		return result, err
 	}
 
 	allocation, err := s.AllocateResources(ctx, in, profile)
 	if err != nil {
 		result := failedStartResult(err)
-		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, Workplace{}, result, err)
+		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, Allocation{}, Workplace{}, result, err)
 		return result, err
 	}
 
 	workplace, err := s.PrepareWorkplace(ctx, in, profile, allocation)
 	if err != nil {
 		result := failedStartResult(err)
-		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, Workplace{}, result, err)
+		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, Workplace{}, result, err)
 		return result, err
 	}
 
 	if strings.TrimSpace(in.Launch.Directory) == "" {
 		in.Launch.Directory = workplace.Name
 	}
-	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, workplace, LaunchResult{Status: "running"}, nil)
+	in.Launch.Runner = allocation.Runner
+	in.Launch.Model = allocation.Model
+	if strings.TrimSpace(in.Launch.ModelBinding) == "" {
+		in.Launch.ModelBinding = allocation.ModelBinding
+	}
+	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, workplace, LaunchResult{Status: "running"}, nil)
 
 	launchCtx := launch.WithHistoryHandle(ctx, historyHandle)
 	result, err := s.Launch(launchCtx, in, profile, allocation, workplace)
-	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, workplace, result, err)
+	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, workplace, result, err)
 	return result, err
 }
 
@@ -120,8 +125,15 @@ func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
 }
 
 func (s *Service) LaunchDirect(ctx context.Context, in Invocation) (LaunchResult, error) {
-	profile := Profile{Name: "direct-launch", Runner: in.Launch.Runner, Mode: "manual", Model: in.Launch.Model, CommitPush: false}
-	allocation := Allocation{Resource: "external-launch", Reserved: true}
+	profile := Profile{Name: "direct-launch", Mode: "manual", CommitPush: false}
+	allocation := Allocation{
+		Resource:     "external-launch",
+		Reserved:     true,
+		Runner:       in.Launch.Runner,
+		Model:        in.Launch.Model,
+		ModelBinding: in.Launch.ModelBinding,
+		Source:       "direct-launch",
+	}
 	workplace := Workplace{Name: in.Launch.Directory, Ready: true}
 
 	return s.Launch(ctx, in, profile, allocation, workplace)
@@ -143,7 +155,7 @@ func (s *Service) AllocateResources(ctx context.Context, in Invocation, profile 
 		return Allocation{}, err
 	}
 
-	s.logger.Printf("Ресурсы подтверждены: задача=%q ресурс=%q резерв=%t", in.Task, allocation.Resource, allocation.Reserved)
+	s.logger.Printf("Ресурсы подтверждены: задача=%q ресурс=%q резерв=%t runner=%q model=%q binding=%q source=%q fallback=%t", in.Task, allocation.Resource, allocation.Reserved, allocation.Runner, allocation.Model, allocation.ModelBinding, allocation.Source, allocation.FallbackUsed)
 	return allocation, nil
 }
 
@@ -158,11 +170,10 @@ func (s *Service) PrepareWorkplace(ctx context.Context, in Invocation, profile P
 }
 
 func (s *Service) Launch(ctx context.Context, in Invocation, profile Profile, allocation Allocation, workplace Workplace) (LaunchResult, error) {
-	if in.Launch.Runner == "" {
-		in.Launch.Runner = profile.Runner
-	}
-	if in.Launch.Model == "" {
-		in.Launch.Model = profile.Model
+	in.Launch.Runner = allocation.Runner
+	in.Launch.Model = allocation.Model
+	if strings.TrimSpace(in.Launch.ModelBinding) == "" {
+		in.Launch.ModelBinding = allocation.ModelBinding
 	}
 
 	s.logger.Printf("Запуск выполнения начат: каталог=%q runner=%q модель=%q", in.Launch.Directory, in.Launch.Runner, in.Launch.Model)
@@ -202,7 +213,7 @@ func (s *Service) beginStartHistory(ctx context.Context, root string, in Invocat
 	return handle
 }
 
-func (s *Service) updateStartHistory(ctx context.Context, root string, handle history.Handle, in Invocation, profile Profile, workplace Workplace, result LaunchResult, launchErr error) {
+func (s *Service) updateStartHistory(ctx context.Context, root string, handle history.Handle, in Invocation, profile Profile, allocation Allocation, workplace Workplace, result LaunchResult, launchErr error) {
 	if root == "" {
 		return
 	}
@@ -211,14 +222,8 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 		errorText = strings.TrimSpace(launchErr.Error())
 	}
 
-	runner := in.Launch.Runner
-	if strings.TrimSpace(runner) == "" {
-		runner = profile.Runner
-	}
-	modelName := in.Launch.Model
-	if strings.TrimSpace(modelName) == "" {
-		modelName = profile.Model
-	}
+	runner := firstNonEmptyTrimmed(in.Launch.Runner, allocation.Runner)
+	modelName := firstNonEmptyTrimmed(in.Launch.Model, allocation.Model)
 	profileName := profile.Name
 	if strings.TrimSpace(profileName) == "" {
 		profileName = strings.TrimSpace(in.Profile)
@@ -239,6 +244,15 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 		RunRecordPath:       result.RunRecordPath,
 		Error:               errorText,
 	})
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func executionHistoryRoot(in Invocation, workplace Workplace) string {

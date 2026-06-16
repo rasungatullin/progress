@@ -6,6 +6,7 @@ type LaunchSpec struct {
 	Directory                string           `json:"directory,omitempty"`
 	Runner                   string           `json:"runner,omitempty"`
 	Model                    string           `json:"model,omitempty"`
+	ModelBinding             string           `json:"model_binding,omitempty"`
 	Prompt                   string           `json:"prompt,omitempty"`
 	PromptAdditions          []string         `json:"prompt_additions,omitempty"`
 	StructuredInput          *StructuredInput `json:"structured_input,omitempty"`
@@ -122,9 +123,9 @@ type Invocation struct {
 type Profile struct {
 	Name                     string   `json:"name,omitempty"`
 	Description              string   `json:"description,omitempty"`
-	Runner                   string   `json:"runner,omitempty"`
 	Mode                     string   `json:"mode,omitempty"`
-	Model                    string   `json:"model,omitempty"`
+	ModelBinding             string   `json:"model_binding,omitempty"`
+	AllowModelFallback       bool     `json:"allow_model_fallback,omitempty"`
 	PromptAdditions          []string `json:"prompt_additions,omitempty"`
 	StructuredOutput         bool     `json:"structured_output,omitempty"`
 	StructuredOutputRequired bool     `json:"structured_output_required,omitempty"`
@@ -139,8 +140,8 @@ type ProfileConfigFile struct {
 
 type ProfileOptions struct {
 	Mode                     string    `json:"mode"`
-	Runner                   string    `json:"runner"`
-	Model                    string    `json:"model"`
+	ModelBinding             string    `json:"model-binding"`
+	AllowModelFallback       *bool     `json:"allow-model-fallback"`
 	PromptAdditions          *[]string `json:"prompt-additions"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
@@ -151,8 +152,8 @@ type ProfileOptions struct {
 type ProfileConfig struct {
 	Description              string    `json:"description"`
 	Mode                     string    `json:"mode"`
-	Runner                   string    `json:"runner"`
-	Model                    string    `json:"model"`
+	ModelBinding             string    `json:"model-binding"`
+	AllowModelFallback       *bool     `json:"allow-model-fallback"`
 	PromptAdditions          *[]string `json:"prompt-additions"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
@@ -161,8 +162,29 @@ type ProfileConfig struct {
 }
 
 type Allocation struct {
-	Resource string `json:"resource,omitempty"`
-	Reserved bool   `json:"reserved,omitempty"`
+	Resource     string `json:"resource,omitempty"`
+	Reserved     bool   `json:"reserved,omitempty"`
+	Runner       string `json:"runner,omitempty"`
+	Model        string `json:"model,omitempty"`
+	ModelBinding string `json:"model_binding,omitempty"`
+	Source       string `json:"source,omitempty"`
+	FallbackUsed bool   `json:"fallback_used,omitempty"`
+}
+
+type ResourceConfigFile struct {
+	Defaults ResourceDefaultsConfig           `json:"defaults"`
+	Runners  []string                         `json:"runners"`
+	Models   []string                         `json:"models"`
+	Bindings map[string]ResourceBindingConfig `json:"bindings"`
+}
+
+type ResourceBindingConfig struct {
+	Runner string `json:"runner"`
+	Model  string `json:"model"`
+}
+
+type ResourceDefaultsConfig struct {
+	ModelBinding string `json:"model-binding"`
 }
 
 type Workplace struct {

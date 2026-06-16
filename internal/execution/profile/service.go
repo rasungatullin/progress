@@ -50,9 +50,9 @@ func (s *Service) Resolve(ctx context.Context, in model.Invocation) (model.Profi
 	profile := model.Profile{
 		Name:                     name,
 		Description:              entry.Description,
-		Runner:                   firstNonEmpty(entry.Runner, config.Defaults.Runner),
 		Mode:                     firstNonEmpty(entry.Mode, config.Defaults.Mode),
-		Model:                    firstNonEmpty(entry.Model, config.Defaults.Model),
+		ModelBinding:             firstNonEmpty(entry.ModelBinding, config.Defaults.ModelBinding),
+		AllowModelFallback:       resolveBool(config.Defaults.AllowModelFallback, entry.AllowModelFallback),
 		PromptAdditions:          resolvePromptAdditions(config.Defaults.PromptAdditions, entry.PromptAdditions),
 		StructuredOutput:         resolveBool(config.Defaults.StructuredOutput, entry.StructuredOutput),
 		StructuredOutputRequired: resolveBool(config.Defaults.StructuredOutputRequired, entry.StructuredOutputRequired),
@@ -65,16 +65,8 @@ func (s *Service) Resolve(ctx context.Context, in model.Invocation) (model.Profi
 	}
 	profile.StructuredOutputFields = fields
 
-	if profile.Runner == "" {
-		return model.Profile{}, fmt.Errorf("execution profile %q has empty runner", name)
-	}
-
 	if profile.Mode == "" {
 		return model.Profile{}, fmt.Errorf("execution profile %q has empty mode", name)
-	}
-
-	if profile.Model == "" {
-		return model.Profile{}, fmt.Errorf("execution profile %q has empty model", name)
 	}
 
 	return profile, nil

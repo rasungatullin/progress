@@ -10,14 +10,14 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
-func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
+func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
 		"defaults": {
-			"runner": "opencode",
 			"mode": "manual",
-			"model": "openai/gpt-5.4",
+			"model-binding": "default",
+			"allow-model-fallback": true,
 			"prompt-additions": ["Default context.", "Always verify the result."],
 			"structured-output": true,
 			"structured-output-required": false,
@@ -30,18 +30,17 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 			},
 			"coder": {
 				"description": "Coder profile",
-				"runner": "codex",
-				"model": "openai/gpt-5.3-codex-spark",
+				"model-binding": "coder",
+				"allow-model-fallback": false,
 				"prompt-additions": ["Implement the requested change."],
 				"structured-output-required": true,
 				"structured-output-fields": ["commit_message", "changes"],
 				"commit-push": true
 			},
-			"local": {
-				"description": "Local profile",
-				"structured-output": false,
-				"structured-output-fields": [],
-				"model": "ollama/qwen3.5:2b"
+			"review": {
+				"description": "Review profile",
+				"model-binding": "review",
+				"structured-output-fields": ["summary"]
 			}
 		}
 	}`)
@@ -50,30 +49,17 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve default profile: %v", err)
 	}
-
-	if defaultProfile.Name != ProfileDefault {
-		t.Fatalf("unexpected default profile name: %q", defaultProfile.Name)
+	if defaultProfile.Name != ProfileDefault || defaultProfile.Description != "Cloud profile" {
+		t.Fatalf("unexpected default profile: %#v", defaultProfile)
 	}
-	if defaultProfile.Description != "Cloud profile" {
-		t.Fatalf("unexpected default description: %q", defaultProfile.Description)
-	}
-	if defaultProfile.Runner != "opencode" {
-		t.Fatalf("unexpected default runner: %q", defaultProfile.Runner)
-	}
-	if defaultProfile.Mode != "manual" {
-		t.Fatalf("unexpected default mode: %q", defaultProfile.Mode)
-	}
-	if defaultProfile.Model != "openai/gpt-5.4" {
-		t.Fatalf("unexpected default model: %q", defaultProfile.Model)
+	if defaultProfile.Mode != "manual" || defaultProfile.ModelBinding != "default" || !defaultProfile.AllowModelFallback {
+		t.Fatalf("unexpected default binding config: %#v", defaultProfile)
 	}
 	if defaultProfile.CommitPush {
 		t.Fatal("default profile commit-push must inherit false")
 	}
-	if !defaultProfile.StructuredOutput {
-		t.Fatal("default profile structured-output must inherit true")
-	}
-	if defaultProfile.StructuredOutputRequired {
-		t.Fatal("default profile structured-output-required must inherit false")
+	if !defaultProfile.StructuredOutput || defaultProfile.StructuredOutputRequired {
+		t.Fatalf("unexpected default structured output flags: %#v", defaultProfile)
 	}
 	if !equalStrings(defaultProfile.StructuredOutputFields, []string{"remarks", "commands"}) {
 		t.Fatalf("unexpected default structured-output-fields: %#v", defaultProfile.StructuredOutputFields)
@@ -82,70 +68,32 @@ func TestResolveProfileAppliesDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("unexpected default prompt-additions: %#v", defaultProfile.PromptAdditions)
 	}
 
-	localProfile, err := service.Resolve(context.Background(), model.Invocation{Profile: ProfileLocal})
-	if err != nil {
-		t.Fatalf("resolve local profile: %v", err)
-	}
-
-	if localProfile.Description != "Local profile" {
-		t.Fatalf("unexpected local description: %q", localProfile.Description)
-	}
-	if localProfile.Runner != "opencode" {
-		t.Fatalf("unexpected local runner: %q", localProfile.Runner)
-	}
-	if localProfile.Mode != "manual" {
-		t.Fatalf("unexpected local mode: %q", localProfile.Mode)
-	}
-	if localProfile.Model != "ollama/qwen3.5:2b" {
-		t.Fatalf("unexpected local model: %q", localProfile.Model)
-	}
-	if localProfile.CommitPush {
-		t.Fatal("local profile commit-push must inherit false")
-	}
-	if localProfile.StructuredOutput {
-		t.Fatal("local profile structured-output must override defaults to false")
-	}
-	if localProfile.StructuredOutputRequired {
-		t.Fatal("local profile structured-output-required must inherit false")
-	}
-	if len(localProfile.StructuredOutputFields) != 0 {
-		t.Fatalf("local profile structured-output-fields must allow explicit empty override: %#v", localProfile.StructuredOutputFields)
-	}
-	if !equalStrings(localProfile.PromptAdditions, []string{"Default context.", "Always verify the result."}) {
-		t.Fatalf("unexpected local prompt-additions: %#v", localProfile.PromptAdditions)
-	}
-
 	coderProfile, err := service.Resolve(context.Background(), model.Invocation{Profile: "coder"})
 	if err != nil {
 		t.Fatalf("resolve coder profile: %v", err)
 	}
-
-	if coderProfile.Description != "Coder profile" {
-		t.Fatalf("unexpected coder description: %q", coderProfile.Description)
+	if coderProfile.ModelBinding != "coder" || coderProfile.AllowModelFallback {
+		t.Fatalf("unexpected coder binding config: %#v", coderProfile)
 	}
-	if coderProfile.Runner != "codex" {
-		t.Fatalf("unexpected coder runner: %q", coderProfile.Runner)
-	}
-	if coderProfile.Mode != "manual" {
-		t.Fatalf("unexpected coder mode: %q", coderProfile.Mode)
-	}
-	if coderProfile.Model != "openai/gpt-5.3-codex-spark" {
-		t.Fatalf("unexpected coder model: %q", coderProfile.Model)
-	}
-	if !coderProfile.CommitPush {
-		t.Fatal("coder profile commit-push must override defaults to true")
-	}
-	if !coderProfile.StructuredOutput {
-		t.Fatal("coder profile structured-output must inherit true from defaults")
-	}
-	if !coderProfile.StructuredOutputRequired {
-		t.Fatal("coder profile structured-output-required must override defaults to true")
+	if !coderProfile.CommitPush || !coderProfile.StructuredOutput || !coderProfile.StructuredOutputRequired {
+		t.Fatalf("unexpected coder structured flags: %#v", coderProfile)
 	}
 	if !equalStrings(coderProfile.StructuredOutputFields, []string{"commit_message", "changes"}) {
 		t.Fatalf("unexpected coder structured-output-fields: %#v", coderProfile.StructuredOutputFields)
 	}
 	if !equalStrings(coderProfile.PromptAdditions, []string{"Default context.", "Always verify the result.", "Implement the requested change."}) {
 		t.Fatalf("unexpected coder prompt-additions: %#v", coderProfile.PromptAdditions)
+	}
+
+	reviewProfile, err := service.Resolve(context.Background(), model.Invocation{Profile: "review"})
+	if err != nil {
+		t.Fatalf("resolve review profile: %v", err)
+	}
+	if reviewProfile.ModelBinding != "review" || !reviewProfile.AllowModelFallback {
+		t.Fatalf("unexpected review binding config: %#v", reviewProfile)
+	}
+	if !equalStrings(reviewProfile.StructuredOutputFields, []string{"summary"}) {
+		t.Fatalf("unexpected review structured-output-fields: %#v", reviewProfile.StructuredOutputFields)
 	}
 }
 
@@ -154,9 +102,8 @@ func TestResolveProfilePromptAdditionsKeepDefaultsWhenProfileListIsEmpty(t *test
 
 	service := newTestService(`{
 		"defaults": {
-			"runner": "opencode",
 			"mode": "manual",
-			"model": "openai/gpt-5.4",
+			"model-binding": "default",
 			"prompt-additions": ["Default context."]
 		},
 		"profiles": {
@@ -183,8 +130,8 @@ func TestResolveProfileReviewPresetFromRepositoryConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve review profile: %v", err)
 	}
-	if len(profile.PromptAdditions) == 0 {
-		t.Fatal("review profile must define prompt-additions")
+	if profile.ModelBinding != "review" {
+		t.Fatalf("unexpected review model-binding: %q", profile.ModelBinding)
 	}
 	joined := strings.Join(profile.PromptAdditions, "\n")
 	for _, expected := range []string{
@@ -204,7 +151,7 @@ func TestResolveProfileAllowsSummaryInStructuredOutputFields(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
-		"defaults": {"runner": "opencode", "mode": "manual", "model": "openai/gpt-5.4"},
+		"defaults": {"mode": "manual", "model-binding": "default"},
 		"profiles": {
 			"default": {
 				"description": "Cloud profile",
@@ -226,7 +173,7 @@ func TestResolveProfileUnknownProfile(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
-		"defaults": {"runner": "opencode", "mode": "manual", "model": "openai/gpt-5.4"},
+		"defaults": {"mode": "manual", "model-binding": "default"},
 		"profiles": {"default": {"description": "Cloud profile"}}
 	}`)
 
@@ -239,19 +186,19 @@ func TestResolveProfileUnknownProfile(t *testing.T) {
 	}
 }
 
-func TestResolveProfileRequiresRunner(t *testing.T) {
+func TestResolveProfileRequiresMode(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
-		"defaults": {"mode": "manual", "model": "openai/gpt-5.4"},
+		"defaults": {"model-binding": "default"},
 		"profiles": {"default": {"description": "Cloud profile"}}
 	}`)
 
 	_, err := service.Resolve(context.Background(), model.Invocation{})
 	if err == nil {
-		t.Fatal("expected empty runner error")
+		t.Fatal("expected empty mode error")
 	}
-	if !strings.Contains(err.Error(), `execution profile "default" has empty runner`) {
+	if !strings.Contains(err.Error(), `execution profile "default" has empty mode`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
