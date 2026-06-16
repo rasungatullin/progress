@@ -742,13 +742,13 @@ func TestBuildRunnerCommandCodex(t *testing.T) {
 	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
 		Directory: "/tmp/work",
 		Runner:    RunnerCodex,
-		Model:     "gpt-5.3-codex",
+		Model:     "openai/gpt-5.4",
 	}, "ship it")
 	if err != nil {
 		t.Fatalf("build command: %v", err)
 	}
 
-	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.3-codex", "ship it"})
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "ship it"})
 }
 
 func TestLaunchStructuredOutputInvalidPreservesFreeText(t *testing.T) {

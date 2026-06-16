@@ -51,7 +51,7 @@
     "codex": {
       "description": "Профиль исполнения через Codex CLI",
       "runner": "codex",
-      "model": "gpt-5.3-codex"
+      "model": "gpt-5.3-codex-spark"
     },
     "local": {
       "description": "Локальный профиль исполнения через локальную модель",
