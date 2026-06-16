@@ -25,6 +25,7 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 		"--dir", "/tmp/work",
 		"--runner", "codex",
 		"--model", "openai/gpt-5.4",
+		"--model-binding", "coder",
 		"--prompt", "ship it",
 		"--structured-output",
 		"--structured-output-required",
@@ -40,6 +41,9 @@ func TestBindLaunchFlagsAndInvocation(t *testing.T) {
 	}
 	if invocation.Launch.Runner != "codex" {
 		t.Fatalf("unexpected runner: %q", invocation.Launch.Runner)
+	}
+	if invocation.Launch.ModelBinding != "coder" {
+		t.Fatalf("unexpected model-binding: %q", invocation.Launch.ModelBinding)
 	}
 	if !invocation.Launch.CommitPush {
 		t.Fatal("expected commit-push to be enabled")
@@ -76,6 +80,9 @@ func TestBindStartFlagsAndInvocationIncludesRepo(t *testing.T) {
 	}
 	if invocation.Repository.URL != "https://github.com/owner/name" {
 		t.Fatalf("unexpected repository: %q", invocation.Repository.URL)
+	}
+	if invocation.Launch.ModelBinding != "" {
+		t.Fatalf("start invocation must not set model-binding implicitly: %#v", invocation.Launch)
 	}
 	if invocation.Launch.StructuredInput == nil || invocation.Launch.StructuredInput.Task != "ship it" {
 		t.Fatalf("unexpected structured input: %#v", invocation.Launch.StructuredInput)
@@ -271,6 +278,64 @@ func TestExecutionReviewCycleHelpIncludesCycleFlags(t *testing.T) {
 	}
 }
 
+func TestExecutionResourcesCommandSupportsModelBindingAndPrintsAllocation(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "resources", "--profile", "coder", "--model-binding", "review"})
+
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			resolveProfile: func(_ context.Context, in execution.Invocation) (execution.Profile, error) {
+				if in.Profile != "coder" || in.Launch.ModelBinding != "review" {
+					t.Fatalf("unexpected profile invocation: %#v", in)
+				}
+				return execution.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}, nil
+			},
+			allocateResource: func(_ context.Context, in execution.Invocation, profile execution.Profile) (execution.Allocation, error) {
+				if profile.ModelBinding != "coder" {
+					t.Fatalf("unexpected profile: %#v", profile)
+				}
+				if in.Launch.ModelBinding != "review" {
+					t.Fatalf("unexpected launch binding: %#v", in.Launch)
+				}
+				return execution.Allocation{
+					Resource:     "binding:review",
+					Reserved:     true,
+					Runner:       "opencode",
+					Model:        "openai/gpt-5.5",
+					ModelBinding: "review",
+					Source:       "explicit-model-binding",
+					FallbackUsed: false,
+				}, nil
+			},
+		}
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute resources command: %v", err)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"resource=binding:review\n",
+		"reserved=true\n",
+		"runner=opencode\n",
+		"model=openai/gpt-5.5\n",
+		"model-binding=review\n",
+		"source=explicit-model-binding\n",
+		"fallback-used=false\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("resources output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
 func TestExecutionRunsCommandPrintsJSONHistory(t *testing.T) {
 	root := t.TempDir()
 	previousDir, err := os.Getwd()
@@ -450,14 +515,17 @@ func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, "description=Базовый профиль исполнения через облачную модель по умолчанию\n") {
+	if !strings.Contains(output, "description=Базовый профиль исполнения через binding по умолчанию\n") {
 		t.Fatalf("profile output must include description, got %q", output)
 	}
-	if !strings.Contains(output, "runner=opencode\n") {
-		t.Fatalf("profile output must include resolved runner, got %q", output)
+	if !strings.Contains(output, "mode=manual\n") {
+		t.Fatalf("profile output must include resolved mode, got %q", output)
 	}
-	if !strings.Contains(output, "model=openai/gpt-5.4\n") {
-		t.Fatalf("profile output must include resolved model, got %q", output)
+	if !strings.Contains(output, "model-binding=default\n") {
+		t.Fatalf("profile output must include resolved model-binding, got %q", output)
+	}
+	if !strings.Contains(output, "allow-model-fallback=false\n") {
+		t.Fatalf("profile output must include allow-model-fallback, got %q", output)
 	}
 	if !strings.Contains(output, "prompt-additions=\n") {
 		t.Fatalf("profile output must include prompt-additions field, got %q", output)

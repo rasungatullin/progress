@@ -837,7 +837,6 @@ func TestLaunchStructuredOutputRequiredFromProfileUsesORSemantics(t *testing.T) 
 
 	result, err := service.Launch(context.Background(), validInvocation(t, false), model.Profile{
 		Name:                     "review",
-		Model:                    "openai/gpt-5.4",
 		StructuredOutputRequired: true,
 	}, validAllocation(), validWorkplace(t))
 	if err == nil {
@@ -1181,7 +1180,6 @@ func TestLaunchAppliesProfilePromptAdditionsToRunnerPrompt(t *testing.T) {
 	invocation.Launch.Prompt = "Review PR #38."
 	if _, err := service.Launch(context.Background(), invocation, model.Profile{
 		Name:            "review",
-		Model:           "openai/gpt-5.5",
 		PromptAdditions: []string{"Collect PR, issue, diff, and previous review comments first.", "Do not modify code."},
 	}, validAllocation(), validWorkplace(t)); err != nil {
 		t.Fatalf("launch: %v", err)
@@ -1278,7 +1276,6 @@ func TestLaunchAppliesProfileStructuredOutputFieldSelectionToPromptOnly(t *testi
 
 	result, err := service.Launch(context.Background(), validInvocation(t, false), model.Profile{
 		Name:                   "review",
-		Model:                  "openai/gpt-5.4",
 		StructuredOutput:       true,
 		StructuredOutputFields: []string{"remarks", "commands"},
 	}, validAllocation(), validWorkplace(t))
@@ -1446,11 +1443,11 @@ func validInvocation(t *testing.T, commitPush bool) model.Invocation {
 }
 
 func validProfile() model.Profile {
-	return model.Profile{Name: "default", Model: "openai/gpt-5.4"}
+	return model.Profile{Name: "default"}
 }
 
 func validAllocation() model.Allocation {
-	return model.Allocation{Resource: "external-launch", Reserved: true}
+	return model.Allocation{Resource: "external-launch", Reserved: true, Runner: RunnerOpenCode, Model: "openai/gpt-5.4"}
 }
 
 func validWorkplace(t *testing.T) model.Workplace {

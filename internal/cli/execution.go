@@ -37,6 +37,7 @@ type launchFlags struct {
 	integrationActions       []string
 	runner                   string
 	model                    string
+	modelBinding             string
 	prompt                   string
 	structuredOutput         bool
 	structuredOutputRequired bool
@@ -218,7 +219,7 @@ func newExecutionProfileCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("profile=%s\ndescription=%s\nrunner=%s\nmode=%s\nmodel=%s\nprompt-additions=%s\nstructured-output=%t\nstructured-output-required=%t\nstructured-output-fields=%s\ncommit-push=%t\n", profile.Name, profile.Description, profile.Runner, profile.Mode, profile.Model, strings.Join(profile.PromptAdditions, " | "), profile.StructuredOutput, profile.StructuredOutputRequired, strings.Join(profile.StructuredOutputFields, ","), profile.CommitPush)
+			cmd.Printf("profile=%s\ndescription=%s\nmode=%s\nmodel-binding=%s\nallow-model-fallback=%t\nprompt-additions=%s\nstructured-output=%t\nstructured-output-required=%t\nstructured-output-fields=%s\ncommit-push=%t\n", profile.Name, profile.Description, profile.Mode, profile.ModelBinding, profile.AllowModelFallback, strings.Join(profile.PromptAdditions, " | "), profile.StructuredOutput, profile.StructuredOutputRequired, strings.Join(profile.StructuredOutputFields, ","), profile.CommitPush)
 			return nil
 		},
 	}
@@ -228,12 +229,17 @@ func newExecutionProfileCommand() *cobra.Command {
 }
 
 func newExecutionResourcesCommand() *cobra.Command {
-	return &cobra.Command{
+	flags := newStartFlags()
+
+	cmd := &cobra.Command{
 		Use:   "resources",
 		Short: "Проверка и резервирование ресурсов",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			in := execution.Invocation{}
+			in := invocationFromProfileFlags(flags)
+			in.Launch.Runner = flags.runner
+			in.Launch.Model = flags.model
+			in.Launch.ModelBinding = flags.modelBinding
 
 			profile, err := service.ResolveProfile(context.Background(), in)
 			if err != nil {
@@ -245,10 +251,16 @@ func newExecutionResourcesCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("resource=%s\nreserved=%t\n", allocation.Resource, allocation.Reserved)
+			cmd.Printf("resource=%s\nreserved=%t\nrunner=%s\nmodel=%s\nmodel-binding=%s\nsource=%s\nfallback-used=%t\n", allocation.Resource, allocation.Reserved, allocation.Runner, allocation.Model, allocation.ModelBinding, allocation.Source, allocation.FallbackUsed)
 			return nil
 		},
 	}
+
+	bindProfileFlags(cmd, flags)
+	cmd.Flags().StringVar(&flags.runner, "runner", "", "Исполнительный runner")
+	cmd.Flags().StringVar(&flags.model, "model", "", "Идентификатор модели")
+	cmd.Flags().StringVar(&flags.modelBinding, "model-binding", "", "Семантический binding runner+model")
+	return cmd
 }
 
 func newExecutionWorkplaceCommand() *cobra.Command {
@@ -332,6 +344,7 @@ func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
+	cmd.Flags().StringVar(&flags.modelBinding, "model-binding", flags.modelBinding, "Семантический binding runner+model")
 	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
@@ -347,6 +360,7 @@ func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Тип исполнительного профиля")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
+	cmd.Flags().StringVar(&flags.modelBinding, "model-binding", flags.modelBinding, "Семантический binding runner+model")
 	bindStructuredInputFlags(cmd, flags)
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
@@ -361,6 +375,7 @@ func bindReviewCycleFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().IntVar(&flags.maxExecutions, "max-executions", flags.maxExecutions, "Максимальное число запусков исполнения")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
+	cmd.Flags().StringVar(&flags.modelBinding, "model-binding", flags.modelBinding, "Семантический binding runner+model")
 	bindStructuredInputFlags(cmd, flags)
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
@@ -398,6 +413,7 @@ func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
 			Directory:                flags.directory,
 			Runner:                   flags.runner,
 			Model:                    flags.model,
+			ModelBinding:             flags.modelBinding,
 			Prompt:                   flags.prompt,
 			StructuredOutput:         flags.structuredOutput,
 			StructuredOutputRequired: flags.structuredOutputRequired,
