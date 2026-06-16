@@ -933,12 +933,16 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 	case RunnerOpenCode:
 		args = []string{"run", "--dir", spec.Directory, "--model", spec.Model, prompt}
 	case RunnerCodex:
-		args = []string{"exec", "-C", spec.Directory, "-m", spec.Model, prompt}
+		args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
 	default:
 		return nil, fmt.Errorf("unsupported runner: %s", spec.Runner)
 	}
 
 	return exec.CommandContext(ctx, runner, args...), nil
+}
+
+func codexModelName(modelName string) string {
+	return strings.TrimPrefix(modelName, "openai/")
 }
 
 func buildRunnerPrompt(spec model.LaunchSpec) (string, error) {

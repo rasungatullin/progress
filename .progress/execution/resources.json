@@ -3,7 +3,7 @@
     "model-binding": "default"
   },
   "runners": ["opencode", "codex"],
-  "models": ["openai/gpt-5.4", "openai/gpt-5.5", "gpt-5.3-codex"],
+  "models": ["openai/gpt-5.4", "openai/gpt-5.5", "gpt-5.3-codex-spark"],
   "bindings": {
     "default": {
       "runner": "opencode",
@@ -11,7 +11,7 @@
     },
     "coder": {
       "runner": "codex",
-      "model": "gpt-5.3-codex"
+      "model": "gpt-5.3-codex-spark"
     },
     "review": {
       "runner": "opencode",
