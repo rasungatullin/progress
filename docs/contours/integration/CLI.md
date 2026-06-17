@@ -44,8 +44,8 @@ flowchart LR
 
 - не требуется отдельно реализовывать OAuth, PAT и хранение секретов;
 - можно опереться на уже существующую авторизацию пользователя в `gh auth login`;
-- `gh` уже покрывает типовые GitHub-сущности: issue, pull request, comments, search, repo, api;
-- интеграция может начать работать как thin adapter без преждевременного усложнения кодовой базы.
+- `gh` уже покрывает типовые GitHub-сущности: `issue`, `pull request`, `comments`, `search`, `repo`, `api`;
+- интеграция может начать работать как тонкий адаптер без преждевременного усложнения кодовой базы.
 
 Ограничения такого подхода:
 
@@ -172,7 +172,7 @@ gh auth status
 gh repo view owner/name --json name,owner,description,defaultBranchRef,url
 ```
 
-Возвращаемые сведения используются как базовый контекст для последующих вызовов issue и pull request.
+Возвращаемые сведения используются как базовый контекст для последующих вызовов задач и запросов на слияние.
 
 ### 7.4 `progress integration github issue get`
 
@@ -200,7 +200,7 @@ gh issue view 123 --repo owner/name --json number,title,body,state,labels,assign
 gh api --paginate --slurp repos/owner/name/issues/123/comments
 ```
 
-Команда принимает `--repo` и обязательный `--number`. Если `--repo` не передан, адаптер может использовать `default_repo` из `.progress/integration/github.json`; если пользователь явно передал пустой `--repo=`, fallback не применяется и запрос отклоняется как `invalid-request`.
+Команда принимает `--repo` и обязательный `--number`. Если `--repo` не передан, адаптер может использовать `default_repo` из `.progress/integration/github.json`; если пользователь явно передал пустой `--repo=`, резервный выбор не применяется и запрос отклоняется как `invalid-request`.
 
 Адаптер преобразует paginated REST-ответ GitHub в массив `TrackerComment` с полями `System`, `Repository`, `Number`, `Author`, `Body`, `URL`, `CreatedAt` и `UpdatedAt`. В текстовом выводе команда печатает общий `comment_count`, затем поля каждого комментария и тело построчно.
 
@@ -223,7 +223,7 @@ gh issue list --repo owner/name --search "is:open label:bug" --json number,title
 
 ### 7.7 `progress integration github pr get`
 
-Команда получает одну карточку pull request.
+Команда получает одну карточку запроса на слияние.
 
 Предпочтительный вызов:
 
@@ -231,16 +231,16 @@ gh issue list --repo owner/name --search "is:open label:bug" --json number,title
 gh pr view 456 --repo owner/name --json number,title,body,state,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt
 ```
 
-Результат должен использоваться как нормализованная карточка change request.
+Результат должен использоваться как нормализованная карточка запроса на изменение.
 
 ### 7.8 `progress integration github pr comments`
 
-Команда получает комментарии pull request, включая review-комментарии.
+Команда получает комментарии запроса на слияние, включая замечания ревизии.
 
 Для первого этапа допустимы два режима:
 
 1. обычные комментарии issue-части PR;
-2. review-комментарии по diff.
+2. замечания ревизии по diff.
 
 Предпочтительные вызовы:
 
@@ -249,11 +249,11 @@ gh api repos/owner/name/issues/456/comments
 gh api repos/owner/name/pulls/456/comments
 ```
 
-Адаптер должен различать discussion comments и inline review comments, но приводить их к совместимой внутренней схеме.
+Адаптер должен различать комментарии обсуждения и inline-замечания ревизии, но приводить их к совместимой внутренней схеме.
 
 ### 7.9 `progress integration github pr search`
 
-Команда выполняет поиск pull request по фильтрам GitHub.
+Команда выполняет поиск запросов на слияние по фильтрам GitHub.
 
 Вариант вызова:
 
@@ -356,7 +356,7 @@ GitHub-адаптер должен различать как минимум сл
 
 1. если `--repo` не передан, сервис может использовать `default_repo`;
 2. если `--repo` передан с непустым значением, используется именно это значение;
-3. если `--repo` передан явно пустым (`--repo=`), запрос отклоняется как `invalid-request`, fallback к `default_repo` не применяется.
+3. если `--repo` передан явно пустым (`--repo=`), запрос отклоняется как `invalid-request`, резервный выбор через `default_repo` не применяется.
 
 ## 12. Порядок реализации
 
@@ -437,4 +437,4 @@ GitHub-адаптер должен различать как минимум сл
 4. `progress integration github issue search --repo <owner/name> --query <expr>`;
 5. `progress integration github pr search --repo <owner/name> --query <expr>`.
 
-Этого достаточно, чтобы контур интеграции начал поставлять полезный внешний контекст для задач, связанных с разработкой, код-ревью и сопровождением изменений.
+Этого достаточно, чтобы контур интеграции начал поставлять полезный внешний контекст для задач, связанных с разработкой, ревизией кода и сопровождением изменений.
