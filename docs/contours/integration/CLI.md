@@ -231,7 +231,7 @@ gh issue list --repo owner/name --search "is:open label:bug" --json number,title
 gh pr view 456 --repo owner/name --json number,title,body,state,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt
 ```
 
-Результат должен использоваться как нормализованная карточка запроса на изменение.
+Результат должен использоваться как нормализованная карточка запроса на слияние.
 
 ### 7.8 `progress integration github pr comments`
 
