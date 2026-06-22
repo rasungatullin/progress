@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -42,8 +43,16 @@ const (
 )
 
 type Service struct {
-	runRunner    func(context.Context, model.Invocation) (string, error)
-	runGitOutput func(context.Context, string, ...string) (string, error)
+	runRunner        func(context.Context, model.Invocation) (string, error)
+	extractSessionID func(model.Invocation, string) string
+	runGitOutput     func(context.Context, string, ...string) (string, error)
+}
+
+var errResumeUnsupported = errors.New("resume is unsupported")
+
+var runnerSessionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?im)(?:runner[_ -]?session[_ -]?id|session[_ -]?id|conversation[_ -]?id)[^\S\r\n]*[:=][^\S\r\n]*["']?([A-Za-z0-9._:-]{6,})["']?`),
+	regexp.MustCompile(`(?im)"(?:runner_session_id|session_id|conversation_id)"\s*:\s*"([^"]+)"`),
 }
 
 type historyHandleContextKey struct{}
@@ -59,8 +68,9 @@ func historyHandleFromContext(ctx context.Context) history.Handle {
 
 func NewService() *Service {
 	return &Service{
-		runRunner:    runRunner,
-		runGitOutput: runGitOutput,
+		runRunner:        runRunner,
+		extractSessionID: extractRunnerSessionID,
+		runGitOutput:     runGitOutput,
 	}
 }
 
@@ -87,20 +97,29 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 
 	runnerOutput, err := s.runRunner(ctx, in)
 	if err != nil {
+		status := "failed"
+		if errors.Is(err, errResumeUnsupported) {
+			status = "resume-unsupported"
+		}
 		result := model.LaunchResult{
-			Status:  "failed",
+			Status:  status,
 			Summary: strings.TrimSpace(err.Error()),
 		}
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
 	}
+	runnerSessionID := ""
+	if s.extractSessionID != nil {
+		runnerSessionID = strings.TrimSpace(s.extractSessionID(in, runnerOutput))
+	}
 	rawOutputPath := persistRunnerOutput(workplace.Name, runnerOutput)
 
 	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState, structuredOutputErr := parseStructuredOutput(runnerOutput)
 	result := model.LaunchResult{
-		Status:        "failed",
-		Summary:       strings.TrimSpace(plainRunnerOutput),
-		RawOutputPath: rawOutputPath,
+		Status:          "failed",
+		Summary:         strings.TrimSpace(plainRunnerOutput),
+		RawOutputPath:   rawOutputPath,
+		RunnerSessionID: runnerSessionID,
 	}
 	if structuredOutputState == trailingStructuredBlockValid {
 		result.StructuredOutput = structuredOutput
@@ -148,6 +167,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	)
 
 	result = model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutputPath: rawOutputPath}
+	result.RunnerSessionID = runnerSessionID
 	if structuredOutputState == trailingStructuredBlockValid {
 		result.StructuredOutput = structuredOutput
 	}
@@ -560,6 +580,7 @@ type runRecord struct {
 	Allocation          model.Allocation        `json:"allocation"`
 	Workplace           model.Workplace         `json:"workplace"`
 	StructuredInput     *model.StructuredInput  `json:"structured_input,omitempty"`
+	RunnerSessionID     string                  `json:"runner_session_id,omitempty"`
 	RawStructuredOutput string                  `json:"raw_structured_output"`
 	StructuredOutput    *model.StructuredOutput `json:"structured_output,omitempty"`
 	StructuredOutputErr string                  `json:"structured_output_error,omitempty"`
@@ -634,6 +655,7 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 		Allocation:          allocation,
 		Workplace:           workplace,
 		StructuredInput:     structuredInput,
+		RunnerSessionID:     launchResult.RunnerSessionID,
 		RawStructuredOutput: rawStructuredOutput,
 		StructuredOutput:    structuredOutput,
 		StructuredOutputErr: errText,
@@ -667,6 +689,10 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 		Name:                in.Workplace.Name,
 		ProfileName:         fallbackHistoryValue(profile.Name),
 		Runner:              fallbackHistoryValue(in.Launch.Runner),
+		RunnerSessionID:     launchResult.RunnerSessionID,
+		ParentRunID:         resumeParentRunID(in),
+		ResumeMessage:       resumeMessage(in),
+		ResumeMessageSource: resumeMessageSource(in),
 		Model:               fallbackHistoryValue(in.Launch.Model),
 		LaunchDirectory:     in.Launch.Directory,
 		RawStructuredInput:  history.StructuredInputJSON(structuredInput),
@@ -928,17 +954,87 @@ func persistRunnerOutput(workplaceDir, output string) string {
 func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt string) (*exec.Cmd, error) {
 	runner := strings.TrimSpace(spec.Runner)
 	var args []string
+	resume := spec.Resume != nil
+	sessionID := ""
+	if spec.Resume != nil {
+		sessionID = strings.TrimSpace(spec.Resume.RunnerSessionID)
+	}
 
 	switch runner {
 	case RunnerOpenCode:
-		args = []string{"run", "--dir", spec.Directory, "--model", spec.Model, prompt}
+		if resume {
+			if sessionID == "" {
+				return nil, fmt.Errorf("%w: runner %s requires runner session id", errResumeUnsupported, runner)
+			}
+			args = []string{"run", "--dir", spec.Directory, "--model", spec.Model, "--session", sessionID, prompt}
+		} else {
+			args = []string{"run", "--dir", spec.Directory, "--model", spec.Model, prompt}
+		}
 	case RunnerCodex:
-		args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
+		if resume {
+			if sessionID == "" {
+				return nil, fmt.Errorf("%w: runner %s requires runner session id", errResumeUnsupported, runner)
+			}
+			args = []string{"exec", "resume", sessionID, prompt}
+		} else {
+			args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
+		}
 	default:
+		if resume {
+			return nil, fmt.Errorf("%w: runner %s does not support saved sessions", errResumeUnsupported, spec.Runner)
+		}
 		return nil, fmt.Errorf("unsupported runner: %s", spec.Runner)
 	}
 
 	return exec.CommandContext(ctx, runner, args...), nil
+}
+
+func extractRunnerSessionID(in model.Invocation, output string) string {
+	if strings.TrimSpace(output) == "" {
+		return ""
+	}
+
+	for _, pattern := range runnerSessionPatterns {
+		matches := pattern.FindStringSubmatch(output)
+		if len(matches) == 2 {
+			return strings.TrimSpace(matches[1])
+		}
+	}
+
+	if in.Launch.Resume != nil {
+		return strings.TrimSpace(in.Launch.Resume.RunnerSessionID)
+	}
+
+	return ""
+}
+
+func resumeParentRunID(in model.Invocation) int64 {
+	if in.Launch.Resume == nil {
+		return 0
+	}
+
+	return in.Launch.Resume.ParentRunID
+}
+
+func resumeMessageSource(in model.Invocation) string {
+	if in.Launch.Resume == nil {
+		return ""
+	}
+
+	return strings.TrimSpace(in.Launch.Resume.MessageSource)
+}
+
+func resumeMessage(in model.Invocation) string {
+	if in.Launch.StructuredInput == nil {
+		return ""
+	}
+	for _, item := range in.Launch.StructuredInput.OperationalContext {
+		if strings.TrimSpace(item.Title) == "Дополнительное сообщение для возобновления" {
+			return strings.TrimSpace(item.Body)
+		}
+	}
+
+	return ""
 }
 
 func codexModelName(modelName string) string {

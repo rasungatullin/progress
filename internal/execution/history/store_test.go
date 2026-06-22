@@ -17,6 +17,18 @@ func TestStoreAndListExecutionRuns(t *testing.T) {
 	root := t.TempDir()
 	input := &model.StructuredInput{Task: "Ship it"}
 	output := &model.StructuredOutput{Summary: "Done"}
+	if err := Store(context.Background(), root, Run{
+		CreatedAt:       "2026-06-10T09:59:00Z",
+		Status:          "completed",
+		Summary:         "parent",
+		Name:            "task-parent",
+		ProfileName:     "default",
+		Runner:          "opencode",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: filepath.Join(root, "repo"),
+	}); err != nil {
+		t.Fatalf("store parent run: %v", err)
+	}
 
 	err := Store(context.Background(), root, Run{
 		CreatedAt:           "2026-06-10T10:00:00Z",
@@ -25,6 +37,10 @@ func TestStoreAndListExecutionRuns(t *testing.T) {
 		Name:                "task-54",
 		ProfileName:         "default",
 		Runner:              "opencode",
+		RunnerSessionID:     "session-54",
+		ParentRunID:         1,
+		ResumeMessage:       "Continue",
+		ResumeMessageSource: "message",
 		Model:               "openai/gpt-5.4",
 		LaunchDirectory:     filepath.Join(root, "repo"),
 		RawStructuredInput:  StructuredInputJSON(input),
@@ -51,6 +67,9 @@ func TestStoreAndListExecutionRuns(t *testing.T) {
 	}
 	if runs[0].RawStructuredOutput != `{"summary":"Done"}` {
 		t.Fatalf("unexpected structured output json: %q", runs[0].RawStructuredOutput)
+	}
+	if runs[0].RunnerSessionID != "session-54" || runs[0].ParentRunID != 1 || runs[0].ResumeMessage != "Continue" || runs[0].ResumeMessageSource != "message" {
+		t.Fatalf("unexpected resume metadata: %#v", runs[0])
 	}
 }
 

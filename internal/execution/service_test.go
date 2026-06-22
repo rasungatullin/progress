@@ -2,10 +2,12 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution/history"
@@ -197,6 +199,133 @@ func TestServiceStartEnrichesRunningHistoryRowBeforeLaunch(t *testing.T) {
 	}
 	if result.Status != "completed" {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestServiceResumeBuildsCompactStructuredInputAndHistoryLink(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	parentInput := StructuredInput{Task: "Original task", ProjectContext: []StructuredContext{{Title: "Spec", Body: "Long context"}}}
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:          "2026-06-22T10:00:00Z",
+		Status:             "completed",
+		Summary:            "Parent summary",
+		Name:               "task-resume",
+		ProfileName:        "coder",
+		Runner:             "codex",
+		RunnerSessionID:    "session-42",
+		Model:              "openai/gpt-5.4",
+		LaunchDirectory:    filepath.Join(root, "workplace"),
+		RawStructuredInput: history.StructuredInputJSON(&parentInput),
+		RunRecordPath:      filepath.Join(root, ".progress", "execution-runs", "parent.json"),
+	}); err != nil {
+		t.Fatalf("store parent run: %v", err)
+	}
+
+	launcher := &stubLauncher{}
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual"}},
+		launcher: launcher,
+	}
+
+	result, err := service.Resume(context.Background(), ResumeRequest{Run: "1", Message: "Учти новый лимит", MessageSource: "message"})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+
+	input := launcher.invocation.Launch.StructuredInput
+	if input == nil {
+		t.Fatal("resume launch must receive structured input")
+	}
+	if input.Task != "" || len(input.ProjectContext) != 0 {
+		t.Fatalf("resume input must stay compact: %#v", input)
+	}
+	if len(input.OperationalContext) != 1 || input.OperationalContext[0].Body != "Учти новый лимит" {
+		t.Fatalf("unexpected operational context: %#v", input.OperationalContext)
+	}
+	if len(input.PreviousRunResults) != 1 || !strings.Contains(input.PreviousRunResults[0].Summary, "parent run #1 completed") {
+		t.Fatalf("unexpected previous run results: %#v", input.PreviousRunResults)
+	}
+	if launcher.invocation.Launch.Resume == nil || launcher.invocation.Launch.Resume.ParentRunID != 1 || launcher.invocation.Launch.Resume.RunnerSessionID != "session-42" {
+		t.Fatalf("unexpected resume metadata: %#v", launcher.invocation.Launch.Resume)
+	}
+
+	var resumeExtension struct {
+		ParentRunID         int64  `json:"parent_run_id"`
+		ParentRunner        string `json:"parent_runner"`
+		ParentRunnerSession string `json:"parent_runner_session_id"`
+		MessageSource       string `json:"message_source"`
+	}
+	if err := json.Unmarshal(input.Extensions["resume"], &resumeExtension); err != nil {
+		t.Fatalf("decode resume extension: %v", err)
+	}
+	if resumeExtension.ParentRunID != 1 || resumeExtension.ParentRunner != "codex" || resumeExtension.ParentRunnerSession != "session-42" || resumeExtension.MessageSource != "message" {
+		t.Fatalf("unexpected resume extension: %#v", resumeExtension)
+	}
+
+	runs, err := history.List(context.Background(), root, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected parent and child runs, got %d", len(runs))
+	}
+	child := runs[0]
+	if child.ParentRunID != 1 || child.ResumeMessage != "Учти новый лимит" || child.ResumeMessageSource != "message" {
+		t.Fatalf("unexpected child history row: %#v", child)
+	}
+}
+
+func TestServiceResumeLatestUsesNewestMatchingRun(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	for _, run := range []history.Run{
+		{CreatedAt: "2026-06-22T10:00:00Z", Status: "completed", Summary: "first", Name: "task-resume", ProfileName: "coder", Runner: "codex", RunnerSessionID: "session-1", Model: "openai/gpt-5.4", LaunchDirectory: filepath.Join(root, "workplace")},
+		{CreatedAt: "2026-06-22T10:01:00Z", Status: "completed", Summary: "second", Name: "task-resume", ProfileName: "coder", Runner: "codex", RunnerSessionID: "session-2", Model: "openai/gpt-5.4", LaunchDirectory: filepath.Join(root, "workplace")},
+	} {
+		if err := history.Store(context.Background(), root, run); err != nil {
+			t.Fatalf("store run: %v", err)
+		}
+	}
+
+	service := &Service{logger: log.Default(), profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual"}}}
+	result, err := service.Resume(context.Background(), ResumeRequest{Run: "latest", Name: "task-resume", Message: "Continue", MessageSource: "message", DryRun: true})
+	if err != nil {
+		t.Fatalf("resume dry-run: %v", err)
+	}
+	if result.Status != "dry-run" {
+		t.Fatalf("unexpected dry-run result: %#v", result)
+	}
+	if !strings.Contains(result.Summary, "parent-run=2") || !strings.Contains(result.Summary, "parent-session-id=session-2") {
+		t.Fatalf("dry-run must use newest matching parent: %q", result.Summary)
 	}
 }
 

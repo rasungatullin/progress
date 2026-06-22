@@ -27,6 +27,10 @@ type Run struct {
 	Name                string
 	ProfileName         string
 	Runner              string
+	RunnerSessionID     string
+	ParentRunID         int64
+	ResumeMessage       string
+	ResumeMessageSource string
 	Model               string
 	LaunchDirectory     string
 	RawStructuredInput  string
@@ -50,6 +54,10 @@ type ListedRun struct {
 	Name                string `json:"name,omitempty"`
 	ProfileName         string `json:"profile_name"`
 	Runner              string `json:"runner"`
+	RunnerSessionID     string `json:"runner_session_id,omitempty"`
+	ParentRunID         int64  `json:"parent_run_id,omitempty"`
+	ResumeMessage       string `json:"resume_message,omitempty"`
+	ResumeMessageSource string `json:"resume_message_source,omitempty"`
 	Model               string `json:"model"`
 	LaunchDirectory     string `json:"launch_directory"`
 	RawStructuredInput  string `json:"raw_structured_input,omitempty"`
@@ -140,7 +148,7 @@ func Begin(ctx context.Context, root string, run Run) (Handle, error) {
 	if err != nil {
 		return Handle{}, err
 	}
-	runResult, err := tx.ExecContext(ctx, `INSERT INTO execution_runs (created_at, status, summary, name, profile_name, runner, request_id, result_id, run_record_path, error) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`, run.CreatedAt, run.Status, run.Summary, nullable(run.Name), run.ProfileName, run.Runner, requestID, nullable(run.RunRecordPath), nullable(run.Error))
+	runResult, err := tx.ExecContext(ctx, `INSERT INTO execution_runs (created_at, status, summary, name, profile_name, runner, runner_session_id, parent_run_id, resume_message, resume_message_source, request_id, result_id, run_record_path, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`, run.CreatedAt, run.Status, run.Summary, nullable(run.Name), run.ProfileName, run.Runner, nullable(run.RunnerSessionID), nullableInt64(run.ParentRunID), nullable(run.ResumeMessage), nullable(run.ResumeMessageSource), requestID, nullable(run.RunRecordPath), nullable(run.Error))
 	if err != nil {
 		return Handle{}, err
 	}
@@ -211,7 +219,7 @@ func Update(ctx context.Context, handle Handle, run Run) error {
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE execution_runs SET status = ?, summary = ?, name = ?, profile_name = ?, runner = ?, result_id = ?, run_record_path = ?, error = ? WHERE id = ?`, run.Status, run.Summary, nullable(run.Name), run.ProfileName, run.Runner, resultID, nullable(run.RunRecordPath), nullable(run.Error), handle.RunID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE execution_runs SET status = ?, summary = ?, name = ?, profile_name = ?, runner = ?, runner_session_id = ?, parent_run_id = ?, resume_message = ?, resume_message_source = ?, result_id = ?, run_record_path = ?, error = ? WHERE id = ?`, run.Status, run.Summary, nullable(run.Name), run.ProfileName, run.Runner, nullable(run.RunnerSessionID), nullableInt64(run.ParentRunID), nullable(run.ResumeMessage), nullable(run.ResumeMessageSource), resultID, nullable(run.RunRecordPath), nullable(run.Error), handle.RunID); err != nil {
 		return err
 	}
 
@@ -267,7 +275,7 @@ func listWithDB(ctx context.Context, db *sql.DB, filter ListFilter) ([]ListedRun
 		args = append(args, strings.TrimSpace(filter.Status))
 	}
 
-	query := `SELECT r.id, r.created_at, r.status, r.summary, COALESCE(r.name, ''), r.profile_name, r.runner, q.model, q.launch_directory, q.raw_structured_input, COALESCE(s.raw_output_path, ''), COALESCE(s.raw_structured_output, ''), COALESCE(r.run_record_path, ''), COALESCE(r.error, '') FROM execution_runs r JOIN execution_requests q ON q.id = r.request_id LEFT JOIN execution_results s ON s.id = r.result_id`
+	query := `SELECT r.id, r.created_at, r.status, r.summary, COALESCE(r.name, ''), r.profile_name, r.runner, COALESCE(r.runner_session_id, ''), COALESCE(r.parent_run_id, 0), COALESCE(r.resume_message, ''), COALESCE(r.resume_message_source, ''), q.model, q.launch_directory, q.raw_structured_input, COALESCE(s.raw_output_path, ''), COALESCE(s.raw_structured_output, ''), COALESCE(r.run_record_path, ''), COALESCE(r.error, '') FROM execution_runs r JOIN execution_requests q ON q.id = r.request_id LEFT JOIN execution_results s ON s.id = r.result_id`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -283,7 +291,7 @@ func listWithDB(ctx context.Context, db *sql.DB, filter ListFilter) ([]ListedRun
 	runs := make([]ListedRun, 0)
 	for rows.Next() {
 		var run ListedRun
-		if err := rows.Scan(&run.ID, &run.CreatedAt, &run.Status, &run.Summary, &run.Name, &run.ProfileName, &run.Runner, &run.Model, &run.LaunchDirectory, &run.RawStructuredInput, &run.RawOutputPath, &run.RawStructuredOutput, &run.RunRecordPath, &run.Error); err != nil {
+		if err := rows.Scan(&run.ID, &run.CreatedAt, &run.Status, &run.Summary, &run.Name, &run.ProfileName, &run.Runner, &run.RunnerSessionID, &run.ParentRunID, &run.ResumeMessage, &run.ResumeMessageSource, &run.Model, &run.LaunchDirectory, &run.RawStructuredInput, &run.RawOutputPath, &run.RawStructuredOutput, &run.RunRecordPath, &run.Error); err != nil {
 			return nil, err
 		}
 		runs = append(runs, run)
@@ -333,9 +341,9 @@ func GetReadOnly(ctx context.Context, root string, id int64) (ListedRun, error) 
 func getWithDB(ctx context.Context, db *sql.DB, id int64) (ListedRun, error) {
 	var run ListedRun
 
-	query := `SELECT r.id, r.created_at, r.status, r.summary, COALESCE(r.name, ''), r.profile_name, r.runner, q.model, q.launch_directory, q.raw_structured_input, COALESCE(s.raw_output_path, ''), COALESCE(s.raw_structured_output, ''), COALESCE(r.run_record_path, ''), COALESCE(r.error, '') FROM execution_runs r JOIN execution_requests q ON q.id = r.request_id LEFT JOIN execution_results s ON s.id = r.result_id WHERE r.id = ?`
+	query := `SELECT r.id, r.created_at, r.status, r.summary, COALESCE(r.name, ''), r.profile_name, r.runner, COALESCE(r.runner_session_id, ''), COALESCE(r.parent_run_id, 0), COALESCE(r.resume_message, ''), COALESCE(r.resume_message_source, ''), q.model, q.launch_directory, q.raw_structured_input, COALESCE(s.raw_output_path, ''), COALESCE(s.raw_structured_output, ''), COALESCE(r.run_record_path, ''), COALESCE(r.error, '') FROM execution_runs r JOIN execution_requests q ON q.id = r.request_id LEFT JOIN execution_results s ON s.id = r.result_id WHERE r.id = ?`
 	row := db.QueryRowContext(ctx, query, id)
-	if err := row.Scan(&run.ID, &run.CreatedAt, &run.Status, &run.Summary, &run.Name, &run.ProfileName, &run.Runner, &run.Model, &run.LaunchDirectory, &run.RawStructuredInput, &run.RawOutputPath, &run.RawStructuredOutput, &run.RunRecordPath, &run.Error); err != nil {
+	if err := row.Scan(&run.ID, &run.CreatedAt, &run.Status, &run.Summary, &run.Name, &run.ProfileName, &run.Runner, &run.RunnerSessionID, &run.ParentRunID, &run.ResumeMessage, &run.ResumeMessageSource, &run.Model, &run.LaunchDirectory, &run.RawStructuredInput, &run.RawOutputPath, &run.RawStructuredOutput, &run.RunRecordPath, &run.Error); err != nil {
 		return run, err
 	}
 
@@ -361,7 +369,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		`PRAGMA foreign_keys = ON`,
 		`CREATE TABLE IF NOT EXISTS execution_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, model TEXT NOT NULL, launch_directory TEXT NOT NULL, raw_structured_input TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS execution_results (id INTEGER PRIMARY KEY AUTOINCREMENT, raw_output_path TEXT NOT NULL, raw_structured_output TEXT NOT NULL)`,
-		`CREATE TABLE IF NOT EXISTS execution_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL, name TEXT, profile_name TEXT NOT NULL, runner TEXT NOT NULL, request_id INTEGER NOT NULL REFERENCES execution_requests(id), result_id INTEGER REFERENCES execution_results(id), run_record_path TEXT, error TEXT)`,
+		`CREATE TABLE IF NOT EXISTS execution_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL, name TEXT, profile_name TEXT NOT NULL, runner TEXT NOT NULL, runner_session_id TEXT, parent_run_id INTEGER REFERENCES execution_runs(id), resume_message TEXT, resume_message_source TEXT, request_id INTEGER NOT NULL REFERENCES execution_requests(id), result_id INTEGER REFERENCES execution_results(id), run_record_path TEXT, error TEXT)`,
 		`CREATE INDEX IF NOT EXISTS execution_runs_created_at_idx ON execution_runs(created_at)`,
 		`CREATE INDEX IF NOT EXISTS execution_runs_name_idx ON execution_runs(name)`,
 		`CREATE INDEX IF NOT EXISTS execution_runs_status_idx ON execution_runs(status)`,
@@ -369,6 +377,17 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("sqlite schema: %w", err)
+		}
+	}
+
+	for _, statement := range []string{
+		`ALTER TABLE execution_runs ADD COLUMN runner_session_id TEXT`,
+		`ALTER TABLE execution_runs ADD COLUMN parent_run_id INTEGER REFERENCES execution_runs(id)`,
+		`ALTER TABLE execution_runs ADD COLUMN resume_message TEXT`,
+		`ALTER TABLE execution_runs ADD COLUMN resume_message_source TEXT`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return fmt.Errorf("sqlite schema: %w", err)
 		}
 	}
@@ -382,6 +401,14 @@ func hasResult(run Run) bool {
 
 func nullable(value string) any {
 	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	return value
+}
+
+func nullableInt64(value int64) any {
+	if value == 0 {
 		return nil
 	}
 

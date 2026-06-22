@@ -7,6 +7,7 @@ type LaunchSpec struct {
 	Runner                   string           `json:"runner,omitempty"`
 	Model                    string           `json:"model,omitempty"`
 	ModelBinding             string           `json:"model_binding,omitempty"`
+	Resume                   *ResumeSpec      `json:"resume,omitempty"`
 	Prompt                   string           `json:"prompt,omitempty"`
 	PromptAdditions          []string         `json:"prompt_additions,omitempty"`
 	StructuredInput          *StructuredInput `json:"structured_input,omitempty"`
@@ -102,6 +103,12 @@ type StructuredConclusion struct {
 	Status  string `json:"status,omitempty"`
 	Summary string `json:"summary,omitempty"`
 	Body    string `json:"body,omitempty"`
+}
+
+type ResumeSpec struct {
+	ParentRunID     int64  `json:"parent_run_id,omitempty"`
+	RunnerSessionID string `json:"runner_session_id,omitempty"`
+	MessageSource   string `json:"message_source,omitempty"`
 }
 
 type WorkplaceSpec struct {
@@ -202,5 +209,6 @@ type LaunchResult struct {
 	Summary          string            `json:"summary,omitempty"`
 	RawOutputPath    string            `json:"raw_output_path,omitempty"`
 	StructuredOutput *StructuredOutput `json:"structured_output,omitempty"`
+	RunnerSessionID  string            `json:"runner_session_id,omitempty"`
 	RunRecordPath    string            `json:"run_record_path,omitempty"`
 }

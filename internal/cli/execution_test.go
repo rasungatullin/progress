@@ -278,6 +278,61 @@ func TestExecutionReviewCycleHelpIncludesCycleFlags(t *testing.T) {
 	}
 }
 
+func TestResumeRequestFromFlagsRejectsConflictingMessageSources(t *testing.T) {
+	t.Parallel()
+
+	_, err := resumeRequestFromFlags(&resumeFlags{run: "42", message: "inline", messageFile: "/tmp/message.txt"})
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResumeRequestFromFlagsRejectsEmptyMessage(t *testing.T) {
+	t.Parallel()
+
+	_, err := resumeRequestFromFlags(&resumeFlags{run: "42", message: "   "})
+	if err == nil {
+		t.Fatal("expected empty message error")
+	}
+	if !strings.Contains(err.Error(), "resume message must be non-empty") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecutionResumeCommandCallsService(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "resume", "--run", "42", "--message", "Continue with the new limit", "--profile", "coder", "--structured-output", "--dry-run"})
+
+	var captured execution.ResumeRequest
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			resume: func(_ context.Context, req execution.ResumeRequest) (execution.LaunchResult, error) {
+				captured = req
+				return execution.LaunchResult{Status: "dry-run", Summary: "resume plan"}, nil
+			},
+		}
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute resume command: %v", err)
+	}
+	if captured.Run != "42" || captured.Message != "Continue with the new limit" || captured.MessageSource != "message" || captured.Profile != "coder" || !captured.StructuredOutput || !captured.DryRun {
+		t.Fatalf("unexpected resume request: %#v", captured)
+	}
+	if !strings.Contains(stdout.String(), "state=dry-run\n") {
+		t.Fatalf("output must include dry-run state: %q", stdout.String())
+	}
+}
+
 func TestExecutionResourcesCommandSupportsModelBindingAndPrintsAllocation(t *testing.T) {
 	t.Parallel()
 
@@ -765,6 +820,7 @@ type executionCommandServiceStub struct {
 	allocateResource func(context.Context, execution.Invocation, execution.Profile) (execution.Allocation, error)
 	prepareWorkplace func(context.Context, execution.Invocation, execution.Profile, execution.Allocation) (execution.Workplace, error)
 	launchDirect     func(context.Context, execution.Invocation) (execution.LaunchResult, error)
+	resume           func(context.Context, execution.ResumeRequest) (execution.LaunchResult, error)
 }
 
 func (s executionCommandServiceStub) Start(ctx context.Context, in execution.Invocation) (execution.LaunchResult, error) {
@@ -807,4 +863,11 @@ func (s executionCommandServiceStub) LaunchDirect(ctx context.Context, in execut
 		return execution.LaunchResult{}, errors.New("unexpected LaunchDirect call")
 	}
 	return s.launchDirect(ctx, in)
+}
+
+func (s executionCommandServiceStub) Resume(ctx context.Context, req execution.ResumeRequest) (execution.LaunchResult, error) {
+	if s.resume == nil {
+		return execution.LaunchResult{}, errors.New("unexpected Resume call")
+	}
+	return s.resume(ctx, req)
 }
