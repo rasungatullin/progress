@@ -304,13 +304,14 @@ func TestExecutionResourcesCommandSupportsModelBindingAndPrintsAllocation(t *tes
 					t.Fatalf("unexpected launch binding: %#v", in.Launch)
 				}
 				return execution.Allocation{
-					Resource:     "binding:review",
-					Reserved:     true,
-					Runner:       "opencode",
-					Model:        "openai/gpt-5.5",
-					ModelBinding: "review",
-					Source:       "explicit-model-binding",
-					FallbackUsed: false,
+					Resource:      "binding:review",
+					Reserved:      true,
+					Runner:        "opencode",
+					Model:         "openai/gpt-5.5",
+					ModelBinding:  "review",
+					BindingSource: "local",
+					Source:        "explicit-model-binding",
+					FallbackUsed:  false,
 				}, nil
 			},
 		}
@@ -328,6 +329,9 @@ func TestExecutionResourcesCommandSupportsModelBindingAndPrintsAllocation(t *tes
 		"model=openai/gpt-5.5\n",
 		"model-binding=review\n",
 		"source=explicit-model-binding\n",
+		"binding-source=local\n",
+		"global-config=\n",
+		"local-config=\n",
 		"fallback-used=false\n",
 	} {
 		if !strings.Contains(output, fragment) {

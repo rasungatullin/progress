@@ -155,7 +155,7 @@ func (s *Service) AllocateResources(ctx context.Context, in Invocation, profile 
 		return Allocation{}, err
 	}
 
-	s.logger.Printf("Ресурсы подтверждены: задача=%q ресурс=%q резерв=%t runner=%q model=%q binding=%q source=%q fallback=%t", in.Task, allocation.Resource, allocation.Reserved, allocation.Runner, allocation.Model, allocation.ModelBinding, allocation.Source, allocation.FallbackUsed)
+	s.logger.Printf("Ресурсы подтверждены: задача=%q ресурс=%q резерв=%t runner=%q model=%q binding=%q source=%q binding-source=%q fallback=%t global-config=%q local-config=%q", in.Task, allocation.Resource, allocation.Reserved, allocation.Runner, allocation.Model, allocation.ModelBinding, allocation.Source, allocation.BindingSource, allocation.FallbackUsed, allocation.GlobalConfigPath, allocation.LocalConfigPath)
 	return allocation, nil
 }
 

@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -32,6 +33,88 @@ func TestAllocateUsesExplicitModelBinding(t *testing.T) {
 	}
 	if allocation.Source != allocationSourceExplicitBinding || allocation.FallbackUsed {
 		t.Fatalf("unexpected allocation metadata: %#v", allocation)
+	}
+}
+
+func TestAllocateUsesGlobalResourcesWhenLocalIsMissing(t *testing.T) {
+	t.Setenv("PROGRESS_CONFIG_HOME", "/global")
+	service := newTestServiceWithGlobalFallback(`{
+		"defaults": {"model-binding": "default"},
+		"runners": ["opencode", "codex"],
+		"models": ["openai/gpt-5.4", "gpt-5.3-codex"],
+		"bindings": {
+			"default": {"runner": "opencode", "model": "openai/gpt-5.4"},
+			"coder": {"runner": "codex", "model": "gpt-5.3-codex"}
+		}
+	}`, "")
+
+	allocation, err := service.Allocate(context.Background(), model.Invocation{
+		Launch: model.LaunchSpec{ModelBinding: "coder"},
+	}, model.Profile{ModelBinding: "default"})
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if allocation.ModelBinding != "coder" || allocation.Source != allocationSourceExplicitBinding {
+		t.Fatalf("unexpected allocation: %#v", allocation)
+	}
+	if allocation.GlobalConfigPath == "" || allocation.LocalConfigPath != "" {
+		t.Fatalf("unexpected config sources: %#v", allocation)
+	}
+}
+
+func TestAllocateMergesLayersAndOverwritesLocalBinding(t *testing.T) {
+	t.Setenv("PROGRESS_CONFIG_HOME", "/global")
+	service := newTestServiceWithGlobalFallback(`{
+		"defaults": {"model-binding": "default"},
+		"runners": ["opencode", "codex"],
+		"models": ["openai/gpt-5.4", "openai/gpt-5.5"],
+		"bindings": {
+			"default": {"runner": "opencode", "model": "openai/gpt-5.4"},
+			"review": {"runner": "opencode", "model": "openai/gpt-5.5"}
+		}
+	}`, `{
+		"defaults": {"model-binding": "coder"},
+		"runners": ["codex"],
+		"models": ["gpt-5.3-codex"],
+		"bindings": {
+			"default": {"runner": "codex", "model": "gpt-5.3-codex"},
+			"coder": {"runner": "codex", "model": "gpt-5.3-codex"}
+		}
+	}`)
+
+	allocation, err := service.Allocate(context.Background(), model.Invocation{
+		Launch: model.LaunchSpec{},
+	}, model.Profile{
+		ModelBinding:       "default",
+		AllowModelFallback: true,
+	})
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if allocation.ModelBinding != "default" {
+		t.Fatalf("unexpected allocation: %#v", allocation)
+	}
+	if allocation.Runner != "codex" || allocation.Model != "gpt-5.3-codex" {
+		t.Fatalf("unexpected allocation: %#v", allocation)
+	}
+	if allocation.BindingSource != "local" {
+		t.Fatalf("expected binding source=local, got: %q", allocation.BindingSource)
+	}
+	if allocation.GlobalConfigPath == "" || allocation.LocalConfigPath == "" {
+		t.Fatalf("expected both config paths: %#v", allocation)
+	}
+}
+
+func TestAllocateReturnsConfigSourceErrorWhenNoConfigsExist(t *testing.T) {
+	t.Setenv("PROGRESS_CONFIG_HOME", "/global")
+	service := newTestService("")
+
+	_, err := service.Allocate(context.Background(), model.Invocation{}, model.Profile{AllowModelFallback: true})
+	if err == nil {
+		t.Fatal("expected missing config error")
+	}
+	if !strings.Contains(err.Error(), "execution resource config not found") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -237,8 +320,36 @@ func TestAllocateRejectsFallbackWhenDefaultBindingIsNotConfigured(t *testing.T) 
 func newTestService(config string) *Service {
 	return &Service{
 		resolveRepoRoot: func(context.Context) (string, error) { return "/repo", nil },
-		readFile: func(string) ([]byte, error) {
-			return []byte(config), nil
+		readFile: func(path string) ([]byte, error) {
+			if strings.HasSuffix(path, "/.progress/execution/resources.json") {
+				if config == "" {
+					return nil, fs.ErrNotExist
+				}
+				return []byte(config), nil
+			}
+			return nil, fs.ErrNotExist
+		},
+	}
+}
+
+func newTestServiceWithGlobalFallback(globalConfig, localConfig string) *Service {
+	return &Service{
+		resolveRepoRoot: func(context.Context) (string, error) { return "/repo", nil },
+		readFile: func(path string) ([]byte, error) {
+			switch {
+			case strings.HasSuffix(path, "/.progress/execution/resources.json"):
+				if localConfig == "" {
+					return nil, fs.ErrNotExist
+				}
+				return []byte(localConfig), nil
+			case strings.Contains(path, "/global/execution/resources.json"):
+				if globalConfig == "" {
+					return nil, fs.ErrNotExist
+				}
+				return []byte(globalConfig), nil
+			default:
+				return nil, fs.ErrNotExist
+			}
 		},
 	}
 }
