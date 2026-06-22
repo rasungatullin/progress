@@ -433,7 +433,7 @@ func (s *Service) updateResumeHistory(ctx context.Context, root string, handle h
 		LaunchDirectory:     fallbackLaunchDirectory(in, root),
 		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
 		RawOutputPath:       result.RawOutputPath,
-		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, ""),
+		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, result.RawStructuredOutput),
 		RunRecordPath:       result.RunRecordPath,
 		Error:               errorText,
 	})
@@ -488,7 +488,7 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 		LaunchDirectory:     fallbackLaunchDirectory(in, root),
 		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
 		RawOutputPath:       result.RawOutputPath,
-		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, ""),
+		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, result.RawStructuredOutput),
 		RunRecordPath:       result.RunRecordPath,
 		Error:               errorText,
 	})

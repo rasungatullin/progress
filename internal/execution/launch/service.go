@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -49,11 +48,6 @@ type Service struct {
 }
 
 var errResumeUnsupported = errors.New("resume is unsupported")
-
-var runnerSessionPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?im)(?:runner[_ -]?session[_ -]?id|session[_ -]?id|conversation[_ -]?id)[^\S\r\n]*[:=][^\S\r\n]*["']?([A-Za-z0-9._:-]{6,})["']?`),
-	regexp.MustCompile(`(?im)"(?:runner_session_id|session_id|conversation_id)"\s*:\s*"([^"]+)"`),
-}
 
 type historyHandleContextKey struct{}
 
@@ -116,10 +110,11 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 
 	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState, structuredOutputErr := parseStructuredOutput(runnerOutput)
 	result := model.LaunchResult{
-		Status:          "failed",
-		Summary:         strings.TrimSpace(plainRunnerOutput),
-		RawOutputPath:   rawOutputPath,
-		RunnerSessionID: runnerSessionID,
+		Status:              "failed",
+		Summary:             strings.TrimSpace(plainRunnerOutput),
+		RawOutputPath:       rawOutputPath,
+		RawStructuredOutput: rawStructuredOutput,
+		RunnerSessionID:     runnerSessionID,
 	}
 	if structuredOutputState == trailingStructuredBlockValid {
 		result.StructuredOutput = structuredOutput
@@ -139,11 +134,12 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		result, err := s.commitAndPush(ctx, in, workplace, structuredOutput)
 		if err != nil {
 			launchResult := model.LaunchResult{
-				Status:           "failed",
-				Summary:          strings.TrimSpace(plainRunnerOutput),
-				RawOutputPath:    rawOutputPath,
-				StructuredOutput: structuredOutput,
-				RunRecordPath:    "",
+				Status:              "failed",
+				Summary:             strings.TrimSpace(plainRunnerOutput),
+				RawOutputPath:       rawOutputPath,
+				RawStructuredOutput: rawStructuredOutput,
+				StructuredOutput:    structuredOutput,
+				RunRecordPath:       "",
 			}
 
 			if structuredOutputState != trailingStructuredBlockValid {
@@ -166,7 +162,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		gitSummary,
 	)
 
-	result = model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutputPath: rawOutputPath}
+	result = model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutputPath: rawOutputPath, RawStructuredOutput: rawStructuredOutput}
 	result.RunnerSessionID = runnerSessionID
 	if structuredOutputState == trailingStructuredBlockValid {
 		result.StructuredOutput = structuredOutput
@@ -535,7 +531,7 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 		return fmt.Errorf("launch prompt is required")
 	}
 
-	if !isSupportedRunner(in.Launch.Runner) {
+	if !isSupportedRunner(in.Launch.Runner) && in.Launch.Resume == nil {
 		return fmt.Errorf("unsupported runner: %s", in.Launch.Runner)
 	}
 
@@ -990,17 +986,6 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 }
 
 func extractRunnerSessionID(in model.Invocation, output string) string {
-	if strings.TrimSpace(output) == "" {
-		return ""
-	}
-
-	for _, pattern := range runnerSessionPatterns {
-		matches := pattern.FindStringSubmatch(output)
-		if len(matches) == 2 {
-			return strings.TrimSpace(matches[1])
-		}
-	}
-
 	if in.Launch.Resume != nil {
 		return strings.TrimSpace(in.Launch.Resume.RunnerSessionID)
 	}

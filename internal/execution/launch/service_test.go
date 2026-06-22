@@ -817,6 +817,46 @@ func TestLaunchPersistsRunnerSessionID(t *testing.T) {
 	}
 }
 
+func TestLaunchIgnoresRunnerSessionIDFromArbitraryOutput(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Task completed successfully.",
+				`session_id: fake-session-42`,
+				structuredOutputStart,
+				`{"summary":"Done."}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		extractSessionID: extractRunnerSessionID,
+	}
+
+	invocation := validInvocation(t, false)
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "" {
+		t.Fatalf("arbitrary output must not set runner session id: %#v", result)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.RunnerSessionID != "" {
+		t.Fatalf("run record must not keep fake runner session id: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "" {
+		t.Fatalf("sqlite history must not keep fake runner session id: %#v", runs)
+	}
+}
+
 func TestLaunchReturnsResumeUnsupportedState(t *testing.T) {
 	t.Parallel()
 

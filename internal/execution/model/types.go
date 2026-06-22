@@ -205,10 +205,11 @@ type Workplace struct {
 }
 
 type LaunchResult struct {
-	Status           string            `json:"status,omitempty"`
-	Summary          string            `json:"summary,omitempty"`
-	RawOutputPath    string            `json:"raw_output_path,omitempty"`
-	StructuredOutput *StructuredOutput `json:"structured_output,omitempty"`
-	RunnerSessionID  string            `json:"runner_session_id,omitempty"`
-	RunRecordPath    string            `json:"run_record_path,omitempty"`
+	Status              string            `json:"status,omitempty"`
+	Summary             string            `json:"summary,omitempty"`
+	RawOutputPath       string            `json:"raw_output_path,omitempty"`
+	RawStructuredOutput string            `json:"raw_structured_output,omitempty"`
+	StructuredOutput    *StructuredOutput `json:"structured_output,omitempty"`
+	RunnerSessionID     string            `json:"runner_session_id,omitempty"`
+	RunRecordPath       string            `json:"run_record_path,omitempty"`
 }
