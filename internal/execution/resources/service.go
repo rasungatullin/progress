@@ -2,19 +2,16 @@ package resources
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
+	"github.com/rasungatullin/progress/internal/configuration"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
 const (
-	configRelativePath = ".progress/execution/resources.json"
-
 	allocationSourceExplicitBinding     = "explicit-model-binding"
 	allocationSourceExplicitRunnerModel = "explicit-runner-model"
 	allocationSourceProfileBinding      = "profile-model-binding"
@@ -24,6 +21,13 @@ const (
 type Service struct {
 	resolveRepoRoot func(context.Context) (string, error)
 	readFile        func(string) ([]byte, error)
+}
+
+type resourceConfig struct {
+	Config           model.ResourceConfigFile
+	BindingSources   map[string]configuration.ConfigFileSource
+	GlobalConfigPath string
+	LocalConfigPath  string
 }
 
 func NewService() *Service {
@@ -44,6 +48,8 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		if err != nil {
 			return model.Allocation{}, err
 		}
+		allocation.GlobalConfigPath = config.GlobalConfigPath
+		allocation.LocalConfigPath = config.LocalConfigPath
 		return allocation, nil
 	}
 
@@ -53,19 +59,21 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		if runner == "" || modelName == "" {
 			return model.Allocation{}, fmt.Errorf("launch runner and model must be provided together when no model-binding is used")
 		}
-		if !containsName(config.Runners, runner) {
+		if !containsName(config.Config.Runners, runner) {
 			return model.Allocation{}, fmt.Errorf("unknown execution runner: %s", runner)
 		}
-		if !containsName(config.Models, modelName) {
+		if !containsName(config.Config.Models, modelName) {
 			return model.Allocation{}, fmt.Errorf("unknown execution model: %s", modelName)
 		}
 		return model.Allocation{
-			Resource:     "runner-model:" + runner + ":" + modelName,
-			Reserved:     true,
-			Runner:       runner,
-			Model:        modelName,
-			Source:       allocationSourceExplicitRunnerModel,
-			FallbackUsed: false,
+			Resource:         "runner-model:" + runner + ":" + modelName,
+			Reserved:         true,
+			Runner:           runner,
+			Model:            modelName,
+			Source:           allocationSourceExplicitRunnerModel,
+			GlobalConfigPath: config.GlobalConfigPath,
+			LocalConfigPath:  config.LocalConfigPath,
+			FallbackUsed:     false,
 		}, nil
 	}
 
@@ -73,6 +81,8 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 	if profileBinding != "" {
 		allocation, err := resolveBinding(config, profileBinding, allocationSourceProfileBinding)
 		if err == nil {
+			allocation.GlobalConfigPath = config.GlobalConfigPath
+			allocation.LocalConfigPath = config.LocalConfigPath
 			return allocation, nil
 		}
 		if !profile.AllowModelFallback {
@@ -85,6 +95,8 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		}
 		fallback.Source = allocationSourceDefaultBinding
 		fallback.FallbackUsed = true
+		fallback.GlobalConfigPath = config.GlobalConfigPath
+		fallback.LocalConfigPath = config.LocalConfigPath
 		return fallback, nil
 	}
 
@@ -98,90 +110,46 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 	}
 	allocation.Source = allocationSourceDefaultBinding
 	allocation.FallbackUsed = true
+	allocation.GlobalConfigPath = config.GlobalConfigPath
+	allocation.LocalConfigPath = config.LocalConfigPath
 	return allocation, nil
 }
 
-func (s *Service) loadConfig(ctx context.Context) (model.ResourceConfigFile, error) {
+func (s *Service) loadConfig(ctx context.Context) (resourceConfig, error) {
 	repoRoot, err := s.resolveRepoRoot(ctx)
 	if err != nil {
-		return model.ResourceConfigFile{}, fmt.Errorf("resolve git repository root for execution resources: %w", err)
+		return resourceConfig{}, fmt.Errorf("resolve git repository root for execution resources: %w", err)
 	}
 
-	configPath := filepath.Join(repoRoot, configRelativePath)
-	content, err := s.readFile(configPath)
+	loaded, err := configuration.LoadExecutionResourceConfig(repoRoot, s.readFile)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return model.ResourceConfigFile{}, fmt.Errorf("execution resource config not found: %s", configPath)
-		}
-		return model.ResourceConfigFile{}, fmt.Errorf("read execution resource config %s: %w", configPath, err)
+		return resourceConfig{}, err
 	}
 
-	var config model.ResourceConfigFile
-	if err := json.Unmarshal(content, &config); err != nil {
-		return model.ResourceConfigFile{}, fmt.Errorf("parse execution resource config %s: %w", configPath, err)
-	}
-	if err := validateConfig(config); err != nil {
-		return model.ResourceConfigFile{}, fmt.Errorf("invalid execution resource config %s: %w", configPath, err)
-	}
-	return config, nil
+	return resourceConfig{
+		Config:           loaded.Config,
+		BindingSources:   loaded.BindingSources,
+		GlobalConfigPath: getLayerPath(loaded.Layers, configuration.ConfigFileSourceGlobal),
+		LocalConfigPath:  getLayerPath(loaded.Layers, configuration.ConfigFileSourceLocal),
+	}, nil
 }
 
-func validateConfig(config model.ResourceConfigFile) error {
-	if len(config.Runners) == 0 {
-		return fmt.Errorf("runners must define at least one entry")
-	}
-	for _, name := range config.Runners {
-		if strings.TrimSpace(name) == "" {
-			return fmt.Errorf("runners contains empty name")
+func getLayerPath(layers []configuration.ExecutionResourceLayer, source configuration.ConfigFileSource) string {
+	for _, layer := range layers {
+		if layer.Source == source {
+			return layer.Path
 		}
 	}
-
-	if len(config.Models) == 0 {
-		return fmt.Errorf("models must define at least one entry")
-	}
-	for _, name := range config.Models {
-		if strings.TrimSpace(name) == "" {
-			return fmt.Errorf("models contains empty name")
-		}
-	}
-
-	if len(config.Bindings) == 0 {
-		return fmt.Errorf("bindings must define at least one entry")
-	}
-	for name, binding := range config.Bindings {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return fmt.Errorf("bindings contains empty name")
-		}
-		if strings.TrimSpace(binding.Runner) == "" {
-			return fmt.Errorf("binding %q has empty runner", name)
-		}
-		if strings.TrimSpace(binding.Model) == "" {
-			return fmt.Errorf("binding %q has empty model", name)
-		}
-		if !containsName(config.Runners, binding.Runner) {
-			return fmt.Errorf("binding %q references unknown runner %q", name, binding.Runner)
-		}
-		if !containsName(config.Models, binding.Model) {
-			return fmt.Errorf("binding %q references unknown model %q", name, binding.Model)
-		}
-	}
-
-	if defaultBinding := strings.TrimSpace(config.Defaults.ModelBinding); defaultBinding != "" {
-		if _, ok := config.Bindings[defaultBinding]; !ok {
-			return fmt.Errorf("defaults.model-binding references unknown binding %q", defaultBinding)
-		}
-	}
-
-	return nil
+	return ""
 }
 
-func resolveBinding(config model.ResourceConfigFile, bindingName string, source string) (model.Allocation, error) {
-	binding, ok := config.Bindings[bindingName]
+func resolveBinding(config resourceConfig, bindingName string, source string) (model.Allocation, error) {
+	binding, ok := config.Config.Bindings[bindingName]
 	if !ok {
 		return model.Allocation{}, fmt.Errorf("unknown execution model-binding: %s", bindingName)
 	}
-	return model.Allocation{
+
+	allocation := model.Allocation{
 		Resource:     "binding:" + bindingName,
 		Reserved:     true,
 		Runner:       binding.Runner,
@@ -189,11 +157,15 @@ func resolveBinding(config model.ResourceConfigFile, bindingName string, source 
 		ModelBinding: bindingName,
 		Source:       source,
 		FallbackUsed: false,
-	}, nil
+	}
+	if config.BindingSources != nil {
+		allocation.BindingSource = string(config.BindingSources[bindingName])
+	}
+	return allocation, nil
 }
 
-func resolveDefaultBinding(config model.ResourceConfigFile) (model.Allocation, error) {
-	bindingName := strings.TrimSpace(config.Defaults.ModelBinding)
+func resolveDefaultBinding(config resourceConfig) (model.Allocation, error) {
+	bindingName := strings.TrimSpace(config.Config.Defaults.ModelBinding)
 	if bindingName == "" {
 		return model.Allocation{}, fmt.Errorf("defaults.model-binding is required for fallback but is not configured")
 	}

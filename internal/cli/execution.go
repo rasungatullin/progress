@@ -251,7 +251,9 @@ func newExecutionResourcesCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("resource=%s\nreserved=%t\nrunner=%s\nmodel=%s\nmodel-binding=%s\nsource=%s\nfallback-used=%t\n", allocation.Resource, allocation.Reserved, allocation.Runner, allocation.Model, allocation.ModelBinding, allocation.Source, allocation.FallbackUsed)
+			cmd.Printf("resource=%s\nreserved=%t\nrunner=%s\nmodel=%s\nmodel-binding=%s\nsource=%s\n", allocation.Resource, allocation.Reserved, allocation.Runner, allocation.Model, allocation.ModelBinding, allocation.Source)
+			cmd.Printf("binding-source=%s\nfallback-used=%t\n", allocation.BindingSource, allocation.FallbackUsed)
+			cmd.Printf("global-config=%s\nlocal-config=%s\n", allocation.GlobalConfigPath, allocation.LocalConfigPath)
 			return nil
 		},
 	}

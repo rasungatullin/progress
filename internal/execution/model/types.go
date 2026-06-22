@@ -162,13 +162,16 @@ type ProfileConfig struct {
 }
 
 type Allocation struct {
-	Resource     string `json:"resource,omitempty"`
-	Reserved     bool   `json:"reserved,omitempty"`
-	Runner       string `json:"runner,omitempty"`
-	Model        string `json:"model,omitempty"`
-	ModelBinding string `json:"model_binding,omitempty"`
-	Source       string `json:"source,omitempty"`
-	FallbackUsed bool   `json:"fallback_used,omitempty"`
+	Resource         string `json:"resource,omitempty"`
+	Reserved         bool   `json:"reserved,omitempty"`
+	Runner           string `json:"runner,omitempty"`
+	Model            string `json:"model,omitempty"`
+	ModelBinding     string `json:"model_binding,omitempty"`
+	BindingSource    string `json:"binding_source,omitempty"`
+	Source           string `json:"source,omitempty"`
+	FallbackUsed     bool   `json:"fallback_used,omitempty"`
+	GlobalConfigPath string `json:"global_config_path,omitempty"`
+	LocalConfigPath  string `json:"local_config_path,omitempty"`
 }
 
 type ResourceConfigFile struct {

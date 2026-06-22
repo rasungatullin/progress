@@ -113,7 +113,16 @@ progress execution review-cycle \
 }
 ```
 
-Отдельный файл `.progress/execution/resources.json` хранит список доступных `runners`, `models`, `bindings` и опциональный `defaults.model-binding`. Поля `runners` и `models` задаются массивами строк, например `["opencode", "codex"]` и `["openai/gpt-5.4", "gpt-5.3-codex"]`. Семантические привязки вроде `default`, `coder` и `review` указывают на конкретную пару `runner/model`.
+`resources.json` формируется из двух слоёв:
+
+- глобальный: `<progress-config-home>/execution/resources.json`, где `<progress-config-home>` по умолчанию равен `${HOME}/.config/progress`, переопределяется `PROGRESS_CONFIG_HOME`;
+- локальный: `.progress/execution/resources.json` в корне репозитория git.
+
+Отдельный слой может быть неполным, но если файл присутствует — конфигурация обязана содержать полный формат (`runners`, `models`, `bindings`), т.е. «неполные» фрагменты не поддерживаются. Слои объединяются после отдельной валидации каждого: списки `runners` и `models` объединяются без дублей, локальный `defaults.model-binding` переопределяет глобальный, а локальная `bindings` с тем же именем перезаписывает глобальную.
+
+В итоговой диагностике рекомендуется указывать источник выборки: `source=...` для причины выбора (`explicit-model-binding`, `profile-model-binding`, `default-model-binding` или `explicit-runner-model`) и `binding-source=...` для происхождения записи (`global|local`).
+
+Итоговый файл хранит список доступных `runners`, `models`, `bindings` и опциональный `defaults.model-binding`. Поля `runners` и `models` задаются массивами строк, например `["opencode", "codex"]` и `["openai/gpt-5.4", "gpt-5.3-codex"]`. Семантические привязки вроде `default`, `coder` и `review` указывают на конкретную пару `runner/model`.
 
 Правила разрешения профиля:
 
@@ -131,7 +140,7 @@ progress execution review-cycle \
 
 ### 3.5 `progress execution resources`
 
-Команда отдельно вызывает подсистему ресурсного снабжения. Она предназначена для проверки доступности ресурсов и имитации резервирования без обязательного запуска всего исполнительного контура. Команда поддерживает `--profile`, `--runner`, `--model` и `--model-binding`, а в выводе печатает `runner`, `model`, `model-binding`, `source` и `fallback-used`.
+Команда отдельно вызывает подсистему ресурсного снабжения. Она предназначена для проверки доступности ресурсов и имитации резервирования без обязательного запуска всего исполнительного контура. Команда поддерживает `--profile`, `--runner`, `--model` и `--model-binding`, а в выводе печатает `runner`, `model`, `model-binding`, `source`, `binding-source`, `global-config`, `local-config` и `fallback-used`.
 
 ### 3.6 `progress execution workplace`
 
