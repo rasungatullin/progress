@@ -1,6 +1,7 @@
 package launch
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,10 @@ const structuredOutputStart = "<progress-structured-output>"
 
 const structuredOutputEnd = "</progress-structured-output>"
 
+const runnerMetadataStart = "<progress-runner-metadata>"
+
+const runnerMetadataEnd = "</progress-runner-metadata>"
+
 const runnerOutputExcludePathspec = ":(exclude).progress/runner-output"
 
 const executionRunsExcludePathspec = ":(exclude).progress/execution-runs"
@@ -45,6 +50,10 @@ type Service struct {
 	runRunner        func(context.Context, model.Invocation) (string, error)
 	extractSessionID func(model.Invocation, string) string
 	runGitOutput     func(context.Context, string, ...string) (string, error)
+}
+
+type runnerMetadata struct {
+	RunnerSessionID string `json:"runner_session_id,omitempty"`
 }
 
 var errResumeUnsupported = errors.New("resume is unsupported")
@@ -102,10 +111,12 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
 	}
+	rawRunnerOutput := runnerOutput
 	runnerSessionID := ""
 	if s.extractSessionID != nil {
-		runnerSessionID = strings.TrimSpace(s.extractSessionID(in, runnerOutput))
+		runnerSessionID = strings.TrimSpace(s.extractSessionID(in, rawRunnerOutput))
 	}
+	runnerOutput, _ = stripTrailingRunnerMetadata(rawRunnerOutput)
 	rawOutputPath := persistRunnerOutput(workplace.Name, runnerOutput)
 
 	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState, structuredOutputErr := parseStructuredOutput(runnerOutput)
@@ -230,6 +241,42 @@ func extractTrailingStructuredBlock(text, startTag, endTag string, validatePaylo
 
 		searchEnd = start
 	}
+}
+
+func appendTrailingRunnerMetadata(output string, metadata runnerMetadata) string {
+	if strings.TrimSpace(metadata.RunnerSessionID) == "" {
+		return output
+	}
+
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return output
+	}
+
+	trimmedOutput := strings.TrimRightFunc(output, unicode.IsSpace)
+	if trimmedOutput == "" {
+		return runnerMetadataStart + "\n" + string(payload) + "\n" + runnerMetadataEnd
+	}
+
+	return trimmedOutput + "\n" + runnerMetadataStart + "\n" + string(payload) + "\n" + runnerMetadataEnd
+}
+
+func stripTrailingRunnerMetadata(output string) (string, *runnerMetadata) {
+	plainOutput, rawPayload, state, err := extractTrailingStructuredBlock(output, runnerMetadataStart, runnerMetadataEnd, func(rawPayload string) error {
+		var payload runnerMetadata
+		return decodeJSONStrict(rawPayload, &payload)
+	})
+	if err != nil || state != trailingStructuredBlockValid {
+		return output, nil
+	}
+
+	var payload runnerMetadata
+	if err := decodeJSONStrict(rawPayload, &payload); err != nil {
+		return output, nil
+	}
+
+	payload.RunnerSessionID = strings.TrimSpace(payload.RunnerSessionID)
+	return plainOutput, &payload
 }
 
 func parseStructuredOutputPayload(rawPayload string) (*model.StructuredOutput, error) {
@@ -909,9 +956,20 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 		return "", err
 	}
 
+	runner := strings.TrimSpace(in.Launch.Runner)
+	if runner == RunnerCodex {
+		return runCodexRunner(ctx, in.Launch, prompt)
+	}
+
 	cmd, err := buildRunnerCommand(ctx, in.Launch, prompt)
 	if err != nil {
 		return "", err
+	}
+	metadata := runnerMetadata{}
+	opencodeTitle := ""
+	if runner == RunnerOpenCode && in.Launch.Resume == nil {
+		opencodeTitle = openCodeExecutionTitle()
+		cmd.Args = insertOpenCodeTitle(cmd.Args, opencodeTitle)
 	}
 	cmd.Dir = in.Launch.Directory
 	cmd.Env = sanitizedEnv()
@@ -919,8 +977,139 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("launch runner failed: %w\n%s", err, strings.TrimSpace(string(output)))
 	}
+	if opencodeTitle != "" {
+		metadata.RunnerSessionID = lookupOpenCodeSessionID(ctx, opencodeTitle)
+	}
+	if strings.TrimSpace(metadata.RunnerSessionID) == "" && in.Launch.Resume != nil {
+		metadata.RunnerSessionID = strings.TrimSpace(in.Launch.Resume.RunnerSessionID)
+	}
 
-	return string(output), nil
+	return appendTrailingRunnerMetadata(string(output), metadata), nil
+}
+
+func runCodexRunner(ctx context.Context, spec model.LaunchSpec, prompt string) (string, error) {
+	cmd, err := buildRunnerCommand(ctx, spec, prompt)
+	if err != nil {
+		return "", err
+	}
+	cmd.Args = insertCodexJSONFlag(cmd.Args)
+	cmd.Dir = spec.Directory
+	cmd.Env = sanitizedEnv()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("launch runner failed: %w\n%s", err, strings.TrimSpace(string(output)))
+	}
+
+	plainOutput, sessionID := normalizeCodexJSONOutput(string(output))
+	if strings.TrimSpace(sessionID) == "" && spec.Resume != nil {
+		sessionID = strings.TrimSpace(spec.Resume.RunnerSessionID)
+	}
+
+	return appendTrailingRunnerMetadata(plainOutput, runnerMetadata{RunnerSessionID: sessionID}), nil
+}
+
+func insertCodexJSONFlag(args []string) []string {
+	if len(args) < 2 || args[1] != "exec" {
+		return args
+	}
+	withJSON := make([]string, 0, len(args)+1)
+	withJSON = append(withJSON, args[0], args[1], "--json")
+	withJSON = append(withJSON, args[2:]...)
+	return withJSON
+}
+
+func normalizeCodexJSONOutput(output string) (string, string) {
+	var sessionID string
+	plainLines := make([]string, 0)
+	messageParts := make([]string, 0)
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var event struct {
+			Type     string `json:"type"`
+			ThreadID string `json:"thread_id"`
+			Item     struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"item"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil || strings.TrimSpace(event.Type) == "" {
+			plainLines = append(plainLines, line)
+			continue
+		}
+
+		if event.Type == "thread.started" && strings.TrimSpace(event.ThreadID) != "" {
+			sessionID = strings.TrimSpace(event.ThreadID)
+			continue
+		}
+		if event.Type == "item.completed" && event.Item.Type == "agent_message" && strings.TrimSpace(event.Item.Text) != "" {
+			messageParts = append(messageParts, strings.TrimSpace(event.Item.Text))
+		}
+	}
+
+	lines := append(plainLines, messageParts...)
+	if len(lines) == 0 {
+		return strings.TrimSpace(output), sessionID
+	}
+
+	return strings.TrimSpace(strings.Join(lines, "\n")), sessionID
+}
+
+func insertOpenCodeTitle(args []string, title string) []string {
+	title = strings.TrimSpace(title)
+	if title == "" || len(args) < 2 || args[1] != "run" {
+		return args
+	}
+	if len(args) == 2 {
+		return append(args, "--title", title)
+	}
+	withTitle := make([]string, 0, len(args)+2)
+	withTitle = append(withTitle, args[:len(args)-1]...)
+	withTitle = append(withTitle, "--title", title, args[len(args)-1])
+	return withTitle
+}
+
+func openCodeExecutionTitle() string {
+	return fmt.Sprintf("progress-execution-%d", time.Now().UTC().UnixNano())
+}
+
+func lookupOpenCodeSessionID(ctx context.Context, title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+
+	for attempt := 0; attempt < 3; attempt++ {
+		cmd := exec.CommandContext(ctx, RunnerOpenCode, "session", "list")
+		cmd.Env = sanitizedEnv()
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			if sessionID := parseOpenCodeSessionList(string(output), title); sessionID != "" {
+				return sessionID
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return ""
+}
+
+func parseOpenCodeSessionList(output, title string) string {
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.HasPrefix(fields[0], "ses_") {
+			continue
+		}
+		if fields[1] == title {
+			return strings.TrimSpace(fields[0])
+		}
+	}
+
+	return ""
 }
 
 func persistRunnerOutput(workplaceDir, output string) string {
@@ -986,6 +1175,11 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 }
 
 func extractRunnerSessionID(in model.Invocation, output string) string {
+	_, metadata := stripTrailingRunnerMetadata(output)
+	if metadata != nil && strings.TrimSpace(metadata.RunnerSessionID) != "" {
+		return strings.TrimSpace(metadata.RunnerSessionID)
+	}
+
 	if in.Launch.Resume != nil {
 		return strings.TrimSpace(in.Launch.Resume.RunnerSessionID)
 	}

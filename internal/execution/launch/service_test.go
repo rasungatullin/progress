@@ -784,13 +784,9 @@ func TestBuildRunnerCommandResumeUnsupportedRunner(t *testing.T) {
 func TestLaunchPersistsRunnerSessionID(t *testing.T) {
 	t.Parallel()
 
-	service := &Service{
-		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{"runner output", structuredOutputStart, `{"summary":"Done."}`, structuredOutputEnd}, "\n"), nil
-		},
-		extractSessionID: func(model.Invocation, string) string {
-			return "session-42"
-		},
+	service := NewService()
+	service.runRunner = func(context.Context, model.Invocation) (string, error) {
+		return appendTrailingRunnerMetadata(strings.Join([]string{"runner output", structuredOutputStart, `{"summary":"Done."}`, structuredOutputEnd}, "\n"), runnerMetadata{RunnerSessionID: "session-42"}), nil
 	}
 
 	invocation := validInvocation(t, false)
@@ -801,6 +797,9 @@ func TestLaunchPersistsRunnerSessionID(t *testing.T) {
 	}
 	if result.RunnerSessionID != "session-42" {
 		t.Fatalf("unexpected runner session id: %#v", result)
+	}
+	if strings.Contains(result.Summary, runnerMetadataStart) {
+		t.Fatalf("summary must not expose runner metadata block: %q", result.Summary)
 	}
 
 	record := readLaunchRunRecord(t, result.RunRecordPath)
@@ -814,6 +813,13 @@ func TestLaunchPersistsRunnerSessionID(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].RunnerSessionID != "session-42" {
 		t.Fatalf("sqlite history must keep runner session id: %#v", runs)
+	}
+	rawOutput, readErr := os.ReadFile(result.RawOutputPath)
+	if readErr != nil {
+		t.Fatalf("read raw output: %v", readErr)
+	}
+	if strings.Contains(string(rawOutput), runnerMetadataStart) {
+		t.Fatalf("raw output must not expose runner metadata block: %q", string(rawOutput))
 	}
 }
 
