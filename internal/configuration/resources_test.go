@@ -124,3 +124,36 @@ func TestLoadExecutionResourceConfigFailsWhenNoLayerExists(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLoadExecutionResourceConfigUsesLocalLayerWhenGlobalHomeMissing(t *testing.T) {
+	originalResolveUserHome := resolveUserHome
+	resolveUserHome = func() (string, error) {
+		return "", errors.New("home not available")
+	}
+	t.Cleanup(func() {
+		resolveUserHome = originalResolveUserHome
+	})
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/execution/resources.json" {
+			return []byte(`{
+				"defaults": {"model-binding": "default"},
+				"runners": ["opencode"],
+				"models": ["openai/gpt-5.4"],
+				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	config, err := LoadExecutionResourceConfigWithHome("/repo", "", readFile)
+	if err != nil {
+		t.Fatalf("load resources config: %v", err)
+	}
+	if config.Config.Defaults.ModelBinding != "default" {
+		t.Fatalf("unexpected default binding: %q", config.Config.Defaults.ModelBinding)
+	}
+	if config.BindingSources["default"] != ConfigFileSourceLocal {
+		t.Fatalf("expected binding source local, got: %q", config.BindingSources["default"])
+	}
+}

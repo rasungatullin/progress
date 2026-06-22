@@ -10,6 +10,8 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
+var resolveUserHome = os.UserHomeDir
+
 const (
 	configDefaultHome      = ".config/progress"
 	configHomeEnvVar       = "PROGRESS_CONFIG_HOME"
@@ -47,20 +49,24 @@ func LoadExecutionResourceConfigWithHome(repoRoot, configHome string, readFile R
 		readFile = os.ReadFile
 	}
 
-	home, err := resolveConfigHome(configHome)
-	if err != nil {
-		return ExecutionResourceConfig{}, err
-	}
+	home, globalHomeErr := resolveConfigHome(configHome)
 
-	globalPath := filepath.Join(home, executionConfigPath)
+	globalPath := ""
+	useGlobalLayer := globalHomeErr == nil
 	localPath := filepath.Join(repoRoot, executionLocalFilePath)
+
+	if useGlobalLayer {
+		globalPath = filepath.Join(home, executionConfigPath)
+	}
 
 	var layers []ExecutionResourceLayer
 
-	if config, err := readLayer(globalPath, ConfigFileSourceGlobal, readFile); err == nil {
-		layers = append(layers, config)
-	} else if !isNotExistErr(err) {
-		return ExecutionResourceConfig{}, err
+	if useGlobalLayer {
+		if config, err := readLayer(globalPath, ConfigFileSourceGlobal, readFile); err == nil {
+			layers = append(layers, config)
+		} else if !isNotExistErr(err) {
+			return ExecutionResourceConfig{}, err
+		}
 	}
 
 	if config, err := readLayer(localPath, ConfigFileSourceLocal, readFile); err == nil {
@@ -70,7 +76,10 @@ func LoadExecutionResourceConfigWithHome(repoRoot, configHome string, readFile R
 	}
 
 	if len(layers) == 0 {
-		return ExecutionResourceConfig{}, fmt.Errorf("execution resource config not found: global=%s local=%s", globalPath, localPath)
+		if useGlobalLayer {
+			return ExecutionResourceConfig{}, fmt.Errorf("execution resource config not found: global=%s local=%s", globalPath, localPath)
+		}
+		return ExecutionResourceConfig{}, fmt.Errorf("execution resource config not found: global layer unavailable (%v) local=%s", globalHomeErr, localPath)
 	}
 
 	merged := mergeExecutionResourceLayers(layers)
@@ -153,7 +162,7 @@ func resolveConfigHome(configHome string) (string, error) {
 		return envHome, nil
 	}
 
-	userHome, err := os.UserHomeDir()
+	userHome, err := resolveUserHome()
 	if err != nil {
 		return "", fmt.Errorf("resolve current user home: %w", err)
 	}
