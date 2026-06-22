@@ -85,6 +85,7 @@ progress synthesize --config ./configs/dev.yaml
 - [docs/MOTIVATION.md](docs/MOTIVATION.md) — мотивация комплекса, причины существования и ключевые идеи;
 - [docs/OPERATING_MODEL.md](docs/OPERATING_MODEL.md) — модель работы комплекса на уровне прикладного цикла разработки;
 - [docs/DEVELOPMENT_MODEL.md](docs/DEVELOPMENT_MODEL.md) — модель развития комплекса, вложенных рабочих циклов, профилей и исполнительных модулей;
+- [docs/UI_CONCEPT.md](docs/UI_CONCEPT.md) — первичный концепт интерфейса наблюдения и навигационного модуля;
 - [STYLE.md](STYLE.md) — точка входа в стилистический регламент;
 - [docs/styleguide/](docs/styleguide/) — канонические документы по языку проекта, словарю терминов и таблицам соответствия между кодом и документацией;
 - [AGENTS.md](AGENTS.md) — обязательные инструкции для агентских контуров;
