@@ -198,6 +198,28 @@ func TestWebHandlersServeExecutionRuns(t *testing.T) {
 	}
 }
 
+func TestWebHandlerServesSidebarNavigationShell(t *testing.T) {
+	root := t.TempDir()
+	handler, err := newWebHandler(root)
+	if err != nil {
+		t.Fatalf("new web handler: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("index status: %d", w.Code)
+	}
+
+	body := w.Body.String()
+	for _, snippet := range []string{"Прогресс", "progress", "История", "Структурированный вывод"} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("index page is missing %q", snippet)
+		}
+	}
+}
+
 func TestWebHandlersServeWorkspaceRuns(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, ".progress", "workplaces", "repo", "task-a")
