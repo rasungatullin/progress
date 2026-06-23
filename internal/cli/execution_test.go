@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -416,6 +417,7 @@ func TestExecutionRunsCommandPrintsJSONHistory(t *testing.T) {
 		ProfileName:     "default",
 		Runner:          "opencode",
 		Model:           "openai/gpt-5.4",
+		RunnerSessionID: "session-54",
 		LaunchDirectory: root,
 		Error:           "boom",
 	}); err != nil {
@@ -432,10 +434,67 @@ func TestExecutionRunsCommandPrintsJSONHistory(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute runs command: %v", err)
 	}
-
 	output := stdout.String()
-	if !strings.Contains(output, `"status":"failed"`) || !strings.Contains(output, `"name":"task-54"`) || !strings.Contains(output, `"error":"boom"`) {
+
+	var runs []history.ListedRun
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &runs); err != nil {
+		t.Fatalf("decode runs json: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	if runs[0].Status != "failed" || runs[0].Name != "task-54" || runs[0].Error != "boom" || runs[0].RunnerSessionID != "session-54" {
 		t.Fatalf("unexpected runs json: %q", output)
+	}
+}
+
+func TestExecutionRunsCommandOmitsRunnerSessionIDWhenEmpty(t *testing.T) {
+	root := t.TempDir()
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir temp root: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousDir)
+	})
+
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:       "2026-06-10T10:00:00Z",
+		Status:          "failed",
+		Summary:         "boom",
+		Name:            "task-55",
+		ProfileName:     "default",
+		Runner:          "opencode",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: root,
+		Error:           "boom",
+	}); err != nil {
+		t.Fatalf("store history: %v", err)
+	}
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "runs", "--json", "--status", "failed", "--name", "task-55"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute runs command: %v", err)
+	}
+
+	var raw []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout.String())), &raw); err != nil {
+		t.Fatalf("decode runs json: %v", err)
+	}
+	if len(raw) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(raw))
+	}
+	if _, ok := raw[0]["runner_session_id"]; ok {
+		t.Fatalf("runner_session_id must be omitted when empty: %#v", raw[0])
 	}
 }
 

@@ -823,6 +823,118 @@ func TestLaunchPersistsRunnerSessionID(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexJSONOutputExtractsThreadStartedSessionID(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`{"type":"thread.started","thread_id":"thread-42"}`,
+		`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
+		`{"type":"assistant_message","item":{"type":"agent_message","text":"Ignored."}}`,
+		`summary line`,
+	}, "\n")
+
+	plain, sessionID := normalizeCodexJSONOutput(output)
+	if strings.TrimSpace(sessionID) != "thread-42" {
+		t.Fatalf("unexpected session id: %q", sessionID)
+	}
+	if strings.TrimSpace(plain) != "summary line\nDone." {
+		t.Fatalf("unexpected plain output: %q", plain)
+	}
+}
+
+func TestNormalizeCodexJSONOutputReturnsPlainForMissingThreadSession(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
+		`summary line`,
+	}, "\n")
+
+	plain, sessionID := normalizeCodexJSONOutput(output)
+	if strings.TrimSpace(sessionID) != "" {
+		t.Fatalf("unexpected session id: %q", sessionID)
+	}
+	if strings.TrimSpace(plain) != "summary line\nDone." {
+		t.Fatalf("unexpected plain output: %q", plain)
+	}
+}
+
+func TestLaunchPersistsCodexRunnerSessionIDFromJSONOutput(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				`{"type":"thread.started","thread_id":"thread-codex-42"}`,
+				`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
+			}, "\n"), nil
+		},
+		extractSessionID: extractRunnerSessionID,
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "thread-codex-42" {
+		t.Fatalf("unexpected runner session id: %#v", result)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.RunnerSessionID != "thread-codex-42" {
+		t.Fatalf("run record must keep runner session id: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "thread-codex-42" {
+		t.Fatalf("sqlite history must keep runner session id: %#v", runs)
+	}
+}
+
+func TestLaunchOmitsCodexRunnerSessionIDWhenNotProvidedByAdapter(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
+				`{"type":"assistant_message","item":{"type":"agent_message","text":"Ignored."}}`,
+			}, "\n"), nil
+		},
+		extractSessionID: extractRunnerSessionID,
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "" {
+		t.Fatalf("missing adapter session id must stay empty: %#v", result)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.RunnerSessionID != "" {
+		t.Fatalf("run record must not store fake runner session id: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "" {
+		t.Fatalf("sqlite history must not keep fake runner session id: %#v", runs)
+	}
+}
+
 func TestLaunchIgnoresRunnerSessionIDFromArbitraryOutput(t *testing.T) {
 	t.Parallel()
 

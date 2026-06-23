@@ -242,3 +242,87 @@ func TestStoreCreatesExecutionRunIndexes(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreMigratesLegacyExecutionRunsSchemaWithNullableRunnerSessionID(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(DatabasePath(root)), 0o755); err != nil {
+		t.Fatalf("mkdir execution-runs dir: %v", err)
+	}
+
+	db, err := sql.Open("sqlite3", DatabasePath(root))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	legacySchema := []string{
+		`CREATE TABLE execution_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, model TEXT NOT NULL, launch_directory TEXT NOT NULL, raw_structured_input TEXT NOT NULL)`,
+		`CREATE TABLE execution_results (id INTEGER PRIMARY KEY AUTOINCREMENT, raw_output_path TEXT NOT NULL, raw_structured_output TEXT NOT NULL)`,
+		`CREATE TABLE execution_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL, name TEXT, profile_name TEXT NOT NULL, runner TEXT NOT NULL, parent_run_id INTEGER, resume_message TEXT, resume_message_source TEXT, request_id INTEGER NOT NULL, result_id INTEGER, run_record_path TEXT, error TEXT)`,
+		`INSERT INTO execution_requests (model, launch_directory, raw_structured_input) VALUES ('openai/gpt-5.4', '/legacy', '')`,
+	}
+	for _, statement := range legacySchema {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatalf("prepare legacy schema: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close legacy sqlite: %v", err)
+	}
+
+	if err := Store(context.Background(), root, Run{
+		CreatedAt:       "2026-06-10T10:00:00Z",
+		Status:          "completed",
+		Summary:         "done",
+		Name:            "legacy-session",
+		ProfileName:     "default",
+		Runner:          "codex",
+		RunnerSessionID: "session-legacy",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: root,
+	}); err != nil {
+		t.Fatalf("store run on legacy schema: %v", err)
+	}
+
+	db, err = sql.Open("sqlite3", DatabasePath(root))
+	if err != nil {
+		t.Fatalf("open migrated sqlite: %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`PRAGMA table_info(execution_runs)`)
+	if err != nil {
+		t.Fatalf("query table info: %v", err)
+	}
+	defer rows.Close()
+
+	hasSessionColumn := false
+	for rows.Next() {
+		var cid int
+		var name string
+		var ctype string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &pk); err != nil {
+			t.Fatalf("scan table info: %v", err)
+		}
+		if name == "runner_session_id" {
+			hasSessionColumn = true
+			if notNull != 0 {
+				t.Fatalf("runner_session_id should be nullable in execution_runs table")
+			}
+		}
+	}
+	if !hasSessionColumn {
+		t.Fatalf("legacy migration must add runner_session_id column")
+	}
+
+	runs, err := List(context.Background(), root, ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list migrated db: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "session-legacy" {
+		t.Fatalf("expected migrated run with runner session id, got %#v", runs)
+	}
+}
