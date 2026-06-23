@@ -243,8 +243,9 @@ profile.name
 allocation.runner
 allocation.model
 created_at
-run_record_path
 ```
+
+Путь к самой записи запуска не хранится внутри JSON-записи `runRecord`. Его следует брать из контекста открытия страницы: из `ListedRun.run_record_path`, полученного через SQLite-историю и API `/api/runs/{id}`, либо из `LaunchResult.RunRecordPath` в момент завершения запуска. Если страница открыта прямым чтением JSON-файла без такого контекста, действие открытия `run_record_path` должно быть недоступно или должно использовать путь текущего открытого файла как внешний параметр, а не поле записи.
 
 Если запись открыта из SQLite-истории, дополнительные сведения можно брать из `ListedRun`: `id`, `created_at`, `status`, `summary`, `name`, `profile_name`, `runner`, `model`, `launch_directory`, `raw_structured_input`, `raw_output_path`, `raw_structured_output`, `run_record_path`, `error`.
 
@@ -375,7 +376,7 @@ run_record_path
 
 Минимально следует показывать:
 
-- `run_record_path`;
+- `run_record_path` из `ListedRun` или внешнего контекста открытия страницы;
 - `result.raw_output_path`;
 - `raw_structured_output`;
 - `structured_output_error`;
