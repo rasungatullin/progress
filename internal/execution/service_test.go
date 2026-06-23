@@ -2,13 +2,16 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution/history"
+	launchservice "github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
@@ -197,6 +200,290 @@ func TestServiceStartEnrichesRunningHistoryRowBeforeLaunch(t *testing.T) {
 	}
 	if result.Status != "completed" {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestServiceResumeBuildsCompactStructuredInputAndHistoryLink(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	workplaceDir := filepath.Join(root, "workplace")
+	if err := os.MkdirAll(workplaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workplace: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	parentInput := StructuredInput{Task: "Original task", ProjectContext: []StructuredContext{{Title: "Spec", Body: "Long context"}}}
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:          "2026-06-22T10:00:00Z",
+		Status:             "completed",
+		Summary:            "Parent summary",
+		Name:               "task-resume",
+		ProfileName:        "coder",
+		Runner:             "codex",
+		RunnerSessionID:    "session-42",
+		Model:              "openai/gpt-5.4",
+		LaunchDirectory:    filepath.Join(root, "workplace"),
+		RawStructuredInput: history.StructuredInputJSON(&parentInput),
+		RunRecordPath:      filepath.Join(root, ".progress", "execution-runs", "parent.json"),
+	}); err != nil {
+		t.Fatalf("store parent run: %v", err)
+	}
+
+	launcher := &stubLauncher{}
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual"}},
+		launcher: launcher,
+	}
+
+	result, err := service.Resume(context.Background(), ResumeRequest{Run: "1", Message: "Учти новый лимит", MessageSource: "message"})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+
+	input := launcher.invocation.Launch.StructuredInput
+	if input == nil {
+		t.Fatal("resume launch must receive structured input")
+	}
+	if input.Task != "" || len(input.ProjectContext) != 0 {
+		t.Fatalf("resume input must stay compact: %#v", input)
+	}
+	if len(input.OperationalContext) != 1 || input.OperationalContext[0].Body != "Учти новый лимит" {
+		t.Fatalf("unexpected operational context: %#v", input.OperationalContext)
+	}
+	if len(input.PreviousRunResults) != 1 || !strings.Contains(input.PreviousRunResults[0].Summary, "parent run #1 completed") {
+		t.Fatalf("unexpected previous run results: %#v", input.PreviousRunResults)
+	}
+	if launcher.invocation.Launch.Resume == nil || launcher.invocation.Launch.Resume.ParentRunID != 1 || launcher.invocation.Launch.Resume.RunnerSessionID != "session-42" {
+		t.Fatalf("unexpected resume metadata: %#v", launcher.invocation.Launch.Resume)
+	}
+
+	var resumeExtension struct {
+		ParentRunID         int64  `json:"parent_run_id"`
+		ParentRunner        string `json:"parent_runner"`
+		ParentRunnerSession string `json:"parent_runner_session_id"`
+		MessageSource       string `json:"message_source"`
+	}
+	if err := json.Unmarshal(input.Extensions["resume"], &resumeExtension); err != nil {
+		t.Fatalf("decode resume extension: %v", err)
+	}
+	if resumeExtension.ParentRunID != 1 || resumeExtension.ParentRunner != "codex" || resumeExtension.ParentRunnerSession != "session-42" || resumeExtension.MessageSource != "message" {
+		t.Fatalf("unexpected resume extension: %#v", resumeExtension)
+	}
+
+	runs, err := history.List(context.Background(), root, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected parent and child runs, got %d", len(runs))
+	}
+	child := runs[0]
+	if child.ParentRunID != 1 || child.ResumeMessage != "Учти новый лимит" || child.ResumeMessageSource != "message" {
+		t.Fatalf("unexpected child history row: %#v", child)
+	}
+}
+
+func TestServiceResumeLatestUsesNewestMatchingRun(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	workplaceDir := filepath.Join(root, "workplace")
+	if err := os.MkdirAll(workplaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workplace: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	for _, run := range []history.Run{
+		{CreatedAt: "2026-06-22T10:00:00Z", Status: "completed", Summary: "first", Name: "task-resume", ProfileName: "coder", Runner: "codex", RunnerSessionID: "session-1", Model: "openai/gpt-5.4", LaunchDirectory: filepath.Join(root, "workplace")},
+		{CreatedAt: "2026-06-22T10:01:00Z", Status: "completed", Summary: "second", Name: "task-resume", ProfileName: "coder", Runner: "codex", RunnerSessionID: "session-2", Model: "openai/gpt-5.4", LaunchDirectory: filepath.Join(root, "workplace")},
+	} {
+		if err := history.Store(context.Background(), root, run); err != nil {
+			t.Fatalf("store run: %v", err)
+		}
+	}
+
+	service := &Service{logger: log.Default(), profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual"}}}
+	result, err := service.Resume(context.Background(), ResumeRequest{Run: "latest", Name: "task-resume", Message: "Continue", MessageSource: "message", DryRun: true})
+	if err != nil {
+		t.Fatalf("resume dry-run: %v", err)
+	}
+	if result.Status != "dry-run" {
+		t.Fatalf("unexpected dry-run result: %#v", result)
+	}
+	if !strings.Contains(result.Summary, "parent-run=2") || !strings.Contains(result.Summary, "parent-session-id=session-2") {
+		t.Fatalf("dry-run must use newest matching parent: %q", result.Summary)
+	}
+}
+
+func TestServiceLaunchReturnsResumeUnsupportedForUnsupportedRunner(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default(), launcher: launchservice.NewService()}
+	workplace := t.TempDir()
+	result, err := service.Launch(context.Background(), Invocation{
+		Launch: LaunchSpec{
+			Directory: workplace,
+			Runner:    "custom-runner",
+			Model:     "openai/gpt-5.4",
+			Prompt:    "Continue task",
+			Resume:    &model.ResumeSpec{ParentRunID: 42, RunnerSessionID: "session-42", MessageSource: "message"},
+		},
+	}, Profile{Name: "coder", Mode: "manual"}, Allocation{Runner: "custom-runner", Model: "openai/gpt-5.4"}, Workplace{Name: workplace, Ready: true})
+	if err == nil {
+		t.Fatal("expected resume unsupported error")
+	}
+	if result.Status != "resume-unsupported" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if !strings.Contains(err.Error(), "resume is unsupported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestServiceResumeReturnsResumeUnsupportedForUnsupportedRunner(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	workplaceDir := filepath.Join(root, "workplace")
+	if err := os.MkdirAll(workplaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workplace: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:       "2026-06-22T10:00:00Z",
+		Status:          "completed",
+		Summary:         "Parent summary",
+		Name:            "task-resume",
+		ProfileName:     "coder",
+		Runner:          "custom-runner",
+		RunnerSessionID: "session-42",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: workplaceDir,
+	}); err != nil {
+		t.Fatalf("store parent run: %v", err)
+	}
+
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual"}},
+		launcher: launchservice.NewService(),
+	}
+
+	result, err := service.Resume(context.Background(), ResumeRequest{Run: "1", Message: "Continue", MessageSource: "message"})
+	if err == nil {
+		t.Fatal("expected resume unsupported error")
+	}
+	if result.Status != "resume-unsupported" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if !strings.Contains(err.Error(), "resume is unsupported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	runs, listErr := history.List(context.Background(), root, history.ListFilter{Limit: 10})
+	if listErr != nil {
+		t.Fatalf("list history: %v", listErr)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected parent and child runs, got %d", len(runs))
+	}
+	if runs[0].Status != "resume-unsupported" {
+		t.Fatalf("unexpected child history row: %#v", runs[0])
+	}
+}
+
+func TestServiceResumePreservesRawStructuredOutputInHistory(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:       "2026-06-22T10:00:00Z",
+		Status:          "completed",
+		Summary:         "Parent summary",
+		Name:            "task-resume",
+		ProfileName:     "coder",
+		Runner:          "codex",
+		RunnerSessionID: "session-42",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: filepath.Join(root, "workplace"),
+	}); err != nil {
+		t.Fatalf("store parent run: %v", err)
+	}
+
+	expectedErr := errors.New("structured output is required: invalid trailing block")
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual"}},
+		launcher: &stubLauncher{result: model.LaunchResult{
+			Status:              "failed",
+			Summary:             "runner returned invalid structured output",
+			RawOutputPath:       filepath.Join(root, "runner.log"),
+			RawStructuredOutput: `{"remarks":[{}]}`,
+			RunRecordPath:       filepath.Join(root, ".progress", "execution-runs", "child.json"),
+		}, err: expectedErr},
+	}
+
+	result, err := service.Resume(context.Background(), ResumeRequest{Run: "1", Message: "Continue", MessageSource: "message"})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected launcher error, got %v", err)
+	}
+	if result.RawStructuredOutput != `{"remarks":[{}]}` {
+		t.Fatalf("unexpected result raw structured output: %#v", result)
+	}
+
+	runs, listErr := history.List(context.Background(), root, history.ListFilter{Limit: 10})
+	if listErr != nil {
+		t.Fatalf("list history: %v", listErr)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected parent and child runs, got %d", len(runs))
+	}
+	if runs[0].RawStructuredOutput != `{"remarks":[{}]}` {
+		t.Fatalf("resume history must preserve raw structured payload: %#v", runs[0])
 	}
 }
 

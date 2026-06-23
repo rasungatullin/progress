@@ -51,6 +51,17 @@ type executionRunsFlags struct {
 	status     string
 }
 
+type resumeFlags struct {
+	run                      string
+	message                  string
+	messageFile              string
+	name                     string
+	profile                  string
+	structuredOutput         bool
+	structuredOutputRequired bool
+	dryRun                   bool
+}
+
 type executionCommandService interface {
 	Start(context.Context, execution.Invocation) (execution.LaunchResult, error)
 	Dispatch(context.Context, execution.Invocation) []string
@@ -58,6 +69,7 @@ type executionCommandService interface {
 	AllocateResources(context.Context, execution.Invocation, execution.Profile) (execution.Allocation, error)
 	PrepareWorkplace(context.Context, execution.Invocation, execution.Profile, execution.Allocation) (execution.Workplace, error)
 	LaunchDirect(context.Context, execution.Invocation) (execution.LaunchResult, error)
+	Resume(context.Context, execution.ResumeRequest) (execution.LaunchResult, error)
 }
 
 type executionServiceFactoryFunc func(*cobra.Command) executionCommandService
@@ -86,6 +98,7 @@ func newExecutionCommand() *cobra.Command {
 	cmd.AddCommand(
 		newExecutionStartCommand(),
 		newExecutionReviewCycleCommand(),
+		newExecutionResumeCommand(),
 		newExecutionDispatcherCommand(),
 		newExecutionProfileCommand(),
 		newExecutionResourcesCommand(),
@@ -188,6 +201,34 @@ func newExecutionReviewCycleCommand() *cobra.Command {
 	}
 
 	bindReviewCycleFlags(cmd, flags)
+	return cmd
+}
+
+func newExecutionResumeCommand() *cobra.Command {
+	flags := &resumeFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "resume",
+		Short: "Возобновление сеанса исполнительного модуля",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			service := newExecutionService(cmd)
+			request, err := resumeRequestFromFlags(flags)
+			if err != nil {
+				return err
+			}
+
+			result, err := service.Resume(context.Background(), request)
+			if err != nil {
+				printLaunchResultOnError(cmd, result)
+				return err
+			}
+
+			printLaunchResult(cmd, result)
+			return nil
+		},
+	}
+
+	bindResumeFlags(cmd, flags)
 	return cmd
 }
 
@@ -384,6 +425,18 @@ func bindReviewCycleFlags(cmd *cobra.Command, flags *launchFlags) {
 	_ = cmd.MarkFlagRequired("review-profile")
 }
 
+func bindResumeFlags(cmd *cobra.Command, flags *resumeFlags) {
+	cmd.Flags().StringVar(&flags.run, "run", "", "Исходный запуск: числовой id или latest")
+	cmd.Flags().StringVar(&flags.message, "message", "", "Дополнительное сообщение для возобновления")
+	cmd.Flags().StringVar(&flags.messageFile, "message-file", "", "Путь к файлу с дополнительным сообщением")
+	cmd.Flags().StringVar(&flags.name, "name", "", "Фильтр имени запуска для выбора latest")
+	cmd.Flags().StringVar(&flags.profile, "profile", "", "Опциональное переопределение исполнительного профиля")
+	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
+	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
+	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "Показать задание на возобновление без запуска исполнительного модуля")
+	_ = cmd.MarkFlagRequired("run")
+}
+
 func bindStructuredInputFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.inputFile, "input-file", "", "Путь к JSON-файлу structured input")
 	cmd.Flags().StringVar(&flags.task, "task", "", "Текстовая постановка structured input")
@@ -459,6 +512,37 @@ func invocationFromWorkplaceFlags(flags *launchFlags) execution.Invocation {
 		Workplace:  execution.WorkplaceSpec{Name: flags.name},
 		Launch:     execution.LaunchSpec{Directory: flags.directory},
 	}
+}
+
+func resumeRequestFromFlags(flags *resumeFlags) (execution.ResumeRequest, error) {
+	if strings.TrimSpace(flags.message) != "" && strings.TrimSpace(flags.messageFile) != "" {
+		return execution.ResumeRequest{}, fmt.Errorf("message and message-file are mutually exclusive")
+	}
+
+	message := strings.TrimSpace(flags.message)
+	messageSource := "message"
+	if strings.TrimSpace(flags.messageFile) != "" {
+		content, err := os.ReadFile(flags.messageFile)
+		if err != nil {
+			return execution.ResumeRequest{}, fmt.Errorf("read message file %s: %w", flags.messageFile, err)
+		}
+		message = strings.TrimSpace(string(content))
+		messageSource = "message-file"
+	}
+	if message == "" {
+		return execution.ResumeRequest{}, fmt.Errorf("resume message must be non-empty")
+	}
+
+	return execution.ResumeRequest{
+		Run:                      strings.TrimSpace(flags.run),
+		Name:                     strings.TrimSpace(flags.name),
+		Message:                  message,
+		MessageSource:            messageSource,
+		Profile:                  strings.TrimSpace(flags.profile),
+		StructuredOutput:         flags.structuredOutput,
+		StructuredOutputRequired: flags.structuredOutputRequired,
+		DryRun:                   flags.dryRun,
+	}, nil
 }
 
 func structuredInputFromFlags(flags *launchFlags) (*execution.StructuredInput, error) {

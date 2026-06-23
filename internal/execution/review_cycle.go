@@ -140,7 +140,7 @@ func updateReviewCycleAggregate(ctx context.Context, root string, handle history
 		LaunchDirectory:     fallbackLaunchDirectory(in, root),
 		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
 		RawOutputPath:       result.RawOutputPath,
-		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, ""),
+		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, result.RawStructuredOutput),
 		RunRecordPath:       result.RunRecordPath,
 		Error:               errorText,
 	})

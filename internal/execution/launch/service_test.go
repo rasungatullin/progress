@@ -751,6 +751,135 @@ func TestBuildRunnerCommandCodex(t *testing.T) {
 	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "ship it"})
 }
 
+func TestBuildRunnerCommandCodexResume(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory: "/tmp/work",
+		Runner:    RunnerCodex,
+		Model:     "openai/gpt-5.4",
+		Resume:    &model.ResumeSpec{ParentRunID: 42, RunnerSessionID: "session-42", MessageSource: "message"},
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "resume", "session-42", "ship it"})
+}
+
+func TestBuildRunnerCommandResumeUnsupportedRunner(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory: "/tmp/work",
+		Runner:    "custom-runner",
+		Model:     "openai/gpt-5.4",
+		Resume:    &model.ResumeSpec{ParentRunID: 42, RunnerSessionID: "session-42", MessageSource: "message"},
+	}, "ship it")
+	if !errors.Is(err, errResumeUnsupported) {
+		t.Fatalf("expected resume unsupported error, got %v", err)
+	}
+}
+
+func TestLaunchPersistsRunnerSessionID(t *testing.T) {
+	t.Parallel()
+
+	service := NewService()
+	service.runRunner = func(context.Context, model.Invocation) (string, error) {
+		return appendTrailingRunnerMetadata(strings.Join([]string{"runner output", structuredOutputStart, `{"summary":"Done."}`, structuredOutputEnd}, "\n"), runnerMetadata{RunnerSessionID: "session-42"}), nil
+	}
+
+	invocation := validInvocation(t, false)
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "session-42" {
+		t.Fatalf("unexpected runner session id: %#v", result)
+	}
+	if strings.Contains(result.Summary, runnerMetadataStart) {
+		t.Fatalf("summary must not expose runner metadata block: %q", result.Summary)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.RunnerSessionID != "session-42" {
+		t.Fatalf("run record must keep runner session id: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "session-42" {
+		t.Fatalf("sqlite history must keep runner session id: %#v", runs)
+	}
+	rawOutput, readErr := os.ReadFile(result.RawOutputPath)
+	if readErr != nil {
+		t.Fatalf("read raw output: %v", readErr)
+	}
+	if strings.Contains(string(rawOutput), runnerMetadataStart) {
+		t.Fatalf("raw output must not expose runner metadata block: %q", string(rawOutput))
+	}
+}
+
+func TestLaunchIgnoresRunnerSessionIDFromArbitraryOutput(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Task completed successfully.",
+				`session_id: fake-session-42`,
+				structuredOutputStart,
+				`{"summary":"Done."}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		extractSessionID: extractRunnerSessionID,
+	}
+
+	invocation := validInvocation(t, false)
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "" {
+		t.Fatalf("arbitrary output must not set runner session id: %#v", result)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.RunnerSessionID != "" {
+		t.Fatalf("run record must not keep fake runner session id: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "" {
+		t.Fatalf("sqlite history must not keep fake runner session id: %#v", runs)
+	}
+}
+
+func TestLaunchReturnsResumeUnsupportedState(t *testing.T) {
+	t.Parallel()
+
+	service := NewService()
+	invocation := validInvocation(t, false)
+	invocation.Launch.Resume = &model.ResumeSpec{ParentRunID: 42, MessageSource: "message"}
+	workplace := validWorkplace(t)
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if !errors.Is(err, errResumeUnsupported) {
+		t.Fatalf("expected resume unsupported error, got %v", err)
+	}
+	if result.Status != "resume-unsupported" {
+		t.Fatalf("unexpected result state: %#v", result)
+	}
+}
+
 func TestLaunchStructuredOutputInvalidPreservesFreeText(t *testing.T) {
 	t.Parallel()
 
@@ -1393,6 +1522,7 @@ type persistedLaunchRunRecord struct {
 	Allocation          model.Allocation        `json:"allocation"`
 	Workplace           model.Workplace         `json:"workplace"`
 	StructuredInput     *model.StructuredInput  `json:"structured_input,omitempty"`
+	RunnerSessionID     string                  `json:"runner_session_id,omitempty"`
 	RawStructuredOutput string                  `json:"raw_structured_output"`
 	StructuredOutput    *model.StructuredOutput `json:"structured_output,omitempty"`
 	StructuredOutputErr string                  `json:"structured_output_error,omitempty"`

@@ -2,8 +2,11 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +39,17 @@ type StructuredAction = model.StructuredAction
 type StructuredChange = model.StructuredChange
 type StructuredCommand = model.StructuredCommand
 type StructuredConclusion = model.StructuredConclusion
+
+type ResumeRequest struct {
+	Run                      string
+	Name                     string
+	Message                  string
+	MessageSource            string
+	Profile                  string
+	StructuredOutput         bool
+	StructuredOutputRequired bool
+	DryRun                   bool
+}
 
 type ProfileResolver interface {
 	Resolve(context.Context, Invocation) (Profile, error)
@@ -124,6 +138,25 @@ func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
 	return s.dispatcher.Plan(ctx, in)
 }
 
+func (s *Service) Resume(ctx context.Context, req ResumeRequest) (LaunchResult, error) {
+	invocation, parent, profile, allocation, workplace, historyRoot, err := s.prepareResume(ctx, req)
+	if err != nil {
+		return LaunchResult{}, err
+	}
+
+	if req.DryRun {
+		return LaunchResult{Status: "dry-run", Summary: formatResumeDryRunSummary(invocation, parent, profile)}, nil
+	}
+
+	historyHandle := s.beginResumeHistory(ctx, historyRoot, invocation, parent)
+	s.updateResumeHistory(ctx, historyRoot, historyHandle, invocation, profile, allocation, workplace, LaunchResult{Status: "running"}, nil)
+
+	launchCtx := launch.WithHistoryHandle(ctx, historyHandle)
+	result, err := s.Launch(launchCtx, invocation, profile, allocation, workplace)
+	s.updateResumeHistory(ctx, historyRoot, historyHandle, invocation, profile, allocation, workplace, result, err)
+	return result, err
+}
+
 func (s *Service) LaunchDirect(ctx context.Context, in Invocation) (LaunchResult, error) {
 	profile := Profile{Name: "direct-launch", Mode: "manual", CommitPush: false}
 	allocation := Allocation{
@@ -137,6 +170,57 @@ func (s *Service) LaunchDirect(ctx context.Context, in Invocation) (LaunchResult
 	workplace := Workplace{Name: in.Launch.Directory, Ready: true}
 
 	return s.Launch(ctx, in, profile, allocation, workplace)
+}
+
+func (s *Service) prepareResume(ctx context.Context, req ResumeRequest) (Invocation, history.ListedRun, Profile, Allocation, Workplace, string, error) {
+	parent, historyRoot, err := resolveResumeParentRun(ctx, req)
+	if err != nil {
+		return Invocation{}, history.ListedRun{}, Profile{}, Allocation{}, Workplace{}, "", err
+	}
+
+	profileName := strings.TrimSpace(req.Profile)
+	if profileName == "" || profileName == "unknown" {
+		profileName = strings.TrimSpace(parent.ProfileName)
+	}
+	if profileName == "" || profileName == "unknown" {
+		profileName = "default"
+	}
+
+	profileInput := Invocation{
+		Profile: profileName,
+		Launch: LaunchSpec{
+			StructuredOutput:         req.StructuredOutput,
+			StructuredOutputRequired: req.StructuredOutputRequired,
+		},
+	}
+	profile, err := s.ResolveProfile(ctx, profileInput)
+	if err != nil {
+		return Invocation{}, history.ListedRun{}, Profile{}, Allocation{}, Workplace{}, "", err
+	}
+
+	structuredInput, err := buildResumeStructuredInput(parent, req)
+	if err != nil {
+		return Invocation{}, history.ListedRun{}, Profile{}, Allocation{}, Workplace{}, "", err
+	}
+
+	invocation := Invocation{
+		Profile:    profileName,
+		Repository: RepositorySpec{},
+		Workplace:  WorkplaceSpec{Name: parent.Name},
+		Launch: LaunchSpec{
+			Directory:                parent.LaunchDirectory,
+			Runner:                   parent.Runner,
+			Model:                    parent.Model,
+			Resume:                   &model.ResumeSpec{ParentRunID: parent.ID, RunnerSessionID: parent.RunnerSessionID, MessageSource: req.MessageSource},
+			StructuredInput:          structuredInput,
+			StructuredOutput:         req.StructuredOutput,
+			StructuredOutputRequired: req.StructuredOutputRequired,
+		},
+	}
+
+	allocation := Allocation{Resource: "resume-parent-run", Reserved: true, Runner: parent.Runner, Model: parent.Model, Source: "resume-parent-run"}
+	workplace := Workplace{Name: parent.LaunchDirectory, Ready: true}
+	return invocation, parent, profile, allocation, workplace, historyRoot, nil
 }
 
 func (s *Service) ResolveProfile(ctx context.Context, in Invocation) (Profile, error) {
@@ -191,6 +275,170 @@ func failedStartResult(err error) LaunchResult {
 	return LaunchResult{Status: "failed", Summary: strings.TrimSpace(err.Error())}
 }
 
+func buildResumeStructuredInput(parent history.ListedRun, req ResumeRequest) (*StructuredInput, error) {
+	message := strings.TrimSpace(req.Message)
+	if message == "" {
+		return nil, fmt.Errorf("resume message must be non-empty")
+	}
+
+	resumeExtension, err := json.Marshal(struct {
+		ParentRunID        int64  `json:"parent_run_id,omitempty"`
+		ParentRunner       string `json:"parent_runner,omitempty"`
+		ParentRunnerSessID string `json:"parent_runner_session_id,omitempty"`
+		MessageSource      string `json:"message_source,omitempty"`
+	}{
+		ParentRunID:        parent.ID,
+		ParentRunner:       parent.Runner,
+		ParentRunnerSessID: parent.RunnerSessionID,
+		MessageSource:      strings.TrimSpace(req.MessageSource),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal resume extension: %w", err)
+	}
+
+	bodyParts := make([]string, 0, 2)
+	if summary := singleLineSummary(parent.Summary); summary != "" {
+		bodyParts = append(bodyParts, "summary="+summary)
+	}
+	if path := strings.TrimSpace(parent.RunRecordPath); path != "" {
+		bodyParts = append(bodyParts, "run_record_path="+path)
+	}
+
+	input := StructuredInput{
+		OperationalContext: []StructuredContext{{
+			Title: "Дополнительное сообщение для возобновления",
+			Body:  message,
+		}},
+		PreviousRunResults: []StructuredResult{{
+			Summary: fmt.Sprintf("parent run #%d %s", parent.ID, parent.Status),
+			Body:    strings.Join(bodyParts, "\n"),
+		}},
+		Extensions: StructuredExtensions{"resume": resumeExtension},
+	}
+
+	normalized, err := launch.NormalizeStructuredInput(&input)
+	if err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+func resolveResumeParentRun(ctx context.Context, req ResumeRequest) (history.ListedRun, string, error) {
+	runRef := strings.TrimSpace(req.Run)
+	if runRef == "" {
+		return history.ListedRun{}, "", fmt.Errorf("resume run reference must be provided")
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return history.ListedRun{}, "", err
+	}
+
+	if runRef == "latest" {
+		runs, err := history.List(ctx, cwd, history.ListFilter{Limit: 1, Name: strings.TrimSpace(req.Name)})
+		if err != nil {
+			return history.ListedRun{}, "", err
+		}
+		if len(runs) == 0 {
+			return history.ListedRun{}, "", fmt.Errorf("resume parent run not found")
+		}
+		return runs[0], cwd, nil
+	}
+
+	runID, err := strconv.ParseInt(runRef, 10, 64)
+	if err != nil || runID <= 0 {
+		return history.ListedRun{}, "", fmt.Errorf("resume run reference must be numeric id or latest")
+	}
+
+	parent, err := history.Get(ctx, cwd, runID)
+	if err != nil {
+		return history.ListedRun{}, "", err
+	}
+	return parent, cwd, nil
+}
+
+func formatResumeDryRunSummary(in Invocation, parent history.ListedRun, profile Profile) string {
+	payload, err := json.MarshalIndent(in.Launch.StructuredInput, "", "  ")
+	if err != nil {
+		payload = []byte("{}")
+	}
+
+	return strings.Join([]string{
+		fmt.Sprintf("resume plan parent-run=%d profile=%s runner=%s model=%s", parent.ID, profile.Name, in.Launch.Runner, in.Launch.Model),
+		fmt.Sprintf("parent-session-id=%s", fallbackExecutionHistoryValue(parent.RunnerSessionID)),
+		"structured-input:",
+		string(payload),
+	}, "\n")
+}
+
+func singleLineSummary(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func (s *Service) beginResumeHistory(ctx context.Context, root string, in Invocation, parent history.ListedRun) history.Handle {
+	if root == "" {
+		return history.Handle{}
+	}
+
+	handle, err := history.Begin(ctx, root, history.Run{
+		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+		Status:              "running",
+		Summary:             "",
+		Name:                in.Workplace.Name,
+		ProfileName:         fallbackExecutionHistoryValue(strings.TrimSpace(in.Profile)),
+		Runner:              fallbackExecutionHistoryValue(in.Launch.Runner),
+		RunnerSessionID:     parent.RunnerSessionID,
+		ParentRunID:         parent.ID,
+		ResumeMessage:       firstResumeMessage(in),
+		ResumeMessageSource: firstNonEmptyTrimmed(resumeMessageSource(in), parent.ResumeMessageSource),
+		Model:               fallbackExecutionHistoryValue(in.Launch.Model),
+		LaunchDirectory:     fallbackLaunchDirectory(in, root),
+		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
+	})
+	if err != nil {
+		return history.Handle{}
+	}
+	return handle
+}
+
+func (s *Service) updateResumeHistory(ctx context.Context, root string, handle history.Handle, in Invocation, profile Profile, allocation Allocation, workplace Workplace, result LaunchResult, launchErr error) {
+	if root == "" {
+		return
+	}
+
+	errorText := ""
+	if launchErr != nil {
+		errorText = strings.TrimSpace(launchErr.Error())
+	}
+
+	runner := firstNonEmptyTrimmed(in.Launch.Runner, allocation.Runner)
+	modelName := firstNonEmptyTrimmed(in.Launch.Model, allocation.Model)
+	profileName := profile.Name
+	if strings.TrimSpace(profileName) == "" {
+		profileName = strings.TrimSpace(in.Profile)
+	}
+
+	_ = history.Update(ctx, handle, history.Run{
+		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+		Status:              result.Status,
+		Summary:             result.Summary,
+		Name:                in.Workplace.Name,
+		ProfileName:         fallbackExecutionHistoryValue(profileName),
+		Runner:              fallbackExecutionHistoryValue(runner),
+		RunnerSessionID:     firstNonEmptyTrimmed(result.RunnerSessionID, parentSessionID(in)),
+		ParentRunID:         parentRunID(in),
+		ResumeMessage:       firstResumeMessage(in),
+		ResumeMessageSource: resumeMessageSource(in),
+		Model:               fallbackExecutionHistoryValue(modelName),
+		LaunchDirectory:     fallbackLaunchDirectory(in, root),
+		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
+		RawOutputPath:       result.RawOutputPath,
+		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, result.RawStructuredOutput),
+		RunRecordPath:       result.RunRecordPath,
+		Error:               errorText,
+	})
+}
+
 func (s *Service) beginStartHistory(ctx context.Context, root string, in Invocation) history.Handle {
 	if root == "" {
 		return history.Handle{}
@@ -240,7 +488,7 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 		LaunchDirectory:     fallbackLaunchDirectory(in, root),
 		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
 		RawOutputPath:       result.RawOutputPath,
-		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, ""),
+		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, result.RawStructuredOutput),
 		RunRecordPath:       result.RunRecordPath,
 		Error:               errorText,
 	})
@@ -253,6 +501,39 @@ func firstNonEmptyTrimmed(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstResumeMessage(in Invocation) string {
+	if in.Launch.StructuredInput == nil {
+		return ""
+	}
+	for _, item := range in.Launch.StructuredInput.OperationalContext {
+		if strings.TrimSpace(item.Title) == "Дополнительное сообщение для возобновления" {
+			return strings.TrimSpace(item.Body)
+		}
+	}
+	return ""
+}
+
+func parentRunID(in Invocation) int64 {
+	if in.Launch.Resume == nil {
+		return 0
+	}
+	return in.Launch.Resume.ParentRunID
+}
+
+func parentSessionID(in Invocation) string {
+	if in.Launch.Resume == nil {
+		return ""
+	}
+	return strings.TrimSpace(in.Launch.Resume.RunnerSessionID)
+}
+
+func resumeMessageSource(in Invocation) string {
+	if in.Launch.Resume == nil {
+		return ""
+	}
+	return strings.TrimSpace(in.Launch.Resume.MessageSource)
 }
 
 func executionHistoryRoot(in Invocation, workplace Workplace) string {
