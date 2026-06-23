@@ -306,6 +306,177 @@
         gap: 12px;
       }
 
+      .run-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+
+      .passport-layout {
+        display: grid;
+        gap: 16px;
+        margin-top: 16px;
+      }
+
+      .passport-nav {
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        border-radius: 14px;
+        padding: 14px;
+        background: rgba(2, 6, 23, 0.28);
+      }
+
+      .passport-nav-title {
+        margin: 0 0 10px;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+
+      .passport-nav-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+      }
+
+      .passport-nav-list a {
+        color: #cbd5e1;
+        text-decoration: none;
+        font-size: 13px;
+      }
+
+      .passport-nav-list a:hover {
+        color: #f8fafc;
+      }
+
+      .passport-main {
+        display: grid;
+        gap: 16px;
+      }
+
+      .passport-section {
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        border-radius: 14px;
+        padding: 16px;
+        background: rgba(2, 6, 23, 0.28);
+      }
+
+      .passport-section h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+
+      .summary-grid,
+      .card-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .summary-card,
+      .context-card,
+      .record-card {
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.54);
+      }
+
+      .summary-label,
+      .card-label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #94a3b8;
+      }
+
+      .summary-value {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        word-break: break-word;
+      }
+
+      .fact-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .facts {
+        margin: 0;
+        display: grid;
+        gap: 10px;
+      }
+
+      .facts div {
+        display: grid;
+        gap: 4px;
+      }
+
+      .facts dt {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #94a3b8;
+      }
+
+      .facts dd {
+        margin: 0;
+        color: #f8fafc;
+        word-break: break-word;
+      }
+
+      .content-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .text-block {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .pill-list,
+      .plain-list {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .pill-list li,
+      .plain-list li {
+        word-break: break-word;
+      }
+
+      .meta-note {
+        margin: 0 0 12px;
+        color: #94a3b8;
+        font-size: 13px;
+      }
+
+      details.technical {
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.54);
+      }
+
+      details.technical summary {
+        cursor: pointer;
+        color: #dbeafe;
+      }
+
+      .technical + .technical {
+        margin-top: 12px;
+      }
+
       @media (min-width: 920px) {
         .workspace-grid {
           grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
@@ -318,6 +489,17 @@
 
         .detail-grid .detail-span {
           grid-column: 1 / -1;
+        }
+
+        .passport-layout {
+          grid-template-columns: 220px minmax(0, 1fr);
+          align-items: start;
+        }
+
+        .summary-grid,
+        .card-grid,
+        .fact-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
 
@@ -368,7 +550,7 @@
                   <li class="nav-item"><a class="nav-link" href="#profiles">Профили</a></li>
                   <li class="nav-item"><a class="nav-link" href="#resources">Ресурсы</a></li>
                   <li class="nav-item"><a class="nav-link" href="#workspacesSection">Рабочие места</a></li>
-                  <li class="nav-item"><a class="nav-link" href="#structuredOutputSection">Структурированный вывод</a></li>
+                  <li class="nav-item"><a class="nav-link" href="#resultSection">Результат запуска</a></li>
                 </ul>
               </li>
               <li class="nav-item"><a class="nav-link" href="#verification">Верификация</a></li>
@@ -421,31 +603,69 @@
           </section>
 
           <section id="execution" class="panel">
-            <h2 class="section-heading">Подробности запуска</h2>
-            <div id="runInfo" class="muted">Выберите запуск, чтобы посмотреть детали.</div>
-            <div class="detail-grid" style="margin-top: 12px;">
+            <div class="run-header">
               <div>
-                <h3 class="section-heading">Результат</h3>
-                <pre id="result"></pre>
+                <h2 class="section-heading">Паспорт запуска</h2>
+                <p class="section-copy">Выбранный запуск показывается как запись исполнения с выделенными входом, ходом исполнения, результатом и диагностикой.</p>
+                <div id="runInfo" class="muted">Выберите запуск, чтобы посмотреть детали.</div>
               </div>
-              <div>
-                <h3 class="section-heading">Структурированный ввод</h3>
-                <pre id="structuredInput"></pre>
+              <div class="actions">
+                <button id="rawButton" disabled>Открыть сырой вывод</button>
+                <button id="recordButton" disabled>Открыть запись запуска</button>
+                <button id="structuredOutputButton" disabled>Показать структурированный вывод</button>
               </div>
-              <div id="structuredOutputSection">
-                <h3 class="section-heading">Структурированный вывод</h3>
-                <pre id="structuredOutput"></pre>
-              </div>
-              <div>
-                <h3 class="section-heading">Запись запуска</h3>
-                <pre id="record"></pre>
-              </div>
-              <div class="detail-span" id="resources">
-                <div class="actions" style="margin-bottom: 8px;">
-                  <button id="rawButton" disabled>Загрузить сырой вывод</button>
-                </div>
-                <h3 class="section-heading">Сырой вывод</h3>
-                <pre id="raw"></pre>
+            </div>
+
+            <div class="passport-layout">
+              <nav class="passport-nav" aria-label="Навигация по записи запуска">
+                <p class="passport-nav-title">Разделы записи</p>
+                <ul class="passport-nav-list">
+                  <li><a href="#passportSummary">Сводка запуска</a></li>
+                  <li><a href="#inputSection">1. Вход запуска</a></li>
+                  <li><a href="#executionSection">2. Исполнение</a></li>
+                  <li><a href="#resultSection">3. Результат</a></li>
+                  <li><a href="#diagnosticsSection">4. Диагностика и архив</a></li>
+                </ul>
+              </nav>
+
+              <div class="passport-main">
+                <section id="passportSummary" class="passport-section">
+                  <h3>Сводка запуска</h3>
+                  <p class="meta-note">Сводка строится только из полей, которые уже присутствуют в истории и записи запуска.</p>
+                  <div id="summaryContent" class="summary-grid"></div>
+                </section>
+
+                <section id="inputSection" class="passport-section">
+                  <h3>1. Вход запуска</h3>
+                  <div id="structuredInput"></div>
+                </section>
+
+                <section id="executionSection" class="passport-section">
+                  <h3>2. Исполнение</h3>
+                  <div id="executionContent"></div>
+                </section>
+
+                <section id="resultSection" class="passport-section">
+                  <h3>3. Результат</h3>
+                  <div id="structuredOutput"></div>
+                </section>
+
+                <section id="diagnosticsSection" class="passport-section">
+                  <h3>4. Диагностика и архив</h3>
+                  <div id="result"></div>
+                  <details id="rawStructuredOutputDetails" class="technical">
+                    <summary>Сырой `raw_structured_output`</summary>
+                    <pre id="rawStructuredOutput"></pre>
+                  </details>
+                  <details id="runRecordDetails" class="technical">
+                    <summary>Сырая запись запуска</summary>
+                    <pre id="record"></pre>
+                  </details>
+                  <details id="rawOutputDetails" class="technical">
+                    <summary>Сырой вывод исполнения</summary>
+                    <pre id="raw"></pre>
+                  </details>
+                </section>
               </div>
             </div>
           </section>
@@ -483,11 +703,19 @@
       const workspacesEl = document.getElementById('workspaces');
       const runInfoEl = document.getElementById('runInfo');
       const resultEl = document.getElementById('result');
+      const summaryContentEl = document.getElementById('summaryContent');
       const structuredInputEl = document.getElementById('structuredInput');
+      const executionContentEl = document.getElementById('executionContent');
       const structuredOutputEl = document.getElementById('structuredOutput');
+      const rawStructuredOutputEl = document.getElementById('rawStructuredOutput');
       const recordEl = document.getElementById('record');
       const rawEl = document.getElementById('raw');
       const rawButton = document.getElementById('rawButton');
+      const recordButton = document.getElementById('recordButton');
+      const structuredOutputButton = document.getElementById('structuredOutputButton');
+      const rawOutputDetailsEl = document.getElementById('rawOutputDetails');
+      const runRecordDetailsEl = document.getElementById('runRecordDetails');
+      const rawStructuredOutputDetailsEl = document.getElementById('rawStructuredOutputDetails');
       const filtersEl = document.getElementById('filters');
       const nameFilterEl = document.getElementById('nameFilter');
       const statusFilterEl = document.getElementById('statusFilter');
@@ -495,6 +723,8 @@
 
       let selectedRun = null;
       let selectedWorkspace = '';
+      let selectedPayload = null;
+      let selectedRecord = null;
 
       function textOrDash(value) {
         return value && value.length ? value : '-';
@@ -513,6 +743,253 @@
         } catch {
           return value;
         }
+      }
+
+      function escapeHTML(value) {
+        return String(value ?? '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function parseJSONObject(value) {
+        if (!value || typeof value !== 'string') return null;
+        try {
+          return JSON.parse(value);
+        } catch {
+          return null;
+        }
+      }
+
+      function hasValue(value) {
+        if (Array.isArray(value)) return value.length > 0;
+        return value !== null && value !== undefined && String(value).trim() !== '';
+      }
+
+      function renderEmpty(message) {
+        return `<p class="muted">${escapeHTML(message)}</p>`;
+      }
+
+      function renderTextSection(title, value) {
+        if (!hasValue(value)) return '';
+        return `<section class="context-card"><span class="card-label">${escapeHTML(title)}</span><p class="text-block">${escapeHTML(value)}</p></section>`;
+      }
+
+      function renderStringList(title, items) {
+        if (!Array.isArray(items) || !items.length) return '';
+        return `<section class="context-card"><span class="card-label">${escapeHTML(title)}</span><ul class="pill-list">${items.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ul></section>`;
+      }
+
+      function renderContextList(title, items) {
+        if (!Array.isArray(items) || !items.length) return '';
+        return `<section><span class="card-label">${escapeHTML(title)}</span><div class="card-grid">${items.map(item => `<article class="context-card"><strong>${escapeHTML(item.title || 'Без заголовка')}</strong><p class="text-block">${escapeHTML(item.body || '-')}</p></article>`).join('')}</div></section>`;
+      }
+
+      function renderObjectList(title, items, fields) {
+        if (!Array.isArray(items) || !items.length) return '';
+        return `<section><span class="card-label">${escapeHTML(title)}</span><div class="card-grid">${items.map(item => {
+          const content = fields
+            .map(field => ({ label: field.label, value: field.format ? field.format(item[field.key], item) : item[field.key] }))
+            .filter(field => hasValue(field.value))
+            .map(field => `<div><dt>${escapeHTML(field.label)}</dt><dd>${escapeHTML(field.value)}</dd></div>`)
+            .join('');
+          return `<article class="record-card"><dl class="facts">${content || `<div><dd>${escapeHTML('-')}</dd></div>`}</dl></article>`;
+        }).join('')}</div></section>`;
+      }
+
+      function renderExtensions(title, value) {
+        if (!value || typeof value !== 'object' || !Object.keys(value).length) return '';
+        return `<details class="technical"><summary>${escapeHTML(title)}</summary><pre>${escapeHTML(JSON.stringify(value, null, 2))}</pre></details>`;
+      }
+
+      function renderFacts(title, entries) {
+        const filtered = entries.filter(entry => hasValue(entry.value));
+        if (!filtered.length) return '';
+        return `<section><span class="card-label">${escapeHTML(title)}</span><div class="record-card"><dl class="facts">${filtered.map(entry => `<div><dt>${escapeHTML(entry.label)}</dt><dd>${escapeHTML(entry.value)}</dd></div>`).join('')}</dl></div></section>`;
+      }
+
+      function renderSummary(payload, record) {
+        const status = record?.result?.status || payload.status;
+        const workplaceName = record?.invocation?.workplace?.name || payload.name;
+        const profileName = record?.profile?.name || payload.profile_name;
+        const runner = record?.allocation?.runner || payload.runner;
+        const model = record?.allocation?.model || payload.model;
+        const createdAt = record?.created_at || payload.created_at;
+        const runRecordPath = payload.run_record_path;
+
+        const items = [
+          ['Статус', status],
+          ['Рабочее место', workplaceName],
+          ['Профиль', profileName],
+          ['Контур исполнения', runner],
+          ['Модель', model],
+          ['Создан', createdAt],
+          ['Путь к записи запуска', runRecordPath],
+        ];
+
+        summaryContentEl.innerHTML = items
+          .map(([label, value]) => `<article class="summary-card"><span class="summary-label">${escapeHTML(label)}</span><p class="summary-value">${escapeHTML(textOrDash(value))}</p></article>`)
+          .join('');
+      }
+
+      function renderStructuredInputView(input) {
+        if (!input) {
+          structuredInputEl.innerHTML = renderEmpty('Структурированный ввод недоступен.');
+          return;
+        }
+
+        const blocks = [
+          renderTextSection('Задача', input.task),
+          renderStringList('Ограничения', input.constraints),
+          renderContextList('Контекст проекта', input.project_context),
+          renderContextList('Операционный контекст', input.operational_context),
+          renderObjectList('Результаты предыдущих запусков', input.previous_run_results, [
+            { key: 'summary', label: 'Сводка' },
+            { key: 'body', label: 'Описание' },
+          ]),
+          renderObjectList('Замечания ревизии', input.review_remarks, [
+            { key: 'id', label: 'ID' },
+            { key: 'status', label: 'Статус' },
+            { key: 'severity', label: 'Критичность' },
+            { key: 'type', label: 'Тип' },
+            { key: 'title', label: 'Заголовок' },
+            { key: 'body', label: 'Описание' },
+            { key: 'answer', label: 'Ответ' },
+            { key: 'resolution', label: 'Решение' },
+          ]),
+          renderObjectList('Ответы на замечания', input.review_responses, [
+            { key: 'id', label: 'ID' },
+            { key: 'remark_id', label: 'Замечание' },
+            { key: 'status', label: 'Статус' },
+            { key: 'summary', label: 'Сводка' },
+            { key: 'body', label: 'Описание' },
+          ]),
+          renderObjectList('Интеграционные действия', input.integration_actions, [
+            { key: 'id', label: 'ID' },
+            { key: 'status', label: 'Статус' },
+            { key: 'type', label: 'Тип' },
+            { key: 'title', label: 'Заголовок' },
+            { key: 'body', label: 'Описание' },
+          ]),
+          renderExtensions('Технические расширения входа', input.extensions),
+        ].filter(Boolean);
+
+        structuredInputEl.innerHTML = blocks.length ? `<div class="content-stack">${blocks.join('')}</div>` : renderEmpty('Структурированный ввод пуст.');
+      }
+
+      function renderExecutionView(payload, record) {
+        const invocation = record?.invocation;
+        const profile = record?.profile;
+        const allocation = record?.allocation;
+        const workplace = record?.workplace;
+
+        const sections = [
+          renderFacts('Параметры запуска', [
+            { label: 'Задача', value: invocation?.task },
+            { label: 'Рабочее место', value: invocation?.workplace?.name || payload.name },
+            { label: 'Профиль', value: invocation?.profile || payload.profile_name },
+            { label: 'Каталог запуска', value: invocation?.launch?.directory || payload.launch_directory },
+            { label: 'Контур исполнения', value: invocation?.launch?.runner || payload.runner },
+            { label: 'Модель', value: invocation?.launch?.model || payload.model },
+            { label: 'Привязка модели', value: invocation?.launch?.model_binding },
+            { label: 'Директива', value: invocation?.launch?.prompt },
+            { label: 'Репозиторий', value: invocation?.repository?.url },
+          ]),
+          renderFacts('Профиль исполнения', [
+            { label: 'Имя профиля', value: profile?.name || payload.profile_name },
+            { label: 'Описание', value: profile?.description },
+            { label: 'Режим', value: profile?.mode },
+            { label: 'Привязка модели', value: profile?.model_binding },
+          ]),
+          renderFacts('Распределение ресурсов', [
+            { label: 'Ресурс', value: allocation?.resource },
+            { label: 'Контур исполнения', value: allocation?.runner || payload.runner },
+            { label: 'Модель', value: allocation?.model || payload.model },
+            { label: 'Привязка модели', value: allocation?.model_binding },
+            { label: 'Источник привязки', value: allocation?.binding_source },
+            { label: 'Источник ресурса', value: allocation?.source },
+            { label: 'Глобальная конфигурация', value: allocation?.global_config_path },
+            { label: 'Локальная конфигурация', value: allocation?.local_config_path },
+          ]),
+          renderFacts('Рабочее место', [
+            { label: 'Имя', value: workplace?.name || payload.name },
+            { label: 'Корень репозитория', value: workplace?.repository_root || payload.launch_directory },
+            { label: 'URL репозитория', value: workplace?.repository_url },
+          ]),
+        ].filter(Boolean);
+
+        executionContentEl.innerHTML = sections.length ? `<div class="fact-grid">${sections.join('')}</div>` : renderEmpty('Детали исполнения недоступны.');
+      }
+
+      function renderStructuredOutputView(payload, record, output) {
+        const resultSummary = record?.result?.summary || payload.summary;
+        const conclusion = output?.conclusion;
+        const blocks = [
+          renderTextSection('Сводка результата', resultSummary),
+          renderTextSection('Итоговая сводка', output?.summary),
+          renderTextSection('Сообщение коммита', output?.commit_message),
+          renderObjectList('Замечания', output?.remarks, [
+            { key: 'id', label: 'ID' },
+            { key: 'status', label: 'Статус' },
+            { key: 'severity', label: 'Критичность' },
+            { key: 'type', label: 'Тип' },
+            { key: 'title', label: 'Заголовок' },
+            { key: 'body', label: 'Описание' },
+            { key: 'answer', label: 'Ответ' },
+            { key: 'resolution', label: 'Решение' },
+          ]),
+          renderObjectList('Вопросы', output?.questions, [
+            { key: 'id', label: 'ID' },
+            { key: 'status', label: 'Статус' },
+            { key: 'title', label: 'Заголовок' },
+            { key: 'body', label: 'Описание' },
+            { key: 'answer', label: 'Ответ' },
+          ]),
+          renderObjectList('Дальнейшие действия', output?.follow_up_actions, [
+            { key: 'id', label: 'ID' },
+            { key: 'status', label: 'Статус' },
+            { key: 'type', label: 'Тип' },
+            { key: 'title', label: 'Заголовок' },
+            { key: 'body', label: 'Описание' },
+          ]),
+          renderObjectList('Изменения', output?.changes, [
+            { key: 'summary', label: 'Сводка' },
+          ]),
+          renderObjectList('Команды', output?.commands, [
+            { key: 'name', label: 'Команда' },
+            { key: 'args', label: 'Аргументы', format: value => Array.isArray(value) ? value.join(' ') : value },
+            { key: 'title', label: 'Заголовок' },
+            { key: 'body', label: 'Описание' },
+          ]),
+          conclusion ? renderFacts('Заключение', [
+            { label: 'Статус', value: conclusion.status },
+            { label: 'Сводка', value: conclusion.summary },
+            { label: 'Описание', value: conclusion.body },
+          ]) : '',
+          renderExtensions('Технические расширения результата', output?.extensions),
+        ].filter(Boolean);
+
+        structuredOutputEl.innerHTML = blocks.length ? `<div class="content-stack">${blocks.join('')}</div>` : renderEmpty('Структурированный вывод отсутствует.');
+      }
+
+      function renderDiagnostics(payload, record, output) {
+        const status = record?.result?.status || payload.status;
+        const summary = record?.result?.summary || payload.summary;
+        const rawOutputPath = record?.result?.raw_output_path || payload.raw_output_path;
+        const diagnostics = [
+          { label: 'Статус', value: status },
+          { label: 'Сводка', value: summary },
+          { label: 'run_record_path', value: payload.run_record_path },
+          { label: 'result.raw_output_path', value: rawOutputPath },
+          { label: 'structured_output_error', value: record?.structured_output_error },
+          { label: 'error', value: record?.error || payload.error },
+        ];
+
+        resultEl.innerHTML = renderFacts('Диагностические поля', diagnostics) || renderEmpty('Диагностические поля отсутствуют.');
+        rawStructuredOutputEl.textContent = prettyJSON(record?.raw_structured_output || payload.raw_structured_output, '(сырой структурированный вывод пуст)');
+        recordEl.textContent = prettyJSON(payload.run_record, payload.run_record_error || '(запись запуска пуста)');
       }
 
       function renderWorkspaces(items) {
@@ -547,13 +1024,23 @@
 
       function clearSelection() {
         selectedRun = null;
+        selectedPayload = null;
+        selectedRecord = null;
         runInfoEl.textContent = 'Выберите запуск, чтобы посмотреть детали.';
-        resultEl.textContent = '';
-        structuredInputEl.textContent = '';
-        structuredOutputEl.textContent = '';
+        summaryContentEl.innerHTML = '';
+        resultEl.innerHTML = '';
+        structuredInputEl.innerHTML = '';
+        executionContentEl.innerHTML = '';
+        structuredOutputEl.innerHTML = '';
+        rawStructuredOutputEl.textContent = '';
         recordEl.textContent = '';
         rawEl.textContent = '';
         rawButton.disabled = true;
+        recordButton.disabled = true;
+        structuredOutputButton.disabled = true;
+        rawOutputDetailsEl.open = false;
+        runRecordDetailsEl.open = false;
+        rawStructuredOutputDetailsEl.open = false;
 
         Array.from(runsEl.children).forEach(row => row.classList.remove('selected'));
       }
@@ -611,18 +1098,23 @@
         }
 
         const payload = await response.json();
-        runInfoEl.textContent = `${payload.status} · ${payload.summary || '-'}${payload.error ? ` · ${payload.error}` : ''}`;
-        resultEl.textContent = JSON.stringify({
-          status: payload.status,
-          summary: payload.summary,
-          error: payload.error,
-          raw_output_path: payload.raw_output_path,
-        }, null, 2);
-        structuredInputEl.textContent = prettyJSON(payload.raw_structured_input, '(структурированный ввод пуст)');
-        structuredOutputEl.textContent = prettyJSON(payload.raw_structured_output, '(структурированный вывод пуст)');
-        recordEl.textContent = prettyJSON(payload.run_record, payload.run_record_error || '(запись запуска пуста)');
+        const record = parseJSONObject(payload.run_record);
+        const structuredInput = record?.structured_input || parseJSONObject(payload.raw_structured_input);
+        const structuredOutput = record?.structured_output || parseJSONObject(payload.raw_structured_output);
+
+        selectedPayload = payload;
+        selectedRecord = record;
+
+        runInfoEl.textContent = `${textOrDash(record?.result?.status || payload.status)} · ${textOrDash(record?.result?.summary || payload.summary)}${payload.error ? ` · ${payload.error}` : ''}`;
+        renderSummary(payload, record);
+        renderStructuredInputView(structuredInput);
+        renderExecutionView(payload, record);
+        renderStructuredOutputView(payload, record, structuredOutput);
+        renderDiagnostics(payload, record, structuredOutput);
         rawEl.textContent = '';
         rawButton.disabled = false;
+        recordButton.disabled = !payload.run_record && !payload.run_record_error;
+        structuredOutputButton.disabled = !payload.raw_structured_output && !record?.raw_structured_output;
         rawButton.dataset.runId = runID;
         rawButton.textContent = 'Загрузить сырой вывод';
 
@@ -632,19 +1124,36 @@
         }
       }
 
+      function showRunRecord() {
+        if (!selectedPayload) return;
+        runRecordDetailsEl.open = true;
+        document.getElementById('diagnosticsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function showStructuredOutput() {
+        if (!selectedPayload) return;
+        rawStructuredOutputDetailsEl.open = true;
+        document.getElementById('diagnosticsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
       async function loadRawOutput() {
         const runID = rawButton.dataset.runId;
         if (!runID) return;
         const response = await fetch(`/api/runs/${runID}/raw-output?workspace=${encodeURIComponent(selectedWorkspace)}`);
         if (!response.ok) {
           rawEl.textContent = `Не удалось загрузить сырой вывод (${response.status})`;
+          rawOutputDetailsEl.open = true;
           return;
         }
 
         rawEl.textContent = await response.text();
+        rawOutputDetailsEl.open = true;
+        document.getElementById('diagnosticsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
 
       rawButton.addEventListener('click', loadRawOutput);
+      recordButton.addEventListener('click', showRunRecord);
+      structuredOutputButton.addEventListener('click', showStructuredOutput);
       filtersEl.addEventListener('submit', async event => {
         event.preventDefault();
         clearSelection();

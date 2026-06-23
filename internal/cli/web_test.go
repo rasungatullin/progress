@@ -213,7 +213,7 @@ func TestWebHandlerServesSidebarNavigationShell(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	for _, snippet := range []string{"Прогресс", "progress", "История", "Структурированный вывод"} {
+	for _, snippet := range []string{"Прогресс", "progress", "История", "Паспорт запуска", "Диагностика и архив"} {
 		if !strings.Contains(body, snippet) {
 			t.Fatalf("index page is missing %q", snippet)
 		}
