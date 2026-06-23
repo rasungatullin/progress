@@ -150,6 +150,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 				RawOutputPath:       rawOutputPath,
 				RawStructuredOutput: rawStructuredOutput,
 				StructuredOutput:    structuredOutput,
+				RunnerSessionID:     runnerSessionID,
 				RunRecordPath:       "",
 			}
 
