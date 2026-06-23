@@ -295,6 +295,11 @@
         color: #bae6fd;
       }
 
+      .workspace-link.active {
+        color: #f8fafc;
+        font-weight: 600;
+      }
+
       .workspace-path {
         font-size: 12px;
         color: #64748b;
@@ -727,7 +732,9 @@
       let selectedRecord = null;
 
       function textOrDash(value) {
-        return value && value.length ? value : '-';
+        if (value === null || value === undefined) return '-';
+        const text = String(value);
+        return text.trim() === '' ? '-' : text;
       }
 
       function appendCell(row, value) {
@@ -1005,10 +1012,12 @@
           const li = document.createElement('li');
           const button = document.createElement('button');
           button.className = 'workspace-link';
+          if (item.path === selectedWorkspace) button.classList.add('active');
           button.textContent = item.name;
           button.title = item.path;
           button.addEventListener('click', async () => {
             selectedWorkspace = item.path;
+            renderWorkspaces(items);
             clearSelection();
             await renderRuns();
           });
