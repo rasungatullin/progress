@@ -213,9 +213,29 @@ func TestWebHandlerServesSidebarNavigationShell(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	for _, snippet := range []string{"Прогресс", "progress", "История", "Паспорт запуска", "Диагностика и архив"} {
+	for _, snippet := range []string{
+		"Прогресс",
+		"progress",
+		"История",
+		"Структурированный вывод",
+		"Паспорт запуска",
+		"Сводка запуска",
+		"1. Вход запуска",
+		"2. Исполнение",
+		"3. Результат",
+		"4. Диагностика и архив",
+		"run_record_path",
+		"result.raw_output_path",
+		"structured_output_error",
+		"Сырой `raw_structured_output`",
+	} {
 		if !strings.Contains(body, snippet) {
 			t.Fatalf("index page is missing %q", snippet)
+		}
+	}
+	for _, oldHeading := range []string{">Structured input<", ">Structured output<", ">Run record<"} {
+		if strings.Contains(body, oldHeading) {
+			t.Fatalf("index page still exposes old raw JSON heading %q", oldHeading)
 		}
 	}
 }
