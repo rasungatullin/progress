@@ -193,6 +193,38 @@ type ResourceBindingConfig struct {
 	Model  string `json:"model"`
 }
 
+type CycleConfig struct {
+	Cycles map[string]CycleDefinition `json:"cycles"`
+}
+
+type CycleDefinition struct {
+	StartStep string      `json:"start_step"`
+	Steps     []CycleStep `json:"steps"`
+	Limits    CycleLimits `json:"limits"`
+}
+
+type CycleStep struct {
+	Name           string              `json:"name"`
+	Profile        string              `json:"profile"`
+	InputTransform CycleInputTransform `json:"input_transform"`
+	Transitions    []CycleTransition   `json:"transitions"`
+}
+
+type CycleTransition struct {
+	Next    string   `json:"next"`
+	In      []string `json:"in"`
+	NotIn   []string `json:"not_in"`
+	Missing bool     `json:"missing"`
+}
+
+type CycleInputTransform struct {
+	TaskOnRepeat string `json:"task_on_repeat"`
+}
+
+type CycleLimits struct {
+	MaxExecutions int `json:"max_executions"`
+}
+
 type ResourceDefaultsConfig struct {
 	ModelBinding string `json:"model-binding"`
 }

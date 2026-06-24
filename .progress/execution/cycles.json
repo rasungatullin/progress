@@ -1,0 +1,99 @@
+{
+  "cycles": {
+    "implementation-review": {
+      "start_step": "execution",
+      "limits": {
+        "max_executions": 8
+      },
+      "steps": [
+        {
+          "name": "execution",
+          "profile": "coder",
+          "input_transform": {
+            "task_on_repeat": "Выполнить реализацию после доработки."
+          },
+          "transitions": [
+            {
+              "next": "review",
+              "in": ["ok", "approve", "approved"],
+              "not_in": []
+            },
+            {
+              "next": "review",
+              "not_in": ["ok", "approve", "approved"]
+            }
+          ]
+        },
+        {
+          "name": "review",
+          "profile": "review",
+          "transitions": [
+            {
+              "next": "",
+              "in": ["ok", "approve", "approved"]
+            },
+            {
+              "next": "implementation",
+              "not_in": ["ok", "approve", "approved"]
+            }
+          ]
+        },
+        {
+          "name": "implementation",
+          "profile": "coder",
+          "input_transform": {
+            "task_on_repeat": "Доработать результат исполнения по замечаниям ревью."
+          },
+          "transitions": [
+            {
+              "next": "review",
+              "not_in": ["ok", "approve", "approved"]
+            },
+            {
+              "next": "review",
+              "in": ["ok", "approve", "approved"]
+            }
+          ]
+        }
+      ]
+    },
+    "ralph-loop": {
+      "start_step": "analysis",
+      "limits": {
+        "max_executions": 4
+      },
+      "steps": [
+        {
+          "name": "analysis",
+          "profile": "review",
+          "input_transform": {
+            "task_on_repeat": "Повторить анализ требований."
+          },
+          "transitions": [
+            {
+              "next": "implementation",
+              "not_in": ["ok", "approve", "approved"]
+            }
+          ]
+        },
+        {
+          "name": "implementation",
+          "profile": "coder",
+          "input_transform": {
+            "task_on_repeat": "Доработать и повторить цикл RALPH."
+          },
+          "transitions": [
+            {
+              "next": "analysis",
+              "not_in": ["ok", "approve", "approved"]
+            },
+            {
+              "next": "analysis",
+              "in": ["ok", "approve", "approved"]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

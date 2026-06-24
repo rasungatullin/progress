@@ -278,6 +278,155 @@ func TestExecutionReviewCycleHelpIncludesCycleFlags(t *testing.T) {
 	}
 }
 
+func TestExecutionCycleCommandRunsDynamicCycleFromConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	cyclesPath := filepath.Join(root, ".progress", "execution")
+	if err := os.MkdirAll(cyclesPath, 0o755); err != nil {
+		t.Fatalf("mkdir cycles path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cyclesPath, "cycles.json"), []byte(`{
+		"cycles": {
+			"implementation-review": {
+				"start_step": "execution",
+				"limits": {"max_executions": 4},
+				"steps": [
+					{
+						"name": "execution",
+						"profile": "coder",
+						"transitions": [{"in": ["ok", "approve", "approved"], "next": ""}, {"not_in": ["ok", "approve", "approved"], "next": "review"}]
+					},
+					{
+						"name": "review",
+						"profile": "review",
+						"transitions": [{"in": ["ok", "approve", "approved"], "next": ""}, {"not_in": ["ok", "approve", "approved"], "next": "implementation"}]
+					},
+					{
+						"name": "implementation",
+						"profile": "coder",
+						"input_transform": {"task_on_repeat": "Повторить доработку по замечаниям ревью."},
+						"transitions": [{"in": ["ok", "approve", "approved"], "next": "review"}, {"not_in": ["ok", "approve", "approved"], "next": "review"}]
+					}
+				]
+			}
+		}
+	}`), 0o600); err != nil {
+		t.Fatalf("write cycles config: %v", err)
+	}
+
+	prevDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir temp root: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(prevDir)
+	})
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "cycle", "--dir", "/tmp/workspace", "--cycle", "implementation-review", "--task", "Ship it", "--profile", "coder"})
+
+	var calls []execution.Invocation
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			start: func(_ context.Context, in execution.Invocation) (execution.LaunchResult, error) {
+				calls = append(calls, in)
+				switch len(calls) {
+				case 1:
+					return execution.LaunchResult{
+						Status:  "completed",
+						Summary: "execution done",
+					}, nil
+				case 2:
+					return execution.LaunchResult{
+						Status:  "completed",
+						Summary: "review 1",
+						StructuredOutput: &execution.StructuredOutput{
+							Conclusion: &execution.StructuredConclusion{
+								Status: "needs-work",
+							},
+							Remarks: []execution.StructuredRemark{{ID: "r1", Status: "open", Severity: "blocking", Title: "Fix"}},
+						},
+					}, nil
+				case 3:
+					return execution.LaunchResult{
+						Status:  "completed",
+						Summary: "implementation done",
+					}, nil
+				case 4:
+					return execution.LaunchResult{
+						Status:  "completed",
+						Summary: "review 2",
+						StructuredOutput: &execution.StructuredOutput{
+							Conclusion: &execution.StructuredConclusion{
+								Status: "ok",
+							},
+						},
+					}, nil
+				default:
+					return execution.LaunchResult{}, errors.New("unexpected extra call")
+				}
+			},
+		}
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute cycle command: %v", err)
+	}
+	if len(calls) != 4 {
+		t.Fatalf("expected execution->review->implementation->review calls, got %d", len(calls))
+	}
+	if calls[1].Profile != "review" || calls[2].Profile != "coder" || calls[3].Profile != "review" {
+		t.Fatalf("profiles sequence mismatch: %#v", []string{calls[0].Profile, calls[1].Profile, calls[2].Profile, calls[3].Profile})
+	}
+	if calls[2].Launch.StructuredInput == nil || calls[2].Launch.StructuredInput.Task != "Повторить доработку по замечаниям ревью." {
+		t.Fatalf("implementation call must receive task_on_repeat override: %#v", calls[2].Launch.StructuredInput)
+	}
+	if !containsStructuredContext(calls[2].Launch.StructuredInput.ProjectContext, "Исходная задача", "Ship it") {
+		t.Fatalf("implementation call must include original task context: %#v", calls[2].Launch.StructuredInput.ProjectContext)
+	}
+	if len(calls[2].Launch.StructuredInput.ReviewRemarks) == 0 {
+		t.Fatalf("implementation call must receive review remarks from previous review step")
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "state=completed\n") {
+		t.Fatalf("output must include completed state: %q", output)
+	}
+}
+
+func TestExecutionCycleHelpIncludesCycleFlag(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "cycle", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute cycle help: %v", err)
+	}
+
+	help := stdout.String()
+	for _, fragment := range []string{"--cycle", "--task", "--repo", "--previous-run-result", "--dir", "--review-remark"} {
+		if !strings.Contains(help, fragment) {
+			t.Fatalf("cycle help must include %q, got %q", fragment, help)
+		}
+	}
+	if strings.Contains(help, "--execution-profile") || strings.Contains(help, "--review-profile") {
+		t.Fatalf("cycle help must not include execution/review profile flags: %q", help)
+	}
+}
+
 func TestResumeRequestFromFlagsRejectsConflictingMessageSources(t *testing.T) {
 	t.Parallel()
 
@@ -768,6 +917,15 @@ func TestPrintLaunchResultPreservesExtensionPayload(t *testing.T) {
 	if !strings.Contains(output, `extension={"name":"custom","value":{"owner":"release","preserve":"keep   spaces"}}`+"\n") {
 		t.Fatalf("extension payload must stay lossless: %q", output)
 	}
+}
+
+func containsStructuredContext(values []execution.StructuredContext, title, body string) bool {
+	for _, value := range values {
+		if value.Title == title && value.Body == body {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
