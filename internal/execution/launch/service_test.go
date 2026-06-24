@@ -951,6 +951,32 @@ func TestLaunchPersistsCodexRunnerSessionIDFromJSONOutput(t *testing.T) {
 	}
 }
 
+func TestLaunchPrefersRunnerMetadataOverCodexTextJSON(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return appendTrailingRunnerMetadata(strings.Join([]string{
+				`{"type":"thread.started","thread_id":"payload-thread"}`,
+				structuredOutputStart,
+				`{"summary":"Done."}`,
+				structuredOutputEnd,
+			}, "\n"), runnerMetadata{RunnerSessionID: "adapter-thread"}), nil
+		},
+		extractSessionID: extractRunnerSessionID,
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "adapter-thread" {
+		t.Fatalf("runner metadata must win over text JSON: %#v", result)
+	}
+}
+
 func TestLaunchOmitsCodexRunnerSessionIDWhenNotProvidedByAdapter(t *testing.T) {
 	t.Parallel()
 

@@ -1176,16 +1176,16 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 }
 
 func extractRunnerSessionID(in model.Invocation, output string) string {
+	_, metadata := stripTrailingRunnerMetadata(output)
+	if metadata != nil && strings.TrimSpace(metadata.RunnerSessionID) != "" {
+		return strings.TrimSpace(metadata.RunnerSessionID)
+	}
+
 	runner := strings.TrimSpace(in.Launch.Runner)
 	if runner == RunnerCodex {
 		if _, sessionID := normalizeCodexJSONOutput(output); strings.TrimSpace(sessionID) != "" {
 			return strings.TrimSpace(sessionID)
 		}
-	}
-
-	_, metadata := stripTrailingRunnerMetadata(output)
-	if metadata != nil && strings.TrimSpace(metadata.RunnerSessionID) != "" {
-		return strings.TrimSpace(metadata.RunnerSessionID)
 	}
 
 	if in.Launch.Resume != nil {
