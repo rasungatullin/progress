@@ -1181,13 +1181,6 @@ func extractRunnerSessionID(in model.Invocation, output string) string {
 		return strings.TrimSpace(metadata.RunnerSessionID)
 	}
 
-	runner := strings.TrimSpace(in.Launch.Runner)
-	if runner == RunnerCodex {
-		if _, sessionID := normalizeCodexJSONOutput(output); strings.TrimSpace(sessionID) != "" {
-			return strings.TrimSpace(sessionID)
-		}
-	}
-
 	if in.Launch.Resume != nil {
 		return strings.TrimSpace(in.Launch.Resume.RunnerSessionID)
 	}

@@ -913,15 +913,15 @@ func TestNormalizeCodexJSONOutputReturnsPlainForMissingThreadSession(t *testing.
 	}
 }
 
-func TestLaunchPersistsCodexRunnerSessionIDFromJSONOutput(t *testing.T) {
+func TestLaunchPersistsCodexRunnerSessionIDFromRunnerMetadata(t *testing.T) {
 	t.Parallel()
 
 	service := &Service{
 		runRunner: func(context.Context, model.Invocation) (string, error) {
-			return strings.Join([]string{
+			return appendTrailingRunnerMetadata(strings.Join([]string{
 				`{"type":"thread.started","thread_id":"thread-codex-42"}`,
 				`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
-			}, "\n"), nil
+			}, "\n"), runnerMetadata{RunnerSessionID: "thread-codex-42"}), nil
 		},
 		extractSessionID: extractRunnerSessionID,
 	}
@@ -983,6 +983,7 @@ func TestLaunchOmitsCodexRunnerSessionIDWhenNotProvidedByAdapter(t *testing.T) {
 	service := &Service{
 		runRunner: func(context.Context, model.Invocation) (string, error) {
 			return strings.Join([]string{
+				`{"type":"thread.started","thread_id":"fake-session-42"}`,
 				`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
 				`{"type":"assistant_message","item":{"type":"agent_message","text":"Ignored."}}`,
 			}, "\n"), nil
