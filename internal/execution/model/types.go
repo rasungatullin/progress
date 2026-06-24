@@ -211,7 +211,8 @@ type CycleStep struct {
 }
 
 type CycleTransition struct {
-	Next    string   `json:"next"`
+	To      string   `json:"to,omitempty"`
+	Finish  string   `json:"finish,omitempty"`
 	In      []string `json:"in"`
 	NotIn   []string `json:"not_in"`
 	Missing bool     `json:"missing"`

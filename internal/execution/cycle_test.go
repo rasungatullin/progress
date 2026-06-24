@@ -14,9 +14,10 @@ func TestRunExecutionCycleTransfersContextBetweenSteps(t *testing.T) {
 
 	starter := &cycleStarterStub{
 		results: []LaunchResult{
+			{Status: "completed", Summary: "Сборка выполнена."},
 			{
 				Status:  "completed",
-				Summary: "Сборка выполнена.",
+				Summary: "Ревизия выявила замечания.",
 				StructuredOutput: &StructuredOutput{
 					Summary: "Changes needed.",
 					Conclusion: &StructuredConclusion{
@@ -45,24 +46,28 @@ func TestRunExecutionCycleTransfersContextBetweenSteps(t *testing.T) {
 					Name:    "execution",
 					Profile: "coder",
 					Transitions: []model.CycleTransition{
-						{Next: "review", NotIn: []string{"ok", "approve", "approved"}},
+						{To: "review", NotIn: []string{"ok", "approve", "approved"}},
+						{To: "review", Missing: true},
 					},
 				},
 				{
 					Name:    "review",
 					Profile: "review",
-					InputTransform: model.CycleInputTransform{
-						TaskOnRepeat: "Повторно проверить после доработки.",
-					},
 					Transitions: []model.CycleTransition{
-						{Next: "implementation", NotIn: []string{"ok", "approve", "approved"}},
+						{Finish: "completed", In: []string{"ok", "approve", "approved"}},
+						{To: "implementation", NotIn: []string{"ok", "approve", "approved"}},
+						{To: "implementation", Missing: true},
 					},
 				},
 				{
 					Name:    "implementation",
 					Profile: "coder",
+					InputTransform: model.CycleInputTransform{
+						TaskOnRepeat: "Повторно проверить после доработки.",
+					},
 					Transitions: []model.CycleTransition{
-						{Next: "review", NotIn: []string{"ok", "approve", "approved"}},
+						{To: "review", NotIn: []string{"ok", "approve", "approved"}},
+						{To: "review", Missing: true},
 					},
 				},
 			},
@@ -104,7 +109,7 @@ func TestRunExecutionCycleTransfersContextBetweenSteps(t *testing.T) {
 	if len(reviewInput.ReviewRemarks) != 1 || reviewInput.ReviewRemarks[0].ID != "r1" {
 		t.Fatalf("implementation input must receive review remarks: %#v", reviewInput.ReviewRemarks)
 	}
-	if len(reviewInput.PreviousRunResults) == 0 || !strings.Contains(reviewInput.PreviousRunResults[len(reviewInput.PreviousRunResults)-1].Body, "Сборка выполнена.") {
+	if len(reviewInput.PreviousRunResults) == 0 || !strings.Contains(reviewInput.PreviousRunResults[len(reviewInput.PreviousRunResults)-1].Body, "Ревизия выявила замечания.") {
 		t.Fatalf("implementation input must include previous run result: %#v", reviewInput.PreviousRunResults)
 	}
 }
@@ -128,7 +133,7 @@ func TestRunExecutionCycleStopsAtLimit(t *testing.T) {
 					Name:    "review",
 					Profile: "review",
 					Transitions: []model.CycleTransition{
-						{Next: "review", In: []string{"needs-work"}},
+						{To: "review", In: []string{"needs-work"}},
 					},
 				},
 			},
@@ -181,7 +186,7 @@ func TestRunExecutionCycleRejectsUnknownCycleAndTransition(t *testing.T) {
 					Name:    "a",
 					Profile: "coder",
 					Transitions: []model.CycleTransition{
-						{Next: "a", In: []string{"ok"}},
+						{To: "a", In: []string{"ok"}},
 					},
 				},
 			},
@@ -191,7 +196,7 @@ func TestRunExecutionCycleRejectsUnknownCycleAndTransition(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid transition error")
 	}
-	if !strings.Contains(err.Error(), "step a has no valid transition") {
+	if !strings.Contains(err.Error(), `step "a" has no valid transition`) {
 		t.Fatalf("unexpected transition error: %v", err)
 	}
 }

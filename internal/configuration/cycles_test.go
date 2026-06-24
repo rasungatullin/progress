@@ -2,6 +2,7 @@ package configuration
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -20,12 +21,12 @@ func TestLoadExecutionCycleConfigLoadsAndValidatesConfig(t *testing.T) {
 							{
 								"name": "implementation",
 								"profile": "coder",
-								"transitions": [{"not_in": ["ok", "approve", "approved"], "next": "review"}]
+								"transitions": [{"not_in": ["ok", "approve", "approved"], "to": "review"}]
 							},
 							{
 								"name": "review",
 								"profile": "review",
-								"transitions": [{"not_in": ["ok", "approve", "approved"], "next": "implementation"}]
+								"transitions": [{"not_in": ["ok", "approve", "approved"], "to": "implementation"}]
 							}
 						]
 					}
@@ -53,7 +54,7 @@ func TestLoadExecutionCycleConfigFailsWhenFileMissing(t *testing.T) {
 	t.Parallel()
 
 	_, err := LoadExecutionCycleConfig("/repo", func(string) ([]byte, error) {
-		return nil, errors.New("not found")
+		return nil, os.ErrNotExist
 	})
 	if err == nil {
 		t.Fatal("expected missing config error")
@@ -74,7 +75,7 @@ func TestLoadExecutionCycleConfigFailsWhenDefinitionHasInvalidTransition(t *test
 						"start_step": "a",
 						"limits": {"max_executions": 3},
 						"steps": [
-							{"name":"a","profile":"coder","transitions":[{"next":"missing","in":["ok"]}]}
+							{"name":"a","profile":"coder","transitions":[{"to":"missing","in":["ok"]}]}
 						]
 					}
 				}
@@ -87,7 +88,7 @@ func TestLoadExecutionCycleConfigFailsWhenDefinitionHasInvalidTransition(t *test
 	if err == nil {
 		t.Fatal("expected invalid transition error")
 	}
-	if !strings.Contains(err.Error(), `has transition to unknown next step "missing"`) {
+	if !strings.Contains(err.Error(), `has transition to unknown step "missing"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

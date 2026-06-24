@@ -279,8 +279,6 @@ func TestExecutionReviewCycleHelpIncludesCycleFlags(t *testing.T) {
 }
 
 func TestExecutionCycleCommandRunsDynamicCycleFromConfig(t *testing.T) {
-	t.Parallel()
-
 	root := t.TempDir()
 	cyclesPath := filepath.Join(root, ".progress", "execution")
 	if err := os.MkdirAll(cyclesPath, 0o755); err != nil {
@@ -295,18 +293,18 @@ func TestExecutionCycleCommandRunsDynamicCycleFromConfig(t *testing.T) {
 					{
 						"name": "execution",
 						"profile": "coder",
-						"transitions": [{"in": ["ok", "approve", "approved"], "next": ""}, {"not_in": ["ok", "approve", "approved"], "next": "review"}]
+						"transitions": [{"in": ["ok", "approve", "approved"], "to": "review"}, {"not_in": ["ok", "approve", "approved"], "to": "review"}, {"missing": true, "to": "review"}]
 					},
 					{
 						"name": "review",
 						"profile": "review",
-						"transitions": [{"in": ["ok", "approve", "approved"], "next": ""}, {"not_in": ["ok", "approve", "approved"], "next": "implementation"}]
+						"transitions": [{"in": ["ok", "approve", "approved"], "finish": "completed"}, {"not_in": ["ok", "approve", "approved"], "to": "implementation"}, {"missing": true, "to": "implementation"}]
 					},
 					{
 						"name": "implementation",
 						"profile": "coder",
 						"input_transform": {"task_on_repeat": "Повторить доработку по замечаниям ревью."},
-						"transitions": [{"in": ["ok", "approve", "approved"], "next": "review"}, {"not_in": ["ok", "approve", "approved"], "next": "review"}]
+						"transitions": [{"in": ["ok", "approve", "approved"], "to": "review"}, {"not_in": ["ok", "approve", "approved"], "to": "review"}, {"missing": true, "to": "review"}]
 					}
 				]
 			}

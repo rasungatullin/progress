@@ -87,11 +87,17 @@ func validateCycleDefinition(cycleName string, definition model.CycleDefinition)
 			continue
 		}
 		for _, transition := range step.Transitions {
-			next := strings.TrimSpace(transition.Next)
+			to := strings.TrimSpace(transition.To)
+			finish := strings.TrimSpace(transition.Finish)
+			hasTo := to != ""
+			hasFinish := finish != ""
+			if hasTo == hasFinish {
+				return fmt.Errorf("step %q transition must define exactly one target action: to or finish", name)
+			}
 			hasIn := len(transition.In) != 0
 			hasNotIn := len(transition.NotIn) != 0
 			if !hasIn && !hasNotIn && !transition.Missing {
-				return fmt.Errorf("step %q transition next=%q must define at least one matcher", name, next)
+				return fmt.Errorf("step %q transition must define at least one matcher", name)
 			}
 		}
 	}
@@ -102,12 +108,12 @@ func validateCycleDefinition(cycleName string, definition model.CycleDefinition)
 
 	for _, step := range definition.Steps {
 		for _, transition := range step.Transitions {
-			next := strings.TrimSpace(transition.Next)
-			if next == "" {
+			to := strings.TrimSpace(transition.To)
+			if to == "" {
 				continue
 			}
-			if _, ok := stepMap[next]; !ok {
-				return fmt.Errorf("step %q has transition to unknown next step %q", step.Name, next)
+			if _, ok := stepMap[to]; !ok {
+				return fmt.Errorf("step %q has transition to unknown step %q", step.Name, to)
 			}
 		}
 	}

@@ -62,7 +62,6 @@ func RunExecutionCycle(ctx context.Context, starter cycleStarter, config model.C
 	attempts := make([]string, 0, maxExecutions)
 	var lastResult LaunchResult
 	var lastStep model.CycleStep
-	var taskOnRepeat string
 	var err error
 
 	for attempt := 1; attempt <= maxExecutions; attempt++ {
@@ -73,6 +72,10 @@ func RunExecutionCycle(ctx context.Context, starter cycleStarter, config model.C
 			return failedExecutionCycleResult("failed", cycleName, maxExecutions, attempts, lastResult, err), err
 		}
 
+		taskOnRepeat := ""
+		if attempt > 1 {
+			taskOnRepeat = strings.TrimSpace(step.InputTransform.TaskOnRepeat)
+		}
 		input := buildCycleInvocationInput(originalInput, originalTask, taskOnRepeat, lastResult, lastStep)
 		execution := in
 		execution.Profile = step.Profile
@@ -83,7 +86,7 @@ func RunExecutionCycle(ctx context.Context, starter cycleStarter, config model.C
 		lastStep = step
 		conclusion := reviewConclusionStatus(result)
 		conclusion = strings.TrimSpace(strings.ToLower(conclusion))
-		nextStep := strings.TrimSpace(nextCycleStep(step, conclusion))
+		transition, hasTransition := selectCycleTransition(step, conclusion)
 		attempts = append(attempts, cycleAttemptSummary(attempt, currentStepName, result, conclusion))
 
 		if invokeErr != nil {
@@ -91,19 +94,24 @@ func RunExecutionCycle(ctx context.Context, starter cycleStarter, config model.C
 			return failedExecutionCycleResult("failed", cycleName, maxExecutions, attempts, result, invokeErr), invokeErr
 		}
 
-		if nextStep == "" {
+		if !hasTransition {
+			err = fmt.Errorf("step %q has no valid transition for conclusion status %q", currentStepName, conclusionOrMissing(conclusion))
+			updateExecutionCycleAggregate(ctx, root, historyHandle, in, failedExecutionCycleResult("failed", cycleName, maxExecutions, attempts, result, err), err)
+			return failedExecutionCycleResult("failed", cycleName, maxExecutions, attempts, result, err), err
+		}
+		if strings.TrimSpace(transition.Finish) != "" {
 			result = completedExecutionCycleResult(cycleName, maxExecutions, attempts, result)
 			updateExecutionCycleAggregate(ctx, root, historyHandle, in, result, nil)
 			return result, nil
 		}
-		if !stepTransitionExists(step, conclusion) {
-			err = fmt.Errorf("step %q has no valid transition for conclusion status %q", currentStepName, conclusionOrMissing(conclusion))
+		nextStep := strings.TrimSpace(transition.To)
+		if nextStep == "" {
+			err = fmt.Errorf("step %q transition has empty target step", currentStepName)
 			updateExecutionCycleAggregate(ctx, root, historyHandle, in, failedExecutionCycleResult("failed", cycleName, maxExecutions, attempts, result, err), err)
 			return failedExecutionCycleResult("failed", cycleName, maxExecutions, attempts, result, err), err
 		}
 
 		currentStepName = nextStep
-		taskOnRepeat = strings.TrimSpace(step.InputTransform.TaskOnRepeat)
 	}
 
 	result := failedExecutionCycleResult("limit-reached", cycleName, maxExecutions, attempts, lastResult, nil)
@@ -185,22 +193,13 @@ func buildCycleInvocationInput(baseInput *StructuredInput, originalTask, taskOnR
 	return input
 }
 
-func nextCycleStep(step model.CycleStep, conclusion string) string {
+func selectCycleTransition(step model.CycleStep, conclusion string) (model.CycleTransition, bool) {
 	for _, transition := range step.Transitions {
 		if matchesCycleTransition(transition, conclusion) {
-			return transition.Next
+			return transition, true
 		}
 	}
-	return ""
-}
-
-func stepTransitionExists(step model.CycleStep, conclusion string) bool {
-	for _, transition := range step.Transitions {
-		if matchesCycleTransition(transition, conclusion) {
-			return true
-		}
-	}
-	return false
+	return model.CycleTransition{}, false
 }
 
 func matchesCycleTransition(transition model.CycleTransition, conclusion string) bool {

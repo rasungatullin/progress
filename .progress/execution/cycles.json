@@ -14,13 +14,16 @@
           },
           "transitions": [
             {
-              "next": "review",
-              "in": ["ok", "approve", "approved"],
-              "not_in": []
+              "to": "review",
+              "in": ["ok", "approve", "approved"]
             },
             {
-              "next": "review",
+              "to": "review",
               "not_in": ["ok", "approve", "approved"]
+            },
+            {
+              "to": "review",
+              "missing": true
             }
           ]
         },
@@ -29,12 +32,16 @@
           "profile": "review",
           "transitions": [
             {
-              "next": "",
+              "finish": "completed",
               "in": ["ok", "approve", "approved"]
             },
             {
-              "next": "implementation",
+              "to": "implementation",
               "not_in": ["ok", "approve", "approved"]
+            },
+            {
+              "to": "implementation",
+              "missing": true
             }
           ]
         },
@@ -46,50 +53,45 @@
           },
           "transitions": [
             {
-              "next": "review",
+              "to": "review",
               "not_in": ["ok", "approve", "approved"]
             },
             {
-              "next": "review",
+              "to": "review",
               "in": ["ok", "approve", "approved"]
+            },
+            {
+              "to": "review",
+              "missing": true
             }
           ]
         }
       ]
     },
     "ralph-loop": {
-      "start_step": "analysis",
+      "start_step": "execute",
       "limits": {
         "max_executions": 4
       },
       "steps": [
         {
-          "name": "analysis",
-          "profile": "review",
-          "input_transform": {
-            "task_on_repeat": "Повторить анализ требований."
-          },
-          "transitions": [
-            {
-              "next": "implementation",
-              "not_in": ["ok", "approve", "approved"]
-            }
-          ]
-        },
-        {
-          "name": "implementation",
+          "name": "execute",
           "profile": "coder",
           "input_transform": {
-            "task_on_repeat": "Доработать и повторить цикл RALPH."
+            "task_on_repeat": "Продолжить исполнение: устранить оставшиеся проблемы и вернуть точное заключение о готовности."
           },
           "transitions": [
             {
-              "next": "analysis",
-              "not_in": ["ok", "approve", "approved"]
+              "finish": "completed",
+              "in": ["ok", "ready", "completed", "verified"]
             },
             {
-              "next": "analysis",
-              "in": ["ok", "approve", "approved"]
+              "to": "execute",
+              "not_in": ["ok", "ready", "completed", "verified"]
+            },
+            {
+              "to": "execute",
+              "missing": true
             }
           ]
         }
