@@ -201,6 +201,53 @@ func TestRunExecutionCycleRejectsUnknownCycleAndTransition(t *testing.T) {
 	}
 }
 
+func TestRunExecutionCycleImplicitlyFinishesWhenStepHasNoTransitions(t *testing.T) {
+	t.Parallel()
+
+	starter := &cycleStarterStub{
+		results: []LaunchResult{
+			{
+				Status:  "completed",
+				Summary: "done",
+				StructuredOutput: &StructuredOutput{
+					Conclusion: &StructuredConclusion{Status: "needs-work"},
+				},
+			},
+		},
+	}
+
+	config := model.CycleConfig{Cycles: map[string]model.CycleDefinition{
+		"implicit-finish": {
+			StartStep: "a",
+			Steps: []model.CycleStep{
+				{
+					Name:    "a",
+					Profile: "coder",
+				},
+			},
+		},
+	}}
+
+	result, err := RunExecutionCycle(context.Background(), starter, config, "implicit-finish", Invocation{
+		Launch: LaunchSpec{
+			Directory:       "/tmp",
+			StructuredInput: &StructuredInput{Task: "task"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run execution cycle: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected completed status, got %#v", result)
+	}
+	if !strings.Contains(result.Summary, "marker=implicit-finish/no-transitions") {
+		t.Fatalf("expected implicit finish marker in summary: %q", result.Summary)
+	}
+	if len(starter.calls) != 1 {
+		t.Fatalf("expected single execution call, got %d", len(starter.calls))
+	}
+}
+
 type cycleStarterStub struct {
 	calls   []Invocation
 	results []LaunchResult

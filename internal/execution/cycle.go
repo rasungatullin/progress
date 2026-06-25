@@ -86,13 +86,22 @@ func RunExecutionCycle(ctx context.Context, starter cycleStarter, config model.C
 		lastStep = step
 		conclusion := reviewConclusionStatus(result)
 		conclusion = strings.TrimSpace(strings.ToLower(conclusion))
-		transition, hasTransition := selectCycleTransition(step, conclusion)
-		attempts = append(attempts, cycleAttemptSummary(attempt, currentStepName, result, conclusion))
+		attemptSummary := cycleAttemptSummary(attempt, currentStepName, result, conclusion)
+		attempts = append(attempts, attemptSummary)
 
 		if invokeErr != nil {
 			updateExecutionCycleAggregate(ctx, root, historyHandle, in, failedExecutionCycleResult("failed", cycleName, maxExecutions, attempts, result, invokeErr), invokeErr)
 			return failedExecutionCycleResult("failed", cycleName, maxExecutions, attempts, result, invokeErr), invokeErr
 		}
+
+		if len(step.Transitions) == 0 {
+			attempts[len(attempts)-1] = joinReviewCycleParts(attemptSummary, "marker=implicit-finish/no-transitions")
+			result := completedExecutionCycleResult(cycleName, maxExecutions, attempts, result)
+			updateExecutionCycleAggregate(ctx, root, historyHandle, in, result, nil)
+			return result, nil
+		}
+
+		transition, hasTransition := selectCycleTransition(step, conclusion)
 
 		if !hasTransition {
 			err = fmt.Errorf("step %q has no valid transition for conclusion status %q", currentStepName, conclusionOrMissing(conclusion))
