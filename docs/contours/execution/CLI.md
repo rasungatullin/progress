@@ -37,6 +37,8 @@ CLI рассматривается как основной ручной инте
 
 В текущей реализации команда дополнительно поддерживает `--repo`. Если флаг не передан, подготовка рабочего места идёт относительно текущего git-репозитория процесса. Если `--repo` передан, контур нормализует краткую форму GitHub `owner/name` или clone URL, материализует локальный кэш в `.progress/repositories/<repo-key>` текущего проекта, затем создаёт `worktree` в `.progress/workplaces/<repo-key>/<name>` и продолжает обычный маршрут `origin/HEAD -> git fetch -> git worktree add` уже для целевого репозитория.
 
+Идентификатор сеанса исполнительного модуля (`runner_session_id`) сохраняется в записи запуска в SQLite при наличии: для `opencode` — через служебный блок `progress-runner-metadata`, для `codex` — из события `thread.started.thread_id` JSON-выхода `codex exec --json`.
+
 Постановка задачи и контекст полного маршрута задаются через структурированный ввод, а не через сырую директиву. Поддерживаются `--input-file`, `--task`, повторяемый `--constraint` и повторяемые JSON-object флаги для объектных секций: `--project-context`, `--operational-context`, `--previous-run-result`, `--review-remark`, `--review-response`, `--integration-action`. Если передан `--input-file`, значения из файла загружаются первыми; затем scalar-флаги перезаписывают соответствующие поля, а repeated-флаги добавляют элементы к массивам.
 
 ### 3.2 `progress execution review-cycle`
@@ -92,6 +94,8 @@ progress execution review-cycle \
 - `opencode`: `opencode run --dir <dir> --model <model> --session <SESSION_ID> <prompt>`.
 
 Если исполнительный модуль не поддерживает сохранённые сеансы или у родительского запуска отсутствует внешний идентификатор сеанса, команда завершается диагностируемым состоянием `resume-unsupported` и не подменяет возобновление повторной передачей полного контекста.
+
+Для `codex` идентификатор сессии берётся только из `thread.started.thread_id` и считается источником только для этой ветки адаптера.
 
 Пример:
 

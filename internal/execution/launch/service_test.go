@@ -272,6 +272,60 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 	}
 }
 
+func TestLaunchCommitPushFailureKeepsRunnerSessionID(t *testing.T) {
+	t.Parallel()
+
+	worktree := tempDir(t)
+	invocation := validInvocation(t, true)
+	invocation.Launch.Directory = worktree
+	workplace := model.Workplace{Name: worktree, Ready: true}
+
+	service := NewService()
+	service.runRunner = func(context.Context, model.Invocation) (string, error) {
+		return appendTrailingRunnerMetadata(strings.Join([]string{
+			"runner output",
+			structuredOutputStart,
+			`{"summary":"Done.","commit_message":"Ship result"}`,
+			structuredOutputEnd,
+		}, "\n"), runnerMetadata{RunnerSessionID: "session-commit-failure"}), nil
+	}
+	service.runGitOutput = func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse --is-inside-work-tree":
+			return "true\n", nil
+		case "branch --show-current":
+			return "feature/test\n", nil
+		case "status --porcelain":
+			return " M file.txt\n", nil
+		case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			return "", fmt.Errorf("git add failed")
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err == nil {
+		t.Fatal("expected commit-push failure")
+	}
+	if result.RunnerSessionID != "session-commit-failure" {
+		t.Fatalf("runner session id must survive commit-push failure: %#v", result)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.RunnerSessionID != "session-commit-failure" {
+		t.Fatalf("run record must keep runner session id: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "session-commit-failure" {
+		t.Fatalf("sqlite history must keep runner session id: %#v", runs)
+	}
+}
+
 func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 	t.Parallel()
 
@@ -820,6 +874,145 @@ func TestLaunchPersistsRunnerSessionID(t *testing.T) {
 	}
 	if strings.Contains(string(rawOutput), runnerMetadataStart) {
 		t.Fatalf("raw output must not expose runner metadata block: %q", string(rawOutput))
+	}
+}
+
+func TestNormalizeCodexJSONOutputExtractsThreadStartedSessionID(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`{"type":"thread.started","thread_id":"thread-42"}`,
+		`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
+		`{"type":"assistant_message","item":{"type":"agent_message","text":"Ignored."}}`,
+		`summary line`,
+	}, "\n")
+
+	plain, sessionID := normalizeCodexJSONOutput(output)
+	if strings.TrimSpace(sessionID) != "thread-42" {
+		t.Fatalf("unexpected session id: %q", sessionID)
+	}
+	if strings.TrimSpace(plain) != "summary line\nDone." {
+		t.Fatalf("unexpected plain output: %q", plain)
+	}
+}
+
+func TestNormalizeCodexJSONOutputReturnsPlainForMissingThreadSession(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
+		`summary line`,
+	}, "\n")
+
+	plain, sessionID := normalizeCodexJSONOutput(output)
+	if strings.TrimSpace(sessionID) != "" {
+		t.Fatalf("unexpected session id: %q", sessionID)
+	}
+	if strings.TrimSpace(plain) != "summary line\nDone." {
+		t.Fatalf("unexpected plain output: %q", plain)
+	}
+}
+
+func TestLaunchPersistsCodexRunnerSessionIDFromRunnerMetadata(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return appendTrailingRunnerMetadata(strings.Join([]string{
+				`{"type":"thread.started","thread_id":"thread-codex-42"}`,
+				`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
+			}, "\n"), runnerMetadata{RunnerSessionID: "thread-codex-42"}), nil
+		},
+		extractSessionID: extractRunnerSessionID,
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "thread-codex-42" {
+		t.Fatalf("unexpected runner session id: %#v", result)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.RunnerSessionID != "thread-codex-42" {
+		t.Fatalf("run record must keep runner session id: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "thread-codex-42" {
+		t.Fatalf("sqlite history must keep runner session id: %#v", runs)
+	}
+}
+
+func TestLaunchPrefersRunnerMetadataOverCodexTextJSON(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return appendTrailingRunnerMetadata(strings.Join([]string{
+				`{"type":"thread.started","thread_id":"payload-thread"}`,
+				structuredOutputStart,
+				`{"summary":"Done."}`,
+				structuredOutputEnd,
+			}, "\n"), runnerMetadata{RunnerSessionID: "adapter-thread"}), nil
+		},
+		extractSessionID: extractRunnerSessionID,
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "adapter-thread" {
+		t.Fatalf("runner metadata must win over text JSON: %#v", result)
+	}
+}
+
+func TestLaunchOmitsCodexRunnerSessionIDWhenNotProvidedByAdapter(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				`{"type":"thread.started","thread_id":"fake-session-42"}`,
+				`{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}`,
+				`{"type":"assistant_message","item":{"type":"agent_message","text":"Ignored."}}`,
+			}, "\n"), nil
+		},
+		extractSessionID: extractRunnerSessionID,
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	workplace := validWorkplace(t)
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if result.RunnerSessionID != "" {
+		t.Fatalf("missing adapter session id must stay empty: %#v", result)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.RunnerSessionID != "" {
+		t.Fatalf("run record must not store fake runner session id: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunnerSessionID != "" {
+		t.Fatalf("sqlite history must not keep fake runner session id: %#v", runs)
 	}
 }
 

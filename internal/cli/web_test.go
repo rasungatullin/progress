@@ -141,6 +141,7 @@ func TestWebHandlersServeExecutionRuns(t *testing.T) {
 		ProfileName:         "default",
 		Runner:              "opencode",
 		Model:               "openai/gpt-5.4",
+		RunnerSessionID:     "session-1",
 		LaunchDirectory:     root,
 		RawOutputPath:       rawPath,
 		RawStructuredOutput: `{"summary":"ok"}`,
@@ -168,6 +169,9 @@ func TestWebHandlersServeExecutionRuns(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(runs))
 	}
+	if runs[0].RunnerSessionID != "session-1" {
+		t.Fatalf("unexpected run session id: %#v", runs)
+	}
 
 	runID := runs[0].ID
 	request = httptest.NewRequest(http.MethodGet, "/api/runs/"+strconv.FormatInt(runID, 10), nil)
@@ -178,10 +182,14 @@ func TestWebHandlersServeExecutionRuns(t *testing.T) {
 	}
 
 	var details struct {
+		history.ListedRun
 		RunRecord string `json:"run_record"`
 	}
 	if err := json.NewDecoder(bytes.NewReader(w.Body.Bytes())).Decode(&details); err != nil {
 		t.Fatalf("decode run details: %v", err)
+	}
+	if details.RunnerSessionID != "session-1" {
+		t.Fatalf("unexpected run detail session id: %#v", details)
 	}
 	if details.RunRecord != "{\"x\":1}" {
 		t.Fatalf("unexpected run record: %q", details.RunRecord)
@@ -237,6 +245,61 @@ func TestWebHandlerServesSidebarNavigationShell(t *testing.T) {
 		if strings.Contains(body, oldHeading) {
 			t.Fatalf("index page still exposes old raw JSON heading %q", oldHeading)
 		}
+	}
+}
+
+func TestWebHandlerOmitRunnerSessionIDWhenUnknown(t *testing.T) {
+	root := t.TempDir()
+
+	handler, err := newWebHandler(root)
+	if err != nil {
+		t.Fatalf("new web handler: %v", err)
+	}
+
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:       "2026-06-10T10:00:00Z",
+		Status:          "completed",
+		Summary:         "done",
+		Name:            "task-2",
+		ProfileName:     "default",
+		Runner:          "opencode",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: root,
+	}); err != nil {
+		t.Fatalf("store run: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("runs endpoint status: %d", w.Code)
+	}
+
+	var runs []map[string]json.RawMessage
+	if err := json.NewDecoder(bytes.NewReader(w.Body.Bytes())).Decode(&runs); err != nil {
+		t.Fatalf("decode runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	if _, ok := runs[0]["runner_session_id"]; ok {
+		t.Fatalf("runner_session_id must be omitted when unknown: %#v", runs[0])
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/runs/1", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusOK {
+		t.Fatalf("run detail endpoint status: %d", w.Code)
+	}
+
+	var details map[string]json.RawMessage
+	if err := json.NewDecoder(bytes.NewReader(w.Body.Bytes())).Decode(&details); err != nil {
+		t.Fatalf("decode run details: %v", err)
+	}
+	if _, ok := details["runner_session_id"]; ok {
+		t.Fatalf("run detail should not include runner_session_id when unknown: %#v", details)
 	}
 }
 

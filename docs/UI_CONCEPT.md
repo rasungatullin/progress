@@ -252,7 +252,7 @@ created_at
 
 Путь к самой записи запуска не хранится внутри JSON-записи `runRecord`. Его следует брать из контекста открытия страницы: из `ListedRun.run_record_path`, полученного через SQLite-историю и API `/api/runs/{id}`, либо из `LaunchResult.RunRecordPath` в момент завершения запуска. Если страница открыта прямым чтением JSON-файла без такого контекста, действие открытия `run_record_path` должно быть недоступно или должно использовать путь текущего открытого файла как внешний параметр, а не поле записи.
 
-Если запись открыта из SQLite-истории, дополнительные сведения можно брать из `ListedRun`: `id`, `created_at`, `status`, `summary`, `name`, `profile_name`, `runner`, `model`, `launch_directory`, `raw_structured_input`, `raw_output_path`, `raw_structured_output`, `run_record_path`, `error`.
+Если запись открыта из SQLite-истории, дополнительные сведения можно брать из `ListedRun`: `id`, `created_at`, `status`, `summary`, `name`, `profile_name`, `runner`, `runner_session_id`, `model`, `launch_directory`, `raw_structured_input`, `raw_output_path`, `raw_structured_output`, `run_record_path`, `error`.
 
 Страница не должна вводить вычисляемые показатели, которых сейчас нет в модели: стоимость, токены, длительность по стадиям, количество файлов, оценка качества или иные агрегаты без отдельного источника данных.
 
@@ -311,6 +311,7 @@ created_at
 - `launch.runner`;
 - `launch.model`;
 - `launch.model_binding`;
+- `runner_session_id` (если известен для данного запуска);
 - `launch.prompt`;
 - `launch.prompt_additions`;
 - `launch.structured_output`;
