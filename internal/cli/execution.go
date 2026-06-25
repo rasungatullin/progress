@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/rasungatullin/progress/internal/configuration"
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
@@ -26,6 +28,7 @@ type launchFlags struct {
 	executionProfile         string
 	reviewProfile            string
 	maxExecutions            int
+	cycle                    string
 	inputFile                string
 	task                     string
 	constraints              []string
@@ -98,6 +101,7 @@ func newExecutionCommand() *cobra.Command {
 	cmd.AddCommand(
 		newExecutionStartCommand(),
 		newExecutionReviewCycleCommand(),
+		newExecutionCycleCommand(),
 		newExecutionResumeCommand(),
 		newExecutionDispatcherCommand(),
 		newExecutionProfileCommand(),
@@ -201,6 +205,43 @@ func newExecutionReviewCycleCommand() *cobra.Command {
 	}
 
 	bindReviewCycleFlags(cmd, flags)
+	return cmd
+}
+
+func newExecutionCycleCommand() *cobra.Command {
+	flags := newStartFlags()
+
+	cmd := &cobra.Command{
+		Use:   "cycle",
+		Short: "Цикл исполнения по конфигурации",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			service := newExecutionService(cmd)
+			in, err := invocationFromStructuredFlags(flags)
+			if err != nil {
+				return err
+			}
+
+			repoRoot, err := executionCycleRepositoryRoot()
+			if err != nil {
+				return err
+			}
+			cycleConfig, err := configuration.LoadExecutionCycleConfig(repoRoot, nil)
+			if err != nil {
+				return err
+			}
+
+			result, err := execution.RunExecutionCycle(context.Background(), service, cycleConfig, flags.cycle, in)
+			if err != nil {
+				printLaunchResultOnError(cmd, result)
+				return err
+			}
+
+			printLaunchResult(cmd, result)
+			return nil
+		},
+	}
+
+	bindCycleFlags(cmd, flags)
 	return cmd
 }
 
@@ -425,6 +466,12 @@ func bindReviewCycleFlags(cmd *cobra.Command, flags *launchFlags) {
 	_ = cmd.MarkFlagRequired("review-profile")
 }
 
+func bindCycleFlags(cmd *cobra.Command, flags *launchFlags) {
+	bindStartFlags(cmd, flags)
+	cmd.Flags().StringVar(&flags.cycle, "cycle", "", "Имя цикла")
+	_ = cmd.MarkFlagRequired("cycle")
+}
+
 func bindResumeFlags(cmd *cobra.Command, flags *resumeFlags) {
 	cmd.Flags().StringVar(&flags.run, "run", "", "Исходный запуск: числовой id или latest")
 	cmd.Flags().StringVar(&flags.message, "message", "", "Дополнительное сообщение для возобновления")
@@ -617,6 +664,19 @@ func appendStructuredJSONObjects[T any](values []string, flagName string, target
 	}
 
 	return nil
+}
+
+func executionCycleRepositoryRoot() (string, error) {
+	output, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
+	if err != nil {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return "", fmt.Errorf("resolve git repository root for execution cycle: %w", err)
+		}
+		return cwd, nil
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }
 
 func decodeStrictJSON(content []byte, target any) error {
