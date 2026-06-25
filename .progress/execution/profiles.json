@@ -27,7 +27,7 @@
       "description": "Профиль кодера с binding для реализации и обязательным commit/push",
       "model-binding": "coder",
       "structured-output": true,
-      "structured-output-fields": ["commit_message", "changes", "remarks", "commands"],
+      "structured-output-fields": ["commit_message", "changes", "remarks", "commands", "conclusion"],
       "commit-push": true
     },
     "review": {
