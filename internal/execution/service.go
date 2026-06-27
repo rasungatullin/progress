@@ -220,9 +220,23 @@ func (s *Service) prepareResume(ctx context.Context, req ResumeRequest) (Invocat
 		},
 	}
 
-	allocation := Allocation{Resource: "resume-parent-run", Reserved: true, Runner: parent.Runner, Model: parent.Model, Source: "resume-parent-run"}
+	allocation := s.resolveResumeAllocation(ctx, invocation, profile)
 	workplace := Workplace{Name: parent.LaunchDirectory, Ready: true}
 	return invocation, parent, profile, allocation, workplace, historyRoot, nil
+}
+
+func (s *Service) resolveResumeAllocation(ctx context.Context, invocation Invocation, profile Profile) Allocation {
+	if s.resources != nil {
+		allocation, err := s.resources.Allocate(ctx, invocation, profile)
+		if err == nil {
+			allocation.Resource = "resume-parent-run"
+			allocation.Source = "resume-parent-run"
+			allocation.Reserved = true
+			return allocation
+		}
+	}
+
+	return Allocation{Resource: "resume-parent-run", Reserved: true, Runner: invocation.Launch.Runner, Model: invocation.Launch.Model, Source: "resume-parent-run"}
 }
 
 func (s *Service) ResolveProfile(ctx context.Context, in Invocation) (Profile, error) {

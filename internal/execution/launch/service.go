@@ -1172,7 +1172,11 @@ func persistRunnerInput(workplaceDir, prompt string) (string, error) {
 		return "", fmt.Errorf("write runner input file: %w", err)
 	}
 
-	return file.Name(), nil
+	absolutePath, err := filepath.Abs(file.Name())
+	if err != nil {
+		return "", fmt.Errorf("resolve runner input file path: %w", err)
+	}
+	return absolutePath, nil
 }
 
 func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt string) (*exec.Cmd, error) {
@@ -1227,10 +1231,14 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 
 func runnerCommand(spec model.LaunchSpec) string {
 	config := resolveRunnerConfig(spec)
-	if config.Type == "script" {
+	switch config.Type {
+	case RunnerCodex, RunnerOpenCode:
+		return config.Type
+	case "script":
 		return strings.TrimSpace(config.Script)
+	default:
+		return strings.TrimSpace(spec.Runner)
 	}
-	return strings.TrimSpace(spec.Runner)
 }
 
 func resolveRunnerConfig(spec model.LaunchSpec) model.RunnerConfig {

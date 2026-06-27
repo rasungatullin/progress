@@ -827,6 +827,22 @@ func TestBuildRunnerCommandUsesCodexSandboxSetting(t *testing.T) {
 	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "--config", "sandbox_mode=workspace-write", "ship it"})
 }
 
+func TestBuildRunnerCommandUsesBuiltinTypeAsCommand(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory:    "/tmp/work",
+		Runner:       "fast",
+		RunnerConfig: model.RunnerConfig{Type: RunnerCodex},
+		Model:        "openai/gpt-5.4",
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "ship it"})
+}
+
 func TestBuildRunnerCommandScript(t *testing.T) {
 	t.Parallel()
 
@@ -915,6 +931,51 @@ cat "$PROGRESS_RUNNER_PROMPT_FILE"
 	}
 	if _, err := os.Stat(filepath.Join(workDir, ".progress", "runner-input")); err != nil {
 		t.Fatalf("runner input directory must exist: %v", err)
+	}
+}
+
+func TestRunRunnerScriptUsesPromptFileWithRelativeLaunchDirectory(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	workDir := "work"
+	toolsDir := filepath.Join(workDir, "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatalf("create tools dir: %v", err)
+	}
+	scriptPath := filepath.Join(toolsDir, "pi.sh")
+	script := `#!/bin/sh
+cat "$PROGRESS_RUNNER_PROMPT_FILE"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	output, err := runRunner(context.Background(), model.Invocation{
+		Launch: model.LaunchSpec{
+			Directory:    workDir,
+			Runner:       "pi",
+			RunnerConfig: model.RunnerConfig{Type: "script", Script: "./tools/pi.sh"},
+			Model:        "pi/default",
+			Prompt:       "ship it",
+		},
+	})
+	if err != nil {
+		t.Fatalf("run runner: %v", err)
+	}
+	if strings.TrimSpace(output) != "ship it" {
+		t.Fatalf("script must read prompt through usable file path, got %q", output)
 	}
 }
 
