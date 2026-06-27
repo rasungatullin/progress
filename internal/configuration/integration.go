@@ -42,7 +42,11 @@ func LoadIntegrationConfigWithHome(repoRoot, configHome string, readFile ReadFil
 
 	globalPath := ""
 	useGlobalLayer := globalHomeErr == nil
-	localPath := filepath.Join(repoRoot, integrationLocalFilePath)
+	localPath := ""
+	useLocalLayer := strings.TrimSpace(repoRoot) != ""
+	if useLocalLayer {
+		localPath = filepath.Join(repoRoot, integrationLocalFilePath)
+	}
 
 	if useGlobalLayer {
 		globalPath = filepath.Join(home, integrationConfigPath)
@@ -58,17 +62,25 @@ func LoadIntegrationConfigWithHome(repoRoot, configHome string, readFile ReadFil
 		}
 	}
 
-	if config, err := readIntegrationLayer(localPath, ConfigFileSourceLocal, readFile); err == nil {
-		layers = append(layers, config)
-	} else if !isNotExistErr(err) {
-		return IntegrationConfig{}, err
+	if useLocalLayer {
+		if config, err := readIntegrationLayer(localPath, ConfigFileSourceLocal, readFile); err == nil {
+			layers = append(layers, config)
+		} else if !isNotExistErr(err) {
+			return IntegrationConfig{}, err
+		}
 	}
 
 	if len(layers) == 0 {
-		if useGlobalLayer {
+		if useGlobalLayer && useLocalLayer {
 			return IntegrationConfig{}, fmt.Errorf("integration config not found: global=%s local=%s", globalPath, localPath)
 		}
-		return IntegrationConfig{}, fmt.Errorf("integration config not found: global layer unavailable (%v) local=%s", globalHomeErr, localPath)
+		if useGlobalLayer {
+			return IntegrationConfig{}, fmt.Errorf("integration config not found: global=%s", globalPath)
+		}
+		if useLocalLayer {
+			return IntegrationConfig{}, fmt.Errorf("integration config not found: global layer unavailable (%v) local=%s", globalHomeErr, localPath)
+		}
+		return IntegrationConfig{}, fmt.Errorf("integration config not found: global layer unavailable (%v)", globalHomeErr)
 	}
 
 	merged := mergeIntegrationLayers(layers)

@@ -203,7 +203,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	}
 
 	result, err := provider.Execute(ctx, normalized)
-	result.System = firstNonEmpty(result.System, route.System)
+	applyResponseSystem(&result, route.System)
 	result.Resource = firstNonEmpty(result.Resource, route.Resource)
 	result.Operation = firstNonEmpty(result.Operation, route.Operation)
 	result.Route = route
@@ -273,6 +273,55 @@ func normalizeOperation(operation string) string {
 	}
 
 	return operation
+}
+
+func applyResponseSystem(result *Response, system string) {
+	system = normalizeSystem(system)
+	if result == nil || system == "" {
+		return
+	}
+
+	result.System = system
+	if result.AuthStatus != nil {
+		result.AuthStatus.System = system
+	}
+	if result.RepositoryStatus != nil {
+		result.RepositoryStatus.System = system
+	}
+	if result.IssueStatus != nil {
+		result.IssueStatus.System = system
+	}
+	if result.PullRequestStatus != nil {
+		result.PullRequestStatus.System = system
+	}
+	if result.Issue != nil {
+		result.Issue.System = system
+		result.Issue.Author.System = system
+		for i := range result.Issue.Assignees {
+			result.Issue.Assignees[i].System = system
+		}
+	}
+	if result.PullRequest != nil {
+		result.PullRequest.System = system
+		result.PullRequest.Author.System = system
+	}
+	for i := range result.Comments {
+		result.Comments[i].System = system
+		result.Comments[i].Author.System = system
+	}
+	for i := range result.Reviews {
+		result.Reviews[i].System = system
+		result.Reviews[i].Author.System = system
+	}
+	if result.RepositoryRef != nil {
+		result.RepositoryRef.System = system
+	}
+	for i := range result.SearchResults {
+		result.SearchResults[i].System = system
+	}
+	for i := range result.Artifacts {
+		result.Artifacts[i].System = system
+	}
 }
 
 func expectedResult(resource string, operation string) string {

@@ -154,6 +154,65 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	}
 }
 
+func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"enterprise": {Type: "github"},
+		},
+	})
+	service.RegisterProvider("enterprise", stubProvider{
+		response: Response{
+			System:            "github",
+			AuthStatus:        &AuthStatus{System: "github"},
+			RepositoryStatus:  &RepositoryStatus{System: "github"},
+			IssueStatus:       &IssueStatus{System: "github"},
+			PullRequestStatus: &PullRequestStatus{System: "github"},
+			Issue: &TrackerIssue{
+				System:    "github",
+				Author:    TrackerUser{System: "github"},
+				Assignees: []TrackerUser{{System: "github"}},
+			},
+			PullRequest: &TrackerPullRequest{System: "github", Author: TrackerUser{System: "github"}},
+			Comments:    []TrackerComment{{System: "github", Author: TrackerUser{System: "github"}}},
+			Reviews:     []TrackerReview{{System: "github", Author: TrackerUser{System: "github"}}},
+			RepositoryRef: &TrackerRepository{
+				System: "github",
+			},
+			SearchResults: []TrackerSearchResult{{System: "github"}},
+			Artifacts:     []Artifact{{System: "github"}},
+		},
+	})
+
+	result, err := service.Execute(context.Background(), Request{System: "enterprise", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if result.System != "enterprise" || result.AuthStatus.System != "enterprise" || result.RepositoryStatus.System != "enterprise" || result.IssueStatus.System != "enterprise" || result.PullRequestStatus.System != "enterprise" {
+		t.Fatalf("expected top-level status systems to use route name, got %#v", result)
+	}
+	if result.Issue == nil || result.Issue.System != "enterprise" || result.Issue.Author.System != "enterprise" || result.Issue.Assignees[0].System != "enterprise" {
+		t.Fatalf("expected issue payload systems to use route name, got %#v", result.Issue)
+	}
+	if result.PullRequest == nil || result.PullRequest.System != "enterprise" || result.PullRequest.Author.System != "enterprise" {
+		t.Fatalf("expected pull request payload systems to use route name, got %#v", result.PullRequest)
+	}
+	if result.Comments[0].System != "enterprise" || result.Comments[0].Author.System != "enterprise" {
+		t.Fatalf("expected comment payload systems to use route name, got %#v", result.Comments)
+	}
+	if result.Reviews[0].System != "enterprise" || result.Reviews[0].Author.System != "enterprise" {
+		t.Fatalf("expected review payload systems to use route name, got %#v", result.Reviews)
+	}
+	if result.RepositoryRef == nil || result.RepositoryRef.System != "enterprise" {
+		t.Fatalf("expected repository payload system to use route name, got %#v", result.RepositoryRef)
+	}
+	if result.SearchResults[0].System != "enterprise" || result.Artifacts[0].System != "enterprise" {
+		t.Fatalf("expected search results and artifacts to use route name, got %#v %#v", result.SearchResults, result.Artifacts)
+	}
+}
+
 func TestDispatchReturnsErrorForMissingSystem(t *testing.T) {
 	t.Parallel()
 

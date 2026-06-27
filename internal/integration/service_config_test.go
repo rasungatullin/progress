@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/configuration"
@@ -42,5 +43,39 @@ func TestNewConfiguredServiceDisablesProvidersOnInvalidConfig(t *testing.T) {
 	}
 	if err.Error() != "integration provider not registered: github" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewConfiguredServiceLoadsGlobalLayerWhenRepoRootUnavailable(t *testing.T) {
+	t.Parallel()
+
+	originalResolveRepoRoot := configuredServiceResolveRepoRoot
+	originalLoadIntegrationConfig := configuredServiceLoadIntegrationConfig
+	configuredServiceResolveRepoRoot = func(context.Context) (string, error) {
+		return "", errors.New("not a git repository")
+	}
+	configuredServiceLoadIntegrationConfig = func(repoRoot string, readFile configuration.ReadFileFunc) (configuration.IntegrationConfig, error) {
+		return configuration.LoadIntegrationConfigWithHome(repoRoot, "/config-home", func(path string) ([]byte, error) {
+			switch path {
+			case "/config-home/integration/systems.json":
+				return []byte(`{"systems":{"enterprise":{"type":"github"}}}`), nil
+			default:
+				return nil, fs.ErrNotExist
+			}
+		})
+	}
+	t.Cleanup(func() {
+		configuredServiceResolveRepoRoot = originalResolveRepoRoot
+		configuredServiceLoadIntegrationConfig = originalLoadIntegrationConfig
+	})
+
+	service := NewConfiguredService(logging.New(io.Discard))
+
+	route, err := service.Dispatch(context.Background(), Request{System: "enterprise", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !route.ProviderAvailable {
+		t.Fatal("provider from global layer must be available even without repo root")
 	}
 }

@@ -20,8 +20,7 @@ func NewConfiguredService(logger *log.Logger) *Service {
 	logger = ensureLogger(logger)
 	repoRoot, err := configuredServiceResolveRepoRoot(context.Background())
 	if err != nil {
-		logger.Printf("Контур интеграции использует переходный режим: конфигурация систем недоступна: %v", err)
-		return NewService(logger)
+		logger.Printf("Контур интеграции не определил локальный слой конфигурации систем: %v", err)
 	}
 
 	loaded, err := configuredServiceLoadIntegrationConfig(repoRoot, os.ReadFile)
