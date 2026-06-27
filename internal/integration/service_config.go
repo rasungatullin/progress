@@ -11,21 +11,26 @@ import (
 	"github.com/rasungatullin/progress/internal/configuration"
 )
 
+var (
+	configuredServiceResolveRepoRoot       = resolveRepoRoot
+	configuredServiceLoadIntegrationConfig = configuration.LoadIntegrationConfig
+)
+
 func NewConfiguredService(logger *log.Logger) *Service {
 	logger = ensureLogger(logger)
-	repoRoot, err := resolveRepoRoot(context.Background())
+	repoRoot, err := configuredServiceResolveRepoRoot(context.Background())
 	if err != nil {
 		logger.Printf("Контур интеграции использует переходный режим: конфигурация систем недоступна: %v", err)
 		return NewService(logger)
 	}
 
-	loaded, err := configuration.LoadIntegrationConfig(repoRoot, os.ReadFile)
+	loaded, err := configuredServiceLoadIntegrationConfig(repoRoot, os.ReadFile)
 	if err != nil {
 		if isMissingIntegrationConfig(err) {
 			return NewService(logger)
 		}
-		logger.Printf("Контур интеграции использует переходный режим: конфигурация систем не загружена: %v", err)
-		return NewService(logger)
+		logger.Printf("Контур интеграции отключил провайдеры из-за ошибки конфигурации систем: %v", err)
+		return newEmptyService(logger)
 	}
 
 	return NewServiceFromConfig(logger, loaded.Config)

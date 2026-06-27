@@ -146,6 +146,12 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.Timeout); value != "" {
 		merged.Timeout = value
 	}
+	if value := strings.TrimSpace(override.Repository); value != "" {
+		merged.Repository = value
+	}
+	if value := strings.TrimSpace(override.Project); value != "" {
+		merged.Project = value
+	}
 	if value := strings.TrimSpace(override.DefaultRepo); value != "" {
 		merged.DefaultRepo = value
 	}
@@ -197,10 +203,17 @@ func validateIntegrationLayer(config integrationmodel.IntegrationConfigFile) err
 }
 
 func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) error {
+	if len(config.Systems) == 0 {
+		return fmt.Errorf("systems must not be empty")
+	}
+
 	for name, system := range config.Systems {
 		name = normalizeSystemName(name)
 		if name == "" {
 			return fmt.Errorf("systems contains empty name")
+		}
+		if err := validateIntegrationSystemType(name, system.Type); err != nil {
+			return err
 		}
 		if !isSystemEnabled(system) {
 			continue
@@ -233,6 +246,20 @@ func validateIntegrationOperations(operations map[string]integrationmodel.Integr
 		}
 	}
 	return nil
+}
+
+func validateIntegrationSystemType(systemName, systemType string) error {
+	systemType = normalizeSystemName(systemType)
+	if systemType == "" {
+		return nil
+	}
+
+	switch systemType {
+	case "github", "script":
+		return nil
+	default:
+		return fmt.Errorf("system %q uses unknown type %q", normalizeSystemName(systemName), systemType)
+	}
 }
 
 func isSystemEnabled(system integrationmodel.IntegrationSystemConfig) bool {

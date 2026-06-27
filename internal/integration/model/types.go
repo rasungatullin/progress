@@ -44,6 +44,8 @@ type IntegrationSystemConfig struct {
 	Command     string                                `json:"command,omitempty"`
 	Path        string                                `json:"path,omitempty"`
 	Timeout     string                                `json:"timeout,omitempty"`
+	Repository  string                                `json:"repository,omitempty"`
+	Project     string                                `json:"project,omitempty"`
 	DefaultRepo string                                `json:"default_repo,omitempty"`
 	Operations  map[string]IntegrationOperationConfig `json:"operations,omitempty"`
 }

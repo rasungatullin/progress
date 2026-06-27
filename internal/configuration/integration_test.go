@@ -20,6 +20,8 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 						"type": "github",
 						"command": "gh",
 						"timeout": "30s",
+						"project": "global-project",
+						"repository": "global/repository",
 						"default_repo": "global/repo",
 						"operations": {
 							"issue.get": {"timeout": "20s"},
@@ -34,6 +36,8 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 				"default_system": "github",
 				"systems": {
 					"github": {
+						"project": "local-project",
+						"repository": "local/repository",
 						"default_repo": "local/repo",
 						"operations": {
 							"issue.get": {"timeout": "10s", "command": "/usr/local/bin/gh"}
@@ -61,6 +65,12 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	}
 	if github.DefaultRepo != "local/repo" {
 		t.Fatalf("unexpected default repo: %q", github.DefaultRepo)
+	}
+	if github.Repository != "local/repository" {
+		t.Fatalf("unexpected repository: %q", github.Repository)
+	}
+	if github.Project != "local-project" {
+		t.Fatalf("unexpected project: %q", github.Project)
 	}
 	if github.Operations["issue.get"].Timeout != "10s" {
 		t.Fatalf("unexpected merged issue.get timeout: %q", github.Operations["issue.get"].Timeout)
@@ -135,5 +145,43 @@ func TestLoadIntegrationConfigUsesLocalLayerWhenGlobalHomeMissing(t *testing.T) 
 	}
 	if config.Config.Systems["github"].Type != "github" {
 		t.Fatalf("unexpected github type: %q", config.Config.Systems["github"].Type)
+	}
+}
+
+func TestLoadIntegrationConfigRejectsEmptySystems(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{"default_system":"github","systems":{}}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if err.Error() != "invalid integration config after merge of 1 layers: systems must not be empty" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadIntegrationConfigRejectsUnknownSystemType(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{"systems":{"github":{"type":"github-enterprise"}}}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if err.Error() != "invalid integration config after merge of 1 layers: system \"github\" uses unknown type \"github-enterprise\"" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

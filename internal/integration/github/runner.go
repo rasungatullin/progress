@@ -40,6 +40,7 @@ type Config struct {
 	Command     string `json:"command"`
 	Path        string `json:"path"`
 	Timeout     string `json:"timeout"`
+	Repository  string `json:"repository"`
 	DefaultRepo string `json:"default_repo"`
 }
 
@@ -417,7 +418,7 @@ func (r *Runner) loadConfig(ctx context.Context) (resolvedConfig, error) {
 
 	command := firstNonEmpty(strings.TrimSpace(raw.Path), strings.TrimSpace(raw.Command), defaultCommand)
 	config.Command = command
-	config.DefaultRepo = strings.TrimSpace(raw.DefaultRepo)
+	config.DefaultRepo = firstNonEmpty(strings.TrimSpace(raw.Repository), strings.TrimSpace(raw.DefaultRepo))
 
 	if strings.TrimSpace(raw.Timeout) == "" {
 		return config, nil
@@ -438,7 +439,7 @@ func (r *Runner) loadConfig(ctx context.Context) (resolvedConfig, error) {
 func resolveSystemConfig(raw integrationmodel.IntegrationSystemConfig) (resolvedConfig, error) {
 	config := resolvedConfig{Command: defaultCommand, Timeout: defaultTimeout}
 	config.Command = firstNonEmpty(strings.TrimSpace(raw.Path), strings.TrimSpace(raw.Command), defaultCommand)
-	config.DefaultRepo = strings.TrimSpace(raw.DefaultRepo)
+	config.DefaultRepo = firstNonEmpty(strings.TrimSpace(raw.Repository), strings.TrimSpace(raw.DefaultRepo))
 
 	if strings.TrimSpace(raw.Timeout) == "" {
 		return config, nil
