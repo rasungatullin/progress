@@ -219,13 +219,13 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 				return "true\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain":
+			case "status --porcelain -z":
 				statusCalls++
 				if statusCalls == 1 {
-					return " M file.txt\n", nil
+					return " M file.txt\x00", nil
 				}
-				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+				return "M  file.txt\x00", nil
+			case "add -A -- file.txt":
 				return "", nil
 			case "commit -m Ship release notes":
 				return "[feature/test abc123] Ship release notes\n", nil
@@ -250,9 +250,9 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 	expectedCalls := [][]string{
 		{"rev-parse", "--is-inside-work-tree"},
 		{"branch", "--show-current"},
-		{"status", "--porcelain"},
-		{"add", "-A", "--", ".", runnerOutputExcludePathspec, executionRunsExcludePathspec},
-		{"status", "--porcelain"},
+		{"status", "--porcelain", "-z"},
+		{"add", "-A", "--", "file.txt"},
+		{"status", "--porcelain", "-z"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
 		{"push", "-u", "origin", "feature/test"},
@@ -295,9 +295,9 @@ func TestLaunchCommitPushFailureKeepsRunnerSessionID(t *testing.T) {
 			return "true\n", nil
 		case "branch --show-current":
 			return "feature/test\n", nil
-		case "status --porcelain":
-			return " M file.txt\n", nil
-		case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+		case "status --porcelain -z":
+			return " M file.txt\x00", nil
+		case "add -A -- file.txt":
 			return "", fmt.Errorf("git add failed")
 		default:
 			return "", fmt.Errorf("unexpected git command: %v", args)
@@ -345,12 +345,12 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 				return "true\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain":
+			case "status --porcelain -z":
 				if addArgs == nil {
-					return " M file.txt\n", nil
+					return " M file.txt\x00!! .progress/runner-output/\x00!! .progress/execution-runs/\x00", nil
 				}
-				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+				return "M  file.txt\x00", nil
+			case "add -A -- file.txt":
 				addArgs = append([]string(nil), args...)
 				return "", nil
 			case "commit -m repo":
@@ -368,7 +368,7 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", ".", runnerOutputExcludePathspec, executionRunsExcludePathspec}) {
+	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", "file.txt"}) {
 		t.Fatalf("git add must exclude raw runner output path: %#v", addArgs)
 	}
 }
@@ -394,9 +394,9 @@ func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *te
 				return "true\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain":
-				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			case "status --porcelain -z":
+				return "M  file.txt\x00", nil
+			case "add -A -- file.txt":
 				return "", nil
 			case "commit -m review-fixes":
 				return "[feature/test abc123] review-fixes\n", nil
@@ -436,9 +436,9 @@ func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *te
 				return "true\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain":
-				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			case "status --porcelain -z":
+				return "M  file.txt\x00", nil
+			case "add -A -- file.txt":
 				return "", nil
 			case "commit -m structured-contract-v1-worktree":
 				return "[feature/test abc123] structured-contract-v1-worktree\n", nil
@@ -473,8 +473,8 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenNoChanges(t *testing.T) {
 				return "true\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain":
-				return "\n", nil
+			case "status --porcelain -z":
+				return "", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
 			}
@@ -492,7 +492,7 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenNoChanges(t *testing.T) {
 	expectedCalls := [][]string{
 		{"rev-parse", "--is-inside-work-tree"},
 		{"branch", "--show-current"},
-		{"status", "--porcelain"},
+		{"status", "--porcelain", "-z"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -514,8 +514,8 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyRunnerOutputChanges(t *testin
 				return "true\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain":
-				return "?? .progress/runner-output/raw-output.txt\n", nil
+			case "status --porcelain -z":
+				return "?? .progress/runner-output/raw-output.txt\x00", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
 			}
@@ -533,7 +533,7 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyRunnerOutputChanges(t *testin
 	expectedCalls := [][]string{
 		{"rev-parse", "--is-inside-work-tree"},
 		{"branch", "--show-current"},
-		{"status", "--porcelain"},
+		{"status", "--porcelain", "-z"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -555,8 +555,8 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyExecutionRunRecordsChange(t *
 				return "true\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain":
-				return "?? .progress/execution-runs/execution-123.json\n", nil
+			case "status --porcelain -z":
+				return "?? .progress/execution-runs/execution-123.json\x00", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
 			}
@@ -574,7 +574,7 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyExecutionRunRecordsChange(t *
 	expectedCalls := [][]string{
 		{"rev-parse", "--is-inside-work-tree"},
 		{"branch", "--show-current"},
-		{"status", "--porcelain"},
+		{"status", "--porcelain", "-z"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -584,20 +584,43 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyExecutionRunRecordsChange(t *
 func TestLaunchCommitPushKeepsProgressConfigVisibleAsUserChange(t *testing.T) {
 	t.Parallel()
 
-	if !statusLineHasUserChanges(" M .progress/execution/profiles.json") {
-		t.Fatal("tracked progress execution config must remain visible to commit/push")
+	paths := userChangedPathsFromPorcelain(strings.Join([]string{
+		" M .progress/execution/profiles.json",
+		"?? .progress/execution-runs/execution-123.json",
+		" M .progress/execution-runs/execution.db",
+		" M .progress/runner-output/execution-123.log",
+		"",
+	}, "\x00"))
+	if !reflect.DeepEqual(paths, []string{".progress/execution/profiles.json"}) {
+		t.Fatalf("unexpected visible progress paths: %#v", paths)
 	}
-	if statusLineHasUserChanges("?? .progress/execution-runs/execution-123.json") {
-		t.Fatal("execution run records must be ignored as runtime artifacts")
+}
+
+func TestLaunchCommitPushKeepsBothRenamePathsVisibleAsUserChange(t *testing.T) {
+	t.Parallel()
+
+	paths := userChangedPathsFromPorcelain(strings.Join([]string{
+		"R  docs/old.md",
+		"docs/new.md",
+		"",
+	}, "\x00"))
+	if !reflect.DeepEqual(paths, []string{"docs/old.md", "docs/new.md"}) {
+		t.Fatalf("unexpected rename paths: %#v", paths)
 	}
-	if statusLineHasUserChanges(" M .progress/execution-runs/execution-123.json") {
-		t.Fatal("unstaged execution run record changes must be ignored as runtime artifacts")
-	}
-	if statusLineHasUserChanges(" M .progress/execution-runs/execution.db") {
-		t.Fatal("sqlite execution history must be ignored as a runtime artifact")
-	}
-	if statusLineHasUserChanges(" M .progress/runner-output/execution-123.log") {
-		t.Fatal("unstaged runner output changes must be ignored as runtime artifacts")
+}
+
+func TestLaunchCommitPushDropsRuntimePathFromRenamePair(t *testing.T) {
+	t.Parallel()
+
+	paths := userChangedPathsFromPorcelain(strings.Join([]string{
+		"R  .progress/runner-output/execution.log",
+		"docs/execution.log",
+		"R  docs/trace.log",
+		".progress/execution-runs/trace.log",
+		"",
+	}, "\x00"))
+	if !reflect.DeepEqual(paths, []string{"docs/execution.log", "docs/trace.log"}) {
+		t.Fatalf("unexpected visible rename paths: %#v", paths)
 	}
 }
 
@@ -614,9 +637,9 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 				return "true\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain":
-				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			case "status --porcelain -z":
+				return "M  file.txt\x00", nil
+			case "add -A -- file.txt":
 				return "", nil
 			case "commit -m repo":
 				return "[feature/test abc123] repo\n", nil

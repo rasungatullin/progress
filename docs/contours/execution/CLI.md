@@ -292,7 +292,7 @@ progress execution resume \
 1. проверяет, что рабочий каталог является git-репозиторием;
 2. определяет текущую активную ветку;
 3. проверяет наличие staged, unstaged и untracked изменений;
-4. при наличии изменений выполняет `git add -A`, `git commit -m <message>` и `git push`;
+4. при наличии изменений строит список пользовательских путей через `git status --porcelain -z`, исключает `.progress/runner-output` и `.progress/execution-runs`, затем выполняет `git add -A -- <paths>`, `git commit -m <message>` и `git push`;
 5. если upstream у текущей ветки ещё не настроен, выполняет `git push -u origin <branch>`;
 6. если изменений нет, корректно пропускает commit и push.
 

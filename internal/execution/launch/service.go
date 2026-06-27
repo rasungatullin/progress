@@ -32,10 +32,6 @@ const runnerMetadataStart = "<progress-runner-metadata>"
 
 const runnerMetadataEnd = "</progress-runner-metadata>"
 
-const runnerOutputExcludePathspec = ":(exclude).progress/runner-output"
-
-const executionRunsExcludePathspec = ":(exclude).progress/execution-runs"
-
 const runRecordFilePrefix = "execution-"
 
 type trailingStructuredBlockState int
@@ -771,25 +767,26 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 		return gitResult{}, err
 	}
 
-	hasChanges, err := s.hasChanges(ctx, in.Launch.Directory)
+	changedPaths, err := s.changedUserPaths(ctx, in.Launch.Directory)
 	if err != nil {
 		return gitResult{}, err
 	}
 
-	if !hasChanges {
+	if len(changedPaths) == 0 {
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
-	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "add", "-A", "--", ".", runnerOutputExcludePathspec, executionRunsExcludePathspec); err != nil {
+	addArgs := append([]string{"add", "-A", "--"}, changedPaths...)
+	if _, err := s.runGitOutput(ctx, in.Launch.Directory, addArgs...); err != nil {
 		return gitResult{}, fmt.Errorf("git add failed: %w", err)
 	}
 
-	hasChanges, err = s.hasChanges(ctx, in.Launch.Directory)
+	changedPaths, err = s.changedUserPaths(ctx, in.Launch.Directory)
 	if err != nil {
 		return gitResult{}, err
 	}
 
-	if !hasChanges {
+	if len(changedPaths) == 0 {
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
@@ -844,53 +841,60 @@ func (s *Service) currentBranch(ctx context.Context, dir string) (string, error)
 }
 
 func (s *Service) hasChanges(ctx context.Context, dir string) (bool, error) {
-	output, err := s.runGitOutput(ctx, dir, "status", "--porcelain")
+	paths, err := s.changedUserPaths(ctx, dir)
 	if err != nil {
-		return false, fmt.Errorf("inspect git changes: %w", err)
+		return false, err
 	}
 
-	for _, line := range strings.Split(output, "\n") {
-		if statusLineHasUserChanges(line) {
-			return true, nil
+	return len(paths) > 0, nil
+}
+
+func (s *Service) changedUserPaths(ctx context.Context, dir string) ([]string, error) {
+	output, err := s.runGitOutput(ctx, dir, "status", "--porcelain", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("inspect git changes: %w", err)
+	}
+
+	return userChangedPathsFromPorcelain(output), nil
+}
+
+func userChangedPathsFromPorcelain(output string) []string {
+	if output == "" {
+		return nil
+	}
+
+	paths := make([]string, 0)
+	seen := make(map[string]struct{})
+	entries := strings.Split(output, "\x00")
+	for index := 0; index < len(entries); index++ {
+		entry := entries[index]
+		if len(entry) < 4 {
+			continue
 		}
-	}
 
-	return false, nil
-}
+		pathValues := []string{strings.TrimSpace(entry[3:])}
+		if isRenameOrCopyStatus(entry) && index+1 < len(entries) {
+			index++
+			pathValues = append(pathValues, strings.TrimSpace(entries[index]))
+		}
 
-func statusLineHasUserChanges(line string) bool {
-	if strings.TrimSpace(line) == "" {
-		return false
-	}
-
-	if isProgressRuntimeStatusLine(line) {
-		return false
-	}
-
-	return true
-}
-
-func isProgressRuntimeStatusLine(line string) bool {
-	if len(line) < 4 {
-		return false
-	}
-
-	pathValue := strings.TrimSpace(line[3:])
-	if pathValue == "" {
-		return false
-	}
-
-	if strings.Contains(pathValue, " -> ") {
-		for _, part := range strings.Split(pathValue, " -> ") {
-			if !isProgressRuntimePath(part) {
-				return false
+		for _, pathValue := range pathValues {
+			if pathValue == "" || isProgressRuntimePath(pathValue) {
+				continue
 			}
+			if _, ok := seen[pathValue]; ok {
+				continue
+			}
+			seen[pathValue] = struct{}{}
+			paths = append(paths, pathValue)
 		}
-
-		return true
 	}
 
-	return isProgressRuntimePath(pathValue)
+	return paths
+}
+
+func isRenameOrCopyStatus(entry string) bool {
+	return entry[0] == 'R' || entry[0] == 'C'
 }
 
 func isProgressRuntimePath(pathValue string) bool {
