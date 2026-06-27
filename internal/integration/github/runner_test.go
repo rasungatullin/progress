@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 func TestRunnerRunAuthStatusReturnsNotInstalled(t *testing.T) {
@@ -57,6 +59,43 @@ func TestRunnerRunAuthStatusSuccess(t *testing.T) {
 	}
 	if result.ExitCode != 0 {
 		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+}
+
+func TestRunnerUsesSystemConfigWithoutLegacyFile(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunnerWithSystemConfig(integrationmodel.IntegrationSystemConfig{
+		Type:        "github",
+		Command:     "/custom/gh",
+		Timeout:     "5s",
+		DefaultRepo: "owner/name",
+	})
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrPermission }
+	runner.lookPath = func(string) (string, error) { return "/custom/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/custom/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		return commandRunner{stdout: "ok"}
+	}
+
+	result, config, err := runner.RunRepoView(context.Background(), "")
+	if err != nil {
+		t.Fatalf("run repo view: %v", err)
+	}
+	if config.Command != "/custom/gh" {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+	if config.DefaultRepo != "owner/name" {
+		t.Fatalf("unexpected default repo: %q", config.DefaultRepo)
+	}
+	if config.Timeout != 5*time.Second {
+		t.Fatalf("unexpected timeout: %s", config.Timeout)
+	}
+	if result.Command != "/custom/gh" {
+		t.Fatalf("unexpected result command: %q", result.Command)
 	}
 }
 

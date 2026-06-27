@@ -37,7 +37,7 @@ func NewService(logger *log.Logger) *Service {
 
 	return &Service{
 		logger:          logger,
-		integration:     integration.NewService(logger),
+		integration:     integration.NewConfiguredService(logger),
 		execution:       execution.NewService(logger),
 		resolveRepo:     resolveCurrentGitHubRepository,
 		resolveRepoRoot: resolveDecisionRepoRoot,

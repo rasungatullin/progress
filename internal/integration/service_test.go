@@ -6,8 +6,13 @@ import (
 	"io"
 	"testing"
 
+	"github.com/rasungatullin/progress/internal/integration/model"
 	"github.com/rasungatullin/progress/internal/logging"
 )
+
+func boolPtr(value bool) *bool {
+	return &value
+}
 
 func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	t.Parallel()
@@ -30,11 +35,88 @@ func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	if len(route.Diagnostics) < 3 {
 		t.Fatalf("expected diagnostic details, got %#v", route.Diagnostics)
 	}
-	if !contains(route.Diagnostics, "provider=gitlab not registered in current build") {
+	if !contains(route.Diagnostics, "provider=gitlab unknown to current integration configuration") {
 		t.Fatalf("expected provider diagnostic, got %#v", route.Diagnostics)
 	}
 	if !contains(route.Diagnostics, "registered systems=github") {
 		t.Fatalf("expected registered systems diagnostic, got %#v", route.Diagnostics)
+	}
+}
+
+func TestNewServiceFromConfigUsesDefaultSystem(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		DefaultSystem: "github",
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github"},
+		},
+	})
+	service.RegisterProvider("github", stubProvider{})
+
+	route, err := service.Dispatch(context.Background(), Request{Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if route.System != "github" {
+		t.Fatalf("expected default system github, got %q", route.System)
+	}
+}
+
+func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github", Enabled: boolPtr(false)},
+		},
+	})
+
+	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if route.ProviderAvailable {
+		t.Fatal("provider must be unavailable for disabled system")
+	}
+	if !contains(route.Diagnostics, "provider=github disabled by integration configuration") {
+		t.Fatalf("expected disabled-system diagnostic, got %#v", route.Diagnostics)
+	}
+}
+
+func TestExecuteReturnsDisabledSystemError(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github", Enabled: boolPtr(false)},
+		},
+	})
+
+	_, err := service.Execute(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	if err == nil {
+		t.Fatal("expected disabled-system error")
+	}
+	if err.Error() != "integration provider disabled by configuration: github" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDispatchReportsUnsupportedConfiguredSystemType(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"gitlab": {Type: "script"},
+		},
+	})
+
+	route, err := service.Dispatch(context.Background(), Request{System: "gitlab", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !contains(route.Diagnostics, "provider=gitlab configured with unsupported type=script") {
+		t.Fatalf("expected unsupported-type diagnostic, got %#v", route.Diagnostics)
 	}
 }
 

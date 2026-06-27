@@ -200,7 +200,7 @@ gh issue view 123 --repo owner/name --json number,title,body,state,labels,assign
 gh api --paginate --slurp repos/owner/name/issues/123/comments
 ```
 
-Команда принимает `--repo` и обязательный `--number`. Если `--repo` не передан, адаптер может использовать `default_repo` из `.progress/integration/github.json`; если пользователь явно передал пустой `--repo=`, резервный выбор не применяется и запрос отклоняется как `invalid-request`.
+Команда принимает `--repo` и обязательный `--number`. Если `--repo` не передан, адаптер может использовать `default_repo` из `.progress/integration/systems.json` или глобального `$PROGRESS_CONFIG_HOME/integration/systems.json`; если пользователь явно передал пустой `--repo=`, резервный выбор не применяется и запрос отклоняется как `invalid-request`.
 
 Адаптер преобразует paginated REST-ответ GitHub в массив `TrackerComment` с полями `System`, `Repository`, `Number`, `Author`, `Body`, `URL`, `CreatedAt` и `UpdatedAt`. В текстовом выводе команда печатает общий `comment_count`, затем поля каждого комментария и тело построчно.
 
@@ -332,31 +332,52 @@ GitHub-адаптер должен различать как минимум сл
 
 ## 11. Конфигурация
 
-На первом этапе достаточно минимальной репозиторной конфигурации, например в файле `.progress/integration/github.json`:
+Контур интеграции использует двухслойную конфигурацию систем:
+
+1. глобальный слой `$PROGRESS_CONFIG_HOME/integration/systems.json` или `~/.config/progress/integration/systems.json`;
+2. локальный слой `.progress/integration/systems.json`.
+
+Локальный слой имеет приоритет над глобальным:
+
+1. `default_system` полностью заменяет глобальное значение;
+2. `systems.<name>` дополняет или переопределяет одноимённую систему из глобального слоя;
+3. простые поля системы, например `command`, `path`, `timeout` и `default_repo`, заменяются локальными значениями;
+4. `operations` сливается по ключу операции;
+5. `enabled=false` в локальном слое выключает систему целиком.
+
+Минимальная конфигурация GitHub-адаптера может выглядеть так:
 
 ```json
 {
-  "command": "gh",
-  "format": "json",
-  "timeout": "30s",
-  "cache_ttl": "5m",
-  "default_repo": "owner/name"
+  "default_system": "github",
+  "systems": {
+    "github": {
+      "type": "github",
+      "enabled": true,
+      "command": "gh",
+      "timeout": "30s",
+      "default_repo": "owner/name"
+    }
+  }
 }
 ```
 
-Назначение полей:
+Назначение полей GitHub-системы:
 
-1. `command` позволяет переопределить путь к бинарю `gh`;
-2. `format` задаёт предпочитаемый режим вывода;
-3. `timeout` ограничивает внешний вызов;
-4. `cache_ttl` задаёт время жизни повторно используемых результатов;
-5. `default_repo` позволяет упростить ручные вызовы CLI для `github repo get`, `github issue get` и `github pr get`, если `--repo` не передан.
+1. `type` фиксирует тип адаптера и должен быть равен `github`, если требуется штатный GitHub-модуль текущей сборки;
+2. `enabled` включает или выключает систему без удаления её описания;
+3. `command` и `path` позволяют переопределить исполняемый файл `gh`;
+4. `timeout` ограничивает внешний вызов;
+5. `default_repo` позволяет упростить ручные вызовы CLI для `github repo get`, `github issue get` и `github pr get`, если `--repo` не передан;
+6. `operations` резервирует пространство для дальнейшей пооперационной настройки, включая будущие script-адаптеры.
 
 Правило приоритета `--repo` и `default_repo`:
 
 1. если `--repo` не передан, сервис может использовать `default_repo`;
 2. если `--repo` передан с непустым значением, используется именно это значение;
 3. если `--repo` передан явно пустым (`--repo=`), запрос отклоняется как `invalid-request`, резервный выбор через `default_repo` не применяется.
+
+Для переходного периода сохраняется совместимость с локальным файлом `.progress/integration/github.json`, если новый `systems.json` отсутствует. Новый конфигурационный слой считается приоритетным и должен использоваться как основной.
 
 ## 12. Порядок реализации
 

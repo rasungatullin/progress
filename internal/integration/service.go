@@ -33,39 +33,106 @@ type Provider interface {
 }
 
 type Service struct {
-	logger    *log.Logger
-	providers map[string]Provider
+	logger        *log.Logger
+	providers     map[string]Provider
+	defaultSystem string
+	systems       map[string]systemState
+}
+
+type systemState struct {
+	Name       string
+	Type       string
+	Configured bool
+	Enabled    bool
+	Registered bool
 }
 
 func NewService(logger *log.Logger) *Service {
+	service := newEmptyService(logger)
+	service.registerConfiguredProvider("github", systemState{Name: "github", Type: "github", Configured: true, Enabled: true}, githubprovider.NewService())
+	return service
+}
+
+func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile) *Service {
+	service := newEmptyService(logger)
+	service.defaultSystem = normalizeSystem(config.DefaultSystem)
+
+	for name, systemConfig := range config.Systems {
+		name = normalizeSystem(name)
+		if name == "" {
+			continue
+		}
+
+		state := systemState{
+			Name:       name,
+			Type:       normalizeSystem(systemConfig.Type),
+			Configured: true,
+			Enabled:    systemEnabled(systemConfig),
+		}
+		service.systems[name] = state
+
+		if !state.Enabled {
+			continue
+		}
+
+		switch state.Type {
+		case "github":
+			service.registerConfiguredProvider(name, state, githubprovider.NewServiceWithConfig(systemConfig))
+		case "":
+			service.systems[name] = state
+		default:
+			service.systems[name] = state
+		}
+	}
+
+	return service
+}
+
+func newEmptyService(logger *log.Logger) *Service {
 	service := &Service{
 		logger:    logger,
 		providers: make(map[string]Provider),
+		systems:   make(map[string]systemState),
 	}
-	service.RegisterProvider("github", githubprovider.NewService())
 	return service
 }
 
 func (s *Service) RegisterProvider(system string, provider Provider) {
+	s.registerConfiguredProvider(system, systemState{Name: normalizeSystem(system), Type: normalizeSystem(system), Configured: true, Enabled: true}, provider)
+}
+
+func (s *Service) registerConfiguredProvider(system string, state systemState, provider Provider) {
 	name := strings.TrimSpace(strings.ToLower(system))
 	if name == "" || provider == nil {
 		return
 	}
 
 	s.providers[name] = provider
+	state.Name = name
+	state.Registered = true
+	state.Enabled = true
+	state.Configured = true
+	if state.Type == "" {
+		state.Type = name
+	}
+	s.systems[name] = state
 }
 
 func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
-	normalized, err := normalizeRequest(req)
+	normalized, err := s.normalizeRequest(req)
 	if err != nil {
+		resolvedSystem := normalizeSystem(req.System)
+		if resolvedSystem == "" {
+			resolvedSystem = s.defaultSystem
+		}
 		route := Route{
-			System:         "",
-			Provider:       "",
+			System:         resolvedSystem,
+			Provider:       resolvedSystem,
 			Resource:       normalizeResource(req.Resource),
 			Operation:      normalizeOperation(req.Operation),
 			ExpectedResult: expectedResult(normalizeResource(req.Resource), normalizeOperation(req.Operation)),
 			Diagnostics: []string{
-				fmt.Sprintf("request system=%s resource=%s operation=%s", strings.TrimSpace(req.System), normalizeResource(req.Resource), normalizeOperation(req.Operation)),
+				fmt.Sprintf("request system=%s resource=%s operation=%s", resolvedSystem, normalizeResource(req.Resource), normalizeOperation(req.Operation)),
 				"dispatcher mode=diagnostic-only",
 				"invalid-request missing system",
 			},
@@ -76,6 +143,7 @@ func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
 	}
 
 	_, ok := s.providers[normalized.System]
+	state, known := s.systems[normalized.System]
 
 	route := Route{
 		System:            normalized.System,
@@ -84,24 +152,30 @@ func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
 		Resource:          normalized.Resource,
 		Operation:         normalized.Operation,
 		ExpectedResult:    expectedResult(normalized.Resource, normalized.Operation),
-		Diagnostics:       buildDiagnostics(normalized.System, normalized.Resource, normalized.Operation, ok, s.registeredSystems()),
+		Diagnostics:       buildDiagnostics(normalized.System, normalized.Resource, normalized.Operation, ok, known, state, s.registeredSystems()),
 	}
 	s.logger.Printf("Диспетчер интеграции сформировал маршрут: система=%q ресурс=%q операция=%q провайдер=%q доступен=%t", route.System, route.Resource, route.Operation, route.Provider, route.ProviderAvailable)
 	return route, nil
 }
 
 func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
-	normalized, err := normalizeRequest(req)
+	normalized, err := s.normalizeRequest(req)
 	if err != nil {
+		resolvedSystem := normalizeSystem(req.System)
+		if resolvedSystem == "" {
+			resolvedSystem = s.defaultSystem
+		}
 		return Response{
 			Resource:  normalizeResource(req.Resource),
 			Operation: normalizeOperation(req.Operation),
 			Route: Route{
+				System:         resolvedSystem,
+				Provider:       resolvedSystem,
 				Resource:       normalizeResource(req.Resource),
 				Operation:      normalizeOperation(req.Operation),
 				ExpectedResult: expectedResult(normalizeResource(req.Resource), normalizeOperation(req.Operation)),
 				Diagnostics: []string{
-					fmt.Sprintf("request system=%s resource=%s operation=%s", strings.TrimSpace(req.System), normalizeResource(req.Resource), normalizeOperation(req.Operation)),
+					fmt.Sprintf("request system=%s resource=%s operation=%s", resolvedSystem, normalizeResource(req.Resource), normalizeOperation(req.Operation)),
 					"dispatcher mode=diagnostic-only",
 					"invalid-request missing system",
 				},
@@ -117,6 +191,14 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	normalized.Route = route
 	provider, ok := s.providers[route.System]
 	if !ok {
+		if state, known := s.systems[route.System]; known {
+			switch {
+			case !state.Enabled:
+				return Response{System: route.System, Resource: route.Resource, Operation: route.Operation, Route: route}, fmt.Errorf("integration provider disabled by configuration: %s", route.System)
+			case state.Type != "" && state.Type != route.System:
+				return Response{System: route.System, Resource: route.Resource, Operation: route.Operation, Route: route}, fmt.Errorf("integration provider type is not supported in current build: %s (%s)", route.System, state.Type)
+			}
+		}
 		return Response{System: route.System, Resource: route.Resource, Operation: route.Operation, Route: route}, fmt.Errorf("integration provider not registered: %s", route.System)
 	}
 
@@ -132,28 +214,9 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	return result, nil
 }
 
-func (s *Service) registeredSystems() []string {
-	if len(s.providers) == 0 {
-		return nil
-	}
-
-	items := make([]string, 0, len(s.providers))
-	for system := range s.providers {
-		items = append(items, system)
-	}
-
-	sort.Strings(items)
-	return items
-}
-
-func normalizeSystem(system string) string {
-	system = strings.TrimSpace(strings.ToLower(system))
-	return system
-}
-
-func normalizeRequest(req Request) (ProviderRequest, error) {
+func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	normalized := ProviderRequest{
-		System:       normalizeSystem(req.System),
+		System:       normalizeSystem(firstNonEmpty(req.System, s.defaultSystem)),
 		Resource:     normalizeResource(req.Resource),
 		Operation:    normalizeOperation(req.Operation),
 		Repository:   strings.TrimSpace(req.Repository),
@@ -173,6 +236,25 @@ func normalizeRequest(req Request) (ProviderRequest, error) {
 	}
 
 	return normalized, nil
+}
+
+func (s *Service) registeredSystems() []string {
+	if len(s.providers) == 0 {
+		return nil
+	}
+
+	items := make([]string, 0, len(s.providers))
+	for system := range s.providers {
+		items = append(items, system)
+	}
+
+	sort.Strings(items)
+	return items
+}
+
+func normalizeSystem(system string) string {
+	system = strings.TrimSpace(strings.ToLower(system))
+	return system
 }
 
 func normalizeResource(resource string) string {
@@ -227,7 +309,7 @@ func expectedResult(resource string, operation string) string {
 	}
 }
 
-func buildDiagnostics(system string, resource string, operation string, available bool, registered []string) []string {
+func buildDiagnostics(system string, resource string, operation string, available bool, known bool, state systemState, registered []string) []string {
 	diagnostics := []string{
 		fmt.Sprintf("request system=%s resource=%s operation=%s", system, resource, operation),
 		"dispatcher mode=diagnostic-only",
@@ -238,7 +320,19 @@ func buildDiagnostics(system string, resource string, operation string, availabl
 		return diagnostics
 	}
 
-	diagnostics = append(diagnostics, fmt.Sprintf("provider=%s not registered in current build", system))
+	if known {
+		switch {
+		case !state.Enabled:
+			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s disabled by integration configuration", system))
+		case state.Type != "" && state.Type != system:
+			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s configured with unsupported type=%s", system, state.Type))
+		default:
+			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s not registered in current build", system))
+		}
+	} else {
+		diagnostics = append(diagnostics, fmt.Sprintf("provider=%s unknown to current integration configuration", system))
+	}
+
 	if len(registered) == 0 {
 		diagnostics = append(diagnostics, "registered systems=<none>")
 		return diagnostics
@@ -246,6 +340,10 @@ func buildDiagnostics(system string, resource string, operation string, availabl
 
 	diagnostics = append(diagnostics, fmt.Sprintf("registered systems=%s", strings.Join(registered, ",")))
 	return diagnostics
+}
+
+func systemEnabled(config model.IntegrationSystemConfig) bool {
+	return config.Enabled == nil || *config.Enabled
 }
 
 func firstNonEmpty(values ...string) string {

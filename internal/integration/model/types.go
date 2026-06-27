@@ -33,6 +33,29 @@ type ProviderRequest struct {
 	Route        Route
 }
 
+type IntegrationConfigFile struct {
+	DefaultSystem string                             `json:"default_system"`
+	Systems       map[string]IntegrationSystemConfig `json:"systems"`
+}
+
+type IntegrationSystemConfig struct {
+	Type        string                                `json:"type"`
+	Enabled     *bool                                 `json:"enabled,omitempty"`
+	Command     string                                `json:"command,omitempty"`
+	Path        string                                `json:"path,omitempty"`
+	Timeout     string                                `json:"timeout,omitempty"`
+	DefaultRepo string                                `json:"default_repo,omitempty"`
+	Operations  map[string]IntegrationOperationConfig `json:"operations,omitempty"`
+}
+
+type IntegrationOperationConfig struct {
+	Type    string `json:"type,omitempty"`
+	Command string `json:"command,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Timeout string `json:"timeout,omitempty"`
+	Script  string `json:"script,omitempty"`
+}
+
 type Response struct {
 	System            string
 	Resource          string

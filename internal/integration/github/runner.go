@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 const (
@@ -91,6 +93,7 @@ type Runner struct {
 	readFile        func(string) ([]byte, error)
 	lookPath        func(string) (string, error)
 	runCommand      func(context.Context, string, []string) commandRunner
+	systemConfig    *integrationmodel.IntegrationSystemConfig
 }
 
 func NewRunner() *Runner {
@@ -100,6 +103,12 @@ func NewRunner() *Runner {
 		lookPath:        exec.LookPath,
 		runCommand:      defaultRunCommand,
 	}
+}
+
+func NewRunnerWithSystemConfig(config integrationmodel.IntegrationSystemConfig) *Runner {
+	runner := NewRunner()
+	runner.systemConfig = &config
+	return runner
 }
 
 func (r *Runner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConfig, error) {
@@ -383,6 +392,9 @@ func (r *Runner) runCommandWithResolvedConfig(ctx context.Context, config resolv
 
 func (r *Runner) loadConfig(ctx context.Context) (resolvedConfig, error) {
 	config := resolvedConfig{Command: defaultCommand, Timeout: defaultTimeout}
+	if r.systemConfig != nil {
+		return resolveSystemConfig(*r.systemConfig)
+	}
 
 	repoRoot, err := r.resolveRepoRoot(ctx)
 	if err != nil {
@@ -405,6 +417,27 @@ func (r *Runner) loadConfig(ctx context.Context) (resolvedConfig, error) {
 
 	command := firstNonEmpty(strings.TrimSpace(raw.Path), strings.TrimSpace(raw.Command), defaultCommand)
 	config.Command = command
+	config.DefaultRepo = strings.TrimSpace(raw.DefaultRepo)
+
+	if strings.TrimSpace(raw.Timeout) == "" {
+		return config, nil
+	}
+
+	timeout, err := time.ParseDuration(strings.TrimSpace(raw.Timeout))
+	if err != nil {
+		return resolvedConfig{}, fmt.Errorf("parse GitHub integration timeout: %w", err)
+	}
+	if timeout <= 0 {
+		return resolvedConfig{}, fmt.Errorf("parse GitHub integration timeout: duration must be positive")
+	}
+
+	config.Timeout = timeout
+	return config, nil
+}
+
+func resolveSystemConfig(raw integrationmodel.IntegrationSystemConfig) (resolvedConfig, error) {
+	config := resolvedConfig{Command: defaultCommand, Timeout: defaultTimeout}
+	config.Command = firstNonEmpty(strings.TrimSpace(raw.Path), strings.TrimSpace(raw.Command), defaultCommand)
 	config.DefaultRepo = strings.TrimSpace(raw.DefaultRepo)
 
 	if strings.TrimSpace(raw.Timeout) == "" {
