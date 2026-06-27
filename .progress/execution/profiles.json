@@ -27,7 +27,13 @@
       "description": "Профиль кодера с binding для реализации и обязательным commit/push",
       "model-binding": "coder",
       "structured-output": true,
-      "structured-output-fields": ["commit_message", "changes", "remarks", "commands", "conclusion"],
+      "structured-output-fields": [
+        "commit_message",
+        "changes",
+        "remarks",
+        "commands",
+        "conclusion"
+      ],
       "commit-push": true
     },
     "review": {
@@ -45,7 +51,34 @@
       ],
       "structured-output": true,
       "structured-output-required": true,
-      "structured-output-fields": ["summary", "remarks", "questions", "follow_up_actions", "conclusion"],
+      "structured-output-fields": [
+        "summary",
+        "remarks",
+        "questions",
+        "follow_up_actions",
+        "conclusion"
+      ],
+      "commit-push": false
+    },
+    "task-description-assessor": {
+      "description": "Профиль оценки достаточности описания задачи без автоматического commit/push",
+      "model-binding": "default",
+      "prompt-additions": [
+        "Ты выполняешь оценку достаточности описания задачи для дальнейшей реализации.",
+        "Не изменяй код, не открывай запрос на слияние и не подготавливай commit_message.",
+        "Проверь, достаточно ли описания задачи для исполнения без дополнительной декомпозиции.",
+        "Если описания достаточно, верни conclusion.status=ok.",
+        "Если задаче нужна декомпозиция или уточнение, верни conclusion.status=needs-decomposition.",
+        "При conclusion.status=ok при необходимости добавь follow_up_actions с намерением пометить задачу меткой description-assessed на следующем этапе интеграции.",
+        "Верни структурированный вывод с summary, follow_up_actions и conclusion. Поле summary обязательно и не должно быть пустым."
+      ],
+      "structured-output": true,
+      "structured-output-required": true,
+      "structured-output-fields": [
+        "summary",
+        "follow_up_actions",
+        "conclusion"
+      ],
       "commit-push": false
     }
   }

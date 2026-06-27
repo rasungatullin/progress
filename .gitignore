@@ -65,3 +65,5 @@ debug/
 .progress/workplaces/
 !.progress/execution/
 !.progress/execution/profiles.json
+!.progress/decision/
+!.progress/decision/workflows.json

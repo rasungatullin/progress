@@ -1,0 +1,22 @@
+{
+  "defaults": {
+    "step": "implement",
+    "profile": "default",
+    "reason_code": "issue_context_ready",
+    "reason_message": "Контекст задачи готов к передаче в контур исполнения."
+  },
+  "routes": [
+    {
+      "step": "assess-description",
+      "profile": "task-description-assessor",
+      "has_labels": [
+        "description-assessment"
+      ],
+      "missing_labels": [
+        "description-assessed"
+      ],
+      "reason_code": "task_description_not_assessed",
+      "reason_message": "Описание задачи ещё не оценено; задача направлена на оценку декомпозиции."
+    }
+  ]
+}
