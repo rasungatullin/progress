@@ -122,6 +122,7 @@ func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error
 		in.Launch.Directory = workplace.Name
 	}
 	in.Launch.Runner = allocation.Runner
+	in.Launch.RunnerConfig = allocation.RunnerConfig
 	in.Launch.Model = allocation.Model
 	if strings.TrimSpace(in.Launch.ModelBinding) == "" {
 		in.Launch.ModelBinding = allocation.ModelBinding
@@ -163,6 +164,7 @@ func (s *Service) LaunchDirect(ctx context.Context, in Invocation) (LaunchResult
 		Resource:     "external-launch",
 		Reserved:     true,
 		Runner:       in.Launch.Runner,
+		RunnerConfig: in.Launch.RunnerConfig,
 		Model:        in.Launch.Model,
 		ModelBinding: in.Launch.ModelBinding,
 		Source:       "direct-launch",
@@ -255,6 +257,7 @@ func (s *Service) PrepareWorkplace(ctx context.Context, in Invocation, profile P
 
 func (s *Service) Launch(ctx context.Context, in Invocation, profile Profile, allocation Allocation, workplace Workplace) (LaunchResult, error) {
 	in.Launch.Runner = allocation.Runner
+	in.Launch.RunnerConfig = allocation.RunnerConfig
 	in.Launch.Model = allocation.Model
 	if strings.TrimSpace(in.Launch.ModelBinding) == "" {
 		in.Launch.ModelBinding = allocation.ModelBinding

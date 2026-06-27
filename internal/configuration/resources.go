@@ -110,20 +110,17 @@ func readLayer(path string, source ConfigFileSource, readFile ReadFileFunc) (Exe
 func mergeExecutionResourceLayers(layers []ExecutionResourceLayer) ExecutionResourceConfig {
 	merged := model.ResourceConfigFile{
 		Defaults: model.ResourceDefaultsConfig{},
+		Runners:  map[string]model.RunnerConfig{},
 		Bindings: map[string]model.ResourceBindingConfig{},
 	}
 	bindingSources := map[string]ConfigFileSource{}
 
-	runnerSeen := map[string]struct{}{}
 	modelSeen := map[string]struct{}{}
 
 	for _, layer := range layers {
-		for _, name := range layer.Config.Runners {
+		for name, runner := range layer.Config.Runners {
 			name = strings.TrimSpace(name)
-			if _, ok := runnerSeen[name]; !ok {
-				runnerSeen[name] = struct{}{}
-				merged.Runners = append(merged.Runners, name)
-			}
+			merged.Runners[name] = runner
 		}
 		for _, name := range layer.Config.Models {
 			name = strings.TrimSpace(name)
@@ -173,9 +170,39 @@ func validateResourceConfig(config model.ResourceConfigFile) error {
 	if len(config.Runners) == 0 {
 		return fmt.Errorf("runners must define at least one entry")
 	}
-	for _, name := range config.Runners {
+	for name, runner := range config.Runners {
+		name = strings.TrimSpace(name)
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("runners contains empty name")
+		}
+		runnerType := strings.TrimSpace(runner.Type)
+		if runnerType == "" {
+			return fmt.Errorf("runner %q has empty type", name)
+		}
+		switch runnerType {
+		case "opencode":
+			if strings.TrimSpace(runner.Script) != "" {
+				return fmt.Errorf("runner %q with type opencode must not define script", name)
+			}
+			if err := validateRunnerSettings(name, runnerType, runner.Settings); err != nil {
+				return err
+			}
+		case "codex":
+			if strings.TrimSpace(runner.Script) != "" {
+				return fmt.Errorf("runner %q with type codex must not define script", name)
+			}
+			if err := validateRunnerSettings(name, runnerType, runner.Settings); err != nil {
+				return err
+			}
+		case "script":
+			if strings.TrimSpace(runner.Script) == "" {
+				return fmt.Errorf("runner %q with type script requires script", name)
+			}
+			if len(runner.Settings) > 0 {
+				return fmt.Errorf("runner %q with type script must not define settings", name)
+			}
+		default:
+			return fmt.Errorf("runner %q has unsupported type %q", name, runnerType)
 		}
 	}
 
@@ -202,8 +229,12 @@ func validateResourceConfig(config model.ResourceConfigFile) error {
 		if strings.TrimSpace(binding.Model) == "" {
 			return fmt.Errorf("binding %q has empty model", name)
 		}
-		if !containsName(config.Runners, binding.Runner) {
+		bindingRunner := strings.TrimSpace(binding.Runner)
+		if !containsRunner(config.Runners, bindingRunner) {
 			return fmt.Errorf("binding %q references unknown runner %q", name, binding.Runner)
+		}
+		if !runnerEnabled(config.Runners[bindingRunner]) {
+			return fmt.Errorf("binding %q references disabled runner %q", name, binding.Runner)
 		}
 		if !containsName(config.Models, binding.Model) {
 			return fmt.Errorf("binding %q references unknown model %q", name, binding.Model)
@@ -217,6 +248,33 @@ func validateResourceConfig(config model.ResourceConfigFile) error {
 	}
 
 	return nil
+}
+
+func validateRunnerSettings(name, runnerType string, settings map[string]string) error {
+	for key := range settings {
+		key = strings.TrimSpace(key)
+		switch runnerType {
+		case "codex":
+			if key != "sandbox" {
+				return fmt.Errorf("runner %q with type codex has unsupported setting %q", name, key)
+			}
+		case "opencode":
+			return fmt.Errorf("runner %q with type opencode has unsupported setting %q", name, key)
+		}
+	}
+	return nil
+}
+
+func containsRunner(values map[string]model.RunnerConfig, expected string) bool {
+	_, ok := values[strings.TrimSpace(expected)]
+	return ok
+}
+
+func runnerEnabled(runner model.RunnerConfig) bool {
+	if runner.Enabled == nil {
+		return true
+	}
+	return *runner.Enabled
 }
 
 func containsName(values []string, expected string) bool {

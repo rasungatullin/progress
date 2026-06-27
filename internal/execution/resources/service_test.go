@@ -14,7 +14,7 @@ func TestAllocateUsesExplicitModelBinding(t *testing.T) {
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode", "codex"],
+		"runners": {"opencode": {"type": "opencode"}, "codex": {"type": "codex"}},
 		"models": ["openai/gpt-5.4", "gpt-5.3-codex"],
 		"bindings": {
 			"default": {"runner": "opencode", "model": "openai/gpt-5.4"},
@@ -40,7 +40,7 @@ func TestAllocateUsesGlobalResourcesWhenLocalIsMissing(t *testing.T) {
 	t.Setenv("PROGRESS_CONFIG_HOME", "/global")
 	service := newTestServiceWithGlobalFallback(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode", "codex"],
+		"runners": {"opencode": {"type": "opencode"}, "codex": {"type": "codex"}},
 		"models": ["openai/gpt-5.4", "gpt-5.3-codex"],
 		"bindings": {
 			"default": {"runner": "opencode", "model": "openai/gpt-5.4"},
@@ -66,7 +66,7 @@ func TestAllocateMergesLayersAndOverwritesLocalBinding(t *testing.T) {
 	t.Setenv("PROGRESS_CONFIG_HOME", "/global")
 	service := newTestServiceWithGlobalFallback(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode", "codex"],
+		"runners": {"opencode": {"type": "opencode"}, "codex": {"type": "codex"}},
 		"models": ["openai/gpt-5.4", "openai/gpt-5.5"],
 		"bindings": {
 			"default": {"runner": "opencode", "model": "openai/gpt-5.4"},
@@ -74,7 +74,7 @@ func TestAllocateMergesLayersAndOverwritesLocalBinding(t *testing.T) {
 		}
 	}`, `{
 		"defaults": {"model-binding": "coder"},
-		"runners": ["codex"],
+		"runners": {"codex": {"type": "codex"}},
 		"models": ["gpt-5.3-codex"],
 		"bindings": {
 			"default": {"runner": "codex", "model": "gpt-5.3-codex"},
@@ -123,7 +123,7 @@ func TestAllocateUsesExplicitRunnerAndModelWithoutBinding(t *testing.T) {
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode", "codex"],
+		"runners": {"opencode": {"type": "opencode"}, "codex": {"type": "codex"}},
 		"models": ["openai/gpt-5.4", "gpt-5.3-codex"],
 		"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 	}`)
@@ -142,12 +142,52 @@ func TestAllocateUsesExplicitRunnerAndModelWithoutBinding(t *testing.T) {
 	}
 }
 
+func TestAllocateRejectsDisabledExplicitRunner(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"runners": {"opencode": {"type": "opencode", "enabled": false}, "codex": {"type": "codex"}},
+		"models": ["openai/gpt-5.4", "gpt-5.3-codex"],
+		"bindings": {"default": {"runner": "codex", "model": "gpt-5.3-codex"}}
+	}`)
+
+	_, err := service.Allocate(context.Background(), model.Invocation{
+		Launch: model.LaunchSpec{Runner: "opencode", Model: "openai/gpt-5.4"},
+	}, model.Profile{ModelBinding: "default"})
+	if err == nil {
+		t.Fatal("expected disabled runner error")
+	}
+	if !strings.Contains(err.Error(), "execution runner is disabled: opencode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAllocateKeepsScriptRunnerConfig(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "pi"},
+		"runners": {"pi": {"type": "script", "script": "./tools/pi.sh"}},
+		"models": ["pi/default"],
+		"bindings": {"pi": {"runner": "pi", "model": "pi/default"}}
+	}`)
+
+	allocation, err := service.Allocate(context.Background(), model.Invocation{}, model.Profile{ModelBinding: "pi"})
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if allocation.Runner != "pi" || allocation.RunnerConfig.Type != "script" || allocation.RunnerConfig.Script != "./tools/pi.sh" {
+		t.Fatalf("unexpected allocation: %#v", allocation)
+	}
+}
+
 func TestAllocateUsesProfileBinding(t *testing.T) {
 	t.Parallel()
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode"],
+		"runners": {"opencode": {"type": "opencode"}},
 		"models": ["openai/gpt-5.4", "openai/gpt-5.5"],
 		"bindings": {
 			"default": {"runner": "opencode", "model": "openai/gpt-5.4"},
@@ -172,7 +212,7 @@ func TestAllocateFallsBackToDefaultBindingWhenProfileAllowsIt(t *testing.T) {
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode"],
+		"runners": {"opencode": {"type": "opencode"}},
 		"models": ["openai/gpt-5.4"],
 		"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 	}`)
@@ -197,7 +237,7 @@ func TestAllocateRejectsUnknownProfileBindingWithoutFallback(t *testing.T) {
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode"],
+		"runners": {"opencode": {"type": "opencode"}},
 		"models": ["openai/gpt-5.4"],
 		"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 	}`)
@@ -216,7 +256,7 @@ func TestAllocateRejectsHalfExplicitRunnerModelPair(t *testing.T) {
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode"],
+		"runners": {"opencode": {"type": "opencode"}},
 		"models": ["openai/gpt-5.4"],
 		"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 	}`)
@@ -237,7 +277,7 @@ func TestAllocateRejectsInvalidConfig(t *testing.T) {
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode"],
+		"runners": {"opencode": {"type": "opencode"}},
 		"models": ["openai/gpt-5.4"],
 		"bindings": {"default": {"runner": "missing", "model": "openai/gpt-5.4"}}
 	}`)
@@ -256,7 +296,7 @@ func TestAllocateRejectsEmptyProfileBindingWithoutFallback(t *testing.T) {
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode"],
+		"runners": {"opencode": {"type": "opencode"}},
 		"models": ["openai/gpt-5.4"],
 		"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 	}`)
@@ -277,7 +317,7 @@ func TestAllocateFallsBackToDefaultBindingWhenProfileBindingIsEmpty(t *testing.T
 
 	service := newTestService(`{
 		"defaults": {"model-binding": "default"},
-		"runners": ["opencode"],
+		"runners": {"opencode": {"type": "opencode"}},
 		"models": ["openai/gpt-5.4"],
 		"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 	}`)
@@ -301,7 +341,7 @@ func TestAllocateRejectsFallbackWhenDefaultBindingIsNotConfigured(t *testing.T) 
 
 	service := newTestService(`{
 		"defaults": {},
-		"runners": ["opencode"],
+		"runners": {"opencode": {"type": "opencode"}},
 		"models": ["openai/gpt-5.4"],
 		"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 	}`)

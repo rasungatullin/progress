@@ -59,8 +59,12 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		if runner == "" || modelName == "" {
 			return model.Allocation{}, fmt.Errorf("launch runner and model must be provided together when no model-binding is used")
 		}
-		if !containsName(config.Config.Runners, runner) {
+		runnerConfig, ok := config.Config.Runners[runner]
+		if !ok {
 			return model.Allocation{}, fmt.Errorf("unknown execution runner: %s", runner)
+		}
+		if !runnerEnabled(runnerConfig) {
+			return model.Allocation{}, fmt.Errorf("execution runner is disabled: %s", runner)
 		}
 		if !containsName(config.Config.Models, modelName) {
 			return model.Allocation{}, fmt.Errorf("unknown execution model: %s", modelName)
@@ -69,6 +73,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			Resource:         "runner-model:" + runner + ":" + modelName,
 			Reserved:         true,
 			Runner:           runner,
+			RunnerConfig:     runnerConfig,
 			Model:            modelName,
 			Source:           allocationSourceExplicitRunnerModel,
 			GlobalConfigPath: config.GlobalConfigPath,
@@ -148,12 +153,15 @@ func resolveBinding(config resourceConfig, bindingName string, source string) (m
 	if !ok {
 		return model.Allocation{}, fmt.Errorf("unknown execution model-binding: %s", bindingName)
 	}
+	runnerName := strings.TrimSpace(binding.Runner)
+	modelName := strings.TrimSpace(binding.Model)
 
 	allocation := model.Allocation{
 		Resource:     "binding:" + bindingName,
 		Reserved:     true,
-		Runner:       binding.Runner,
-		Model:        binding.Model,
+		Runner:       runnerName,
+		RunnerConfig: config.Config.Runners[runnerName],
+		Model:        modelName,
 		ModelBinding: bindingName,
 		Source:       source,
 		FallbackUsed: false,
@@ -162,6 +170,13 @@ func resolveBinding(config resourceConfig, bindingName string, source string) (m
 		allocation.BindingSource = string(config.BindingSources[bindingName])
 	}
 	return allocation, nil
+}
+
+func runnerEnabled(runner model.RunnerConfig) bool {
+	if runner.Enabled == nil {
+		return true
+	}
+	return *runner.Enabled
 }
 
 func resolveDefaultBinding(config resourceConfig) (model.Allocation, error) {
