@@ -71,6 +71,9 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Decision.ExecutionPlan.Repository != "owner/name" {
 		t.Fatalf("unexpected execution repository: %q", result.Decision.ExecutionPlan.Repository)
 	}
+	if result.Decision.ExecutionPlan.Step != "implement" {
+		t.Fatalf("unexpected execution step: %q", result.Decision.ExecutionPlan.Step)
+	}
 	if result.Decision.ExecutionPlan.Profile != defaultExecutionProfile {
 		t.Fatalf("unexpected execution profile: %q", result.Decision.ExecutionPlan.Profile)
 	}
@@ -118,6 +121,45 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	}
 	if executionStub.invocation.Launch.StructuredOutputRequired {
 		t.Fatal("structured output must remain optional for decision-triggered execution")
+	}
+}
+
+func TestServiceStartRoutesTaskDescriptionAssessment(t *testing.T) {
+	t.Parallel()
+
+	integrationStub := &stubIntegrationExecutor{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     211,
+				Title:      "Assess task description",
+				State:      "OPEN",
+				Labels:     []string{"description-assessment"},
+			},
+		},
+	}
+	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
+	service := &Service{logger: log.Default(), integration: integrationStub, execution: executionStub, resolveRepo: func(context.Context) (string, error) { return "owner/name", nil }}
+
+	result, err := service.Start(context.Background(), StartInput{TaskNumber: 211})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if result.Decision == nil || result.Decision.ExecutionPlan == nil {
+		t.Fatalf("expected execution plan, got %#v", result.Decision)
+	}
+	if result.Decision.ExecutionPlan.Step != "assess-description" {
+		t.Fatalf("unexpected execution step: %q", result.Decision.ExecutionPlan.Step)
+	}
+	if result.Decision.ExecutionPlan.Profile != "task-description-assessor" {
+		t.Fatalf("unexpected execution profile: %q", result.Decision.ExecutionPlan.Profile)
+	}
+	if len(result.Decision.Reasons) != 1 || result.Decision.Reasons[0].Code != "task_description_not_assessed" {
+		t.Fatalf("unexpected decision reasons: %#v", result.Decision.Reasons)
+	}
+	if executionStub.invocation.Profile != "task-description-assessor" {
+		t.Fatalf("unexpected execution invocation profile: %q", executionStub.invocation.Profile)
 	}
 }
 

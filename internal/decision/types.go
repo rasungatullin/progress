@@ -38,6 +38,7 @@ type ExecutionPlan struct {
 	TaskNumber      int
 	TaskTitle       string
 	Repository      string
+	Step            string
 	Profile         string
 	Prompt          string
 	StructuredInput *execution.StructuredInput

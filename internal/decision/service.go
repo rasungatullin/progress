@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -23,20 +24,24 @@ type executionStarter interface {
 }
 
 type Service struct {
-	logger      *log.Logger
-	integration integrationExecutor
-	execution   executionStarter
-	resolveRepo func(context.Context) (string, error)
+	logger          *log.Logger
+	integration     integrationExecutor
+	execution       executionStarter
+	resolveRepo     func(context.Context) (string, error)
+	resolveRepoRoot func(context.Context) (string, error)
+	readFile        func(string) ([]byte, error)
 }
 
 func NewService(logger *log.Logger) *Service {
 	logger = ensureLogger(logger)
 
 	return &Service{
-		logger:      logger,
-		integration: integration.NewService(logger),
-		execution:   execution.NewService(logger),
-		resolveRepo: resolveCurrentGitHubRepository,
+		logger:          logger,
+		integration:     integration.NewService(logger),
+		execution:       execution.NewService(logger),
+		resolveRepo:     resolveCurrentGitHubRepository,
+		resolveRepoRoot: resolveDecisionRepoRoot,
+		readFile:        os.ReadFile,
 	}
 }
 
@@ -64,7 +69,12 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		return StartResult{}, fmt.Errorf("integration did not return issue for task %d", input.TaskNumber)
 	}
 
-	decision := buildExecuteDecision(response.Issue)
+	route, err := s.selectWorkflowRoute(ctx, response.Issue)
+	if err != nil {
+		return StartResult{}, err
+	}
+
+	decision := buildExecuteDecision(response.Issue, route)
 	result := StartResult{
 		Context: DecisionContext{
 			Signal: signal,
@@ -127,23 +137,38 @@ func (s *Service) resolveCurrentRepository(ctx context.Context) (string, error) 
 	return normalized, nil
 }
 
-func buildExecuteDecision(issue *integration.TrackerIssue) Decision {
+func buildExecuteDecision(issue *integration.TrackerIssue, route selectedWorkflowRoute) Decision {
+	prompt := buildExecutionTask(issue)
+	if strings.TrimSpace(route.Step) == "" {
+		route.Step = "implement"
+	}
+	if strings.TrimSpace(route.Profile) == "" {
+		route.Profile = defaultExecutionProfile
+	}
+	if strings.TrimSpace(route.ReasonCode) == "" {
+		route.ReasonCode = "issue_context_ready"
+	}
+	if strings.TrimSpace(route.ReasonMessage) == "" {
+		route.ReasonMessage = "Контекст задачи готов к передаче в контур исполнения."
+	}
+
 	return Decision{
 		Type: DecisionType(DecisionTypeExecute),
 		Reasons: []DecisionReason{
 			{
-				Code:    "issue_context_ready",
-				Message: "Issue-backed decision context is ready for direct execution handoff.",
+				Code:    route.ReasonCode,
+				Message: route.ReasonMessage,
 			},
 		},
 		ExecutionPlan: &ExecutionPlan{
 			TaskNumber: issue.Number,
 			TaskTitle:  issue.Title,
 			Repository: strings.TrimSpace(issue.Repository),
-			Profile:    defaultExecutionProfile,
-			Prompt:     buildExecutionTask(issue),
+			Step:       route.Step,
+			Profile:    route.Profile,
+			Prompt:     prompt,
 			StructuredInput: &execution.StructuredInput{
-				Task: buildExecutionTask(issue),
+				Task: prompt,
 			},
 		},
 	}
@@ -220,6 +245,15 @@ func resolveCurrentGitHubRepository(ctx context.Context) (string, error) {
 	}
 
 	return repository, nil
+}
+
+func resolveDecisionRepoRoot(ctx context.Context) (string, error) {
+	output, err := runGitOutput(ctx, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(output), nil
 }
 
 func parseGitHubRepositoryFromRemoteURL(raw string) (string, error) {
