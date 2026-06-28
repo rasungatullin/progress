@@ -1,10 +1,14 @@
 package model
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type LaunchSpec struct {
 	Directory                string           `json:"directory,omitempty"`
 	Runner                   string           `json:"runner,omitempty"`
+	RunnerConfig             RunnerConfig     `json:"runner_config,omitempty"`
 	Model                    string           `json:"model,omitempty"`
 	ModelBinding             string           `json:"model_binding,omitempty"`
 	Resume                   *ResumeSpec      `json:"resume,omitempty"`
@@ -169,23 +173,53 @@ type ProfileConfig struct {
 }
 
 type Allocation struct {
-	Resource         string `json:"resource,omitempty"`
-	Reserved         bool   `json:"reserved,omitempty"`
-	Runner           string `json:"runner,omitempty"`
-	Model            string `json:"model,omitempty"`
-	ModelBinding     string `json:"model_binding,omitempty"`
-	BindingSource    string `json:"binding_source,omitempty"`
-	Source           string `json:"source,omitempty"`
-	FallbackUsed     bool   `json:"fallback_used,omitempty"`
-	GlobalConfigPath string `json:"global_config_path,omitempty"`
-	LocalConfigPath  string `json:"local_config_path,omitempty"`
+	Resource         string       `json:"resource,omitempty"`
+	Reserved         bool         `json:"reserved,omitempty"`
+	Runner           string       `json:"runner,omitempty"`
+	RunnerConfig     RunnerConfig `json:"runner_config,omitempty"`
+	Model            string       `json:"model,omitempty"`
+	ModelBinding     string       `json:"model_binding,omitempty"`
+	BindingSource    string       `json:"binding_source,omitempty"`
+	Source           string       `json:"source,omitempty"`
+	FallbackUsed     bool         `json:"fallback_used,omitempty"`
+	GlobalConfigPath string       `json:"global_config_path,omitempty"`
+	LocalConfigPath  string       `json:"local_config_path,omitempty"`
 }
 
 type ResourceConfigFile struct {
 	Defaults ResourceDefaultsConfig           `json:"defaults"`
-	Runners  []string                         `json:"runners"`
+	Runners  map[string]RunnerConfig          `json:"runners"`
 	Models   []string                         `json:"models"`
 	Bindings map[string]ResourceBindingConfig `json:"bindings"`
+}
+
+type RunnerConfig struct {
+	Type     string            `json:"type,omitempty"`
+	Enabled  *bool             `json:"enabled,omitempty"`
+	Settings map[string]string `json:"settings,omitempty"`
+	Script   string            `json:"script,omitempty"`
+}
+
+func (c *RunnerConfig) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for key := range raw {
+		switch key {
+		case "type", "enabled", "settings", "script":
+		default:
+			return fmt.Errorf("runner config contains unsupported field %q", key)
+		}
+	}
+
+	type runnerConfig RunnerConfig
+	var decoded runnerConfig
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*c = RunnerConfig(decoded)
+	return nil
 }
 
 type ResourceBindingConfig struct {

@@ -225,7 +225,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 					return " M file.txt\n", nil
 				}
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/runner-input :(exclude).progress/execution-runs":
 				return "", nil
 			case "commit -m Ship release notes":
 				return "[feature/test abc123] Ship release notes\n", nil
@@ -251,7 +251,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"rev-parse", "--is-inside-work-tree"},
 		{"branch", "--show-current"},
 		{"status", "--porcelain"},
-		{"add", "-A", "--", ".", runnerOutputExcludePathspec, executionRunsExcludePathspec},
+		{"add", "-A", "--", ".", runnerOutputExcludePathspec, runnerInputExcludePathspec, executionRunsExcludePathspec},
 		{"status", "--porcelain"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
@@ -297,7 +297,7 @@ func TestLaunchCommitPushFailureKeepsRunnerSessionID(t *testing.T) {
 			return "feature/test\n", nil
 		case "status --porcelain":
 			return " M file.txt\n", nil
-		case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+		case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/runner-input :(exclude).progress/execution-runs":
 			return "", fmt.Errorf("git add failed")
 		default:
 			return "", fmt.Errorf("unexpected git command: %v", args)
@@ -350,7 +350,7 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 					return " M file.txt\n", nil
 				}
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/runner-input :(exclude).progress/execution-runs":
 				addArgs = append([]string(nil), args...)
 				return "", nil
 			case "commit -m repo":
@@ -368,7 +368,7 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", ".", runnerOutputExcludePathspec, executionRunsExcludePathspec}) {
+	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", ".", runnerOutputExcludePathspec, runnerInputExcludePathspec, executionRunsExcludePathspec}) {
 		t.Fatalf("git add must exclude raw runner output path: %#v", addArgs)
 	}
 }
@@ -396,7 +396,7 @@ func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *te
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/runner-input :(exclude).progress/execution-runs":
 				return "", nil
 			case "commit -m review-fixes":
 				return "[feature/test abc123] review-fixes\n", nil
@@ -438,7 +438,7 @@ func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *te
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/runner-input :(exclude).progress/execution-runs":
 				return "", nil
 			case "commit -m structured-contract-v1-worktree":
 				return "[feature/test abc123] structured-contract-v1-worktree\n", nil
@@ -599,6 +599,9 @@ func TestLaunchCommitPushKeepsProgressConfigVisibleAsUserChange(t *testing.T) {
 	if statusLineHasUserChanges(" M .progress/runner-output/execution-123.log") {
 		t.Fatal("unstaged runner output changes must be ignored as runtime artifacts")
 	}
+	if statusLineHasUserChanges(" M .progress/runner-input/execution-123.md") {
+		t.Fatal("unstaged runner input changes must be ignored as runtime artifacts")
+	}
 }
 
 func TestLaunchPushErrorReturned(t *testing.T) {
@@ -616,7 +619,7 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 				return "feature/test\n", nil
 			case "status --porcelain":
 				return "M  file.txt\n", nil
-			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/execution-runs":
+			case "add -A -- . :(exclude).progress/runner-output :(exclude).progress/runner-input :(exclude).progress/execution-runs":
 				return "", nil
 			case "commit -m repo":
 				return "[feature/test abc123] repo\n", nil
@@ -803,6 +806,177 @@ func TestBuildRunnerCommandCodex(t *testing.T) {
 	}
 
 	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "ship it"})
+}
+
+func TestBuildRunnerCommandUsesCodexSandboxSetting(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory: "/tmp/work",
+		Runner:    RunnerCodex,
+		RunnerConfig: model.RunnerConfig{
+			Type:     RunnerCodex,
+			Settings: map[string]string{"sandbox": "workspace-write"},
+		},
+		Model: "openai/gpt-5.4",
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "--config", "sandbox_mode=workspace-write", "ship it"})
+}
+
+func TestBuildRunnerCommandUsesBuiltinTypeAsCommand(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory:    "/tmp/work",
+		Runner:       "fast",
+		RunnerConfig: model.RunnerConfig{Type: RunnerCodex},
+		Model:        "openai/gpt-5.4",
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "ship it"})
+}
+
+func TestBuildRunnerCommandScript(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory: "/tmp/work",
+		Runner:    "pi",
+		RunnerConfig: model.RunnerConfig{
+			Type:   "script",
+			Script: "./tools/pi.sh",
+		},
+		Model: "pi/default",
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	assertRunnerCommand(t, cmd, "./tools/pi.sh", nil)
+}
+
+func TestBuildRunnerCommandScriptRequiresScript(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory:    "/tmp/work",
+		Runner:       "pi",
+		RunnerConfig: model.RunnerConfig{Type: "script"},
+		Model:        "pi/default",
+	}, "ship it")
+	if err == nil {
+		t.Fatal("expected script path error")
+	}
+	if !strings.Contains(err.Error(), "runner pi requires script") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunRunnerScriptUsesLaunchDirectoryAndPromptFile(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	toolsDir := filepath.Join(workDir, "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatalf("create tools dir: %v", err)
+	}
+	scriptPath := filepath.Join(toolsDir, "pi.sh")
+	script := `#!/bin/sh
+if [ -n "$PROGRESS_RUNNER_DIRECTORY" ]; then
+  echo "unexpected directory env"
+  exit 23
+fi
+printf 'cwd=%s\n' "$(pwd)"
+printf 'name=%s\n' "$PROGRESS_RUNNER_NAME"
+printf 'model=%s\n' "$PROGRESS_RUNNER_MODEL"
+printf 'prompt='
+cat "$PROGRESS_RUNNER_PROMPT_FILE"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	output, err := runRunner(context.Background(), model.Invocation{
+		Launch: model.LaunchSpec{
+			Directory:    workDir,
+			Runner:       "pi",
+			RunnerConfig: model.RunnerConfig{Type: "script", Script: "./tools/pi.sh"},
+			Model:        "pi/default",
+			Prompt:       "ship it",
+		},
+	})
+	if err != nil {
+		t.Fatalf("run runner: %v", err)
+	}
+	expectedWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		expectedWorkDir = workDir
+	}
+	for _, expected := range []string{
+		"cwd=" + expectedWorkDir,
+		"name=pi",
+		"model=pi/default",
+		"prompt=ship it",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("output must contain %q, got %q", expected, output)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".progress", "runner-input")); err != nil {
+		t.Fatalf("runner input directory must exist: %v", err)
+	}
+}
+
+func TestRunRunnerScriptUsesPromptFileWithRelativeLaunchDirectory(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	workDir := "work"
+	toolsDir := filepath.Join(workDir, "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatalf("create tools dir: %v", err)
+	}
+	scriptPath := filepath.Join(toolsDir, "pi.sh")
+	script := `#!/bin/sh
+cat "$PROGRESS_RUNNER_PROMPT_FILE"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	output, err := runRunner(context.Background(), model.Invocation{
+		Launch: model.LaunchSpec{
+			Directory:    workDir,
+			Runner:       "pi",
+			RunnerConfig: model.RunnerConfig{Type: "script", Script: "./tools/pi.sh"},
+			Model:        "pi/default",
+			Prompt:       "ship it",
+		},
+	})
+	if err != nil {
+		t.Fatalf("run runner: %v", err)
+	}
+	if strings.TrimSpace(output) != "ship it" {
+		t.Fatalf("script must read prompt through usable file path, got %q", output)
+	}
 }
 
 func TestBuildRunnerCommandCodexResume(t *testing.T) {
@@ -1798,10 +1972,14 @@ func buildStructuredJSON(value any) (string, error) {
 
 func assertRunnerCommand(t *testing.T, cmd *exec.Cmd, expectedPath string, expectedArgs []string) {
 	t.Helper()
-	if filepath.Base(cmd.Path) != expectedPath {
+	if strings.ContainsRune(expectedPath, filepath.Separator) {
+		if cmd.Path != expectedPath {
+			t.Fatalf("unexpected command path: %q", cmd.Path)
+		}
+	} else if filepath.Base(cmd.Path) != expectedPath {
 		t.Fatalf("unexpected command path: %q", cmd.Path)
 	}
-	if !reflect.DeepEqual(cmd.Args, append([]string{expectedPath}, expectedArgs...)) {
+	if !reflect.DeepEqual(cmd.Args, append([]string{cmd.Args[0]}, expectedArgs...)) {
 		t.Fatalf("unexpected command args: %#v", cmd.Args)
 	}
 }

@@ -34,6 +34,8 @@ const runnerMetadataEnd = "</progress-runner-metadata>"
 
 const runnerOutputExcludePathspec = ":(exclude).progress/runner-output"
 
+const runnerInputExcludePathspec = ":(exclude).progress/runner-input"
+
 const executionRunsExcludePathspec = ":(exclude).progress/execution-runs"
 
 const runRecordFilePrefix = "execution-"
@@ -579,7 +581,7 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 		return fmt.Errorf("launch prompt is required")
 	}
 
-	if !isSupportedRunner(in.Launch.Runner) && in.Launch.Resume == nil {
+	if !isSupportedRunner(in.Launch) && in.Launch.Resume == nil {
 		return fmt.Errorf("unsupported runner: %s", in.Launch.Runner)
 	}
 
@@ -603,9 +605,10 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 	return nil
 }
 
-func isSupportedRunner(runner string) bool {
-	switch strings.TrimSpace(runner) {
-	case RunnerOpenCode, RunnerCodex:
+func isSupportedRunner(spec model.LaunchSpec) bool {
+	runnerConfig := resolveRunnerConfig(spec)
+	switch runnerConfig.Type {
+	case RunnerOpenCode, RunnerCodex, "script":
 		return true
 	default:
 		return false
@@ -780,7 +783,7 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
-	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "add", "-A", "--", ".", runnerOutputExcludePathspec, executionRunsExcludePathspec); err != nil {
+	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "add", "-A", "--", ".", runnerOutputExcludePathspec, runnerInputExcludePathspec, executionRunsExcludePathspec); err != nil {
 		return gitResult{}, fmt.Errorf("git add failed: %w", err)
 	}
 
@@ -897,6 +900,8 @@ func isProgressRuntimePath(pathValue string) bool {
 	pathValue = strings.Trim(pathValue, "\"")
 	return pathValue == ".progress/runner-output" ||
 		strings.HasPrefix(pathValue, ".progress/runner-output/") ||
+		pathValue == ".progress/runner-input" ||
+		strings.HasPrefix(pathValue, ".progress/runner-input/") ||
 		pathValue == ".progress/execution-runs" ||
 		strings.HasPrefix(pathValue, ".progress/execution-runs/")
 }
@@ -957,9 +962,18 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 		return "", err
 	}
 
-	runner := strings.TrimSpace(in.Launch.Runner)
-	if runner == RunnerCodex {
+	runnerConfig := resolveRunnerConfig(in.Launch)
+	if runnerConfig.Type == RunnerCodex {
 		return runCodexRunner(ctx, in.Launch, prompt)
+	}
+
+	promptFile := ""
+	if runnerConfig.Type == "script" {
+		persistedPromptFile, err := persistRunnerInput(in.Launch.Directory, prompt)
+		if err != nil {
+			return "", err
+		}
+		promptFile = persistedPromptFile
 	}
 
 	cmd, err := buildRunnerCommand(ctx, in.Launch, prompt)
@@ -968,12 +982,12 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	}
 	metadata := runnerMetadata{}
 	opencodeTitle := ""
-	if runner == RunnerOpenCode && in.Launch.Resume == nil {
+	if runnerConfig.Type == RunnerOpenCode && in.Launch.Resume == nil {
 		opencodeTitle = openCodeExecutionTitle()
 		cmd.Args = insertOpenCodeTitle(cmd.Args, opencodeTitle)
 	}
 	cmd.Dir = in.Launch.Directory
-	cmd.Env = sanitizedEnv()
+	cmd.Env = runnerEnv(in.Launch, promptFile)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("launch runner failed: %w\n%s", err, strings.TrimSpace(string(output)))
@@ -995,7 +1009,7 @@ func runCodexRunner(ctx context.Context, spec model.LaunchSpec, prompt string) (
 	}
 	cmd.Args = insertCodexJSONFlag(cmd.Args)
 	cmd.Dir = spec.Directory
-	cmd.Env = sanitizedEnv()
+	cmd.Env = runnerEnv(spec, "")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("launch runner failed: %w\n%s", err, strings.TrimSpace(string(output)))
@@ -1137,8 +1151,38 @@ func persistRunnerOutput(workplaceDir, output string) string {
 	return file.Name()
 }
 
+func persistRunnerInput(workplaceDir, prompt string) (string, error) {
+	workplaceDir = strings.TrimSpace(workplaceDir)
+	if workplaceDir == "" {
+		return "", fmt.Errorf("launch directory is required for script runner input")
+	}
+
+	inputDir := filepath.Join(workplaceDir, ".progress", "runner-input")
+	if err := os.MkdirAll(inputDir, 0o755); err != nil {
+		return "", fmt.Errorf("create runner input directory: %w", err)
+	}
+
+	file, err := os.CreateTemp(inputDir, "execution-*.md")
+	if err != nil {
+		return "", fmt.Errorf("create runner input file: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := io.WriteString(file, prompt); err != nil {
+		return "", fmt.Errorf("write runner input file: %w", err)
+	}
+
+	absolutePath, err := filepath.Abs(file.Name())
+	if err != nil {
+		return "", fmt.Errorf("resolve runner input file path: %w", err)
+	}
+	return absolutePath, nil
+}
+
 func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt string) (*exec.Cmd, error) {
 	runner := strings.TrimSpace(spec.Runner)
+	runnerConfig := resolveRunnerConfig(spec)
+	command := runnerCommand(spec)
 	var args []string
 	resume := spec.Resume != nil
 	sessionID := ""
@@ -1146,24 +1190,34 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 		sessionID = strings.TrimSpace(spec.Resume.RunnerSessionID)
 	}
 
-	switch runner {
+	switch runnerConfig.Type {
 	case RunnerOpenCode:
 		if resume {
 			if sessionID == "" {
 				return nil, fmt.Errorf("%w: runner %s requires runner session id", errResumeUnsupported, runner)
 			}
-			args = []string{"run", "--dir", spec.Directory, "--model", spec.Model, "--session", sessionID, prompt}
+			args = []string{"run", "--dir", spec.Directory, "--model", spec.Model, "--session", sessionID}
 		} else {
-			args = []string{"run", "--dir", spec.Directory, "--model", spec.Model, prompt}
+			args = []string{"run", "--dir", spec.Directory, "--model", spec.Model}
 		}
+		args = append(args, prompt)
 	case RunnerCodex:
 		if resume {
 			if sessionID == "" {
 				return nil, fmt.Errorf("%w: runner %s requires runner session id", errResumeUnsupported, runner)
 			}
-			args = []string{"exec", "resume", sessionID, prompt}
+			args = []string{"exec", "resume", sessionID}
 		} else {
-			args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
+			args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model)}
+		}
+		args = append(args, codexSettingsArgs(runnerConfig.Settings)...)
+		args = append(args, prompt)
+	case "script":
+		if resume {
+			return nil, fmt.Errorf("%w: runner %s does not support saved sessions", errResumeUnsupported, spec.Runner)
+		}
+		if command == "" {
+			return nil, fmt.Errorf("runner %s requires script", spec.Runner)
 		}
 	default:
 		if resume {
@@ -1172,7 +1226,55 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 		return nil, fmt.Errorf("unsupported runner: %s", spec.Runner)
 	}
 
-	return exec.CommandContext(ctx, runner, args...), nil
+	return exec.CommandContext(ctx, command, args...), nil
+}
+
+func runnerCommand(spec model.LaunchSpec) string {
+	config := resolveRunnerConfig(spec)
+	switch config.Type {
+	case RunnerCodex, RunnerOpenCode:
+		return config.Type
+	case "script":
+		return strings.TrimSpace(config.Script)
+	default:
+		return strings.TrimSpace(spec.Runner)
+	}
+}
+
+func resolveRunnerConfig(spec model.LaunchSpec) model.RunnerConfig {
+	config := spec.RunnerConfig
+	if strings.TrimSpace(config.Type) == "" {
+		switch strings.TrimSpace(spec.Runner) {
+		case RunnerOpenCode:
+			config.Type = RunnerOpenCode
+		case RunnerCodex:
+			config.Type = RunnerCodex
+		default:
+			config.Type = strings.TrimSpace(spec.Runner)
+		}
+	}
+	return config
+}
+
+func codexSettingsArgs(settings map[string]string) []string {
+	sandbox := strings.TrimSpace(settings["sandbox"])
+	if sandbox == "" {
+		return nil
+	}
+	return []string{"--config", "sandbox_mode=" + sandbox}
+}
+
+func runnerEnv(spec model.LaunchSpec, promptFile string) []string {
+	env := sanitizedEnv()
+	if resolveRunnerConfig(spec).Type != "script" {
+		return env
+	}
+	env = append(env,
+		"PROGRESS_RUNNER_NAME="+strings.TrimSpace(spec.Runner),
+		"PROGRESS_RUNNER_MODEL="+strings.TrimSpace(spec.Model),
+		"PROGRESS_RUNNER_PROMPT_FILE="+strings.TrimSpace(promptFile),
+	)
+	return env
 }
 
 func extractRunnerSessionID(in model.Invocation, output string) string {

@@ -15,7 +15,7 @@ func TestLoadExecutionResourceConfigMergesGlobalAndLocalLayersAndSetsBindingSour
 		case "/config-home/execution/resources.json":
 			return []byte(`{
 				"defaults": {"model-binding": "default"},
-				"runners": ["opencode", "codex"],
+				"runners": {"opencode": {"type": "opencode"}, "codex": {"type": "codex"}},
 				"models": ["openai/gpt-5.4", "openai/gpt-5.5"],
 				"bindings": {
 					"default": {"runner": "opencode", "model": "openai/gpt-5.4"},
@@ -25,7 +25,7 @@ func TestLoadExecutionResourceConfigMergesGlobalAndLocalLayersAndSetsBindingSour
 		case "/repo/.progress/execution/resources.json":
 			return []byte(`{
 				"defaults": {"model-binding": "coder"},
-				"runners": ["codex"],
+				"runners": {"codex": {"type": "codex"}},
 				"models": ["gpt-5.3-codex-spark"],
 				"bindings": {
 					"default": {"runner": "codex", "model": "gpt-5.3-codex-spark"},
@@ -45,7 +45,7 @@ func TestLoadExecutionResourceConfigMergesGlobalAndLocalLayersAndSetsBindingSour
 	if config.BindingSources["default"] != ConfigFileSourceLocal {
 		t.Fatalf("expected binding default from local, got: %q", config.BindingSources["default"])
 	}
-	if len(config.Config.Runners) != 2 || config.Config.Runners[0] != "opencode" || config.Config.Runners[1] != "codex" {
+	if len(config.Config.Runners) != 2 || config.Config.Runners["opencode"].Type != "opencode" || config.Config.Runners["codex"].Type != "codex" {
 		t.Fatalf("unexpected merged runners: %#v", config.Config.Runners)
 	}
 	if len(config.Config.Models) != 3 {
@@ -64,7 +64,7 @@ func TestLoadExecutionResourceConfigUsesGlobalLayerOnly(t *testing.T) {
 		case "/config-home/execution/resources.json":
 			return []byte(`{
 				"defaults": {"model-binding": "default"},
-				"runners": ["opencode"],
+				"runners": {"opencode": {"type": "opencode"}},
 				"models": ["openai/gpt-5.4"],
 				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 			}`), nil
@@ -92,7 +92,7 @@ func TestLoadExecutionResourceConfigFailsWhenLayerHasInvalidBinding(t *testing.T
 		if path == "/config-home/execution/resources.json" {
 			return []byte(`{
 				"defaults": {"model-binding": "default"},
-				"runners": ["opencode"],
+				"runners": {"opencode": {"type": "opencode"}},
 				"models": ["openai/gpt-5.4"],
 				"bindings": {"default": {"runner": "missing", "model": "openai/gpt-5.4"}}
 			}`), nil
@@ -105,6 +105,54 @@ func TestLoadExecutionResourceConfigFailsWhenLayerHasInvalidBinding(t *testing.T
 		t.Fatal("expected invalid-layer error")
 	}
 	if !strings.Contains(err.Error(), `binding "default" references unknown runner "missing"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadExecutionResourceConfigRejectsDisabledBindingRunner(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/config-home/execution/resources.json" {
+			return []byte(`{
+				"defaults": {"model-binding": "default"},
+				"runners": {"opencode": {"type": "opencode", "enabled": false}},
+				"models": ["openai/gpt-5.4"],
+				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected disabled runner error")
+	}
+	if !strings.Contains(err.Error(), `binding "default" references disabled runner "opencode"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadExecutionResourceConfigRejectsUnsupportedRunnerConfigField(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/config-home/execution/resources.json" {
+			return []byte(`{
+				"defaults": {"model-binding": "default"},
+				"runners": {"codex": {"type": "codex", "command": "/opt/bin/codex"}},
+				"models": ["gpt-5.3-codex"],
+				"bindings": {"default": {"runner": "codex", "model": "gpt-5.3-codex"}}
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected unsupported field error")
+	}
+	if !strings.Contains(err.Error(), `runner config contains unsupported field "command"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -138,7 +186,7 @@ func TestLoadExecutionResourceConfigUsesLocalLayerWhenGlobalHomeMissing(t *testi
 		if path == "/repo/.progress/execution/resources.json" {
 			return []byte(`{
 				"defaults": {"model-binding": "default"},
-				"runners": ["opencode"],
+				"runners": {"opencode": {"type": "opencode"}},
 				"models": ["openai/gpt-5.4"],
 				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}}
 			}`), nil

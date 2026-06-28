@@ -297,6 +297,63 @@ func TestServiceResumeBuildsCompactStructuredInputAndHistoryLink(t *testing.T) {
 	}
 }
 
+func TestServiceResumeRestoresRunnerConfigFromResources(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	workplaceDir := filepath.Join(root, "workplace")
+	if err := os.MkdirAll(workplaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workplace: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	if err := history.Store(context.Background(), root, history.Run{
+		CreatedAt:       "2026-06-22T10:00:00Z",
+		Status:          "completed",
+		Summary:         "Parent summary",
+		Name:            "task-resume",
+		ProfileName:     "coder",
+		Runner:          "fast",
+		RunnerSessionID: "session-42",
+		Model:           "openai/gpt-5.4",
+		LaunchDirectory: workplaceDir,
+	}); err != nil {
+		t.Fatalf("store parent run: %v", err)
+	}
+
+	launcher := &stubLauncher{}
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual"}},
+		resources: &stubResourceProvider{allocation: model.Allocation{
+			Runner:       "fast",
+			RunnerConfig: model.RunnerConfig{Type: "codex"},
+			Model:        "openai/gpt-5.4",
+		}},
+		launcher: launcher,
+	}
+
+	result, err := service.Resume(context.Background(), ResumeRequest{Run: "1", Message: "Continue", MessageSource: "message"})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if launcher.invocation.Launch.RunnerConfig.Type != "codex" {
+		t.Fatalf("resume must restore runner config: %#v", launcher.invocation.Launch.RunnerConfig)
+	}
+}
+
 func TestServiceResumeLatestUsesNewestMatchingRun(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
