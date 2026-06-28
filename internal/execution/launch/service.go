@@ -762,12 +762,17 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 		return gitResult{}, fmt.Errorf("launch directory is not a git repository")
 	}
 
+	gitRoot, err := s.gitRepositoryRoot(ctx, in.Launch.Directory)
+	if err != nil {
+		return gitResult{}, err
+	}
+
 	branch, err := s.currentBranch(ctx, in.Launch.Directory)
 	if err != nil {
 		return gitResult{}, err
 	}
 
-	changedPaths, err := s.changedUserPaths(ctx, in.Launch.Directory)
+	changedPaths, err := s.changedUserPaths(ctx, gitRoot)
 	if err != nil {
 		return gitResult{}, err
 	}
@@ -777,11 +782,11 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 	}
 
 	addArgs := append([]string{"add", "-A", "--"}, changedPaths...)
-	if _, err := s.runGitOutput(ctx, in.Launch.Directory, addArgs...); err != nil {
+	if _, err := s.runGitOutput(ctx, gitRoot, addArgs...); err != nil {
 		return gitResult{}, fmt.Errorf("git add failed: %w", err)
 	}
 
-	changedPaths, err = s.changedUserPaths(ctx, in.Launch.Directory)
+	changedPaths, err = s.changedUserPaths(ctx, gitRoot)
 	if err != nil {
 		return gitResult{}, err
 	}
@@ -840,6 +845,20 @@ func (s *Service) currentBranch(ctx context.Context, dir string) (string, error)
 	return branch, nil
 }
 
+func (s *Service) gitRepositoryRoot(ctx context.Context, dir string) (string, error) {
+	output, err := s.runGitOutput(ctx, dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("resolve git repository root: %w", err)
+	}
+
+	root := strings.TrimSpace(output)
+	if root == "" {
+		return "", fmt.Errorf("resolve git repository root: root is empty")
+	}
+
+	return root, nil
+}
+
 func (s *Service) hasChanges(ctx context.Context, dir string) (bool, error) {
 	paths, err := s.changedUserPaths(ctx, dir)
 	if err != nil {
@@ -850,7 +869,7 @@ func (s *Service) hasChanges(ctx context.Context, dir string) (bool, error) {
 }
 
 func (s *Service) changedUserPaths(ctx context.Context, dir string) ([]string, error) {
-	output, err := s.runGitOutput(ctx, dir, "status", "--porcelain", "-z")
+	output, err := s.runGitOutput(ctx, dir, "status", "--porcelain", "-z", "-uall")
 	if err != nil {
 		return nil, fmt.Errorf("inspect git changes: %w", err)
 	}
@@ -899,7 +918,9 @@ func isRenameOrCopyStatus(entry string) bool {
 
 func isProgressRuntimePath(pathValue string) bool {
 	pathValue = strings.Trim(pathValue, "\"")
-	return pathValue == ".progress/runner-output" ||
+	return pathValue == ".progress" ||
+		pathValue == ".progress/" ||
+		pathValue == ".progress/runner-output" ||
 		strings.HasPrefix(pathValue, ".progress/runner-output/") ||
 		pathValue == ".progress/execution-runs" ||
 		strings.HasPrefix(pathValue, ".progress/execution-runs/")

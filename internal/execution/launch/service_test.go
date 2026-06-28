@@ -217,9 +217,11 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 			switch strings.Join(args, " ") {
 			case "rev-parse --is-inside-work-tree":
 				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain -z":
+			case "status --porcelain -z -uall":
 				statusCalls++
 				if statusCalls == 1 {
 					return " M file.txt\x00", nil
@@ -249,10 +251,11 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 
 	expectedCalls := [][]string{
 		{"rev-parse", "--is-inside-work-tree"},
+		{"rev-parse", "--show-toplevel"},
 		{"branch", "--show-current"},
-		{"status", "--porcelain", "-z"},
+		{"status", "--porcelain", "-z", "-uall"},
 		{"add", "-A", "--", "file.txt"},
-		{"status", "--porcelain", "-z"},
+		{"status", "--porcelain", "-z", "-uall"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
 		{"push", "-u", "origin", "feature/test"},
@@ -293,9 +296,11 @@ func TestLaunchCommitPushFailureKeepsRunnerSessionID(t *testing.T) {
 		switch strings.Join(args, " ") {
 		case "rev-parse --is-inside-work-tree":
 			return "true\n", nil
+		case "rev-parse --show-toplevel":
+			return worktree + "\n", nil
 		case "branch --show-current":
 			return "feature/test\n", nil
-		case "status --porcelain -z":
+		case "status --porcelain -z -uall":
 			return " M file.txt\x00", nil
 		case "add -A -- file.txt":
 			return "", fmt.Errorf("git add failed")
@@ -343,9 +348,11 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 			switch strings.Join(args, " ") {
 			case "rev-parse --is-inside-work-tree":
 				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return worktree + "\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain -z":
+			case "status --porcelain -z -uall":
 				if addArgs == nil {
 					return " M file.txt\x00!! .progress/runner-output/\x00!! .progress/execution-runs/\x00", nil
 				}
@@ -373,6 +380,113 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 	}
 }
 
+func TestLaunchCommitPushStagesPathsFromRepositoryRootForSubdirectoryLaunch(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := tempDir(t)
+	launchDir := filepath.Join(repoRoot, "sub")
+	if err := os.MkdirAll(launchDir, 0o755); err != nil {
+		t.Fatalf("mkdir launch subdir: %v", err)
+	}
+
+	invocation := validInvocation(t, true)
+	invocation.Launch.Directory = launchDir
+
+	var statusDirs []string
+	var addDir string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, dir string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return repoRoot + "\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain -z -uall":
+				statusDirs = append(statusDirs, dir)
+				if addDir == "" {
+					return " M sub/file.txt\x00", nil
+				}
+				return "M  sub/file.txt\x00", nil
+			case "add -A -- sub/file.txt":
+				addDir = dir
+				return "", nil
+			case "commit -m repo":
+				return "[feature/test abc123] repo\n", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			case "push":
+				return "Everything up-to-date\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: dir=%q args=%v", dir, args)
+			}
+		},
+	}
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), model.Workplace{Name: repoRoot, Ready: true}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !reflect.DeepEqual(statusDirs, []string{repoRoot, repoRoot}) {
+		t.Fatalf("status must run from repository root: %#v", statusDirs)
+	}
+	if addDir != repoRoot {
+		t.Fatalf("git add must run from repository root: %q", addDir)
+	}
+}
+
+func TestLaunchCommitPushUsesUAllForVisibleProgressFiles(t *testing.T) {
+	t.Parallel()
+
+	worktree := tempDir(t)
+	invocation := validInvocation(t, true)
+	invocation.Launch.Directory = worktree
+	workplace := model.Workplace{Name: worktree, Ready: true}
+
+	var addArgs []string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return worktree + "\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain -z -uall":
+				if addArgs == nil {
+					return "?? .progress/execution/profiles.json\x00?? .progress/runner-output/raw-output.txt\x00", nil
+				}
+				return "A  .progress/execution/profiles.json\x00", nil
+			case "add -A -- .progress/execution/profiles.json":
+				addArgs = append([]string(nil), args...)
+				return "", nil
+			case "commit -m repo":
+				return "[feature/test abc123] repo\n", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			case "push":
+				return "Everything up-to-date\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	if _, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !reflect.DeepEqual(addArgs, []string{"add", "-A", "--", ".progress/execution/profiles.json"}) {
+		t.Fatalf("git add must keep visible progress config only: %#v", addArgs)
+	}
+}
+
 func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *testing.T) {
 	t.Parallel()
 
@@ -392,9 +506,11 @@ func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *te
 			switch strings.Join(args, " ") {
 			case "rev-parse --is-inside-work-tree":
 				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain -z":
+			case "status --porcelain -z -uall":
 				return "M  file.txt\x00", nil
 			case "add -A -- file.txt":
 				return "", nil
@@ -434,9 +550,11 @@ func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *te
 			switch strings.Join(args, " ") {
 			case "rev-parse --is-inside-work-tree":
 				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return worktreeDir + "\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain -z":
+			case "status --porcelain -z -uall":
 				return "M  file.txt\x00", nil
 			case "add -A -- file.txt":
 				return "", nil
@@ -471,9 +589,11 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenNoChanges(t *testing.T) {
 			switch strings.Join(args, " ") {
 			case "rev-parse --is-inside-work-tree":
 				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain -z":
+			case "status --porcelain -z -uall":
 				return "", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -491,8 +611,9 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenNoChanges(t *testing.T) {
 
 	expectedCalls := [][]string{
 		{"rev-parse", "--is-inside-work-tree"},
+		{"rev-parse", "--show-toplevel"},
 		{"branch", "--show-current"},
-		{"status", "--porcelain", "-z"},
+		{"status", "--porcelain", "-z", "-uall"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -512,9 +633,11 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyRunnerOutputChanges(t *testin
 			switch strings.Join(args, " ") {
 			case "rev-parse --is-inside-work-tree":
 				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain -z":
+			case "status --porcelain -z -uall":
 				return "?? .progress/runner-output/raw-output.txt\x00", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -532,8 +655,9 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyRunnerOutputChanges(t *testin
 
 	expectedCalls := [][]string{
 		{"rev-parse", "--is-inside-work-tree"},
+		{"rev-parse", "--show-toplevel"},
 		{"branch", "--show-current"},
-		{"status", "--porcelain", "-z"},
+		{"status", "--porcelain", "-z", "-uall"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -553,9 +677,11 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyExecutionRunRecordsChange(t *
 			switch strings.Join(args, " ") {
 			case "rev-parse --is-inside-work-tree":
 				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain -z":
+			case "status --porcelain -z -uall":
 				return "?? .progress/execution-runs/execution-123.json\x00", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -573,8 +699,9 @@ func TestLaunchCommitPushSkipsCommitAndPushWhenOnlyExecutionRunRecordsChange(t *
 
 	expectedCalls := [][]string{
 		{"rev-parse", "--is-inside-work-tree"},
+		{"rev-parse", "--show-toplevel"},
 		{"branch", "--show-current"},
-		{"status", "--porcelain", "-z"},
+		{"status", "--porcelain", "-z", "-uall"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -586,9 +713,24 @@ func TestLaunchCommitPushKeepsProgressConfigVisibleAsUserChange(t *testing.T) {
 
 	paths := userChangedPathsFromPorcelain(strings.Join([]string{
 		" M .progress/execution/profiles.json",
+		" M .progress/decision/workflows.json",
 		"?? .progress/execution-runs/execution-123.json",
 		" M .progress/execution-runs/execution.db",
 		" M .progress/runner-output/execution-123.log",
+		"",
+	}, "\x00"))
+	if !reflect.DeepEqual(paths, []string{".progress/execution/profiles.json", ".progress/decision/workflows.json"}) {
+		t.Fatalf("unexpected visible progress paths: %#v", paths)
+	}
+}
+
+func TestLaunchCommitPushDropsCollapsedProgressDirectoryPath(t *testing.T) {
+	t.Parallel()
+
+	paths := userChangedPathsFromPorcelain(strings.Join([]string{
+		"?? .progress/",
+		"?? .progress/execution/profiles.json",
+		"?? .progress/runner-output/raw-output.txt",
 		"",
 	}, "\x00"))
 	if !reflect.DeepEqual(paths, []string{".progress/execution/profiles.json"}) {
@@ -635,9 +777,11 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 			switch strings.Join(args, " ") {
 			case "rev-parse --is-inside-work-tree":
 				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
 			case "branch --show-current":
 				return "feature/test\n", nil
-			case "status --porcelain -z":
+			case "status --porcelain -z -uall":
 				return "M  file.txt\x00", nil
 			case "add -A -- file.txt":
 				return "", nil
