@@ -6,8 +6,13 @@ import (
 	"io"
 	"testing"
 
+	"github.com/rasungatullin/progress/internal/integration/model"
 	"github.com/rasungatullin/progress/internal/logging"
 )
+
+func boolPtr(value bool) *bool {
+	return &value
+}
 
 func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	t.Parallel()
@@ -30,11 +35,88 @@ func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	if len(route.Diagnostics) < 3 {
 		t.Fatalf("expected diagnostic details, got %#v", route.Diagnostics)
 	}
-	if !contains(route.Diagnostics, "provider=gitlab not registered in current build") {
+	if !contains(route.Diagnostics, "provider=gitlab unknown to current integration configuration") {
 		t.Fatalf("expected provider diagnostic, got %#v", route.Diagnostics)
 	}
 	if !contains(route.Diagnostics, "registered systems=github") {
 		t.Fatalf("expected registered systems diagnostic, got %#v", route.Diagnostics)
+	}
+}
+
+func TestNewServiceFromConfigUsesDefaultSystem(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		DefaultSystem: "github",
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github"},
+		},
+	})
+	service.RegisterProvider("github", stubProvider{})
+
+	route, err := service.Dispatch(context.Background(), Request{Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if route.System != "github" {
+		t.Fatalf("expected default system github, got %q", route.System)
+	}
+}
+
+func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github", Enabled: boolPtr(false)},
+		},
+	})
+
+	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if route.ProviderAvailable {
+		t.Fatal("provider must be unavailable for disabled system")
+	}
+	if !contains(route.Diagnostics, "provider=github disabled by integration configuration") {
+		t.Fatalf("expected disabled-system diagnostic, got %#v", route.Diagnostics)
+	}
+}
+
+func TestExecuteReturnsDisabledSystemError(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github", Enabled: boolPtr(false)},
+		},
+	})
+
+	_, err := service.Execute(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	if err == nil {
+		t.Fatal("expected disabled-system error")
+	}
+	if err.Error() != "integration provider disabled by configuration: github" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDispatchReportsUnsupportedConfiguredSystemType(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"gitlab": {Type: "script"},
+		},
+	})
+
+	route, err := service.Dispatch(context.Background(), Request{System: "gitlab", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !contains(route.Diagnostics, "provider=gitlab configured with unsupported type=script") {
+		t.Fatalf("expected unsupported-type diagnostic, got %#v", route.Diagnostics)
 	}
 }
 
@@ -69,6 +151,65 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	}
 	if result.Operation != "get" {
 		t.Fatalf("unexpected result operation: %q", result.Operation)
+	}
+}
+
+func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"enterprise": {Type: "github"},
+		},
+	})
+	service.RegisterProvider("enterprise", stubProvider{
+		response: Response{
+			System:            "github",
+			AuthStatus:        &AuthStatus{System: "github"},
+			RepositoryStatus:  &RepositoryStatus{System: "github"},
+			IssueStatus:       &IssueStatus{System: "github"},
+			PullRequestStatus: &PullRequestStatus{System: "github"},
+			Issue: &TrackerIssue{
+				System:    "github",
+				Author:    TrackerUser{System: "github"},
+				Assignees: []TrackerUser{{System: "github"}},
+			},
+			PullRequest: &TrackerPullRequest{System: "github", Author: TrackerUser{System: "github"}},
+			Comments:    []TrackerComment{{System: "github", Author: TrackerUser{System: "github"}}},
+			Reviews:     []TrackerReview{{System: "github", Author: TrackerUser{System: "github"}}},
+			RepositoryRef: &TrackerRepository{
+				System: "github",
+			},
+			SearchResults: []TrackerSearchResult{{System: "github"}},
+			Artifacts:     []Artifact{{System: "github"}},
+		},
+	})
+
+	result, err := service.Execute(context.Background(), Request{System: "enterprise", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if result.System != "enterprise" || result.AuthStatus.System != "enterprise" || result.RepositoryStatus.System != "enterprise" || result.IssueStatus.System != "enterprise" || result.PullRequestStatus.System != "enterprise" {
+		t.Fatalf("expected top-level status systems to use route name, got %#v", result)
+	}
+	if result.Issue == nil || result.Issue.System != "enterprise" || result.Issue.Author.System != "enterprise" || result.Issue.Assignees[0].System != "enterprise" {
+		t.Fatalf("expected issue payload systems to use route name, got %#v", result.Issue)
+	}
+	if result.PullRequest == nil || result.PullRequest.System != "enterprise" || result.PullRequest.Author.System != "enterprise" {
+		t.Fatalf("expected pull request payload systems to use route name, got %#v", result.PullRequest)
+	}
+	if result.Comments[0].System != "enterprise" || result.Comments[0].Author.System != "enterprise" {
+		t.Fatalf("expected comment payload systems to use route name, got %#v", result.Comments)
+	}
+	if result.Reviews[0].System != "enterprise" || result.Reviews[0].Author.System != "enterprise" {
+		t.Fatalf("expected review payload systems to use route name, got %#v", result.Reviews)
+	}
+	if result.RepositoryRef == nil || result.RepositoryRef.System != "enterprise" {
+		t.Fatalf("expected repository payload system to use route name, got %#v", result.RepositoryRef)
+	}
+	if result.SearchResults[0].System != "enterprise" || result.Artifacts[0].System != "enterprise" {
+		t.Fatalf("expected search results and artifacts to use route name, got %#v %#v", result.SearchResults, result.Artifacts)
 	}
 }
 

@@ -32,7 +32,7 @@ const (
 )
 
 var integrationServiceFactory = func(cmd *cobra.Command) *integration.Service {
-	return integration.NewService(logging.New(cmd.ErrOrStderr()))
+	return integration.NewConfiguredService(logging.New(cmd.ErrOrStderr()))
 }
 
 func newIntegrationCommand() *cobra.Command {

@@ -91,6 +91,10 @@ func NewService() *Service {
 	return &Service{runner: NewRunner()}
 }
 
+func NewServiceWithConfig(config model.IntegrationSystemConfig) *Service {
+	return &Service{runner: NewRunnerWithSystemConfig(config)}
+}
+
 func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model.Response, error) {
 	response := model.Response{
 		System:    "github",

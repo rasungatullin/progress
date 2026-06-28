@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 func TestRunnerRunAuthStatusReturnsNotInstalled(t *testing.T) {
@@ -57,6 +59,72 @@ func TestRunnerRunAuthStatusSuccess(t *testing.T) {
 	}
 	if result.ExitCode != 0 {
 		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+}
+
+func TestRunnerUsesSystemConfigWithoutLegacyFile(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunnerWithSystemConfig(integrationmodel.IntegrationSystemConfig{
+		Type:       "github",
+		Command:    "/custom/gh",
+		Timeout:    "5s",
+		Repository: "owner/name",
+	})
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrPermission }
+	runner.lookPath = func(string) (string, error) { return "/custom/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/custom/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		return commandRunner{stdout: "ok"}
+	}
+
+	result, config, err := runner.RunRepoView(context.Background(), "")
+	if err != nil {
+		t.Fatalf("run repo view: %v", err)
+	}
+	if config.Command != "/custom/gh" {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+	if config.DefaultRepo != "owner/name" {
+		t.Fatalf("unexpected default repo: %q", config.DefaultRepo)
+	}
+	if config.Timeout != 5*time.Second {
+		t.Fatalf("unexpected timeout: %s", config.Timeout)
+	}
+	if result.Command != "/custom/gh" {
+		t.Fatalf("unexpected result command: %q", result.Command)
+	}
+}
+
+func TestRunnerUsesRepositoryFieldBeforeDefaultRepo(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunnerWithSystemConfig(integrationmodel.IntegrationSystemConfig{
+		Type:        "github",
+		Repository:  "owner/from-repository",
+		DefaultRepo: "owner/from-default-repo",
+	})
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"repo", "view", "owner/from-repository", "--json", "name,owner,description,defaultBranchRef,url"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `{"name":"name"}`}
+	}
+
+	_, config, err := runner.RunRepoView(context.Background(), "")
+	if err != nil {
+		t.Fatalf("run repo view: %v", err)
+	}
+	if config.DefaultRepo != "owner/from-repository" {
+		t.Fatalf("unexpected default repo: %q", config.DefaultRepo)
 	}
 }
 
