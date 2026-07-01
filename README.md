@@ -83,6 +83,7 @@ progress synthesize --config ./configs/dev.yaml
 
 - [CONCEPT.md](CONCEPT.md) — общая концепция комплекса;
 - [docs/MOTIVATION.md](docs/MOTIVATION.md) — мотивация комплекса, причины существования и ключевые идеи;
+- [docs/TARGET_ARCHITECTURE.md](docs/TARGET_ARCHITECTURE.md) — целевое общее описание архитектуры, канонической задачи, маршрутов и контуров;
 - [docs/OPERATING_MODEL.md](docs/OPERATING_MODEL.md) — модель работы комплекса на уровне прикладного цикла разработки;
 - [docs/DEVELOPMENT_MODEL.md](docs/DEVELOPMENT_MODEL.md) — модель развития комплекса, вложенных рабочих циклов, профилей и исполнительных модулей;
 - [docs/UI_CONCEPT.md](docs/UI_CONCEPT.md) — первичный концепт интерфейса наблюдения и навигационного модуля;
