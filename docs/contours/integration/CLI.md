@@ -396,6 +396,7 @@ GitHub-адаптер должен различать как минимум сл
       "integration_type": "repository",
       "enabled": true,
       "base_url": "https://api.bitbucket.org/2.0",
+      "api_variant": "cloud",
       "token_env": "BITBUCKET_TOKEN",
       "workspace": "workspace",
       "repository": "workspace/repository"
@@ -428,12 +429,14 @@ GitHub-адаптер должен различать как минимум сл
 5. `command` и `path` позволяют переопределить исполняемый файл `gh`;
 6. `timeout` ограничивает внешний вызов;
 7. `base_url` задаёт базовый адрес HTTP API для Bitbucket, Mattermost или Telegram;
-8. `token` или `token_env` задают данные авторизации либо ссылку на переменную окружения;
-9. `repository` задаёт резервный репозиторий для репозиторных операций;
-10. `workspace` задаёт рабочее пространство Bitbucket, если `--repo` передан без префикса;
-11. `channel_id` задаёт резервный канал Mattermost;
-12. `chat_id` задаёт резервный чат Telegram;
-13. `operations` резервирует пространство для пооперационной настройки.
+8. `api_variant` задаёт вариант Bitbucket API: `cloud` для `api.bitbucket.org/2.0` или `server` для Bitbucket Server/Data Center через `rest/api/1.0`;
+9. `token` или `token_env` задают данные авторизации либо ссылку на переменную окружения;
+10. `repository` задаёт резервный репозиторий для репозиторных операций;
+11. `workspace` задаёт рабочее пространство Bitbucket Cloud, если `--repo` передан без префикса;
+12. `project` задаёт ключ проекта Bitbucket Server/Data Center, если `--repo` передан без префикса;
+13. `channel_id` задаёт резервный канал Mattermost;
+14. `chat_id` задаёт резервный чат Telegram;
+15. `operations` резервирует пространство для пооперационной настройки.
 
 Правило приоритета `--repo`, `repository` и `default_repo`:
 

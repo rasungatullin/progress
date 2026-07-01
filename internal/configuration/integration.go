@@ -183,6 +183,9 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.BaseURL); value != "" {
 		merged.BaseURL = value
 	}
+	if value := strings.TrimSpace(override.APIVariant); value != "" {
+		merged.APIVariant = value
+	}
 	if value := strings.TrimSpace(override.Token); value != "" {
 		merged.Token = value
 	}

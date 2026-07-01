@@ -91,6 +91,7 @@ type IntegrationSystemConfig struct {
 	Path             string                                `json:"path,omitempty"`
 	Timeout          string                                `json:"timeout,omitempty"`
 	BaseURL          string                                `json:"base_url,omitempty"`
+	APIVariant       string                                `json:"api_variant,omitempty"`
 	Token            string                                `json:"token,omitempty"`
 	TokenEnv         string                                `json:"token_env,omitempty"`
 	Username         string                                `json:"username,omitempty"`

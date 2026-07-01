@@ -19,6 +19,10 @@ import (
 const (
 	defaultBaseURL = "https://api.bitbucket.org/2.0"
 	defaultTimeout = 30 * time.Second
+
+	apiVariantCloud  = "cloud"
+	apiVariantServer = "server"
+	serverAPIPrefix  = "rest/api/1.0"
 )
 
 type Service struct {
@@ -30,6 +34,16 @@ type repositoryRef struct {
 	workspace string
 	slug      string
 	fullName  string
+}
+
+type serverLinks struct {
+	Self []struct {
+		Href string `json:"href"`
+	} `json:"self"`
+	Clone []struct {
+		Name string `json:"name"`
+		Href string `json:"href"`
+	} `json:"clone"`
 }
 
 type apiRepository struct {
@@ -119,6 +133,87 @@ type apiUserResponse struct {
 	Nickname    string `json:"nickname"`
 }
 
+type serverRepository struct {
+	ID          int    `json:"id"`
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	SCMID       string `json:"scmId"`
+	State       string `json:"state"`
+	Public      bool   `json:"public"`
+	Project     struct {
+		Key  string `json:"key"`
+		Name string `json:"name"`
+	} `json:"project"`
+	Links serverLinks `json:"links"`
+}
+
+type serverBranch struct {
+	ID        string `json:"id"`
+	DisplayID string `json:"displayId"`
+	IsDefault bool   `json:"isDefault"`
+	Type      string `json:"type"`
+}
+
+type serverUser struct {
+	Name         string      `json:"name"`
+	Slug         string      `json:"slug"`
+	DisplayName  string      `json:"displayName"`
+	EmailAddress string      `json:"emailAddress"`
+	Active       bool        `json:"active"`
+	Links        serverLinks `json:"links"`
+}
+
+type serverPullRequest struct {
+	ID          int    `json:"id"`
+	Version     int    `json:"version"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	State       string `json:"state"`
+	CreatedDate int64  `json:"createdDate"`
+	UpdatedDate int64  `json:"updatedDate"`
+	Author      struct {
+		User serverUser `json:"user"`
+	} `json:"author"`
+	FromRef struct {
+		ID        string `json:"id"`
+		DisplayID string `json:"displayId"`
+	} `json:"fromRef"`
+	ToRef struct {
+		ID        string `json:"id"`
+		DisplayID string `json:"displayId"`
+	} `json:"toRef"`
+	Links serverLinks `json:"links"`
+}
+
+type serverActivityPage struct {
+	Values []serverActivity `json:"values"`
+}
+
+type serverActivity struct {
+	ID          int            `json:"id"`
+	CreatedDate int64          `json:"createdDate"`
+	User        serverUser     `json:"user"`
+	Comment     *serverComment `json:"comment"`
+}
+
+type serverComment struct {
+	ID          int             `json:"id"`
+	Text        string          `json:"text"`
+	Author      serverUser      `json:"author"`
+	CreatedDate int64           `json:"createdDate"`
+	UpdatedDate int64           `json:"updatedDate"`
+	Anchor      *serverAnchor   `json:"anchor"`
+	Comments    []serverComment `json:"comments"`
+	Links       serverLinks     `json:"links"`
+}
+
+type serverAnchor struct {
+	Path     string `json:"path"`
+	Line     int    `json:"line"`
+	LineType string `json:"lineType"`
+}
+
 func NewService(config model.IntegrationSystemConfig) *Service {
 	return &Service{config: config, client: http.DefaultClient}
 }
@@ -160,6 +255,9 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 		response.AuthStatus = &model.AuthStatus{System: "bitbucket", State: model.FailureKindAuthRequired, Available: true, Authenticated: false, Message: err.Error()}
 		return response, err
 	}
+	if s.apiVariant() == apiVariantServer {
+		return s.executeServerAuthStatus(ctx, response)
+	}
 
 	status, body, err := s.do(ctx, http.MethodGet, "user", nil)
 	auth := &model.AuthStatus{
@@ -189,12 +287,43 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 	return response, nil
 }
 
+func (s *Service) executeServerAuthStatus(ctx context.Context, response model.Response) (model.Response, error) {
+	endpoint := s.serverEndpoint("projects?limit=1")
+	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+	auth := &model.AuthStatus{
+		System:      "bitbucket",
+		State:       "ready",
+		Available:   true,
+		Command:     "http",
+		ExitCode:    statusToExitCode(status),
+		Stdout:      string(body),
+		Diagnostics: []string{"endpoint=" + endpoint, "api_variant=server"},
+	}
+	if err != nil {
+		auth.State = failureKindForHTTPStatus(status)
+		auth.Message = err.Error()
+		response.AuthStatus = auth
+		response.Status = model.ResponseStatusFailed
+		response.Failure = failureForHTTPStatus(status, err, string(body))
+		return response, err
+	}
+
+	auth.Authenticated = true
+	auth.Message = "Bitbucket Server authorization is available"
+	response.AuthStatus = auth
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
 func (s *Service) executeRepositoryGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	repository, err := s.resolveRepository(req.Repository, req.RepoProvided)
 	if err != nil {
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
 		return response, err
+	}
+	if s.apiVariant() == apiVariantServer {
+		return s.executeServerRepositoryGet(ctx, response, req, repository)
 	}
 
 	status, body, err := s.do(ctx, http.MethodGet, fmt.Sprintf("repositories/%s/%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug)), nil)
@@ -230,6 +359,53 @@ func (s *Service) executeRepositoryGet(ctx context.Context, response model.Respo
 	return response, nil
 }
 
+func (s *Service) executeServerRepositoryGet(ctx context.Context, response model.Response, req model.ProviderRequest, repository repositoryRef) (model.Response, error) {
+	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug)))
+	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = failureForHTTPStatus(status, err, string(body))
+		response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+		return response, err
+	}
+
+	var raw serverRepository
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return responseWithDecodeFailure(response, err)
+	}
+
+	defaultBranch := ""
+	branchEndpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/branches/default", url.PathEscape(repository.workspace), url.PathEscape(repository.slug)))
+	if _, branchBody, branchErr := s.do(ctx, http.MethodGet, branchEndpoint, nil); branchErr == nil {
+		var branch serverBranch
+		if json.Unmarshal(branchBody, &branch) == nil {
+			defaultBranch = strings.TrimSpace(firstNonEmpty(branch.DisplayID, branch.ID))
+		}
+	}
+
+	owner := strings.TrimSpace(firstNonEmpty(raw.Project.Key, repository.workspace))
+	name := strings.TrimSpace(firstNonEmpty(raw.Slug, raw.Name, repository.slug))
+	response.Repository = &model.Repository{
+		System:        "bitbucket",
+		ExternalID:    strconv.Itoa(raw.ID),
+		FullName:      owner + "/" + name,
+		Owner:         owner,
+		Name:          name,
+		Description:   strings.TrimSpace(raw.Description),
+		DefaultBranch: defaultBranch,
+		URL:           firstServerSelfLink(raw.Links),
+		Traits:        []string{"server"},
+		Attributes: map[string]string{
+			"api_variant": apiVariantServer,
+			"scm_id":      strings.TrimSpace(raw.SCMID),
+			"state":       strings.TrimSpace(raw.State),
+			"public":      strconv.FormatBool(raw.Public),
+		},
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
 func (s *Service) executePullRequestGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	repository, err := s.resolveRepository(req.Repository, req.RepoProvided)
 	if err != nil {
@@ -242,6 +418,9 @@ func (s *Service) executePullRequestGet(ctx context.Context, response model.Resp
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
 		return response, err
+	}
+	if s.apiVariant() == apiVariantServer {
+		return s.executeServerPullRequestGet(ctx, response, req, repository)
 	}
 
 	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number)
@@ -262,6 +441,25 @@ func (s *Service) executePullRequestGet(ctx context.Context, response model.Resp
 	return response, nil
 }
 
+func (s *Service) executeServerPullRequestGet(ctx context.Context, response model.Response, req model.ProviderRequest, repository repositoryRef) (model.Response, error) {
+	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number))
+	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = failureForHTTPStatus(status, err, string(body))
+		response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+		return response, err
+	}
+
+	var raw serverPullRequest
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return responseWithDecodeFailure(response, err)
+	}
+	response.MergeRequest = mergeRequestFromServerAPI(repository.fullName, raw)
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
 func (s *Service) executePullRequestCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	repository, err := s.resolveRepository(req.Repository, req.RepoProvided)
 	if err != nil {
@@ -274,6 +472,9 @@ func (s *Service) executePullRequestCreate(ctx context.Context, response model.R
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
 		return response, err
+	}
+	if s.apiVariant() == apiVariantServer {
+		return s.executeServerPullRequestCreate(ctx, response, req, repository)
 	}
 
 	payload := map[string]any{
@@ -317,6 +518,60 @@ func (s *Service) executePullRequestCreate(ctx context.Context, response model.R
 	return response, nil
 }
 
+func (s *Service) executeServerPullRequestCreate(ctx context.Context, response model.Response, req model.ProviderRequest, repository repositoryRef) (model.Response, error) {
+	payload := map[string]any{
+		"title":       strings.TrimSpace(req.Title),
+		"description": strings.TrimSpace(req.Body),
+		"fromRef": map[string]any{
+			"id": branchRefID(req.Head),
+			"repository": map[string]any{
+				"slug": repository.slug,
+				"project": map[string]string{
+					"key": repository.workspace,
+				},
+			},
+		},
+		"toRef": map[string]any{
+			"id": branchRefID(req.Base),
+			"repository": map[string]any{
+				"slug": repository.slug,
+				"project": map[string]string{
+					"key": repository.workspace,
+				},
+			},
+		},
+	}
+	content, _ := json.Marshal(payload)
+	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests", url.PathEscape(repository.workspace), url.PathEscape(repository.slug)))
+	status, body, err := s.do(ctx, http.MethodPost, endpoint, content)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = failureForHTTPStatus(status, err, string(body))
+		response.OperationResult = operationResult(req, status, http.MethodPost, repository.fullName, err, body)
+		return response, err
+	}
+
+	var raw serverPullRequest
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return responseWithDecodeFailure(response, err)
+	}
+	response.MergeRequest = mergeRequestFromServerAPI(repository.fullName, raw)
+	response.OperationResult = &model.OperationResult{
+		System:     "bitbucket",
+		ObjectType: "merge-request",
+		Operation:  "create",
+		Status:     model.ResponseStatusOK,
+		ExternalID: strconv.Itoa(raw.ID),
+		URL:        response.MergeRequest.URL,
+		HTTPStatus: status,
+		Method:     http.MethodPost,
+		Endpoint:   endpoint,
+		Message:    fmt.Sprintf("Bitbucket pull request created for %s %s -> %s", repository.fullName, req.Head, req.Base),
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
 func (s *Service) executePullRequestComments(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	repository, err := s.resolveRepository(req.Repository, req.RepoProvided)
 	if err != nil {
@@ -329,6 +584,9 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
 		return response, err
+	}
+	if s.apiVariant() == apiVariantServer {
+		return s.executeServerPullRequestComments(ctx, response, req, repository)
 	}
 
 	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number)
@@ -365,6 +623,35 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 			}
 		}
 		response.ReviewRemarks = append(response.ReviewRemarks, remark)
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executeServerPullRequestComments(ctx context.Context, response model.Response, req model.ProviderRequest, repository repositoryRef) (model.Response, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d/activities?limit=%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number, limit))
+	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = failureForHTTPStatus(status, err, string(body))
+		response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+		return response, err
+	}
+
+	var raw serverActivityPage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return responseWithDecodeFailure(response, err)
+	}
+	response.ReviewRemarks = []model.ReviewRemark{}
+	for _, item := range raw.Values {
+		if item.Comment == nil {
+			continue
+		}
+		response.ReviewRemarks = appendServerCommentRemarks(response.ReviewRemarks, repository.fullName, req.Number, *item.Comment)
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
@@ -429,6 +716,9 @@ func (s *Service) resolveRepository(raw string, repoProvided bool) (repositoryRe
 		return repositoryRef{}, fmt.Errorf("Bitbucket repository is required")
 	}
 	workspace := strings.TrimSpace(s.config.Workspace)
+	if s.apiVariant() == apiVariantServer {
+		workspace = strings.TrimSpace(firstNonEmpty(s.config.Project, s.config.Workspace))
+	}
 	parts := strings.Split(raw, "/")
 	switch len(parts) {
 	case 1:
@@ -444,6 +734,31 @@ func (s *Service) resolveRepository(raw string, repoProvided bool) (repositoryRe
 	default:
 		return repositoryRef{}, fmt.Errorf("Bitbucket repository must use workspace/repo format")
 	}
+}
+
+func (s *Service) apiVariant() string {
+	raw := strings.TrimSpace(strings.ToLower(s.config.APIVariant))
+	switch raw {
+	case apiVariantCloud, "bitbucket-cloud":
+		return apiVariantCloud
+	case apiVariantServer, "bitbucket-server", "data-center", "datacenter", "stash":
+		return apiVariantServer
+	}
+
+	base := strings.TrimRight(strings.ToLower(strings.TrimSpace(s.config.BaseURL)), "/")
+	if strings.Contains(base, "/rest/api/") || strings.Contains(base, "://stash.") || strings.Contains(base, ".stash.") {
+		return apiVariantServer
+	}
+	return apiVariantCloud
+}
+
+func (s *Service) serverEndpoint(endpoint string) string {
+	endpoint = strings.TrimLeft(endpoint, "/")
+	base := strings.TrimRight(strings.ToLower(strings.TrimSpace(s.config.BaseURL)), "/")
+	if strings.HasSuffix(base, "/rest/api/1.0") || strings.HasSuffix(base, "/rest/api/latest") {
+		return endpoint
+	}
+	return serverAPIPrefix + "/" + endpoint
 }
 
 func (s *Service) token() string {
@@ -482,6 +797,88 @@ func userFromAPI(raw apiUser) model.User {
 		URL:      strings.TrimSpace(raw.Links.HTML.Href),
 		IsActive: true,
 	}
+}
+
+func mergeRequestFromServerAPI(repository string, raw serverPullRequest) *model.MergeRequest {
+	return &model.MergeRequest{
+		System:     "bitbucket",
+		Repository: repository,
+		Number:     raw.ID,
+		ExternalID: strconv.Itoa(raw.ID),
+		Title:      strings.TrimSpace(raw.Title),
+		Body:       raw.Description,
+		State:      strings.TrimSpace(raw.State),
+		Traits:     []string{"server"},
+		Attributes: map[string]string{
+			"api_variant": apiVariantServer,
+			"version":     strconv.Itoa(raw.Version),
+		},
+		BaseRef:   strings.TrimSpace(firstNonEmpty(raw.ToRef.DisplayID, raw.ToRef.ID)),
+		HeadRef:   strings.TrimSpace(firstNonEmpty(raw.FromRef.DisplayID, raw.FromRef.ID)),
+		Author:    userFromServerAPI(raw.Author.User),
+		URL:       firstServerSelfLink(raw.Links),
+		CreatedAt: timestampMillisToRFC3339(raw.CreatedDate),
+		UpdatedAt: timestampMillisToRFC3339(raw.UpdatedDate),
+	}
+}
+
+func userFromServerAPI(raw serverUser) model.User {
+	return model.User{
+		System:   "bitbucket",
+		Login:    strings.TrimSpace(firstNonEmpty(raw.Name, raw.Slug)),
+		Name:     strings.TrimSpace(raw.DisplayName),
+		Email:    strings.TrimSpace(raw.EmailAddress),
+		URL:      firstServerSelfLink(raw.Links),
+		IsActive: raw.Active,
+	}
+}
+
+func appendServerCommentRemarks(remarks []model.ReviewRemark, repository string, number int, raw serverComment) []model.ReviewRemark {
+	remark := model.ReviewRemark{
+		System:             "bitbucket",
+		Repository:         repository,
+		MergeRequestNumber: number,
+		ExternalID:         strconv.Itoa(raw.ID),
+		Author:             userFromServerAPI(raw.Author),
+		Body:               raw.Text,
+		URL:                firstServerSelfLink(raw.Links),
+		CreatedAt:          timestampMillisToRFC3339(raw.CreatedDate),
+		UpdatedAt:          timestampMillisToRFC3339(raw.UpdatedDate),
+	}
+	if raw.Anchor != nil {
+		remark.Path = strings.TrimSpace(raw.Anchor.Path)
+		remark.Line = raw.Anchor.Line
+		remark.Side = strings.TrimSpace(raw.Anchor.LineType)
+	}
+	remarks = append(remarks, remark)
+	for _, child := range raw.Comments {
+		remarks = appendServerCommentRemarks(remarks, repository, number, child)
+	}
+	return remarks
+}
+
+func firstServerSelfLink(links serverLinks) string {
+	for _, link := range links.Self {
+		if strings.TrimSpace(link.Href) != "" {
+			return strings.TrimSpace(link.Href)
+		}
+	}
+	return ""
+}
+
+func branchRefID(branch string) string {
+	branch = strings.TrimSpace(branch)
+	if strings.HasPrefix(branch, "refs/") {
+		return branch
+	}
+	return "refs/heads/" + branch
+}
+
+func timestampMillisToRFC3339(value int64) string {
+	if value <= 0 {
+		return ""
+	}
+	return time.UnixMilli(value).UTC().Format(time.RFC3339)
 }
 
 func parseTimeout(raw string) (time.Duration, error) {
