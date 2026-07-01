@@ -94,6 +94,7 @@ progress synthesize --config ./configs/dev.yaml
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — целевая архитектурная схема;
 - [docs/contours/reactivity/README.md](docs/contours/reactivity/README.md) — контур реакции на внешние события;
 - [docs/contours/integration/README.md](docs/contours/integration/README.md) — контур интеграции с внешними системами;
+- [docs/contours/integration/TARGET_ARCHITECTURE.md](docs/contours/integration/TARGET_ARCHITECTURE.md) — целевое архитектурное состояние контура интеграции;
 - [docs/contours/decision/README.md](docs/contours/decision/README.md) — контур принятия решения;
 - [docs/contours/decision/PLAN.md](docs/contours/decision/PLAN.md) — прикладной план развития контура решения по циклу задачи;
 - [docs/contours/execution/README.md](docs/contours/execution/README.md) — контур исполнения;
