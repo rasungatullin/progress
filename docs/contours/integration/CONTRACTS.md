@@ -25,29 +25,35 @@
 
 ## 3. Базовые возможности
 
-Для первого рабочего этапа достаточно следующих возможностей:
+Для текущего рабочего этапа поддерживаются следующие возможности:
 
 - проверить доступность интеграции и авторизацию;
 - получить репозиторий;
 - получить задачу по идентификатору или номеру;
 - получить комментарии задачи;
+- создать комментарий задачи;
 - получить запрос на слияние по идентификатору или номеру;
 - получить комментарии запроса на слияние, включая замечания ревизии;
 - создать запрос на слияние;
-- создать комментарий к задаче или запросу на слияние;
-- ответить на комментарий запроса на слияние.
+- получить цепочку обсуждения мессенджера, если внешняя система поддерживает такую операцию;
+- создать сообщение в мессенджере.
 
 Это не исчерпывающий список. Контракт должен позволять расширение, но первый потребительский слой должен оставаться небольшим и понятным.
 
 ## 4. Каноничные сущности
 
-Для первого среза контур должен оперировать следующими каноничными сущностями:
+Контур оперирует следующими каноническими сущностями:
 
-- `Repository`;
-- `Issue`;
-- `IssueComment`;
-- `PullRequest`;
-- `PullRequestComment`.
+- `CanonicalTask` — каноническая задача трекера;
+- `TaskComment` — комментарий задачи;
+- `Repository` — репозиторий;
+- `MergeRequest` — запрос на слияние;
+- `ReviewRemark` — замечание ревизии;
+- `MessageThread` — цепочка обсуждения;
+- `Message` — сообщение;
+- `MessageReaction` — реакция сообщения;
+- `Failure` — отказное состояние;
+- `OperationResult` — диагностируемый результат операции изменения.
 
 Каноничность здесь означает, что внутренние поля выражают инженерный смысл, а не копируют один в один внешний формат конкретной системы.
 
@@ -63,6 +69,61 @@
 - `Attributes map[string]string` — каноничные дополнительные поля key-value.
 
 ## 5. Каноничные Go-типы
+
+Актуальная реализация находится в `internal/integration/model/types.go`. Основной вход — `Request`, внутренний вход адаптера — `ProviderRequest`, выход — `Response`.
+
+Ключевые поля `Request`:
+
+```go
+type Request struct {
+    IntegrationType string
+    System          string
+    SystemProvided  bool
+    Resource        string
+    ObjectType      string
+    Operation       string
+    Repository      string
+    Number          int
+    ExternalID      string
+    Base            string
+    Head            string
+    Title           string
+    Body            string
+    Text            string
+    ChannelID       string
+    ThreadID        string
+    MessageID       string
+}
+```
+
+Ключевые поля `Response`:
+
+```go
+type Response struct {
+    IntegrationType string
+    System          string
+    Resource        string
+    ObjectType      string
+    Operation       string
+    Status          string
+    Partial         bool
+    Failure         *Failure
+    Route           Route
+    Task            *CanonicalTask
+    TaskComments    []TaskComment
+    Repository      *Repository
+    MergeRequest    *MergeRequest
+    ReviewRemarks   []ReviewRemark
+    Conversation    *MessageThread
+    Messages        []Message
+    Message         *Message
+    OperationResult *OperationResult
+}
+```
+
+Для перехода соседних контуров также заполняются прежние структуры `TrackerIssue`, `TrackerRepository`, `TrackerPullRequest` и `TrackerComment`, если результат может быть однозначно преобразован.
+
+Предыдущий пример первого GitHub-среза оставлен ниже как историческая форма контракта, но новые вызовы должны использовать `Request` и `Response`.
 
 ```go
 package integration
@@ -162,7 +223,7 @@ type PullRequestComment struct {
 
 ## 6. Интерфейс контура
 
-Контур должен публиковать простой Go-интерфейс с предметными методами по основным сущностям первого среза.
+Контур публикует универсальный интерфейс диспетчеризации и выполнения канонического запроса.
 
 ```go
 package integration
@@ -170,26 +231,18 @@ package integration
 import "context"
 
 type Service interface {
-    AuthCheck(context.Context, AuthCheckRequest) (AuthCheckResult, error)
-
-    RepositoryGet(context.Context, RepositoryGetRequest) (RepositoryGetResult, error)
-
-    IssueGet(context.Context, IssueGetRequest) (IssueGetResult, error)
-    IssueCommentList(context.Context, IssueCommentListRequest) (IssueCommentListResult, error)
-
-    PullRequestGet(context.Context, PullRequestGetRequest) (PullRequestGetResult, error)
-    PullRequestCommentList(context.Context, PullRequestCommentListRequest) (PullRequestCommentListResult, error)
-    PullRequestCreate(context.Context, PullRequestCreateRequest) (PullRequestCreateResult, error)
-    PullRequestCommentCreate(context.Context, PullRequestCommentCreateRequest) (PullRequestCommentCreateResult, error)
-    PullRequestCommentReply(context.Context, PullRequestCommentReplyRequest) (PullRequestCommentReplyResult, error)
+    Dispatch(context.Context, Request) (Route, error)
+    Execute(context.Context, Request) (Response, error)
 }
 ```
 
 Важно:
 
 - контур сам должен уметь определить, с какой системой работать, по настройкам и селектору;
-- в текущем контракте среды исполнения `integration.Service` поле `System` обязательно и используется как явный селектор адаптера;
-- вызывающему коду не нужно заранее знать, GitHub это или иная система, если этого достаточно для настройки маршрутизации.
+- поле `System` является явным селектором интегрируемой системы;
+- если `System` не задан, диспетчер выбирает систему по `IntegrationType` и настройкам `default_systems`;
+- если `SystemProvided=true` и `System` пустой, запрос отклоняется как `invalid-request`;
+- вызывающему коду не нужно знать устройство GitHub, Bitbucket, Mattermost, Telegram или другой внешней системы.
 
 ## 7. Типовой запрос
 
@@ -201,21 +254,23 @@ type Service interface {
 
 ```go
 type IssueGetRequest struct {
-    System     System // required in current runtime contract
-    Repository string
-    Number     int
-    Fields     []string
-    Options    RequestOptions
+    IntegrationType string // "tracker"
+    System          string
+    ObjectType      string // "task" или "issue"
+    Operation       string // "get"
+    Repository      string
+    Number          int
 }
 ```
 
 Семантика полей:
 
-- `System` — в текущем контракте среды исполнения обязателен и указывает конкретную интеграцию;
+- `IntegrationType` — тип интеграции, например `tracker`, `repository` или `messenger`;
+- `System` — конкретная интегрируемая система, если нужно переопределить систему по умолчанию;
+- `ObjectType` — тип канонического объекта;
+- `Operation` — интеграционная операция;
 - `Repository` — опорный контекст, если он нужен для разрешения объекта;
 - `Number` — канонический идентификатор задачи внутри контекста источника;
-- `Fields` — опциональный список требуемых полей;
-- `Options` — служебные режимы вызова.
 
 Если `Fields` не указан, контур должен вернуть базовый каноничный набор полей сущности.
 

@@ -1285,6 +1285,14 @@ func (r *stubRunner) RunIssueComments(_ context.Context, repository string, numb
 	return r.result, r.config, r.err
 }
 
+func (r *stubRunner) RunIssueCommentCreate(_ context.Context, repository string, number int, body string) (CommandResult, resolvedConfig, error) {
+	r.issueCommentCalls++
+	r.repo = repository
+	r.number = number
+	r.body = body
+	return r.result, r.config, r.err
+}
+
 func (r *stubRunner) RunPRView(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
 	r.prViewCalls++
 	r.repo = repository

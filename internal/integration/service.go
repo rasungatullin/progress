@@ -7,13 +7,28 @@ import (
 	"sort"
 	"strings"
 
+	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
 	githubprovider "github.com/rasungatullin/progress/internal/integration/github"
+	mattermostprovider "github.com/rasungatullin/progress/internal/integration/mattermost"
 	"github.com/rasungatullin/progress/internal/integration/model"
+	telegramprovider "github.com/rasungatullin/progress/internal/integration/telegram"
 )
 
 type Request = model.Request
 type Response = model.Response
 type Route = model.Route
+type Failure = model.Failure
+type CanonicalTask = model.CanonicalTask
+type TaskComment = model.TaskComment
+type Repository = model.Repository
+type MergeRequest = model.MergeRequest
+type ReviewRemark = model.ReviewRemark
+type MessageThread = model.MessageThread
+type Message = model.Message
+type MessageReaction = model.MessageReaction
+type OperationResult = model.OperationResult
+type User = model.User
+type ObjectLink = model.ObjectLink
 type TrackerIssue = model.TrackerIssue
 type TrackerPullRequest = model.TrackerPullRequest
 type TrackerComment = model.TrackerComment
@@ -33,29 +48,49 @@ type Provider interface {
 }
 
 type Service struct {
-	logger        *log.Logger
-	providers     map[string]Provider
-	defaultSystem string
-	systems       map[string]systemState
+	logger         *log.Logger
+	providers      map[string]Provider
+	defaultSystem  string
+	defaultSystems map[string]string
+	systems        map[string]systemState
 }
 
 type systemState struct {
-	Name       string
-	Type       string
-	Configured bool
-	Enabled    bool
-	Registered bool
+	Name             string
+	Type             string
+	IntegrationTypes []string
+	Configured       bool
+	Enabled          bool
+	Registered       bool
+	Default          bool
 }
 
 func NewService(logger *log.Logger) *Service {
 	service := newEmptyService(logger)
-	service.registerConfiguredProvider("github", systemState{Name: "github", Type: "github", Configured: true, Enabled: true}, githubprovider.NewService())
+	service.defaultSystems[model.IntegrationTypeTracker] = "github"
+	service.defaultSystems[model.IntegrationTypeRepository] = "github"
+	service.registerConfiguredProvider("github", systemState{
+		Name:             "github",
+		Type:             "github",
+		IntegrationTypes: []string{model.IntegrationTypeTracker, model.IntegrationTypeRepository},
+		Configured:       true,
+		Enabled:          true,
+		Default:          true,
+	}, githubprovider.NewService())
 	return service
 }
 
 func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile) *Service {
 	service := newEmptyService(logger)
 	service.defaultSystem = normalizeSystem(config.DefaultSystem)
+	for integrationType, system := range config.DefaultSystems {
+		integrationType = normalizeIntegrationType(integrationType)
+		system = normalizeSystem(system)
+		if integrationType == "" || system == "" {
+			continue
+		}
+		service.defaultSystems[integrationType] = system
+	}
 
 	for name, systemConfig := range config.Systems {
 		name = normalizeSystem(name)
@@ -64,10 +99,12 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 		}
 
 		state := systemState{
-			Name:       name,
-			Type:       normalizeSystem(systemConfig.Type),
-			Configured: true,
-			Enabled:    systemEnabled(systemConfig),
+			Name:             name,
+			Type:             normalizeSystem(systemConfig.Type),
+			IntegrationTypes: normalizeIntegrationTypes(systemConfig),
+			Configured:       true,
+			Enabled:          systemEnabled(systemConfig),
+			Default:          systemConfig.Default,
 		}
 		service.systems[name] = state
 
@@ -78,6 +115,12 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 		switch state.Type {
 		case "github":
 			service.registerConfiguredProvider(name, state, githubprovider.NewServiceWithConfig(systemConfig))
+		case "bitbucket":
+			service.registerConfiguredProvider(name, state, bitbucketprovider.NewService(systemConfig))
+		case "mattermost":
+			service.registerConfiguredProvider(name, state, mattermostprovider.NewService(systemConfig))
+		case "telegram":
+			service.registerConfiguredProvider(name, state, telegramprovider.NewService(systemConfig))
 		case "":
 			service.systems[name] = state
 		default:
@@ -85,24 +128,36 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 		}
 	}
 
+	service.applyConfiguredDefaults()
 	return service
 }
 
 func newEmptyService(logger *log.Logger) *Service {
-	service := &Service{
-		logger:    logger,
-		providers: make(map[string]Provider),
-		systems:   make(map[string]systemState),
+	return &Service{
+		logger:         ensureLogger(logger),
+		providers:      make(map[string]Provider),
+		defaultSystems: make(map[string]string),
+		systems:        make(map[string]systemState),
 	}
-	return service
 }
 
 func (s *Service) RegisterProvider(system string, provider Provider) {
-	s.registerConfiguredProvider(system, systemState{Name: normalizeSystem(system), Type: normalizeSystem(system), Configured: true, Enabled: true}, provider)
+	system = normalizeSystem(system)
+	state := s.systems[system]
+	state.Name = system
+	if state.Type == "" {
+		state.Type = system
+	}
+	if len(state.IntegrationTypes) == 0 {
+		state.IntegrationTypes = defaultIntegrationTypesForProvider(state.Type)
+	}
+	state.Configured = true
+	state.Enabled = true
+	s.registerConfiguredProvider(system, state, provider)
 }
 
 func (s *Service) registerConfiguredProvider(system string, state systemState, provider Provider) {
-	name := strings.TrimSpace(strings.ToLower(system))
+	name := normalizeSystem(system)
 	if name == "" || provider == nil {
 		return
 	}
@@ -115,71 +170,86 @@ func (s *Service) registerConfiguredProvider(system string, state systemState, p
 	if state.Type == "" {
 		state.Type = name
 	}
+	if len(state.IntegrationTypes) == 0 {
+		state.IntegrationTypes = defaultIntegrationTypesForProvider(state.Type)
+	}
+	state.IntegrationTypes = dedupeStrings(state.IntegrationTypes)
 	s.systems[name] = state
+}
+
+func (s *Service) applyConfiguredDefaults() {
+	if s.defaultSystem != "" {
+		if state, ok := s.systems[s.defaultSystem]; ok {
+			for _, integrationType := range state.IntegrationTypes {
+				if _, exists := s.defaultSystems[integrationType]; !exists {
+					s.defaultSystems[integrationType] = s.defaultSystem
+				}
+			}
+		}
+	}
+
+	for system, state := range s.systems {
+		if !state.Enabled || !state.Default {
+			continue
+		}
+		for _, integrationType := range state.IntegrationTypes {
+			if _, exists := s.defaultSystems[integrationType]; !exists {
+				s.defaultSystems[integrationType] = system
+			}
+		}
+	}
+
+	for system, state := range s.systems {
+		if !state.Enabled || len(state.IntegrationTypes) == 0 {
+			continue
+		}
+		for _, integrationType := range state.IntegrationTypes {
+			if _, exists := s.defaultSystems[integrationType]; !exists {
+				s.defaultSystems[integrationType] = system
+			}
+		}
+	}
 }
 
 func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
 	normalized, err := s.normalizeRequest(req)
 	if err != nil {
-		resolvedSystem := normalizeSystem(req.System)
-		if resolvedSystem == "" {
-			resolvedSystem = s.defaultSystem
-		}
-		route := Route{
-			System:         resolvedSystem,
-			Provider:       resolvedSystem,
-			Resource:       normalizeResource(req.Resource),
-			Operation:      normalizeOperation(req.Operation),
-			ExpectedResult: expectedResult(normalizeResource(req.Resource), normalizeOperation(req.Operation)),
-			Diagnostics: []string{
-				fmt.Sprintf("request system=%s resource=%s operation=%s", resolvedSystem, normalizeResource(req.Resource), normalizeOperation(req.Operation)),
-				"dispatcher mode=diagnostic-only",
-				"invalid-request missing system",
-			},
-		}
-
-		s.logger.Printf("Диспетчер интеграции отклонил запрос: система=%q причина=%q", req.System, err)
+		route := s.errorRoute(req, err)
+		s.logger.Printf("Диспетчер интеграции отклонил запрос: система=%q тип=%q причина=%q", req.System, req.IntegrationType, err)
 		return route, err
 	}
 
-	_, ok := s.providers[normalized.System]
 	state, known := s.systems[normalized.System]
+	_, registered := s.providers[normalized.System]
+	available := registered && systemSupportsIntegrationType(state, normalized.IntegrationType)
 
 	route := Route{
+		IntegrationType:   normalized.IntegrationType,
 		System:            normalized.System,
 		Provider:          normalized.System,
-		ProviderAvailable: ok,
+		ProviderType:      state.Type,
+		ProviderAvailable: available,
 		Resource:          normalized.Resource,
+		ObjectType:        normalized.ObjectType,
 		Operation:         normalized.Operation,
-		ExpectedResult:    expectedResult(normalized.Resource, normalized.Operation),
-		Diagnostics:       buildDiagnostics(normalized.System, normalized.Resource, normalized.Operation, ok, known, state, s.registeredSystems()),
+		ExpectedResult:    expectedResult(normalized.IntegrationType, normalized.ObjectType, normalized.Resource, normalized.Operation),
+		Diagnostics:       buildDiagnostics(normalized.IntegrationType, normalized.System, normalized.Resource, normalized.ObjectType, normalized.Operation, available, registered, known, state, s.registeredSystems()),
 	}
-	s.logger.Printf("Диспетчер интеграции сформировал маршрут: система=%q ресурс=%q операция=%q провайдер=%q доступен=%t", route.System, route.Resource, route.Operation, route.Provider, route.ProviderAvailable)
+	s.logger.Printf("Диспетчер интеграции сформировал маршрут: тип=%q система=%q объект=%q операция=%q провайдер=%q доступен=%t", route.IntegrationType, route.System, route.ObjectType, route.Operation, route.Provider, route.ProviderAvailable)
 	return route, nil
 }
 
 func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	normalized, err := s.normalizeRequest(req)
 	if err != nil {
-		resolvedSystem := normalizeSystem(req.System)
-		if resolvedSystem == "" {
-			resolvedSystem = s.defaultSystem
-		}
 		return Response{
-			Resource:  normalizeResource(req.Resource),
-			Operation: normalizeOperation(req.Operation),
-			Route: Route{
-				System:         resolvedSystem,
-				Provider:       resolvedSystem,
-				Resource:       normalizeResource(req.Resource),
-				Operation:      normalizeOperation(req.Operation),
-				ExpectedResult: expectedResult(normalizeResource(req.Resource), normalizeOperation(req.Operation)),
-				Diagnostics: []string{
-					fmt.Sprintf("request system=%s resource=%s operation=%s", resolvedSystem, normalizeResource(req.Resource), normalizeOperation(req.Operation)),
-					"dispatcher mode=diagnostic-only",
-					"invalid-request missing system",
-				},
-			},
+			IntegrationType: normalizeIntegrationType(firstNonEmpty(req.IntegrationType, inferIntegrationType(firstNonEmpty(req.ObjectType, req.Resource)))),
+			Resource:        normalizeResource(req.Resource),
+			ObjectType:      normalizeObjectType(firstNonEmpty(req.ObjectType, req.Resource)),
+			Operation:       normalizeOperation(req.Operation),
+			Status:          model.ResponseStatusFailed,
+			Failure:         failureFromError(model.FailureKindInvalidRequest, false, err),
+			Route:           s.errorRoute(req, err),
 		}, err
 	}
 
@@ -190,23 +260,40 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 
 	normalized.Route = route
 	provider, ok := s.providers[route.System]
-	if !ok {
+	if !ok || !route.ProviderAvailable {
 		if state, known := s.systems[route.System]; known {
 			switch {
 			case !state.Enabled:
-				return Response{System: route.System, Resource: route.Resource, Operation: route.Operation, Route: route}, fmt.Errorf("integration provider disabled by configuration: %s", route.System)
-			case state.Type != "" && state.Type != route.System:
-				return Response{System: route.System, Resource: route.Resource, Operation: route.Operation, Route: route}, fmt.Errorf("integration provider type is not supported in current build: %s (%s)", route.System, state.Type)
+				err := fmt.Errorf("integration provider disabled by configuration: %s", route.System)
+				return responseWithFailure(route, model.FailureKindNotConfigured, false, err), err
+			case state.Type != "" && !ok:
+				err := fmt.Errorf("integration provider type is not supported in current build: %s (%s)", route.System, state.Type)
+				return responseWithFailure(route, model.FailureKindUnsupportedOperation, false, err), err
+			case !systemSupportsIntegrationType(state, route.IntegrationType):
+				err := fmt.Errorf("integration provider %s does not support integration type %s", route.System, route.IntegrationType)
+				return responseWithFailure(route, model.FailureKindUnsupportedOperation, false, err), err
 			}
 		}
-		return Response{System: route.System, Resource: route.Resource, Operation: route.Operation, Route: route}, fmt.Errorf("integration provider not registered: %s", route.System)
+		err := fmt.Errorf("integration provider not registered: %s", route.System)
+		return responseWithFailure(route, model.FailureKindNotConfigured, false, err), err
 	}
 
 	result, err := provider.Execute(ctx, normalized)
-	applyResponseSystem(&result, route.System)
-	result.Resource = firstNonEmpty(result.Resource, route.Resource)
-	result.Operation = firstNonEmpty(result.Operation, route.Operation)
-	result.Route = route
+	applyRouteToResponse(&result, route)
+	if result.Status == "" {
+		if err != nil || result.Failure != nil {
+			result.Status = model.ResponseStatusFailed
+		} else if result.Partial {
+			result.Status = model.ResponseStatusPartial
+		} else {
+			result.Status = model.ResponseStatusOK
+		}
+	}
+	if err != nil && result.Failure == nil {
+		result.Failure = failureFromError(model.FailureKindExternalFailure, false, err)
+		result.Status = model.ResponseStatusFailed
+	}
+	normalizeDerivedObjects(&result)
 	if err != nil {
 		return result, err
 	}
@@ -215,27 +302,99 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 }
 
 func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
-	normalized := ProviderRequest{
-		System:       normalizeSystem(firstNonEmpty(req.System, s.defaultSystem)),
-		Resource:     normalizeResource(req.Resource),
-		Operation:    normalizeOperation(req.Operation),
-		Repository:   strings.TrimSpace(req.Repository),
-		RepoProvided: req.RepoProvided,
-		Number:       req.Number,
-		Base:         strings.TrimSpace(req.Base),
-		Head:         strings.TrimSpace(req.Head),
-		Title:        strings.TrimSpace(req.Title),
-		Body:         strings.TrimSpace(req.Body),
-		Draft:        req.Draft,
-		Query:        strings.TrimSpace(req.Query),
-		Limit:        req.Limit,
+	objectType := normalizeObjectType(firstNonEmpty(req.ObjectType, req.Resource))
+	integrationType := normalizeIntegrationType(req.IntegrationType)
+	system := normalizeSystem(req.System)
+	if req.SystemProvided && system == "" {
+		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
+	}
+	if system == "" {
+		system = s.defaultSystemForType(integrationType)
+	}
+	if system == "" {
+		system = s.defaultSystem
+	}
+	if system == "" {
+		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
+	}
+	if integrationType == "" {
+		integrationType = s.firstIntegrationTypeForSystem(system)
+	}
+	if integrationType == "" {
+		integrationType = inferIntegrationType(objectType)
 	}
 
-	if normalized.System == "" {
-		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
+	normalized := ProviderRequest{
+		IntegrationType: integrationType,
+		System:          system,
+		SystemProvided:  req.SystemProvided,
+		Resource:        normalizeResource(firstNonEmpty(req.Resource, objectType)),
+		ObjectType:      objectType,
+		Operation:       normalizeOperation(req.Operation),
+		Repository:      strings.TrimSpace(req.Repository),
+		RepoProvided:    req.RepoProvided,
+		Number:          req.Number,
+		ExternalID:      strings.TrimSpace(req.ExternalID),
+		Base:            strings.TrimSpace(req.Base),
+		Head:            strings.TrimSpace(req.Head),
+		Title:           strings.TrimSpace(req.Title),
+		Body:            strings.TrimSpace(req.Body),
+		Text:            strings.TrimSpace(req.Text),
+		Draft:           req.Draft,
+		Query:           strings.TrimSpace(req.Query),
+		Limit:           req.Limit,
+		ChannelID:       strings.TrimSpace(req.ChannelID),
+		ThreadID:        strings.TrimSpace(req.ThreadID),
+		MessageID:       strings.TrimSpace(req.MessageID),
+		Reaction:        strings.TrimSpace(req.Reaction),
+		Fields:          trimStrings(req.Fields),
+	}
+	if normalized.ObjectType == "" {
+		normalized.ObjectType = normalizeObjectType(normalized.Resource)
 	}
 
 	return normalized, nil
+}
+
+func (s *Service) errorRoute(req Request, err error) Route {
+	objectType := normalizeObjectType(firstNonEmpty(req.ObjectType, req.Resource))
+	integrationType := normalizeIntegrationType(req.IntegrationType)
+	system := normalizeSystem(req.System)
+	if system == "" && !req.SystemProvided {
+		system = s.defaultSystemForType(integrationType)
+	}
+	return Route{
+		IntegrationType: integrationType,
+		System:          system,
+		Provider:        system,
+		Resource:        normalizeResource(req.Resource),
+		ObjectType:      objectType,
+		Operation:       normalizeOperation(req.Operation),
+		ExpectedResult:  expectedResult(integrationType, objectType, normalizeResource(req.Resource), normalizeOperation(req.Operation)),
+		Diagnostics: []string{
+			fmt.Sprintf("request system=%s resource=%s operation=%s", system, normalizeResource(req.Resource), normalizeOperation(req.Operation)),
+			fmt.Sprintf("request type=%s system=%s resource=%s object=%s operation=%s", integrationType, system, normalizeResource(req.Resource), objectType, normalizeOperation(req.Operation)),
+			"dispatcher mode=diagnostic-only",
+			"invalid-request missing system",
+			fmt.Sprintf("invalid-request %s", err.Error()),
+		},
+	}
+}
+
+func (s *Service) defaultSystemForType(integrationType string) string {
+	integrationType = normalizeIntegrationType(integrationType)
+	if integrationType == "" {
+		return ""
+	}
+	return normalizeSystem(s.defaultSystems[integrationType])
+}
+
+func (s *Service) firstIntegrationTypeForSystem(system string) string {
+	state, ok := s.systems[normalizeSystem(system)]
+	if !ok || len(state.IntegrationTypes) == 0 {
+		return ""
+	}
+	return state.IntegrationTypes[0]
 }
 
 func (s *Service) registeredSystems() []string {
@@ -253,16 +412,38 @@ func (s *Service) registeredSystems() []string {
 }
 
 func normalizeSystem(system string) string {
-	system = strings.TrimSpace(strings.ToLower(system))
-	return system
+	return strings.TrimSpace(strings.ToLower(system))
+}
+
+func normalizeIntegrationType(integrationType string) string {
+	return strings.TrimSpace(strings.ToLower(integrationType))
+}
+
+func normalizeObjectType(objectType string) string {
+	objectType = strings.TrimSpace(strings.ToLower(objectType))
+	switch objectType {
+	case "task":
+		return "task"
+	case "issue":
+		return "issue"
+	case "pull-request", "pr", "merge-request", "mr":
+		return "merge-request"
+	case "repo":
+		return "repository"
+	case "comment":
+		return "comment"
+	case "thread", "discussion":
+		return "thread"
+	default:
+		return objectType
+	}
 }
 
 func normalizeResource(resource string) string {
 	resource = strings.TrimSpace(strings.ToLower(resource))
 	if resource == "" {
-		return "tracker-object"
+		return "canonical-object"
 	}
-
 	return resource
 }
 
@@ -271,8 +452,202 @@ func normalizeOperation(operation string) string {
 	if operation == "" {
 		return "get"
 	}
+	switch operation {
+	case "list-comments":
+		return "comments"
+	case "send", "post":
+		return "create"
+	default:
+		return operation
+	}
+}
 
-	return operation
+func inferIntegrationType(objectType string) string {
+	switch normalizeObjectType(objectType) {
+	case "task", "issue", "comment":
+		return model.IntegrationTypeTracker
+	case "repository", "branch", "commit", "pull-request", "pr", "merge-request", "mr":
+		return model.IntegrationTypeRepository
+	case "channel", "thread", "message", "reaction":
+		return model.IntegrationTypeMessenger
+	default:
+		return ""
+	}
+}
+
+func normalizeIntegrationTypes(config model.IntegrationSystemConfig) []string {
+	var values []string
+	if config.IntegrationType != "" {
+		values = append(values, config.IntegrationType)
+	}
+	values = append(values, config.IntegrationTypes...)
+	if len(values) == 0 {
+		values = defaultIntegrationTypesForProvider(normalizeSystem(config.Type))
+	}
+	for i := range values {
+		values[i] = normalizeIntegrationType(values[i])
+	}
+	return dedupeStrings(values)
+}
+
+func defaultIntegrationTypesForProvider(providerType string) []string {
+	switch normalizeSystem(providerType) {
+	case "github":
+		return []string{model.IntegrationTypeTracker, model.IntegrationTypeRepository}
+	case "bitbucket":
+		return []string{model.IntegrationTypeRepository}
+	case "mattermost", "telegram":
+		return []string{model.IntegrationTypeMessenger}
+	default:
+		return nil
+	}
+}
+
+func systemSupportsIntegrationType(state systemState, integrationType string) bool {
+	integrationType = normalizeIntegrationType(integrationType)
+	if integrationType == "" {
+		return true
+	}
+	for _, item := range state.IntegrationTypes {
+		if item == integrationType {
+			return true
+		}
+	}
+	return false
+}
+
+func buildDiagnostics(integrationType string, system string, resource string, objectType string, operation string, available bool, registered bool, known bool, state systemState, registeredSystems []string) []string {
+	diagnostics := []string{
+		fmt.Sprintf("request system=%s resource=%s operation=%s", system, resource, operation),
+		fmt.Sprintf("request type=%s system=%s resource=%s object=%s operation=%s", integrationType, system, resource, objectType, operation),
+		"dispatcher mode=diagnostic-only",
+	}
+
+	if available {
+		diagnostics = append(diagnostics, fmt.Sprintf("provider=%s registered", system))
+		if state.Type != "" {
+			diagnostics = append(diagnostics, fmt.Sprintf("provider-type=%s", state.Type))
+		}
+		return diagnostics
+	}
+
+	if known {
+		switch {
+		case !state.Enabled:
+			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s disabled by integration configuration", system))
+		case registered && !systemSupportsIntegrationType(state, integrationType):
+			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s does not support integration type=%s", system, integrationType))
+		case state.Type != "" && !registered:
+			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s configured with unsupported type=%s", system, state.Type))
+		default:
+			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s not registered in current build", system))
+		}
+	} else {
+		diagnostics = append(diagnostics, fmt.Sprintf("provider=%s unknown to current integration configuration", system))
+	}
+
+	if len(registeredSystems) == 0 {
+		diagnostics = append(diagnostics, "registered systems=<none>")
+		return diagnostics
+	}
+
+	diagnostics = append(diagnostics, fmt.Sprintf("registered systems=%s", strings.Join(registeredSystems, ",")))
+	return diagnostics
+}
+
+func expectedResult(integrationType string, objectType string, resource string, operation string) string {
+	switch normalizeIntegrationType(integrationType) {
+	case model.IntegrationTypeTracker:
+		switch normalizeObjectType(firstNonEmpty(objectType, resource)) {
+		case "issue":
+			if operation == "comments" {
+				return "tracker-comment[]"
+			}
+			if operation == "search" {
+				return "tracker-search-result[]"
+			}
+			return "tracker-issue"
+		case "task":
+			if operation == "comments" {
+				return "task-comment[]"
+			}
+			if operation == "search" {
+				return "canonical-task[]"
+			}
+			return "canonical-task"
+		case "comment":
+			return "task-comment"
+		}
+	case model.IntegrationTypeRepository:
+		switch normalizeObjectType(firstNonEmpty(objectType, resource)) {
+		case "repository":
+			return "canonical-repository"
+		case "merge-request":
+			if resource == "pr" || resource == "pull-request" {
+				if operation == "create" {
+					return "integration-pull-request-status"
+				}
+				return "tracker-pull-request"
+			}
+			if operation == "create" {
+				return "integration-operation-result"
+			}
+			return "canonical-merge-request"
+		case "comment", "review":
+			return "review-remark[]"
+		}
+	case model.IntegrationTypeMessenger:
+		switch normalizeObjectType(firstNonEmpty(objectType, resource)) {
+		case "thread":
+			return "message-thread"
+		case "message":
+			if operation == "create" {
+				return "message"
+			}
+			return "message[]"
+		case "reaction":
+			return "integration-operation-result"
+		}
+	}
+
+	switch resource {
+	case "issue":
+		if operation == "comments" {
+			return "tracker-comment[]"
+		}
+		if operation == "search" {
+			return "tracker-search-result[]"
+		}
+		return "tracker-issue"
+	case "pull-request", "pr":
+		if operation == "search" {
+			return "tracker-search-result[]"
+		}
+		if operation == "create" {
+			return "integration-pull-request-status"
+		}
+		return "tracker-pull-request"
+	case "auth":
+		return "integration-auth-status"
+	case "repository", "repo":
+		return "tracker-repository"
+	default:
+		return "normalized-response"
+	}
+}
+
+func applyRouteToResponse(result *Response, route Route) {
+	if result == nil {
+		return
+	}
+
+	result.IntegrationType = firstNonEmpty(result.IntegrationType, route.IntegrationType)
+	result.System = normalizeSystem(firstNonEmpty(result.System, route.System))
+	result.Resource = firstNonEmpty(result.Resource, route.Resource)
+	result.ObjectType = firstNonEmpty(result.ObjectType, route.ObjectType)
+	result.Operation = firstNonEmpty(result.Operation, route.Operation)
+	result.Route = route
+	applyResponseSystem(result, route.System)
 }
 
 func applyResponseSystem(result *Response, system string) {
@@ -282,6 +657,50 @@ func applyResponseSystem(result *Response, system string) {
 	}
 
 	result.System = system
+	if result.Task != nil {
+		result.Task.System = system
+		result.Task.Author.System = system
+		for i := range result.Task.Assignees {
+			result.Task.Assignees[i].System = system
+		}
+	}
+	for i := range result.TaskComments {
+		result.TaskComments[i].System = system
+		result.TaskComments[i].Author.System = system
+	}
+	if result.Repository != nil {
+		result.Repository.System = system
+	}
+	if result.MergeRequest != nil {
+		result.MergeRequest.System = system
+		result.MergeRequest.Author.System = system
+	}
+	for i := range result.ReviewRemarks {
+		result.ReviewRemarks[i].System = system
+		result.ReviewRemarks[i].Author.System = system
+	}
+	if result.Conversation != nil {
+		result.Conversation.System = system
+		for i := range result.Conversation.Messages {
+			result.Conversation.Messages[i].System = system
+			result.Conversation.Messages[i].Author.System = system
+		}
+		for i := range result.Conversation.Reactions {
+			result.Conversation.Reactions[i].System = system
+			result.Conversation.Reactions[i].User.System = system
+		}
+	}
+	for i := range result.Messages {
+		result.Messages[i].System = system
+		result.Messages[i].Author.System = system
+	}
+	if result.Message != nil {
+		result.Message.System = system
+		result.Message.Author.System = system
+	}
+	if result.OperationResult != nil {
+		result.OperationResult.System = system
+	}
 	if result.AuthStatus != nil {
 		result.AuthStatus.System = system
 	}
@@ -324,75 +743,269 @@ func applyResponseSystem(result *Response, system string) {
 	}
 }
 
-func expectedResult(resource string, operation string) string {
-	switch resource {
-	case "issue":
-		if operation == "comments" {
-			return "tracker-comment[]"
+func normalizeDerivedObjects(result *Response) {
+	if result == nil {
+		return
+	}
+	if result.Task == nil && result.Issue != nil {
+		result.Task = canonicalTaskFromTrackerIssue(*result.Issue)
+	}
+	if result.Issue == nil && result.Task != nil {
+		issue := trackerIssueFromCanonicalTask(*result.Task)
+		result.Issue = &issue
+	}
+	if len(result.TaskComments) == 0 && len(result.Comments) > 0 {
+		result.TaskComments = make([]TaskComment, 0, len(result.Comments))
+		for _, comment := range result.Comments {
+			result.TaskComments = append(result.TaskComments, taskCommentFromTrackerComment(comment))
 		}
-		if operation == "search" {
-			return "tracker-search-result[]"
+	}
+	if len(result.Comments) == 0 && len(result.TaskComments) > 0 {
+		result.Comments = make([]TrackerComment, 0, len(result.TaskComments))
+		for _, comment := range result.TaskComments {
+			result.Comments = append(result.Comments, trackerCommentFromTaskComment(comment))
 		}
-		return "tracker-issue"
-	case "pull-request", "pr":
-		if operation == "search" {
-			return "tracker-search-result[]"
-		}
-		if operation == "create" {
-			return "integration-pull-request-status"
-		}
-		return "tracker-pull-request"
-	case "comment":
-		return "tracker-comment[]"
-	case "review":
-		return "tracker-review[]"
-	case "auth":
-		if operation == "status" {
-			return "integration-auth-status"
-		}
-		return "normalized-response"
-	case "repository", "repo":
-		return "tracker-repository"
-	default:
-		return "normalized-response"
+	}
+	if result.Repository == nil && result.RepositoryRef != nil {
+		result.Repository = repositoryFromTrackerRepository(*result.RepositoryRef)
+	}
+	if result.RepositoryRef == nil && result.Repository != nil {
+		repository := trackerRepositoryFromRepository(*result.Repository)
+		result.RepositoryRef = &repository
+	}
+	if result.MergeRequest == nil && result.PullRequest != nil {
+		result.MergeRequest = mergeRequestFromTrackerPullRequest(*result.PullRequest)
+	}
+	if result.PullRequest == nil && result.MergeRequest != nil {
+		pr := trackerPullRequestFromMergeRequest(*result.MergeRequest)
+		result.PullRequest = &pr
 	}
 }
 
-func buildDiagnostics(system string, resource string, operation string, available bool, known bool, state systemState, registered []string) []string {
-	diagnostics := []string{
-		fmt.Sprintf("request system=%s resource=%s operation=%s", system, resource, operation),
-		"dispatcher mode=diagnostic-only",
+func canonicalTaskFromTrackerIssue(issue TrackerIssue) *CanonicalTask {
+	return &CanonicalTask{
+		System:     issue.System,
+		Repository: issue.Repository,
+		Number:     issue.Number,
+		Title:      issue.Title,
+		Body:       issue.Body,
+		State:      issue.State,
+		Traits:     append([]string(nil), issue.Labels...),
+		Assignees:  usersFromTrackerUsers(issue.Assignees),
+		Author:     userFromTrackerUser(issue.Author),
+		URL:        issue.URL,
+		CreatedAt:  issue.CreatedAt,
+		UpdatedAt:  issue.UpdatedAt,
 	}
+}
 
-	if available {
-		diagnostics = append(diagnostics, fmt.Sprintf("provider=%s registered", system))
-		return diagnostics
+func trackerIssueFromCanonicalTask(task CanonicalTask) TrackerIssue {
+	return TrackerIssue{
+		System:     task.System,
+		Repository: task.Repository,
+		Number:     task.Number,
+		Title:      task.Title,
+		Body:       task.Body,
+		State:      task.State,
+		Labels:     append([]string(nil), task.Traits...),
+		Assignees:  trackerUsersFromUsers(task.Assignees),
+		Author:     trackerUserFromUser(task.Author),
+		URL:        task.URL,
+		CreatedAt:  task.CreatedAt,
+		UpdatedAt:  task.UpdatedAt,
 	}
+}
 
-	if known {
-		switch {
-		case !state.Enabled:
-			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s disabled by integration configuration", system))
-		case state.Type != "" && state.Type != system:
-			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s configured with unsupported type=%s", system, state.Type))
-		default:
-			diagnostics = append(diagnostics, fmt.Sprintf("provider=%s not registered in current build", system))
-		}
-	} else {
-		diagnostics = append(diagnostics, fmt.Sprintf("provider=%s unknown to current integration configuration", system))
+func taskCommentFromTrackerComment(comment TrackerComment) TaskComment {
+	return TaskComment{
+		System:     comment.System,
+		Repository: comment.Repository,
+		TaskNumber: comment.Number,
+		Author:     userFromTrackerUser(comment.Author),
+		Body:       comment.Body,
+		URL:        comment.URL,
+		CreatedAt:  comment.CreatedAt,
+		UpdatedAt:  comment.UpdatedAt,
 	}
+}
 
-	if len(registered) == 0 {
-		diagnostics = append(diagnostics, "registered systems=<none>")
-		return diagnostics
+func trackerCommentFromTaskComment(comment TaskComment) TrackerComment {
+	return TrackerComment{
+		System:     comment.System,
+		Repository: comment.Repository,
+		Number:     comment.TaskNumber,
+		Author:     trackerUserFromUser(comment.Author),
+		Body:       comment.Body,
+		URL:        comment.URL,
+		CreatedAt:  comment.CreatedAt,
+		UpdatedAt:  comment.UpdatedAt,
 	}
+}
 
-	diagnostics = append(diagnostics, fmt.Sprintf("registered systems=%s", strings.Join(registered, ",")))
-	return diagnostics
+func repositoryFromTrackerRepository(repository TrackerRepository) *Repository {
+	return &Repository{
+		System:        repository.System,
+		FullName:      repository.FullName,
+		Owner:         repository.Owner,
+		Name:          repository.Name,
+		Description:   repository.Description,
+		DefaultBranch: repository.DefaultBranch,
+		URL:           repository.URL,
+	}
+}
+
+func trackerRepositoryFromRepository(repository Repository) TrackerRepository {
+	return TrackerRepository{
+		System:        repository.System,
+		FullName:      repository.FullName,
+		Owner:         repository.Owner,
+		Name:          repository.Name,
+		Description:   repository.Description,
+		DefaultBranch: repository.DefaultBranch,
+		URL:           repository.URL,
+	}
+}
+
+func mergeRequestFromTrackerPullRequest(pr TrackerPullRequest) *MergeRequest {
+	return &MergeRequest{
+		System:         pr.System,
+		Repository:     pr.Repository,
+		Number:         pr.Number,
+		Title:          pr.Title,
+		Body:           pr.Body,
+		State:          pr.State,
+		Traits:         append([]string(nil), pr.Labels...),
+		Author:         userFromTrackerUser(pr.Author),
+		ReviewDecision: pr.ReviewDecision,
+		BaseRef:        pr.BaseRef,
+		HeadRef:        pr.HeadRef,
+		URL:            pr.URL,
+		CreatedAt:      pr.CreatedAt,
+		UpdatedAt:      pr.UpdatedAt,
+	}
+}
+
+func trackerPullRequestFromMergeRequest(pr MergeRequest) TrackerPullRequest {
+	return TrackerPullRequest{
+		System:         pr.System,
+		Repository:     pr.Repository,
+		Number:         pr.Number,
+		Title:          pr.Title,
+		Body:           pr.Body,
+		State:          pr.State,
+		Author:         trackerUserFromUser(pr.Author),
+		ReviewDecision: pr.ReviewDecision,
+		BaseRef:        pr.BaseRef,
+		HeadRef:        pr.HeadRef,
+		Labels:         append([]string(nil), pr.Traits...),
+		URL:            pr.URL,
+		CreatedAt:      pr.CreatedAt,
+		UpdatedAt:      pr.UpdatedAt,
+	}
+}
+
+func userFromTrackerUser(user TrackerUser) User {
+	return User{
+		System:   user.System,
+		Login:    user.Login,
+		Name:     user.Name,
+		Email:    user.Email,
+		URL:      user.URL,
+		IsBot:    user.IsBot,
+		IsActive: user.IsActive,
+	}
+}
+
+func trackerUserFromUser(user User) TrackerUser {
+	return TrackerUser{
+		System:   user.System,
+		Login:    user.Login,
+		Name:     user.Name,
+		Email:    user.Email,
+		URL:      user.URL,
+		IsBot:    user.IsBot,
+		IsActive: user.IsActive,
+	}
+}
+
+func usersFromTrackerUsers(users []TrackerUser) []User {
+	if len(users) == 0 {
+		return nil
+	}
+	result := make([]User, 0, len(users))
+	for _, user := range users {
+		result = append(result, userFromTrackerUser(user))
+	}
+	return result
+}
+
+func trackerUsersFromUsers(users []User) []TrackerUser {
+	if len(users) == 0 {
+		return nil
+	}
+	result := make([]TrackerUser, 0, len(users))
+	for _, user := range users {
+		result = append(result, trackerUserFromUser(user))
+	}
+	return result
+}
+
+func responseWithFailure(route Route, kind string, retryable bool, err error) Response {
+	return Response{
+		IntegrationType: route.IntegrationType,
+		System:          route.System,
+		Resource:        route.Resource,
+		ObjectType:      route.ObjectType,
+		Operation:       route.Operation,
+		Status:          model.ResponseStatusFailed,
+		Failure:         failureFromError(kind, retryable, err),
+		Route:           route,
+	}
+}
+
+func failureFromError(kind string, retryable bool, err error) *Failure {
+	if err == nil {
+		return nil
+	}
+	return &Failure{Kind: kind, Retryable: retryable, Message: err.Error()}
 }
 
 func systemEnabled(config model.IntegrationSystemConfig) bool {
 	return config.Enabled == nil || *config.Enabled
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(strings.ToLower(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func trimStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func firstNonEmpty(values ...string) string {

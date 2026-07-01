@@ -193,6 +193,45 @@ func (r *Runner) RunIssueComments(ctx context.Context, repository string, number
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--paginate", "--slurp", fmt.Sprintf("repos/%s/issues/%d/comments", repository, number)})
 }
 
+func (r *Runner) RunIssueCommentCreate(ctx context.Context, repository string, number int, body string) (CommandResult, resolvedConfig, error) {
+	number, err := normalizeIssueNumber(number)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	body = strings.TrimSpace(body)
+	if body == "" {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: "GitHub issue comment body is required",
+			Result:  result,
+		}
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", fmt.Sprintf("repos/%s/issues/%d/comments", repository, number), "--method", "POST", "-f", "body=" + body})
+}
+
 func (r *Runner) RunPRView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
 	number, err := normalizePullRequestNumber(number)
 	if err != nil {
