@@ -232,6 +232,61 @@ func (r *Runner) RunIssueCommentCreate(ctx context.Context, repository string, n
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", fmt.Sprintf("repos/%s/issues/%d/comments", repository, number), "--method", "POST", "-f", "body=" + body})
 }
 
+func (r *Runner) RunIssueLabelsAdd(ctx context.Context, repository string, number int, labels []string) (CommandResult, resolvedConfig, error) {
+	return r.runIssueLabelsChange(ctx, repository, number, labels, true)
+}
+
+func (r *Runner) RunIssueLabelsRemove(ctx context.Context, repository string, number int, labels []string) (CommandResult, resolvedConfig, error) {
+	return r.runIssueLabelsChange(ctx, repository, number, labels, false)
+}
+
+func (r *Runner) runIssueLabelsChange(ctx context.Context, repository string, number int, labels []string, add bool) (CommandResult, resolvedConfig, error) {
+	number, err := normalizeIssueNumber(number)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	labels = normalizeIssueLabels(labels)
+	if len(labels) == 0 {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: "GitHub issue label is required",
+			Result:  result,
+		}
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	flag := "--remove-label"
+	if add {
+		flag = "--add-label"
+	}
+	args := []string{"issue", "edit", strconv.Itoa(number), "--repo", repository}
+	for _, label := range labels {
+		args = append(args, flag, label)
+	}
+	return r.runCommandWithResolvedConfig(ctx, config, args)
+}
+
 func (r *Runner) RunPRView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
 	number, err := normalizePullRequestNumber(number)
 	if err != nil {
@@ -598,6 +653,24 @@ func normalizeIssueNumber(number int) (int, error) {
 	}
 
 	return number, nil
+}
+
+func normalizeIssueLabels(labels []string) []string {
+	result := make([]string, 0, len(labels))
+	seen := map[string]struct{}{}
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		key := strings.ToLower(label)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, label)
+	}
+	return result
 }
 
 func normalizePullRequestNumber(number int) (int, error) {

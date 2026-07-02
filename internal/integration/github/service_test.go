@@ -560,6 +560,68 @@ func TestServiceIssueCommentsMapsMalformedJSONToNormalizedError(t *testing.T) {
 	}
 }
 
+func TestServiceIssueLabelAddSuccess(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "github",
+		Resource:        "label",
+		ObjectType:      "label",
+		Operation:       "add",
+		Repository:      "owner/name",
+		Number:          123,
+		Labels:          []string{"external-bug", "backend"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.issueLabelCalls != 1 {
+		t.Fatalf("expected label runner call, got %d", stub.issueLabelCalls)
+	}
+	if stub.repo != "owner/name" || stub.number != 123 {
+		t.Fatalf("unexpected target: repo=%q number=%d", stub.repo, stub.number)
+	}
+	if strings.Join(stub.labels, ",") != "external-bug,backend" {
+		t.Fatalf("unexpected labels: %#v", stub.labels)
+	}
+	if response.OperationResult == nil || response.OperationResult.Operation != "add" {
+		t.Fatalf("unexpected operation result: %#v", response.OperationResult)
+	}
+}
+
+func TestServiceIssueLabelRemoveRequiresLabels(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second}}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "github",
+		Resource:        "label",
+		ObjectType:      "label",
+		Operation:       "remove",
+		Repository:      "owner/name",
+		Number:          123,
+	})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	if stub.issueLabelCalls != 0 {
+		t.Fatalf("runner must not be invoked without labels, got %d calls", stub.issueLabelCalls)
+	}
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindInvalidRequest {
+		t.Fatalf("expected invalid request failure, got %#v", response.Failure)
+	}
+}
+
 func TestServicePRGetSuccess(t *testing.T) {
 	t.Parallel()
 
@@ -1475,6 +1537,7 @@ type stubRunner struct {
 	repoCalls         int
 	issueCalls        int
 	issueCommentCalls int
+	issueLabelCalls   int
 	prViewCalls       int
 	prListCalls       int
 	prReviewCalls     int
@@ -1485,6 +1548,7 @@ type stubRunner struct {
 	head              string
 	title             string
 	body              string
+	labels            []string
 	draft             bool
 	prListRequest     PRListRequest
 	prCommentRequest  PRCommentCreateRequest
@@ -1521,6 +1585,22 @@ func (r *stubRunner) RunIssueCommentCreate(_ context.Context, repository string,
 	r.repo = repository
 	r.number = number
 	r.body = body
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunIssueLabelsAdd(_ context.Context, repository string, number int, labels []string) (CommandResult, resolvedConfig, error) {
+	r.issueLabelCalls++
+	r.repo = repository
+	r.number = number
+	r.labels = append([]string(nil), labels...)
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunIssueLabelsRemove(_ context.Context, repository string, number int, labels []string) (CommandResult, resolvedConfig, error) {
+	r.issueLabelCalls++
+	r.repo = repository
+	r.number = number
+	r.labels = append([]string(nil), labels...)
 	return r.result, r.config, r.err
 }
 

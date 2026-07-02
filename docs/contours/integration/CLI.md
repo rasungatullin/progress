@@ -2,7 +2,7 @@
 
 ## 1. Назначение документа
 
-Настоящий документ определяет практический срез контура интеграции с внешними системами. Контур поддерживает GitHub как трекер и репозиторий, Bitbucket как репозиторий, Mattermost и Telegram как мессенджеры.
+Настоящий документ определяет практический срез контура интеграции с внешними системами. Контур поддерживает GitHub как трекер и репозиторий, Bitbucket как репозиторий, Mattermost и Telegram как мессенджеры, Confluence как wiki.
 
 Документ фиксирует:
 
@@ -13,7 +13,7 @@
 
 ## 2. Принцип встроенных интеграций
 
-GitHub-адаптер запускает `gh` как внешний инструмент и получает структурированный результат. Bitbucket, Mattermost и Telegram используют HTTP API и нормализуют ответы в те же канонические структуры.
+GitHub-адаптер запускает `gh` как внешний инструмент и получает структурированный результат. Bitbucket, Mattermost, Telegram и Confluence используют HTTP API и нормализуют ответы в те же канонические структуры.
 
 Базовая схема вызова:
 
@@ -64,6 +64,7 @@ flowchart LR
 - `internal/integration/bitbucket/service.go` — адаптер Bitbucket;
 - `internal/integration/mattermost/service.go` — адаптер Mattermost;
 - `internal/integration/telegram/service.go` — адаптер Telegram;
+- `internal/integration/confluence/service.go` — адаптер Confluence;
 - `internal/cli/integration.go` — ветка CLI-команд `progress integration ...`.
 
 Минимальные внутренние интерфейсы:
@@ -96,6 +97,7 @@ type Provider interface {
 - `MessageThread`;
 - `Message`;
 - `MessageReaction`;
+- `WikiPage`;
 - `Failure`;
 - `OperationResult`.
 
@@ -152,6 +154,8 @@ type Provider interface {
 - `progress integration github issue get`;
 - `progress integration github issue comments`;
 - `progress integration github issue comment create`;
+- `progress integration github issue label add`;
+- `progress integration github issue label remove`;
 - `progress integration github pr get`;
 - `progress integration github pr list`;
 - `progress integration github pr search`;
@@ -173,7 +177,10 @@ type Provider interface {
 - `progress integration mattermost message create`;
 - `progress integration telegram auth status`;
 - `progress integration telegram thread get`;
-- `progress integration telegram message create`.
+- `progress integration telegram message create`;
+- `progress integration confluence auth status`;
+- `progress integration confluence page get`;
+- `progress integration confluence page search`.
 
 ## 7. Назначение команд
 
@@ -239,7 +246,37 @@ gh api --paginate --slurp repos/owner/name/issues/123/comments
 
 Адаптер преобразует paginated REST-ответ GitHub в массив `TrackerComment` с полями `System`, `Repository`, `Number`, `Author`, `Body`, `URL`, `CreatedAt` и `UpdatedAt`. В текстовом выводе команда печатает общий `comment_count`, затем поля каждого комментария и тело построчно.
 
-### 7.6 `progress integration github issue search`
+### 7.6 `progress integration github issue label add`
+
+Команда добавляет к задаче одну или несколько меток по каноническим названиям.
+
+```bash
+progress integration github issue label add --repo owner/name --number 123 --label bug --label backend
+```
+
+Поле `--label` принимает каноническое название метки задачи. Перед вызовом GitHub контур интеграции переводит каноническое название во внешнее имя по `task_label_mapping`. Если сопоставление не задано, используется то же название.
+
+Вариант системного вызова:
+
+```bash
+gh issue edit 123 --repo owner/name --add-label bug --add-label backend
+```
+
+### 7.7 `progress integration github issue label remove`
+
+Команда снимает с задачи одну или несколько меток по каноническим названиям.
+
+```bash
+progress integration github issue label remove --repo owner/name --number 123 --label bug
+```
+
+Вариант системного вызова:
+
+```bash
+gh issue edit 123 --repo owner/name --remove-label bug
+```
+
+### 7.8 `progress integration github issue search`
 
 Команда выполняет поиск issue в репозитории или во всём доступном GitHub-пространстве.
 
@@ -256,7 +293,7 @@ gh issue list --repo owner/name --search "is:open label:bug" --json number,title
 - ограничение количества результатов;
 - режим краткого и подробного вывода.
 
-### 7.7 `progress integration github pr get`
+### 7.9 `progress integration github pr get`
 
 Команда получает одну карточку запроса на слияние.
 
@@ -268,7 +305,7 @@ gh pr view 456 --repo owner/name --json number,title,body,state,author,labels,re
 
 Результат должен использоваться как нормализованная карточка запроса на слияние.
 
-### 7.8 `progress integration github pr comments`
+### 7.10 `progress integration github pr comments`
 
 Команда получает комментарии запроса на слияние, включая замечания ревизии.
 
@@ -286,7 +323,7 @@ gh api graphql -f query='<review threads query>' -f owner=owner -f name=name -F 
 
 Адаптер приводит оба вида комментариев к `ReviewRemark`. Для обычного комментария поля `Path`, `Line` и `ReplyToID` пустые. Для inline-замечания `ReplyToID` содержит идентификатор review thread, а `State` отражает состояние `resolved` или `unresolved`.
 
-### 7.9 `progress integration github pr search`
+### 7.11 `progress integration github pr search`
 
 Команда выполняет поиск запросов на слияние по фильтрам GitHub.
 
@@ -307,7 +344,7 @@ gh pr list --repo owner/name --state closed --limit 30 --json number,title,body,
 
 Если `--repo` не передан, GitHub-адаптер сначала использует `default_repo` из конфигурации, а при его отсутствии вызывает `gh pr list` без `--repo`, чтобы `gh` выбрал текущий репозиторий рабочей директории.
 
-### 7.10 `progress integration github pr comment create`
+### 7.12 `progress integration github pr comment create`
 
 Команда создаёт комментарий к запросу на слияние.
 
@@ -325,7 +362,7 @@ progress integration github pr comment create --repo owner/name --number 456 --b
 
 Если `--path` и `--line` не переданы, адаптер создаёт обычный комментарий обсуждения через issue-часть PR. Если они переданы, адаптер создаёт review thread через GraphQL mutation `addPullRequestReviewThread`. Флаг `--side` задаёт сторону diff и по умолчанию равен `RIGHT`.
 
-### 7.11 `progress integration github pr comment resolve`
+### 7.13 `progress integration github pr comment resolve`
 
 Команда разрешает inline-замечание ревизии по идентификатору review thread.
 
@@ -335,7 +372,7 @@ progress integration github pr comment resolve --thread PRRT_kw...
 
 Команда использует GraphQL mutation `resolveReviewThread`. Идентификатор thread можно получить из поля `remark_thread_id` команды `progress integration github pr comments`.
 
-### 7.12 `progress integration bitbucket pr search`
+### 7.14 `progress integration bitbucket pr search`
 
 Команда выполняет поиск запросов на слияние в Bitbucket.
 
@@ -348,15 +385,15 @@ progress integration github pr comment resolve --thread PRRT_kw...
 - `--query` для выражения фильтра Bitbucket Cloud;
 - `--limit` для ограничения количества результатов.
 
-### 7.13 `progress integration bitbucket pr comment create`
+### 7.15 `progress integration bitbucket pr comment create`
 
 Команда создаёт комментарий к запросу на слияние Bitbucket Cloud. Для inline-комментария используются `--path`, `--line` и `--side`.
 
 `progress integration bitbucket pr comment resolve` присутствует в CLI как единая операция контура, но текущий Bitbucket-адаптер возвращает `unsupported-operation`, потому что механизм разрешения замечаний различается между Bitbucket Cloud и Server/Data Center и требует отдельного контракта.
 
-### 7.14 `progress integration github api`
+### 7.16 `progress integration github api`
 
-Команда даёт управляемый escape hatch для редких операций, которые ещё не вынесены в отдельный подкомандный интерфейс.
+Команда даёт управляемый резервный путь для редких операций, которые ещё не вынесены в отдельный подкомандный интерфейс.
 
 Пример вызова:
 
@@ -364,7 +401,48 @@ progress integration github pr comment resolve --thread PRRT_kw...
 progress integration github api repos/owner/name/issues/123/events
 ```
 
-Ограничение команды состоит в том, что она не должна становиться основным пользовательским интерфейсом контура. Её задача - ускорить расширение адаптера без немедленного разрастания CLI-дерева.
+Ограничение команды состоит в том, что она не должна становиться основным пользовательским интерфейсом контура. Её задача — ускорить расширение адаптера без немедленного разрастания CLI-дерева.
+
+### 7.17 `progress integration confluence auth status`
+
+Команда проверяет доступность Confluence через HTTP API. Для self-hosted Confluence Server/Data Center используется базовый адрес из `base_url` и путь `/rest/api/user/current`.
+
+Настройка поддерживает два режима авторизации:
+
+- `username` + `token` или `token_env` — HTTP Basic;
+- только `token` или `token_env` — заголовок `Authorization: Bearer`.
+
+### 7.18 `progress integration confluence page get`
+
+Команда получает страницу wiki по идентификатору Confluence.
+
+```bash
+progress integration confluence page get --id 12345
+```
+
+Вариант HTTP-вызова для self-hosted Confluence:
+
+```bash
+GET /rest/api/content/12345?expand=space,body.storage,version,history
+```
+
+Адаптер возвращает `WikiPage` — страницу wiki с идентификатором, пространством, заголовком, телом в storage-формате, номером версии, временем обновления, пользователем обновления и ссылкой на страницу.
+
+### 7.19 `progress integration confluence page search`
+
+Команда ищет страницы wiki по CQL-запросу Confluence.
+
+```bash
+progress integration confluence page search --query 'type=page and text ~ "integration"' --limit 10
+```
+
+Вариант HTTP-вызова:
+
+```bash
+GET /rest/api/content/search?cql=type%3Dpage&limit=10&expand=space,version
+```
+
+Команда возвращает массив `WikiPage` без обязательного тела страницы. Для получения полного тела нужно выполнить `page get` по идентификатору.
 
 ## 8. Схема дерева команд
 
@@ -377,11 +455,33 @@ flowchart TD
     D --> F[repo get]
     D --> G[issue get]
     D --> H[issue comments]
-    D --> I[issue search]
-    D --> J[pr get]
-    D --> K[pr comments]
-    D --> L[pr search]
-    D --> M[api]
+    D --> I[issue comment create]
+    D --> J[issue label add]
+    D --> K[issue label remove]
+    D --> L[pr get]
+    D --> M[pr list]
+    D --> N[pr comments]
+    D --> O[pr comment create]
+    D --> P[pr comment resolve]
+    B --> Q[bitbucket]
+    Q --> R[auth status]
+    Q --> S[repo get]
+    Q --> T[pr get]
+    Q --> U[pr list]
+    Q --> V[pr comments]
+    Q --> W[pr comment create]
+    B --> X[mattermost]
+    X --> Y[auth status]
+    X --> Z[thread get]
+    X --> AA[message create]
+    B --> AB[telegram]
+    AB --> AC[auth status]
+    AB --> AD[thread get]
+    AB --> AE[message create]
+    B --> AF[confluence]
+    AF --> AG[auth status]
+    AF --> AH[page get]
+    AF --> AI[page search]
 ```
 
 ## 9. Общие флаги и правила вызова
@@ -390,6 +490,8 @@ flowchart TD
 
 - `--repo` — репозиторий `owner/name`;
 - `--number` — номер issue или PR;
+- `--label` — каноническое название метки задачи;
+- `--id` — внешний идентификатор объекта, если источник не использует числовой номер;
 - `--query` — поисковая строка;
 - `--limit` — ограничение числа результатов;
 - `--format` — `text` или `json`;
@@ -399,8 +501,10 @@ flowchart TD
 
 1. если операция требует репозиторий, `--repo` обязателен, кроме `github repo get`, `github issue get` и `github pr get`, где можно опустить `--repo` и использовать `default_repo` из конфигурации;
 2. если операция адресует сущность по номеру, `--number` обязателен;
-3. для машинного использования предпочтителен `--format json`;
-4. текстовый вывод нужен для ручной диагностики и первичного освоения CLI.
+3. если операция изменяет метки задачи, `--label` задаётся каноническим названием и может повторяться;
+4. если операция адресует страницу wiki, `--id` содержит внешний идентификатор страницы;
+5. для машинного использования предпочтителен `--format json`;
+6. текстовый вывод нужен для ручной диагностики и первичного освоения CLI.
 
 ## 10. Обработка ошибок
 
@@ -436,8 +540,9 @@ GitHub-адаптер должен различать как минимум сл
 2. `default_systems.<type>` заменяет систему по умолчанию для конкретного типа интеграции;
 3. `systems.<name>` дополняет или переопределяет одноимённую систему из глобального слоя;
 4. простые поля системы, например `command`, `path`, `timeout`, `base_url`, `token_env`, `repository`, `project`, `channel_id`, `chat_id` и `default_repo`, заменяются локальными значениями;
-5. `operations` сливается по ключу операции;
-6. `enabled=false` в локальном слое выключает систему целиком.
+5. `task_label_mapping` сливается по внешней метке;
+6. `operations` сливается по ключу операции;
+7. `enabled=false` в локальном слое выключает систему целиком.
 
 Минимальная конфигурация встроенных адаптеров может выглядеть так:
 
@@ -446,7 +551,8 @@ GitHub-адаптер должен различать как минимум сл
   "default_systems": {
     "tracker": "github",
     "repository": "github",
-    "messenger": "mattermost"
+    "messenger": "mattermost",
+    "wiki": "confluence"
   },
   "systems": {
     "github": {
@@ -456,7 +562,12 @@ GitHub-адаптер должен различать как минимум сл
       "command": "gh",
       "timeout": "30s",
       "repository": "owner/name",
-      "default_repo": "owner/name"
+      "default_repo": "owner/name",
+      "task_label_mapping": {
+        "bug": "bug",
+        "type:backend": "backend",
+        "external-only": ""
+      }
     },
     "bitbucket": {
       "type": "bitbucket",
@@ -482,6 +593,14 @@ GitHub-адаптер должен различать как минимум сл
       "enabled": true,
       "token_env": "TELEGRAM_BOT_TOKEN",
       "chat_id": "chat-id"
+    },
+    "confluence": {
+      "type": "confluence",
+      "integration_type": "wiki",
+      "enabled": true,
+      "base_url": "https://confluence.example/confluence",
+      "username": "service-user",
+      "token_env": "CONFLUENCE_TOKEN"
     }
   }
 }
@@ -489,13 +608,13 @@ GitHub-адаптер должен различать как минимум сл
 
 Назначение общих полей системы:
 
-1. `type` фиксирует тип встроенного адаптера: `github`, `bitbucket`, `mattermost`, `telegram` или `script`;
+1. `type` фиксирует тип встроенного адаптера: `github`, `bitbucket`, `mattermost`, `telegram`, `confluence` или `script`;
 2. `integration_type` задаёт один тип интеграции, а `integration_types` — несколько типов для одной системы;
 3. `enabled` включает или выключает систему без удаления её описания;
 4. `default=true` делает систему системой по умолчанию для её типов, если `default_systems` не задаёт явное значение;
 5. `command` и `path` позволяют переопределить исполняемый файл `gh`;
 6. `timeout` ограничивает внешний вызов;
-7. `base_url` задаёт базовый адрес HTTP API для Bitbucket, Mattermost или Telegram;
+7. `base_url` задаёт базовый адрес HTTP API для Bitbucket, Mattermost, Telegram или Confluence;
 8. `api_variant` задаёт вариант Bitbucket API: `cloud` для `api.bitbucket.org/2.0` или `server` для Bitbucket Server/Data Center через `rest/api/1.0`;
 9. `token` или `token_env` задают данные авторизации либо ссылку на переменную окружения;
 10. `repository` задаёт резервный репозиторий для репозиторных операций;
@@ -503,7 +622,8 @@ GitHub-адаптер должен различать как минимум сл
 12. `project` задаёт ключ проекта Bitbucket Server/Data Center, если `--repo` передан без префикса;
 13. `channel_id` задаёт резервный канал Mattermost;
 14. `chat_id` задаёт резервный чат Telegram;
-15. `operations` резервирует пространство для пооперационной настройки.
+15. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
+16. `operations` резервирует пространство для пооперационной настройки.
 
 Правило приоритета `--repo`, `repository` и `default_repo`:
 

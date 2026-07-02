@@ -34,9 +34,11 @@ type integrationFlags struct {
 	channelID       string
 	threadID        string
 	messageID       string
+	externalID      string
 	draft           bool
 	line            int
 	limit           int
+	labels          []string
 }
 
 const (
@@ -60,6 +62,7 @@ func newIntegrationCommand() *cobra.Command {
 	cmd.AddCommand(newIntegrationBitbucketCommand())
 	cmd.AddCommand(newIntegrationMattermostCommand())
 	cmd.AddCommand(newIntegrationTelegramCommand())
+	cmd.AddCommand(newIntegrationConfluenceCommand())
 	return cmd
 }
 
@@ -190,6 +193,7 @@ func newIntegrationGitHubIssueCommand() *cobra.Command {
 	cmd.AddCommand(newIntegrationGitHubIssueGetCommand())
 	cmd.AddCommand(newIntegrationGitHubIssueCommentsCommand())
 	cmd.AddCommand(newIntegrationGitHubIssueCommentCommand())
+	cmd.AddCommand(newIntegrationGitHubIssueLabelCommand())
 	return cmd
 }
 
@@ -199,6 +203,36 @@ func newIntegrationGitHubIssueCommentCommand() *cobra.Command {
 		Short: "Операции с комментариями задачи GitHub",
 	}
 	cmd.AddCommand(newIntegrationGitHubIssueCommentCreateCommand())
+	return cmd
+}
+
+func newIntegrationGitHubIssueLabelCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "label",
+		Short: "Операции с метками задачи GitHub",
+	}
+	cmd.AddCommand(newIntegrationGitHubIssueLabelChangeCommand("add"))
+	cmd.AddCommand(newIntegrationGitHubIssueLabelChangeCommand("remove"))
+	return cmd
+}
+
+func newIntegrationConfluenceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "confluence",
+		Short: "Интеграция с Confluence как wiki",
+	}
+	cmd.AddCommand(newIntegrationSystemAuthCommand("confluence", "Confluence"))
+	cmd.AddCommand(newIntegrationConfluencePageCommand())
+	return cmd
+}
+
+func newIntegrationConfluencePageCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "page",
+		Short: "Операции со страницами wiki Confluence",
+	}
+	cmd.AddCommand(newIntegrationConfluencePageGetCommand())
+	cmd.AddCommand(newIntegrationConfluencePageSearchCommand())
 	return cmd
 }
 
@@ -633,6 +667,78 @@ func newIntegrationMessageCreateCommand(system string, label string) *cobra.Comm
 	return cmd
 }
 
+func newIntegrationConfluencePageGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{
+		Use:   "get",
+		Short: "Получение страницы wiki Confluence",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
+				return fmt.Errorf("--id is required")
+			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				IntegrationType: "wiki",
+				System:          "confluence",
+				Resource:        "page",
+				ObjectType:      "page",
+				Operation:       "get",
+				ExternalID:      flags.externalID,
+			})
+			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationWikiPage); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flags.externalID, "id", "", "Идентификатор страницы Confluence")
+	return cmd
+}
+
+func newIntegrationConfluencePageSearchCommand() *cobra.Command {
+	flags := &integrationFlags{limit: 10}
+	cmd := &cobra.Command{
+		Use:   "search",
+		Short: "Поиск страниц wiki Confluence по CQL",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("query") || strings.TrimSpace(flags.query) == "" {
+				return fmt.Errorf("--query is required")
+			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				IntegrationType: "wiki",
+				System:          "confluence",
+				Resource:        "page",
+				ObjectType:      "page",
+				Operation:       "search",
+				Query:           flags.query,
+				Limit:           flags.limit,
+			})
+			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationWikiPages); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flags.query, "query", "", "CQL-запрос Confluence")
+	cmd.Flags().IntVar(&flags.limit, "limit", flags.limit, "Предельное число страниц")
+	return cmd
+}
+
 func newIntegrationGitHubAuthStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
@@ -820,6 +926,57 @@ func newIntegrationGitHubIssueCommentCreateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
 	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер задачи GitHub")
 	cmd.Flags().StringVar(&flags.body, "body", "", "Текст комментария")
+	return cmd
+}
+
+func newIntegrationGitHubIssueLabelChangeCommand(operation string) *cobra.Command {
+	flags := &integrationFlags{}
+	title := "Добавление меток задачи GitHub"
+	if operation == "remove" {
+		title = "Снятие меток задачи GitHub"
+	}
+
+	cmd := &cobra.Command{
+		Use:   operation,
+		Short: title,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("number") {
+				return fmt.Errorf("--number is required")
+			}
+			if len(flags.labels) == 0 {
+				return fmt.Errorf("--label is required")
+			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				IntegrationType: "tracker",
+				System:          "github",
+				Resource:        "label",
+				ObjectType:      "label",
+				Operation:       operation,
+				Repository:      flags.repo,
+				RepoProvided:    cmd.Flags().Changed("repo"),
+				Number:          flags.number,
+				Labels:          flags.labels,
+			})
+			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationOperationResult); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
+	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер задачи GitHub")
+	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Каноническое название метки задачи")
 	return cmd
 }
 
@@ -1299,9 +1456,40 @@ func printIntegrationMessage(cmd *cobra.Command, response integration.Response) 
 	}
 }
 
+func printIntegrationWikiPage(cmd *cobra.Command, response integration.Response) {
+	if response.WikiPage == nil {
+		printFailure(cmd, response)
+		return
+	}
+	printWikiPage(cmd, *response.WikiPage, response)
+}
+
+func printIntegrationWikiPages(cmd *cobra.Command, response integration.Response) {
+	if response.Failure != nil {
+		printFailure(cmd, response)
+		return
+	}
+	query := ""
+	if response.Metadata != nil {
+		query = response.Metadata["query"]
+	}
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nquery=%s\npage_count=%d\n", response.System, response.Resource, response.Operation, query, len(response.WikiPages))
+	for _, page := range response.WikiPages {
+		cmd.Printf("page_id=%s\npage_space=%s\npage_title=%s\npage_version=%d\npage_url=%s\npage_updated_at=%s\n", page.ExternalID, page.Space, page.Title, page.Version, page.URL, page.UpdatedAt)
+	}
+}
+
 func printMessage(cmd *cobra.Command, message integration.Message) {
 	cmd.Printf("message_system=%s\nspace_id=%s\nthread_id=%s\nmessage_id=%s\nauthor_login=%s\nauthor_name=%s\nurl=%s\ncreated_at=%s\nupdated_at=%s\n", message.System, message.SpaceID, message.ThreadID, message.MessageID, message.Author.Login, message.Author.Name, message.URL, message.CreatedAt, message.UpdatedAt)
 	printMultilineField(cmd, "message_body", message.Body)
+}
+
+func printWikiPage(cmd *cobra.Command, page integration.WikiPage, response integration.Response) {
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\npage_id=%s\nspace=%s\ntitle=%s\nbody_format=%s\nversion=%d\nupdated_by_login=%s\nupdated_by_name=%s\nurl=%s\ncreated_at=%s\nupdated_at=%s\n", page.System, response.Resource, response.Operation, page.ExternalID, page.Space, page.Title, page.BodyFormat, page.Version, page.UpdatedBy.Login, page.UpdatedBy.Name, page.URL, page.CreatedAt, page.UpdatedAt)
+	for _, trait := range page.Traits {
+		cmd.Printf("trait=%s\n", trait)
+	}
+	printMultilineField(cmd, "body", page.Body)
 }
 
 func printFailure(cmd *cobra.Command, response integration.Response) {

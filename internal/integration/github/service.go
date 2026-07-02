@@ -17,6 +17,8 @@ type ghRunner interface {
 	RunIssueView(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunIssueComments(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunIssueCommentCreate(context.Context, string, int, string) (CommandResult, resolvedConfig, error)
+	RunIssueLabelsAdd(context.Context, string, int, []string) (CommandResult, resolvedConfig, error)
+	RunIssueLabelsRemove(context.Context, string, int, []string) (CommandResult, resolvedConfig, error)
 	RunPRView(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRList(context.Context, string, PRListRequest) (CommandResult, resolvedConfig, error)
 	RunPRCreate(context.Context, string, PRCreateRequest) (CommandResult, resolvedConfig, error)
@@ -176,6 +178,10 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executeIssueComments(ctx, response, req)
 	case isIssueCommentRequest(req) && req.Operation == "create":
 		return s.executeIssueCommentCreate(ctx, response, req)
+	case isIssueLabelRequest(req) && req.Operation == "add":
+		return s.executeIssueLabelsChange(ctx, response, req, true)
+	case isIssueLabelRequest(req) && req.Operation == "remove":
+		return s.executeIssueLabelsChange(ctx, response, req, false)
 	case isPullRequestRequest(req) && req.Operation == "get":
 		return s.executePRGet(ctx, response, req)
 	case isPullRequestRequest(req) && (req.Operation == "list" || req.Operation == "search"):
@@ -948,6 +954,130 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 	return response, nil
 }
 
+func (s *Service) executeIssueLabelsChange(ctx context.Context, response model.Response, req model.ProviderRequest, add bool) (model.Response, error) {
+	repository := strings.TrimSpace(req.Repository)
+	operation := "remove"
+	action := "remove"
+	if add {
+		operation = "add"
+		action = "add"
+	}
+	if req.RepoProvided {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status.State = ErrorCodeInvalidRequest
+			status.Message = err.Error()
+			status.Diagnostics = append(status.Diagnostics, "issue label "+action+" request rejected before invoking gh")
+			response.IssueStatus = &status
+			response.Status = model.ResponseStatusFailed
+			response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: status.Message}
+			return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+		}
+	}
+
+	number, err := normalizeIssueNumber(req.Number)
+	if err != nil {
+		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
+		status.State = ErrorCodeInvalidRequest
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "issue label "+action+" request rejected before invoking gh")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: status.Message}
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	}
+
+	labels := normalizeLabelNames(req.Labels)
+	if len(labels) == 0 {
+		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, number)
+		status.State = ErrorCodeInvalidRequest
+		status.Message = "GitHub issue label is required"
+		status.Diagnostics = append(status.Diagnostics, "issue label "+action+" request rejected before invoking gh")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: status.Message}
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	}
+
+	var result CommandResult
+	var config resolvedConfig
+	if add {
+		result, config, err = s.runner.RunIssueLabelsAdd(ctx, repository, number, labels)
+	} else {
+		result, config, err = s.runner.RunIssueLabelsRemove(ctx, repository, number, labels)
+	}
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
+	if err != nil && result.ExitCode == 0 {
+		result.ExitCode = -1
+	}
+	if config.Command == "" {
+		config.Command = defaultCommand
+	}
+
+	status := issueErrorStatus(config, result, repository, number)
+	if err != nil {
+		var ghErr *Error
+		if errors.As(err, &ghErr) {
+			status.State = repositoryStateForErrorCode(ghErr.Code)
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "gh issue label "+action+" failed before applying labels")
+			response.IssueStatus = &status
+			response.Status = model.ResponseStatusFailed
+			response.Failure = &model.Failure{Kind: failureKindForGitHubError(ghErr.Code), Message: status.Message}
+			return response, ghErr
+		}
+
+		status.State = StateExternalFailure
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "gh issue label "+action+" failed before applying labels")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindExternalFailure, Message: status.Message}
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+	}
+
+	if result.ExitCode != 0 {
+		switch {
+		case isAuthRequired(result):
+			status.State = ErrorCodeAuthRequired
+			status.Message = "GitHub authentication is required"
+			response.Failure = &model.Failure{Kind: model.FailureKindAuthRequired, Message: status.Message}
+		case isIssueNotFound(result), isRepoNotFound(result):
+			status.State = ErrorCodeNotFound
+			status.Message = fmt.Sprintf("GitHub issue not found: %s#%d", repository, number)
+			response.Failure = &model.Failure{Kind: model.FailureKindNotFound, Message: status.Message}
+		default:
+			status.State = StateExternalFailure
+			status.Message = fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
+			response.Failure = &model.Failure{Kind: model.FailureKindExternalFailure, Message: status.Message}
+		}
+		status.Diagnostics = append(status.Diagnostics, "gh issue label "+action+" exited with a non-zero code")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		return response, &Error{Code: status.State, Message: status.Message, Result: result}
+	}
+
+	response.OperationResult = &model.OperationResult{
+		System:     "github",
+		ObjectType: "label",
+		Operation:  operation,
+		Status:     model.ResponseStatusOK,
+		ExternalID: strconv.Itoa(number),
+		Method:     "gh",
+		Endpoint:   "issue edit",
+		Message:    fmt.Sprintf("GitHub issue labels updated for %s#%d", repository, number),
+		Diagnostics: []string{
+			"repository=" + repository,
+			"number=" + strconv.Itoa(number),
+			"labels=" + strings.Join(labels, ","),
+		},
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
 func decodeIssueComments(payload string) ([]ghIssueComment, error) {
 	var pages [][]ghIssueComment
 	if err := json.Unmarshal([]byte(payload), &pages); err == nil {
@@ -1653,6 +1783,24 @@ func normalizeTrackerLabels(labels []ghIssueLabel) []string {
 	return result
 }
 
+func normalizeLabelNames(labels []string) []string {
+	result := make([]string, 0, len(labels))
+	seen := map[string]struct{}{}
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		key := strings.ToLower(label)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, label)
+	}
+	return result
+}
+
 func isAuthRequired(result CommandResult) bool {
 	message := strings.ToLower(result.Stdout + "\n" + result.Stderr)
 	return strings.Contains(message, "not logged into any github hosts") || strings.Contains(message, "gh auth login")
@@ -1763,6 +1911,11 @@ func isIssueRequest(req model.ProviderRequest) bool {
 func isIssueCommentRequest(req model.ProviderRequest) bool {
 	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
 	return object == "comment" && req.IntegrationType == model.IntegrationTypeTracker
+}
+
+func isIssueLabelRequest(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
+	return (object == "label" || object == "task-label") && req.IntegrationType == model.IntegrationTypeTracker
 }
 
 func isPullRequestCommentRequest(req model.ProviderRequest) bool {

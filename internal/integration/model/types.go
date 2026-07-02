@@ -4,6 +4,7 @@ const (
 	IntegrationTypeTracker    = "tracker"
 	IntegrationTypeRepository = "repository"
 	IntegrationTypeMessenger  = "messenger"
+	IntegrationTypeWiki       = "wiki"
 
 	ResponseStatusOK      = "ok"
 	ResponseStatusPartial = "partial"
@@ -51,6 +52,7 @@ type Request struct {
 	MessageID       string
 	Reaction        string
 	Fields          []string
+	Labels          []string
 }
 
 type ProviderRequest struct {
@@ -82,6 +84,7 @@ type ProviderRequest struct {
 	MessageID       string
 	Reaction        string
 	Fields          []string
+	Labels          []string
 	Route           Route
 }
 
@@ -111,6 +114,7 @@ type IntegrationSystemConfig struct {
 	DefaultRepo      string                                `json:"default_repo,omitempty"`
 	ChannelID        string                                `json:"channel_id,omitempty"`
 	ChatID           string                                `json:"chat_id,omitempty"`
+	TaskLabelMapping map[string]string                     `json:"task_label_mapping,omitempty"`
 	Operations       map[string]IntegrationOperationConfig `json:"operations,omitempty"`
 }
 
@@ -141,6 +145,8 @@ type Response struct {
 	Conversation      *MessageThread
 	Messages          []Message
 	Message           *Message
+	WikiPage          *WikiPage
+	WikiPages         []WikiPage
 	OperationResult   *OperationResult
 	AuthStatus        *AuthStatus
 	RepositoryStatus  *RepositoryStatus
@@ -363,6 +369,23 @@ type MessageReaction struct {
 	User      User
 	Name      string
 	CreatedAt string
+}
+
+type WikiPage struct {
+	System     string
+	Space      string
+	ExternalID string
+	Title      string
+	Body       string
+	BodyFormat string
+	Version    int
+	URL        string
+	CreatedAt  string
+	UpdatedAt  string
+	UpdatedBy  User
+	Traits     []string
+	Attributes map[string]string
+	Links      []ObjectLink
 }
 
 type User struct {
