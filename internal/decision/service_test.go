@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,6 +58,15 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Decision == nil {
 		t.Fatal("expected decision in result")
 	}
+	if result.Consideration == nil {
+		t.Fatal("expected consideration result")
+	}
+	if result.Consideration.Status != ConsiderationStatusExecution {
+		t.Fatalf("unexpected consideration status: %q", result.Consideration.Status)
+	}
+	if result.Consideration.Route.Name != "default" {
+		t.Fatalf("unexpected consideration route: %#v", result.Consideration.Route)
+	}
 	if result.Decision.Type != DecisionType(DecisionTypeExecute) {
 		t.Fatalf("unexpected decision type: %q", result.Decision.Type)
 	}
@@ -70,6 +81,9 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	}
 	if result.Decision.ExecutionPlan.Repository != "owner/name" {
 		t.Fatalf("unexpected execution repository: %q", result.Decision.ExecutionPlan.Repository)
+	}
+	if result.Decision.ExecutionPlan.Action != "implement" {
+		t.Fatalf("unexpected execution action: %q", result.Decision.ExecutionPlan.Action)
 	}
 	if result.Decision.ExecutionPlan.Step != "implement" {
 		t.Fatalf("unexpected execution step: %q", result.Decision.ExecutionPlan.Step)
@@ -94,6 +108,9 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	}
 	if executionStub.invocation.Task != "task-123" {
 		t.Fatalf("unexpected execution task: %q", executionStub.invocation.Task)
+	}
+	if executionStub.invocation.Action != "implement" {
+		t.Fatalf("unexpected execution action: %q", executionStub.invocation.Action)
 	}
 	if executionStub.invocation.Profile != defaultExecutionProfile {
 		t.Fatalf("unexpected execution invocation profile: %q", executionStub.invocation.Profile)
@@ -121,6 +138,109 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	}
 	if executionStub.invocation.Launch.StructuredOutputRequired {
 		t.Fatal("structured output must remain optional for decision-triggered execution")
+	}
+}
+
+func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"defaults": {
+			"name": "default",
+			"title": "Маршрут по умолчанию",
+			"step": "implement",
+			"profile": "default",
+			"reason_code": "issue_context_ready",
+			"reason_message": "Контекст задачи готов."
+		},
+		"routes": [
+			{
+				"name": "description-assessment",
+				"title": "Оценка описания",
+				"description": "Проверяет достаточность постановки.",
+				"step": "assess-description",
+				"action": "task-description-assessment",
+				"profile": "task-description-assessor",
+				"has_labels": ["description-assessment"],
+				"missing_labels": ["description-assessed"],
+				"expected_result": "Сформировать заключение о достаточности описания.",
+				"constraints": ["Не менять код."],
+				"reason_code": "task_description_not_assessed",
+				"reason_message": "Описание задачи ещё не оценено."
+			}
+		]
+	}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	service := &Service{
+		logger:          log.Default(),
+		resolveRepoRoot: func(context.Context) (string, error) { return root, nil },
+		readFile:        os.ReadFile,
+	}
+
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 211},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     211,
+			Title:      "Assess task description",
+			Labels:     []string{"description-assessment"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.Status != ConsiderationStatusExecution {
+		t.Fatalf("unexpected status: %q", result.Status)
+	}
+	if result.Route.Name != "description-assessment" || result.Route.Title != "Оценка описания" {
+		t.Fatalf("unexpected route: %#v", result.Route)
+	}
+	if len(result.Checks) != 1 || result.Checks[0].Status != RouteCheckStatusPassed {
+		t.Fatalf("unexpected route checks: %#v", result.Checks)
+	}
+	if len(result.Reasons) != 1 || result.Reasons[0].Code != "task_description_not_assessed" {
+		t.Fatalf("unexpected reasons: %#v", result.Reasons)
+	}
+	if result.ExecutionPlan == nil {
+		t.Fatal("expected execution plan")
+	}
+	if result.ExecutionPlan.Action != "task-description-assessment" {
+		t.Fatalf("unexpected action: %q", result.ExecutionPlan.Action)
+	}
+	if result.ExecutionPlan.Step != "assess-description" || result.ExecutionPlan.Profile != "task-description-assessor" {
+		t.Fatalf("unexpected execution plan: %#v", result.ExecutionPlan)
+	}
+	if result.ExecutionPlan.ExpectedResult != "Сформировать заключение о достаточности описания." {
+		t.Fatalf("unexpected expected result: %q", result.ExecutionPlan.ExpectedResult)
+	}
+	if len(result.ExecutionPlan.Constraints) != 1 || result.ExecutionPlan.Constraints[0] != "Не менять код." {
+		t.Fatalf("unexpected constraints: %#v", result.ExecutionPlan.Constraints)
+	}
+	if result.ExecutionPlan.StructuredInput == nil || len(result.ExecutionPlan.StructuredInput.Constraints) != 1 {
+		t.Fatalf("expected constraints in structured input: %#v", result.ExecutionPlan.StructuredInput)
+	}
+}
+
+func TestServiceConsiderReturnsDiagnosedFailureWithoutIssue(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{})
+	if err == nil {
+		t.Fatal("expected missing issue error")
+	}
+	if result.Status != ConsiderationStatusFailed {
+		t.Fatalf("unexpected status: %q", result.Status)
+	}
+	if result.Failure == nil || result.Failure.Code != "missing_issue" || !result.Failure.ManualIntervention {
+		t.Fatalf("unexpected failure: %#v", result.Failure)
 	}
 }
 

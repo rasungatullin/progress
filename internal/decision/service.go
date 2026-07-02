@@ -69,19 +69,28 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		return StartResult{}, fmt.Errorf("integration did not return issue for task %d", input.TaskNumber)
 	}
 
-	route, err := s.selectWorkflowRoute(ctx, response.Issue)
+	decisionContext := DecisionContext{
+		Signal: signal,
+		Issue:  response.Issue,
+	}
+	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext})
 	if err != nil {
-		return StartResult{}, err
+		return StartResult{
+			Context:       decisionContext,
+			Consideration: &consideration,
+		}, err
 	}
 
-	decision := buildExecuteDecision(response.Issue, route)
+	decision := decisionFromConsideration(consideration)
 	result := StartResult{
-		Context: DecisionContext{
-			Signal: signal,
-			Issue:  response.Issue,
-		},
-		Ready:    true,
-		Decision: &decision,
+		Context:       decisionContext,
+		Ready:         consideration.Status != ConsiderationStatusFailed,
+		Consideration: &consideration,
+		Decision:      &decision,
+	}
+	if decision.ExecutionPlan == nil {
+		s.logger.Printf("Рассмотрение задачи завершено без запуска: задача=%d исход=%q", input.TaskNumber, consideration.Status)
+		return result, nil
 	}
 
 	launchResult, err := s.execution.Start(ctx, executionInvocationFromDecisionPlan(decision.ExecutionPlan))
@@ -95,6 +104,31 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 	result.Execution = &launchResult
 
 	s.logger.Printf("Контекст решения собран: задача=%d готовность=%t решение=%q", input.TaskNumber, result.Ready, decision.Type)
+	return result, nil
+}
+
+func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (ConsiderationResult, error) {
+	result := ConsiderationResult{Context: input.Context}
+	if input.Context.Issue == nil {
+		err := fmt.Errorf("decision context issue is required")
+		result.Status = ConsiderationStatusFailed
+		result.Failure = decisionFailure("missing_issue", err, false, true)
+		return result, err
+	}
+
+	route, err := s.selectWorkflowRoute(ctx, input.Context.Issue)
+	if err != nil {
+		result.Status = ConsiderationStatusFailed
+		result.Failure = decisionFailure("route_resolution_failed", err, false, true)
+		return result, err
+	}
+
+	decision := buildExecuteDecision(input.Context.Issue, route)
+	result.Status = ConsiderationStatusExecution
+	result.Route = route.Route
+	result.Checks = route.Checks
+	result.Reasons = append([]DecisionReason(nil), decision.Reasons...)
+	result.ExecutionPlan = decision.ExecutionPlan
 	return result, nil
 }
 
@@ -142,8 +176,14 @@ func buildExecuteDecision(issue *integration.TrackerIssue, route selectedWorkflo
 	if strings.TrimSpace(route.Step) == "" {
 		route.Step = "implement"
 	}
+	if strings.TrimSpace(route.Action) == "" {
+		route.Action = route.Step
+	}
 	if strings.TrimSpace(route.Profile) == "" {
 		route.Profile = defaultExecutionProfile
+	}
+	if strings.TrimSpace(route.ExpectedResult) == "" {
+		route.ExpectedResult = "Выполнить выбранное действие и вернуть диагностируемый результат."
 	}
 	if strings.TrimSpace(route.ReasonCode) == "" {
 		route.ReasonCode = "issue_context_ready"
@@ -151,27 +191,57 @@ func buildExecuteDecision(issue *integration.TrackerIssue, route selectedWorkflo
 	if strings.TrimSpace(route.ReasonMessage) == "" {
 		route.ReasonMessage = "Контекст задачи готов к передаче в контур исполнения."
 	}
+	reasons := []DecisionReason{{
+		Code:    route.ReasonCode,
+		Message: route.ReasonMessage,
+	}}
+	routeRef := route.Route
+	if strings.TrimSpace(routeRef.Name) == "" {
+		routeRef.Name = "default"
+	}
+	if strings.TrimSpace(routeRef.Title) == "" {
+		routeRef.Title = route.Step
+	}
 
 	return Decision{
-		Type: DecisionType(DecisionTypeExecute),
-		Reasons: []DecisionReason{
-			{
-				Code:    route.ReasonCode,
-				Message: route.ReasonMessage,
-			},
-		},
+		Type:    DecisionType(DecisionTypeExecute),
+		Status:  ConsiderationStatusExecution,
+		Route:   routeRef,
+		Checks:  append([]RouteCheckResult(nil), route.Checks...),
+		Reasons: reasons,
 		ExecutionPlan: &ExecutionPlan{
-			TaskNumber: issue.Number,
-			TaskTitle:  issue.Title,
-			Repository: strings.TrimSpace(issue.Repository),
-			Step:       route.Step,
-			Profile:    route.Profile,
-			Prompt:     prompt,
+			TaskNumber:     issue.Number,
+			TaskTitle:      issue.Title,
+			Repository:     strings.TrimSpace(issue.Repository),
+			Action:         route.Action,
+			Step:           route.Step,
+			Profile:        route.Profile,
+			Prompt:         prompt,
+			ExpectedResult: route.ExpectedResult,
+			Constraints:    append([]string(nil), route.Constraints...),
+			Route:          routeRef,
+			Reasons:        append([]DecisionReason(nil), reasons...),
 			StructuredInput: &execution.StructuredInput{
-				Task: prompt,
+				Task:        prompt,
+				Constraints: append([]string(nil), route.Constraints...),
 			},
 		},
 	}
+}
+
+func decisionFromConsideration(result ConsiderationResult) Decision {
+	decision := Decision{
+		Status:        result.Status,
+		Route:         result.Route,
+		Checks:        append([]RouteCheckResult(nil), result.Checks...),
+		Reasons:       append([]DecisionReason(nil), result.Reasons...),
+		ExecutionPlan: result.ExecutionPlan,
+		Failure:       result.Failure,
+	}
+	if result.ExecutionPlan != nil {
+		decision.Type = DecisionType(DecisionTypeExecute)
+	}
+	return decision
 }
 
 func executionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Invocation {
@@ -181,6 +251,7 @@ func executionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Invocati
 
 	return execution.Invocation{
 		Task:       fmt.Sprintf("task-%d", plan.TaskNumber),
+		Action:     plan.Action,
 		Profile:    plan.Profile,
 		Repository: execution.RepositorySpec{URL: plan.Repository},
 		Workplace: execution.WorkplaceSpec{
@@ -190,6 +261,19 @@ func executionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Invocati
 			StructuredInput:  plan.StructuredInput,
 			StructuredOutput: true,
 		},
+	}
+}
+
+func decisionFailure(code string, err error, retryable bool, manualIntervention bool) *DecisionFailure {
+	if err == nil {
+		return nil
+	}
+
+	return &DecisionFailure{
+		Code:               code,
+		Message:            strings.TrimSpace(err.Error()),
+		Retryable:          retryable,
+		ManualIntervention: manualIntervention,
 	}
 }
 

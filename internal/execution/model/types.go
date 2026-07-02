@@ -121,6 +121,7 @@ type RepositorySpec struct {
 
 type Invocation struct {
 	Task       string         `json:"task,omitempty"`
+	Action     string         `json:"action,omitempty"`
 	Profile    string         `json:"profile,omitempty"`
 	Repository RepositorySpec `json:"repository,omitempty"`
 	Workplace  WorkplaceSpec  `json:"workplace,omitempty"`
@@ -237,6 +238,44 @@ type Workplace struct {
 	Ready          bool   `json:"ready,omitempty"`
 }
 
+type ActionClass string
+
+type OperationKind string
+
+type OperationStatus string
+
+type Failure struct {
+	Code               string `json:"code,omitempty"`
+	Message            string `json:"message,omitempty"`
+	Retryable          bool   `json:"retryable,omitempty"`
+	ManualIntervention bool   `json:"manual_intervention,omitempty"`
+}
+
+type Action struct {
+	Name              string          `json:"name,omitempty"`
+	Class             ActionClass     `json:"class,omitempty"`
+	Profile           string          `json:"profile,omitempty"`
+	ExpectedResult    string          `json:"expected_result,omitempty"`
+	RequiresWorkplace bool            `json:"requires_workplace,omitempty"`
+	RequiresSynthesis bool            `json:"requires_synthesis,omitempty"`
+	Operations        []OperationSpec `json:"operations,omitempty"`
+}
+
+type OperationSpec struct {
+	Name  string        `json:"name,omitempty"`
+	Kind  OperationKind `json:"kind,omitempty"`
+	Title string        `json:"title,omitempty"`
+}
+
+type OperationResult struct {
+	Name    string          `json:"name,omitempty"`
+	Kind    OperationKind   `json:"kind,omitempty"`
+	Title   string          `json:"title,omitempty"`
+	Status  OperationStatus `json:"status,omitempty"`
+	Summary string          `json:"summary,omitempty"`
+	Failure *Failure        `json:"failure,omitempty"`
+}
+
 type LaunchResult struct {
 	Status              string            `json:"status,omitempty"`
 	Summary             string            `json:"summary,omitempty"`
@@ -245,4 +284,13 @@ type LaunchResult struct {
 	StructuredOutput    *StructuredOutput `json:"structured_output,omitempty"`
 	RunnerSessionID     string            `json:"runner_session_id,omitempty"`
 	RunRecordPath       string            `json:"run_record_path,omitempty"`
+}
+
+type ExecutionResult struct {
+	Status     string            `json:"status,omitempty"`
+	Summary    string            `json:"summary,omitempty"`
+	Action     Action            `json:"action,omitempty"`
+	Operations []OperationResult `json:"operations,omitempty"`
+	Launch     *LaunchResult     `json:"launch,omitempty"`
+	Failure    *Failure          `json:"failure,omitempty"`
 }

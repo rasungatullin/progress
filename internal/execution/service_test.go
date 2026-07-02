@@ -152,6 +152,105 @@ func TestServiceStartUpdatesRunningHistoryRowOnSuccess(t *testing.T) {
 	}
 }
 
+func TestServiceExecuteReturnsActionAndOperationResults(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := &Service{
+		logger:     log.Default(),
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		launcher: &stubLauncher{result: model.LaunchResult{
+			Status:  "completed",
+			Summary: "launch complete",
+		}},
+	}
+
+	result, err := service.Execute(context.Background(), Invocation{
+		Task:    "task-91",
+		Action:  "implement",
+		Profile: "coder",
+		Workplace: WorkplaceSpec{
+			Name: "task-91",
+		},
+		Launch: LaunchSpec{
+			Directory:       root,
+			StructuredInput: &StructuredInput{Task: "Ship it."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if result.Status != "completed" || result.Launch == nil || result.Launch.Status != "completed" {
+		t.Fatalf("unexpected execution result: %#v", result)
+	}
+	if result.Action.Name != "implement" || result.Action.Profile != "coder" || !result.Action.RequiresSynthesis {
+		t.Fatalf("unexpected action: %#v", result.Action)
+	}
+	expectedOperations := []string{
+		OperationKindResolveAction,
+		OperationKindResolveProfile,
+		OperationKindAllocateResources,
+		OperationKindPrepareWorkplace,
+		OperationKindLaunchSynthesis,
+	}
+	if len(result.Operations) != len(expectedOperations) {
+		t.Fatalf("unexpected operation count: %#v", result.Operations)
+	}
+	for index, operationName := range expectedOperations {
+		if result.Operations[index].Name != operationName {
+			t.Fatalf("unexpected operation at %d: %#v", index, result.Operations[index])
+		}
+		if result.Operations[index].Status != OperationStatusCompleted {
+			t.Fatalf("operation %s must be completed: %#v", operationName, result.Operations[index])
+		}
+	}
+}
+
+func TestServiceExecuteReturnsDiagnosedOperationFailure(t *testing.T) {
+	t.Parallel()
+
+	expectedErr := errors.New("profile unavailable")
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{err: expectedErr},
+	}
+
+	result, err := service.Execute(context.Background(), Invocation{
+		Task:    "task-92",
+		Action:  "implement",
+		Profile: "missing",
+		Workplace: WorkplaceSpec{
+			Name: "task-92",
+		},
+		Launch: LaunchSpec{
+			Directory: t.TempDir(),
+		},
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected profile error, got %v", err)
+	}
+	if result.Status != "failed" || result.Launch == nil || result.Launch.Status != "failed" {
+		t.Fatalf("unexpected execution result: %#v", result)
+	}
+	if result.Failure == nil || result.Failure.Code != "execution_failed" {
+		t.Fatalf("unexpected failure: %#v", result.Failure)
+	}
+	if len(result.Operations) < 2 {
+		t.Fatalf("expected operation diagnostics: %#v", result.Operations)
+	}
+	if result.Operations[0].Name != OperationKindResolveAction || result.Operations[0].Status != OperationStatusCompleted {
+		t.Fatalf("action resolution must be completed: %#v", result.Operations[0])
+	}
+	if result.Operations[1].Name != OperationKindResolveProfile || result.Operations[1].Status != OperationStatusFailed {
+		t.Fatalf("profile operation must be failed: %#v", result.Operations[1])
+	}
+	if result.Operations[1].Failure == nil || result.Operations[1].Failure.Code != "profile_not_found" {
+		t.Fatalf("unexpected operation failure: %#v", result.Operations[1])
+	}
+}
+
 func TestServiceStartEnrichesRunningHistoryRowBeforeLaunch(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {

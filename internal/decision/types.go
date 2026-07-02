@@ -10,6 +10,16 @@ const (
 	SignalKindTask   = "task-number"
 
 	DecisionTypeExecute = "execute"
+
+	ConsiderationStatusExecution          = "execution"
+	ConsiderationStatusCompleted          = "completed"
+	ConsiderationStatusAwaiting           = "awaiting-external-change"
+	ConsiderationStatusManualIntervention = "manual-intervention"
+	ConsiderationStatusFailed             = "failed"
+
+	RouteCheckStatusPassed  = "passed"
+	RouteCheckStatusFailed  = "failed"
+	RouteCheckStatusSkipped = "skipped"
 )
 
 type Signal struct {
@@ -34,25 +44,72 @@ type DecisionReason struct {
 	Message string
 }
 
+type ConsiderationStatus string
+
+type RouteCheckStatus string
+
+type ProcessingRoute struct {
+	Name        string
+	Title       string
+	Description string
+}
+
+type RouteCheckResult struct {
+	Name    string
+	Status  RouteCheckStatus
+	Reasons []DecisionReason
+}
+
+type DecisionFailure struct {
+	Code               string
+	Message            string
+	Retryable          bool
+	ManualIntervention bool
+}
+
 type ExecutionPlan struct {
 	TaskNumber      int
 	TaskTitle       string
 	Repository      string
+	Action          string
 	Step            string
 	Profile         string
 	Prompt          string
+	ExpectedResult  string
+	Constraints     []string
+	Route           ProcessingRoute
+	Reasons         []DecisionReason
 	StructuredInput *execution.StructuredInput
 }
 
 type Decision struct {
 	Type          DecisionType
 	Reasons       []DecisionReason
+	Route         ProcessingRoute
+	Checks        []RouteCheckResult
+	Status        ConsiderationStatus
+	Failure       *DecisionFailure
 	ExecutionPlan *ExecutionPlan
 }
 
+type ConsiderationInput struct {
+	Context DecisionContext
+}
+
+type ConsiderationResult struct {
+	Context       DecisionContext
+	Status        ConsiderationStatus
+	Route         ProcessingRoute
+	Checks        []RouteCheckResult
+	Reasons       []DecisionReason
+	ExecutionPlan *ExecutionPlan
+	Failure       *DecisionFailure
+}
+
 type StartResult struct {
-	Context   DecisionContext
-	Ready     bool
-	Decision  *Decision
-	Execution *execution.LaunchResult
+	Context       DecisionContext
+	Ready         bool
+	Consideration *ConsiderationResult
+	Decision      *Decision
+	Execution     *execution.LaunchResult
 }

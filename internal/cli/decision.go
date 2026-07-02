@@ -87,6 +87,20 @@ func printDecisionStartResultOnError(cmd *cobra.Command, result decision.StartRe
 func printDecisionStartResult(cmd *cobra.Command, result decision.StartResult) {
 	issue := result.Context.Issue
 	cmd.Printf("task=%d\nsignal-source=%s\nsignal-kind=%s\ncontext-ready=%t\n", result.Context.Signal.TaskNumber, result.Context.Signal.Source, result.Context.Signal.Kind, result.Ready)
+	if result.Consideration != nil {
+		if result.Consideration.Status != "" {
+			cmd.Printf("consideration-status=%s\n", result.Consideration.Status)
+		}
+		if result.Consideration.Route.Name != "" {
+			cmd.Printf("processing-route=%s\n", result.Consideration.Route.Name)
+		}
+		for _, check := range result.Consideration.Checks {
+			if check.Name == "" && check.Status == "" {
+				continue
+			}
+			cmd.Printf("route-check=%s:%s\n", check.Name, check.Status)
+		}
+	}
 	if result.Decision != nil {
 		cmd.Printf("decision-type=%s\n", result.Decision.Type)
 		for _, reason := range result.Decision.Reasons {

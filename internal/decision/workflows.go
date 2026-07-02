@@ -19,19 +19,30 @@ type workflowConfigFile struct {
 }
 
 type workflowRouteConfig struct {
-	Step          string   `json:"step"`
-	Profile       string   `json:"profile"`
-	HasLabels     []string `json:"has_labels"`
-	MissingLabels []string `json:"missing_labels"`
-	ReasonCode    string   `json:"reason_code"`
-	ReasonMessage string   `json:"reason_message"`
+	Name           string   `json:"name"`
+	Title          string   `json:"title"`
+	Description    string   `json:"description"`
+	Step           string   `json:"step"`
+	Action         string   `json:"action"`
+	Profile        string   `json:"profile"`
+	HasLabels      []string `json:"has_labels"`
+	MissingLabels  []string `json:"missing_labels"`
+	ExpectedResult string   `json:"expected_result"`
+	Constraints    []string `json:"constraints"`
+	ReasonCode     string   `json:"reason_code"`
+	ReasonMessage  string   `json:"reason_message"`
 }
 
 type selectedWorkflowRoute struct {
-	Step          string
-	Profile       string
-	ReasonCode    string
-	ReasonMessage string
+	Step           string
+	Action         string
+	Profile        string
+	ExpectedResult string
+	Constraints    []string
+	ReasonCode     string
+	ReasonMessage  string
+	Route          ProcessingRoute
+	Checks         []RouteCheckResult
 }
 
 func (s *Service) selectWorkflowRoute(ctx context.Context, issue *integration.TrackerIssue) (selectedWorkflowRoute, error) {
@@ -41,21 +52,47 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, issue *integration.Tr
 	}
 
 	selected := selectedWorkflowRoute{
-		Step:          strings.TrimSpace(config.Defaults.Step),
-		Profile:       strings.TrimSpace(config.Defaults.Profile),
-		ReasonCode:    strings.TrimSpace(config.Defaults.ReasonCode),
-		ReasonMessage: strings.TrimSpace(config.Defaults.ReasonMessage),
+		Action:         strings.TrimSpace(config.Defaults.Action),
+		Step:           strings.TrimSpace(config.Defaults.Step),
+		Profile:        strings.TrimSpace(config.Defaults.Profile),
+		ExpectedResult: strings.TrimSpace(config.Defaults.ExpectedResult),
+		Constraints:    normalizeRouteConstraints(config.Defaults.Constraints),
+		ReasonCode:     strings.TrimSpace(config.Defaults.ReasonCode),
+		ReasonMessage:  strings.TrimSpace(config.Defaults.ReasonMessage),
+		Route: ProcessingRoute{
+			Name:        firstNonEmpty(strings.TrimSpace(config.Defaults.Name), "default"),
+			Title:       firstNonEmpty(strings.TrimSpace(config.Defaults.Title), "Маршрут по умолчанию"),
+			Description: strings.TrimSpace(config.Defaults.Description),
+		},
+		Checks: []RouteCheckResult{{
+			Name:   "default-route",
+			Status: RouteCheckStatusPassed,
+			Reasons: []DecisionReason{{
+				Code:    "default_route_available",
+				Message: "Маршрут по умолчанию доступен для задачи.",
+			}},
+		}},
 	}
-	for _, route := range config.Routes {
-		if !workflowRouteMatchesIssue(route, issue) {
+	for index, route := range config.Routes {
+		check := evaluateWorkflowRoute(route, issue)
+		if check.Status != RouteCheckStatusPassed {
 			continue
 		}
 
 		selected = selectedWorkflowRoute{
-			Step:          strings.TrimSpace(route.Step),
-			Profile:       strings.TrimSpace(route.Profile),
-			ReasonCode:    strings.TrimSpace(route.ReasonCode),
-			ReasonMessage: strings.TrimSpace(route.ReasonMessage),
+			Action:         strings.TrimSpace(route.Action),
+			Step:           strings.TrimSpace(route.Step),
+			Profile:        strings.TrimSpace(route.Profile),
+			ExpectedResult: strings.TrimSpace(route.ExpectedResult),
+			Constraints:    normalizeRouteConstraints(route.Constraints),
+			ReasonCode:     strings.TrimSpace(route.ReasonCode),
+			ReasonMessage:  strings.TrimSpace(route.ReasonMessage),
+			Route: ProcessingRoute{
+				Name:        firstNonEmpty(strings.TrimSpace(route.Name), fmt.Sprintf("route-%d", index+1)),
+				Title:       firstNonEmpty(strings.TrimSpace(route.Title), strings.TrimSpace(route.Step)),
+				Description: strings.TrimSpace(route.Description),
+			},
+			Checks: []RouteCheckResult{check},
 		}
 		break
 	}
@@ -135,19 +172,39 @@ func validateWorkflowConfig(config workflowConfigFile) error {
 }
 
 func workflowRouteMatchesIssue(route workflowRouteConfig, issue *integration.TrackerIssue) bool {
+	return evaluateWorkflowRoute(route, issue).Status == RouteCheckStatusPassed
+}
+
+func evaluateWorkflowRoute(route workflowRouteConfig, issue *integration.TrackerIssue) RouteCheckResult {
 	issueLabels := issueLabelSet(issue)
+	reasons := make([]DecisionReason, 0)
 	for _, label := range normalizeLabels(route.HasLabels) {
 		if _, ok := issueLabels[label]; !ok {
-			return false
+			reasons = append(reasons, DecisionReason{
+				Code:    "required_label_missing",
+				Message: fmt.Sprintf("У задачи отсутствует обязательный признак %q.", label),
+			})
 		}
 	}
 	for _, label := range normalizeLabels(route.MissingLabels) {
 		if _, ok := issueLabels[label]; ok {
-			return false
+			reasons = append(reasons, DecisionReason{
+				Code:    "forbidden_label_present",
+				Message: fmt.Sprintf("У задачи присутствует запрещающий признак %q.", label),
+			})
 		}
 	}
 
-	return true
+	var status RouteCheckStatus = RouteCheckStatusPassed
+	if len(reasons) != 0 {
+		status = RouteCheckStatusFailed
+	}
+
+	return RouteCheckResult{
+		Name:    firstNonEmpty(strings.TrimSpace(route.Name), "labels"),
+		Status:  status,
+		Reasons: reasons,
+	}
 }
 
 func issueLabelSet(issue *integration.TrackerIssue) map[string]struct{} {
@@ -184,4 +241,35 @@ func normalizeLabels(labels []string) []string {
 	}
 
 	return result
+}
+
+func normalizeRouteConstraints(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		result = append(result, value)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+
+	return result
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+
+	return ""
 }
