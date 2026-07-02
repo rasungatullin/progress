@@ -40,7 +40,12 @@ type Request struct {
 	Text            string
 	Draft           bool
 	Query           string
+	State           string
+	Scope           string
 	Limit           int
+	Path            string
+	Line            int
+	Side            string
 	ChannelID       string
 	ThreadID        string
 	MessageID       string
@@ -66,7 +71,12 @@ type ProviderRequest struct {
 	Text            string
 	Draft           bool
 	Query           string
+	State           string
+	Scope           string
 	Limit           int
+	Path            string
+	Line            int
+	Side            string
 	ChannelID       string
 	ThreadID        string
 	MessageID       string
@@ -126,6 +136,7 @@ type Response struct {
 	TaskComments      []TaskComment
 	Repository        *Repository
 	MergeRequest      *MergeRequest
+	MergeRequests     []MergeRequest
 	ReviewRemarks     []ReviewRemark
 	Conversation      *MessageThread
 	Messages          []Message

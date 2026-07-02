@@ -293,3 +293,125 @@ func TestServiceServerPullRequestCommentsNormalizesActivities(t *testing.T) {
 		t.Fatalf("unexpected reply author: %#v", response.ReviewRemarks[1])
 	}
 }
+
+func TestServiceCloudPullRequestCommentsFollowsPagination(t *testing.T) {
+	t.Parallel()
+
+	var server *httptest.Server
+	var seenPaths []string
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPaths = append(seenPaths, r.URL.String())
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "2":
+			_, _ = w.Write([]byte(`{
+				"values": [{
+					"id": 8,
+					"content": {"raw": "Second page"},
+					"user": {"display_name": "Bob", "nickname": "bob"},
+					"links": {"html": {"href": "https://bitbucket.example/workspace/repo/pull-requests/5/_/diff#comment-8"}}
+				}]
+			}`))
+		default:
+			_, _ = w.Write([]byte(`{
+				"next": "` + server.URL + `/repositories/workspace/repo/pullrequests/5/comments?page=2",
+				"values": [{
+					"id": 7,
+					"content": {"raw": "First page"},
+					"user": {"display_name": "Alice", "nickname": "alice"},
+					"inline": {"path": "file.go", "to": 10},
+					"links": {"html": {"href": "https://bitbucket.example/workspace/repo/pull-requests/5/_/diff#comment-7"}}
+				}]
+			}`))
+		}
+	}))
+	defer server.Close()
+
+	service := NewService(model.IntegrationSystemConfig{
+		BaseURL:    server.URL,
+		Token:      "token",
+		Repository: "workspace/repo",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "bitbucket",
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "comments",
+		Number:          5,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if len(seenPaths) != 2 {
+		t.Fatalf("expected two paginated requests, got %#v", seenPaths)
+	}
+	if len(response.ReviewRemarks) != 2 {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+	if response.ReviewRemarks[0].Path != "file.go" || response.ReviewRemarks[0].Line != 10 {
+		t.Fatalf("unexpected inline location: %#v", response.ReviewRemarks[0])
+	}
+	if response.ReviewRemarks[1].Body != "Second page" {
+		t.Fatalf("unexpected second remark: %#v", response.ReviewRemarks[1])
+	}
+}
+
+func TestServiceCloudPullRequestListDefaultsToClosed(t *testing.T) {
+	t.Parallel()
+
+	var seenStates []string
+	var seenPagelen string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenStates = r.URL.Query()["state"]
+		seenPagelen = r.URL.Query().Get("pagelen")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"values": [{
+				"id": 5,
+				"title": "Merged PR",
+				"description": "Body",
+				"state": "MERGED",
+				"updated_on": "2026-06-01T11:00:00Z",
+				"author": {"display_name": "Alice", "nickname": "alice"},
+				"source": {"branch": {"name": "feature"}},
+				"destination": {"branch": {"name": "main"}},
+				"links": {"html": {"href": "https://bitbucket.example/workspace/repo/pull-requests/5"}}
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	service := NewService(model.IntegrationSystemConfig{
+		BaseURL:    server.URL,
+		Token:      "token",
+		Repository: "workspace/repo",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "bitbucket",
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "search",
+		Limit:           2,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if seenPagelen != "2" {
+		t.Fatalf("unexpected pagelen: %q", seenPagelen)
+	}
+	if len(seenStates) != 2 || seenStates[0] != "MERGED" || seenStates[1] != "DECLINED" {
+		t.Fatalf("unexpected states: %#v", seenStates)
+	}
+	if len(response.MergeRequests) != 1 {
+		t.Fatalf("unexpected merge requests: %#v", response.MergeRequests)
+	}
+	if response.MergeRequests[0].State != "MERGED" {
+		t.Fatalf("unexpected state: %#v", response.MergeRequests[0])
+	}
+}

@@ -95,3 +95,29 @@ func TestDispatchUsesDefaultSystemByIntegrationType(t *testing.T) {
 		})
 	}
 }
+
+func TestDispatchInfersRepositoryTypeFromObjectBeforeSystemDefault(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {
+				Type:             "github",
+				IntegrationTypes: []string{"tracker", "repository"},
+			},
+		},
+	})
+
+	for _, request := range []Request{
+		{System: "github", Resource: "repo", Operation: "get"},
+		{System: "github", Resource: "pr", Operation: "get"},
+	} {
+		route, err := service.Dispatch(context.Background(), request)
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		if route.IntegrationType != model.IntegrationTypeRepository {
+			t.Fatalf("expected repository integration type for resource %q, got %q", request.Resource, route.IntegrationType)
+		}
+	}
+}

@@ -153,12 +153,21 @@ type Provider interface {
 - `progress integration github issue comments`;
 - `progress integration github issue comment create`;
 - `progress integration github pr get`;
+- `progress integration github pr list`;
+- `progress integration github pr search`;
 - `progress integration github pr create`;
+- `progress integration github pr comments`;
+- `progress integration github pr comment create`;
+- `progress integration github pr comment resolve`;
 - `progress integration bitbucket auth status`;
 - `progress integration bitbucket repo get`;
 - `progress integration bitbucket pr get`;
+- `progress integration bitbucket pr list`;
+- `progress integration bitbucket pr search`;
 - `progress integration bitbucket pr create`;
 - `progress integration bitbucket pr comments`;
+- `progress integration bitbucket pr comment create`;
+- `progress integration bitbucket pr comment resolve`;
 - `progress integration mattermost auth status`;
 - `progress integration mattermost thread get`;
 - `progress integration mattermost message create`;
@@ -263,19 +272,19 @@ gh pr view 456 --repo owner/name --json number,title,body,state,author,labels,re
 
 Команда получает комментарии запроса на слияние, включая замечания ревизии.
 
-Для первого этапа допустимы два режима:
+Адаптер GitHub читает два источника:
 
-1. обычные комментарии issue-части PR;
-2. замечания ревизии по diff.
+1. обычные комментарии обсуждения PR через issue-часть запроса на слияние;
+2. inline-замечания ревизии через review threads GraphQL API.
 
 Предпочтительные вызовы:
 
 ```bash
-gh api repos/owner/name/issues/456/comments
-gh api repos/owner/name/pulls/456/comments
+gh api --paginate --slurp repos/owner/name/issues/456/comments
+gh api graphql -f query='<review threads query>' -f owner=owner -f name=name -F number=456
 ```
 
-Адаптер должен различать комментарии обсуждения и inline-замечания ревизии, но приводить их к совместимой внутренней схеме.
+Адаптер приводит оба вида комментариев к `ReviewRemark`. Для обычного комментария поля `Path`, `Line` и `ReplyToID` пустые. Для inline-замечания `ReplyToID` содержит идентификатор review thread, а `State` отражает состояние `resolved` или `unresolved`.
 
 ### 7.9 `progress integration github pr search`
 
@@ -284,10 +293,68 @@ gh api repos/owner/name/pulls/456/comments
 Вариант вызова:
 
 ```bash
-gh pr list --repo owner/name --search "is:open review-requested:@me" --json number,title,state,author,reviewDecision,url,updatedAt
+gh pr list --repo owner/name --state closed --limit 30 --json number,title,body,state,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt
 ```
 
-### 7.10 `progress integration github api`
+Команда поддерживает:
+
+- `--state` со значениями `open`, `closed`, `merged` и `all`; по умолчанию используется `closed`;
+- `--scope` со значениями `all`, `authored` и `reviewer`; по умолчанию используется `all`;
+- `--query` для дополнительной строки поиска GitHub;
+- `--limit` для ограничения количества результатов.
+
+Для `--scope authored` адаптер добавляет `--author @me`. Для `--scope reviewer` адаптер добавляет поисковый фильтр `reviewed-by:@me`.
+
+Если `--repo` не передан, GitHub-адаптер сначала использует `default_repo` из конфигурации, а при его отсутствии вызывает `gh pr list` без `--repo`, чтобы `gh` выбрал текущий репозиторий рабочей директории.
+
+### 7.10 `progress integration github pr comment create`
+
+Команда создаёт комментарий к запросу на слияние.
+
+Обычный комментарий обсуждения:
+
+```bash
+progress integration github pr comment create --repo owner/name --number 456 --body "Проверил, замечание принято"
+```
+
+Inline-замечание ревизии:
+
+```bash
+progress integration github pr comment create --repo owner/name --number 456 --body "Нужно обработать пустой ответ" --path internal/service.go --line 42
+```
+
+Если `--path` и `--line` не переданы, адаптер создаёт обычный комментарий обсуждения через issue-часть PR. Если они переданы, адаптер создаёт review thread через GraphQL mutation `addPullRequestReviewThread`. Флаг `--side` задаёт сторону diff и по умолчанию равен `RIGHT`.
+
+### 7.11 `progress integration github pr comment resolve`
+
+Команда разрешает inline-замечание ревизии по идентификатору review thread.
+
+```bash
+progress integration github pr comment resolve --thread PRRT_kw...
+```
+
+Команда использует GraphQL mutation `resolveReviewThread`. Идентификатор thread можно получить из поля `remark_thread_id` команды `progress integration github pr comments`.
+
+### 7.12 `progress integration bitbucket pr search`
+
+Команда выполняет поиск запросов на слияние в Bitbucket.
+
+Для Bitbucket Cloud закрытое состояние разворачивается в состояния API `MERGED` и `DECLINED`, потому что единого внешнего значения `closed` у Cloud API нет. По умолчанию команда ищет закрытые запросы на слияние.
+
+Команда поддерживает:
+
+- `--state` со значениями `open`, `closed`, `merged`, `declined` и `all`;
+- `--scope` со значениями `all`, `authored` и `reviewer` для Bitbucket Cloud;
+- `--query` для выражения фильтра Bitbucket Cloud;
+- `--limit` для ограничения количества результатов.
+
+### 7.13 `progress integration bitbucket pr comment create`
+
+Команда создаёт комментарий к запросу на слияние Bitbucket Cloud. Для inline-комментария используются `--path`, `--line` и `--side`.
+
+`progress integration bitbucket pr comment resolve` присутствует в CLI как единая операция контура, но текущий Bitbucket-адаптер возвращает `unsupported-operation`, потому что механизм разрешения замечаний различается между Bitbucket Cloud и Server/Data Center и требует отдельного контракта.
+
+### 7.14 `progress integration github api`
 
 Команда даёт управляемый escape hatch для редких операций, которые ещё не вынесены в отдельный подкомандный интерфейс.
 

@@ -26,10 +26,17 @@ type integrationFlags struct {
 	title           string
 	body            string
 	text            string
+	query           string
+	state           string
+	scope           string
+	path            string
+	side            string
 	channelID       string
 	threadID        string
 	messageID       string
 	draft           bool
+	line            int
+	limit           int
 }
 
 const (
@@ -95,8 +102,10 @@ func newIntegrationBitbucketPRCommand() *cobra.Command {
 		Short: "Операции с запросами на слияние Bitbucket",
 	}
 	cmd.AddCommand(newIntegrationMergeRequestGetCommand("bitbucket", "Bitbucket"))
+	cmd.AddCommand(newIntegrationMergeRequestListCommand("bitbucket", "Bitbucket"))
 	cmd.AddCommand(newIntegrationMergeRequestCreateCommand("bitbucket", "Bitbucket"))
 	cmd.AddCommand(newIntegrationMergeRequestCommentsCommand("bitbucket", "Bitbucket"))
+	cmd.AddCommand(newIntegrationMergeRequestCommentCommand("bitbucket", "Bitbucket"))
 	return cmd
 }
 
@@ -165,7 +174,10 @@ func newIntegrationGitHubPRCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newIntegrationGitHubPRGetCommand())
+	cmd.AddCommand(newIntegrationMergeRequestListCommand("github", "GitHub"))
 	cmd.AddCommand(newIntegrationGitHubPRCreateCommand())
+	cmd.AddCommand(newIntegrationMergeRequestCommentsCommand("github", "GitHub"))
+	cmd.AddCommand(newIntegrationMergeRequestCommentCommand("github", "GitHub"))
 	return cmd
 }
 
@@ -371,6 +383,48 @@ func newIntegrationMergeRequestCreateCommand(system string, label string) *cobra
 	return cmd
 }
 
+func newIntegrationMergeRequestListCommand(system string, label string) *cobra.Command {
+	flags := &integrationFlags{state: "closed", scope: "all", limit: 30}
+	cmd := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"search"},
+		Short:   "Поиск запросов на слияние " + label,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				IntegrationType: "repository",
+				System:          system,
+				Resource:        "merge-request",
+				ObjectType:      "merge-request",
+				Operation:       "search",
+				Repository:      flags.repo,
+				RepoProvided:    cmd.Flags().Changed("repo"),
+				Query:           flags.query,
+				State:           flags.state,
+				Scope:           flags.scope,
+				Limit:           flags.limit,
+			})
+			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationMergeRequests); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().StringVar(&flags.state, "state", flags.state, "Состояние запросов на слияние: open, closed или all")
+	cmd.Flags().StringVar(&flags.scope, "scope", flags.scope, "Область отбора: all, authored или reviewer")
+	cmd.Flags().StringVar(&flags.query, "query", "", "Строка поиска внешней системы")
+	cmd.Flags().IntVar(&flags.limit, "limit", flags.limit, "Максимальное количество результатов")
+	return cmd
+}
+
 func newIntegrationMergeRequestCommentsCommand(system string, label string) *cobra.Command {
 	flags := &integrationFlags{}
 	cmd := &cobra.Command{
@@ -406,6 +460,100 @@ func newIntegrationMergeRequestCommentsCommand(system string, label string) *cob
 	}
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
 	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер запроса на слияние")
+	return cmd
+}
+
+func newIntegrationMergeRequestCommentCommand(system string, label string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "comment",
+		Short: "Операции с комментариями запроса на слияние " + label,
+	}
+	cmd.AddCommand(newIntegrationMergeRequestCommentCreateCommand(system, label))
+	cmd.AddCommand(newIntegrationMergeRequestCommentResolveCommand(system, label))
+	return cmd
+}
+
+func newIntegrationMergeRequestCommentCreateCommand(system string, label string) *cobra.Command {
+	flags := &integrationFlags{side: "RIGHT"}
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Создание комментария запроса на слияние " + label,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("number") {
+				return fmt.Errorf("--number is required")
+			}
+			if !cmd.Flags().Changed("body") || strings.TrimSpace(flags.body) == "" {
+				return fmt.Errorf("--body is required")
+			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				IntegrationType: "repository",
+				System:          system,
+				Resource:        "comment",
+				ObjectType:      "comment",
+				Operation:       "create",
+				Repository:      flags.repo,
+				RepoProvided:    cmd.Flags().Changed("repo"),
+				Number:          flags.number,
+				Body:            flags.body,
+				Path:            flags.path,
+				Line:            flags.line,
+				Side:            flags.side,
+			})
+			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationReviewRemarkOperation); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер запроса на слияние")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Текст комментария")
+	cmd.Flags().StringVar(&flags.path, "path", "", "Путь файла для inline-комментария")
+	cmd.Flags().IntVar(&flags.line, "line", 0, "Номер строки для inline-комментария")
+	cmd.Flags().StringVar(&flags.side, "side", flags.side, "Сторона diff для inline-комментария: LEFT или RIGHT")
+	return cmd
+}
+
+func newIntegrationMergeRequestCommentResolveCommand(system string, label string) *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{
+		Use:   "resolve",
+		Short: "Разрешение замечания ревизии запроса на слияние " + label,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("thread") || strings.TrimSpace(flags.threadID) == "" {
+				return fmt.Errorf("--thread is required")
+			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				IntegrationType: "repository",
+				System:          system,
+				Resource:        "comment",
+				ObjectType:      "comment",
+				Operation:       "resolve",
+				ThreadID:        flags.threadID,
+			})
+			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationReviewRemarkOperation); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flags.threadID, "thread", "", "Идентификатор review thread")
 	return cmd
 }
 
@@ -776,11 +924,9 @@ func newIntegrationGitHubPRGetCommand() *cobra.Command {
 
 func newIntegrationDispatcherCommand() *cobra.Command {
 	flags := &integrationFlags{
-		integrationType: "tracker",
-		system:          "github",
-		resource:        "issue",
-		object:          "issue",
-		operation:       "get",
+		system:    "github",
+		resource:  "issue",
+		operation: "get",
 	}
 
 	cmd := &cobra.Command{
@@ -1065,6 +1211,25 @@ func printIntegrationMergeRequest(cmd *cobra.Command, response integration.Respo
 	printIssueBody(cmd, pr.Body)
 }
 
+func printIntegrationMergeRequests(cmd *cobra.Command, response integration.Response) {
+	if response.Failure != nil {
+		printFailure(cmd, response)
+		return
+	}
+	repository := ""
+	state := ""
+	scope := ""
+	if response.Metadata != nil {
+		repository = response.Metadata["repository"]
+		state = response.Metadata["state"]
+		scope = response.Metadata["scope"]
+	}
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nstate=%s\nscope=%s\nmerge_request_count=%d\n", response.System, response.Resource, response.Operation, repository, state, scope, len(response.MergeRequests))
+	for _, pr := range response.MergeRequests {
+		cmd.Printf("merge_request_number=%d\nmerge_request_title=%s\nmerge_request_state=%s\nmerge_request_author_login=%s\nmerge_request_author_name=%s\nmerge_request_review_decision=%s\nmerge_request_base_ref=%s\nmerge_request_head_ref=%s\nmerge_request_url=%s\nmerge_request_updated_at=%s\n", pr.Number, pr.Title, pr.State, pr.Author.Login, pr.Author.Name, pr.ReviewDecision, pr.BaseRef, pr.HeadRef, pr.URL, pr.UpdatedAt)
+	}
+}
+
 func printIntegrationOperationResult(cmd *cobra.Command, response integration.Response) {
 	if response.MergeRequest != nil {
 		printIntegrationMergeRequest(cmd, response)
@@ -1083,6 +1248,19 @@ func printIntegrationOperationResult(cmd *cobra.Command, response integration.Re
 	}
 }
 
+func printIntegrationReviewRemarkOperation(cmd *cobra.Command, response integration.Response) {
+	if len(response.ReviewRemarks) > 0 {
+		printIntegrationReviewRemarks(cmd, response)
+	}
+	if response.OperationResult != nil {
+		printIntegrationOperationResult(cmd, response)
+		return
+	}
+	if len(response.ReviewRemarks) == 0 {
+		printFailure(cmd, response)
+	}
+}
+
 func printIntegrationReviewRemarks(cmd *cobra.Command, response integration.Response) {
 	if len(response.ReviewRemarks) == 0 {
 		printFailure(cmd, response)
@@ -1093,7 +1271,7 @@ func printIntegrationReviewRemarks(cmd *cobra.Command, response integration.Resp
 	}
 	cmd.Printf("system=%s\nresource=%s\noperation=%s\nremark_count=%d\n", response.System, response.Resource, response.Operation, len(response.ReviewRemarks))
 	for _, remark := range response.ReviewRemarks {
-		cmd.Printf("remark_id=%s\nremark_author_login=%s\nremark_author_name=%s\nremark_state=%s\nremark_path=%s\nremark_line=%d\nremark_url=%s\nremark_created_at=%s\nremark_updated_at=%s\n", remark.ExternalID, remark.Author.Login, remark.Author.Name, remark.State, remark.Path, remark.Line, remark.URL, remark.CreatedAt, remark.UpdatedAt)
+		cmd.Printf("remark_id=%s\nremark_thread_id=%s\nremark_repository=%s\nremark_merge_request_number=%d\nremark_author_login=%s\nremark_author_name=%s\nremark_state=%s\nremark_path=%s\nremark_line=%d\nremark_url=%s\nremark_created_at=%s\nremark_updated_at=%s\n", remark.ExternalID, remark.ReplyToID, remark.Repository, remark.MergeRequestNumber, remark.Author.Login, remark.Author.Name, remark.State, remark.Path, remark.Line, remark.URL, remark.CreatedAt, remark.UpdatedAt)
 		printMultilineField(cmd, "remark_body", remark.Body)
 	}
 }

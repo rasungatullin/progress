@@ -33,7 +33,11 @@
 - получить комментарии задачи;
 - создать комментарий задачи;
 - получить запрос на слияние по идентификатору или номеру;
+- найти запросы на слияние в репозитории, включая отбор по текущему автору или текущему ревьюеру;
 - получить комментарии запроса на слияние, включая замечания ревизии;
+- создать комментарий запроса на слияние, включая inline-комментарий к строке diff;
+- получить состояние замечания ревизии как `resolved` или `unresolved`;
+- разрешить замечание ревизии, если внешняя система поддерживает такую операцию;
 - создать запрос на слияние;
 - получить цепочку обсуждения мессенджера, если внешняя система поддерживает такую операцию;
 - создать сообщение в мессенджере.
@@ -90,6 +94,13 @@ type Request struct {
     Title           string
     Body            string
     Text            string
+    Query           string
+    State           string
+    Scope           string
+    Limit           int
+    Path            string
+    Line            int
+    Side            string
     ChannelID       string
     ThreadID        string
     MessageID       string
@@ -113,6 +124,7 @@ type Response struct {
     TaskComments    []TaskComment
     Repository      *Repository
     MergeRequest    *MergeRequest
+    MergeRequests   []MergeRequest
     ReviewRemarks   []ReviewRemark
     Conversation    *MessageThread
     Messages        []Message

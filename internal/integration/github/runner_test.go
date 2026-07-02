@@ -540,6 +540,91 @@ func TestRunnerRunPRViewUsesConfiguredDefaultRepository(t *testing.T) {
 	}
 }
 
+func TestRunnerRunPRListBuildsCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"pr", "list", "--repo", "owner/name", "--state", "closed", "--limit", "5", "--json", "number,title,body,state,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt", "--search", "label:bug reviewed-by:@me"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `[]`}
+	}
+
+	result, config, err := runner.RunPRList(context.Background(), "owner/name", PRListRequest{State: "", Scope: "reviewer", Query: "label:bug", Limit: 5})
+	if err != nil {
+		t.Fatalf("run pr list: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
+func TestRunnerRunPRListCanUseCurrentRepository(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"pr", "list", "--state", "closed", "--limit", "30", "--json", "number,title,body,state,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `[]`}
+	}
+
+	if _, _, err := runner.RunPRList(context.Background(), "", PRListRequest{}); err != nil {
+		t.Fatalf("run pr list: %v", err)
+	}
+}
+
+func TestRunnerRunPRReviewThreadResolveBuildsGraphQLCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		if len(args) < 6 || args[0] != "api" || args[1] != "graphql" {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		if !strings.Contains(fmt.Sprint(args), "resolveReviewThread") || !strings.Contains(fmt.Sprint(args), "threadId=thread-1") {
+			t.Fatalf("unexpected graphql args: %#v", args)
+		}
+		return commandRunner{stdout: `{"data":{"resolveReviewThread":{"thread":{"id":"thread-1","isResolved":true}}}}`}
+	}
+
+	result, config, err := runner.RunPRReviewThreadResolve(context.Background(), "thread-1")
+	if err != nil {
+		t.Fatalf("run pr review thread resolve: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
 func TestRunnerRunPRCreateBuildsCommand(t *testing.T) {
 	t.Parallel()
 

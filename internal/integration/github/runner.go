@@ -261,6 +261,122 @@ func (r *Runner) RunPRView(ctx context.Context, repository string, number int) (
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"pr", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"})
 }
 
+func (r *Runner) RunPRList(ctx context.Context, repository string, request PRListRequest) (CommandResult, resolvedConfig, error) {
+	request, err := normalizePRListRequest(request)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository = firstNonEmpty(repository, config.DefaultRepo)
+	if repository != "" {
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			result := CommandResult{Command: config.Command, ExitCode: -1}
+			return result, config, &Error{
+				Code:    ErrorCodeInvalidRequest,
+				Message: err.Error(),
+				Result:  result,
+			}
+		}
+	}
+
+	args := []string{"pr", "list"}
+	if repository != "" {
+		args = append(args, "--repo", repository)
+	}
+	args = append(args, "--state", request.State, "--limit", strconv.Itoa(request.Limit), "--json", "number,title,body,state,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt")
+	search := request.Query
+	switch request.Scope {
+	case "authored":
+		args = append(args, "--author", "@me")
+	case "reviewer":
+		search = strings.TrimSpace(strings.Join([]string{search, "reviewed-by:@me"}, " "))
+	}
+	if search != "" {
+		args = append(args, "--search", search)
+	}
+
+	return r.runCommandWithResolvedConfig(ctx, config, args)
+}
+
+func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+	owner, name, err := splitRepository(repository)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	query := `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first: 100) {
+            nodes {
+              id
+              body
+              url
+              path
+              line
+              author {
+                login
+                url
+              }
+              createdAt
+              updatedAt
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + query, "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)})
+}
+
 func resolveRepository(repository string, fallback string) (string, error) {
 	return normalizeRepository(firstNonEmpty(repository, fallback))
 }
@@ -294,12 +410,168 @@ func (r *Runner) RunPRCreate(ctx context.Context, repository string, request PRC
 	return r.runCommandWithConfig(ctx, args)
 }
 
+func (r *Runner) RunPRCommentCreate(ctx context.Context, repository string, number int, request PRCommentCreateRequest) (CommandResult, resolvedConfig, error) {
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	request, err = normalizePRCommentCreateRequest(request)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	if request.Path == "" && request.Line == 0 {
+		return r.RunIssueCommentCreate(ctx, repository, number, request.Body)
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+	owner, name, err := splitRepository(repository)
+	if err != nil {
+		result := CommandResult{Command: config.Command, ExitCode: -1}
+		return result, config, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	nodeQuery := `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id
+    }
+  }
+}`
+	nodeResult, config, err := r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + nodeQuery, "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)})
+	if err != nil || nodeResult.ExitCode != 0 {
+		return nodeResult, config, err
+	}
+
+	var nodeResponse ghPullRequestNodeResponse
+	if err := json.Unmarshal([]byte(nodeResult.Stdout), &nodeResponse); err != nil {
+		return nodeResult, config, &Error{
+			Code:    ErrorCodeExternalFailure,
+			Message: fmt.Sprintf("parse GitHub pull request node response: %v", err),
+			Result:  nodeResult,
+			Err:     err,
+		}
+	}
+	pullRequestID := strings.TrimSpace(nodeResponse.Data.Repository.PullRequest.ID)
+	if pullRequestID == "" {
+		return nodeResult, config, &Error{
+			Code:    ErrorCodeNotFound,
+			Message: fmt.Sprintf("GitHub pull request not found: %s#%d", repository, number),
+			Result:  nodeResult,
+		}
+	}
+
+	mutation := `mutation($pullRequestId: ID!, $body: String!, $path: String!, $line: Int!, $side: DiffSide!) {
+  addPullRequestReviewThread(input: {pullRequestId: $pullRequestId, body: $body, path: $path, line: $line, side: $side}) {
+    thread {
+      id
+      isResolved
+      comments(first: 1) {
+        nodes {
+          id
+          body
+          url
+          path
+          line
+          author {
+            login
+            url
+          }
+          createdAt
+          updatedAt
+        }
+      }
+    }
+  }
+}`
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + mutation, "-f", "pullRequestId=" + pullRequestID, "-f", "body=" + request.Body, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side})
+}
+
+func (r *Runner) RunPRReviewThreadResolve(ctx context.Context, threadID string) (CommandResult, resolvedConfig, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: "GitHub pull request review thread id is required",
+			Result:  result,
+		}
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	mutation := `mutation($threadId: ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) {
+    thread {
+      id
+      isResolved
+    }
+  }
+}`
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + mutation, "-f", "threadId=" + threadID})
+}
+
 type PRCreateRequest struct {
 	Base  string
 	Head  string
 	Title string
 	Body  string
 	Draft bool
+}
+
+type PRListRequest struct {
+	State string
+	Scope string
+	Query string
+	Limit int
+}
+
+type PRCommentCreateRequest struct {
+	Body string
+	Path string
+	Line int
+	Side string
+}
+
+type ghPullRequestNodeResponse struct {
+	Data struct {
+		Repository struct {
+			PullRequest struct {
+				ID string `json:"id"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
 }
 
 func normalizeRepository(repository string) (string, error) {
@@ -356,6 +628,71 @@ func normalizePRCreateRequest(request PRCreateRequest) (PRCreateRequest, error) 
 	}
 
 	return request, nil
+}
+
+func normalizePRListRequest(request PRListRequest) (PRListRequest, error) {
+	request.State = strings.TrimSpace(strings.ToLower(request.State))
+	request.Scope = strings.TrimSpace(strings.ToLower(request.Scope))
+	request.Query = strings.TrimSpace(request.Query)
+
+	switch request.State {
+	case "":
+		request.State = "closed"
+	case "open", "closed", "merged", "all":
+	default:
+		return PRListRequest{}, fmt.Errorf("GitHub pull request state must be one of open, closed, merged or all")
+	}
+
+	switch request.Scope {
+	case "", "all":
+		request.Scope = "all"
+	case "author", "authored", "mine":
+		request.Scope = "authored"
+	case "reviewer", "reviewed", "review":
+		request.Scope = "reviewer"
+	default:
+		return PRListRequest{}, fmt.Errorf("GitHub pull request scope must be one of all, authored or reviewer")
+	}
+
+	if request.Limit <= 0 {
+		request.Limit = 30
+	}
+
+	return request, nil
+}
+
+func normalizePRCommentCreateRequest(request PRCommentCreateRequest) (PRCommentCreateRequest, error) {
+	request.Body = strings.TrimSpace(request.Body)
+	request.Path = strings.TrimSpace(request.Path)
+	request.Side = strings.TrimSpace(strings.ToUpper(request.Side))
+
+	if request.Body == "" {
+		return PRCommentCreateRequest{}, fmt.Errorf("GitHub pull request comment body is required")
+	}
+	if request.Path == "" && request.Line > 0 {
+		return PRCommentCreateRequest{}, fmt.Errorf("GitHub pull request inline comment path is required")
+	}
+	if request.Path != "" && request.Line <= 0 {
+		return PRCommentCreateRequest{}, fmt.Errorf("GitHub pull request inline comment line must be greater than zero")
+	}
+	switch request.Side {
+	case "":
+		request.Side = "RIGHT"
+	case "LEFT", "RIGHT":
+	default:
+		return PRCommentCreateRequest{}, fmt.Errorf("GitHub pull request inline comment side must be LEFT or RIGHT")
+	}
+
+	return request, nil
+}
+
+func splitRepository(repository string) (string, string, error) {
+	repository, err := normalizeRepository(repository)
+	if err != nil {
+		return "", "", err
+	}
+	parts := strings.Split(repository, "/")
+	return parts[0], parts[1], nil
 }
 
 func (r *Runner) runCommandWithConfig(ctx context.Context, args []string) (CommandResult, resolvedConfig, error) {

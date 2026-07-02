@@ -318,10 +318,10 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
 	}
 	if integrationType == "" {
-		integrationType = s.firstIntegrationTypeForSystem(system)
+		integrationType = inferIntegrationType(objectType)
 	}
 	if integrationType == "" {
-		integrationType = inferIntegrationType(objectType)
+		integrationType = s.firstIntegrationTypeForSystem(system)
 	}
 
 	normalized := ProviderRequest{
@@ -342,7 +342,12 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		Text:            strings.TrimSpace(req.Text),
 		Draft:           req.Draft,
 		Query:           strings.TrimSpace(req.Query),
+		State:           strings.TrimSpace(req.State),
+		Scope:           strings.TrimSpace(req.Scope),
 		Limit:           req.Limit,
+		Path:            strings.TrimSpace(req.Path),
+		Line:            req.Line,
+		Side:            strings.TrimSpace(req.Side),
 		ChannelID:       strings.TrimSpace(req.ChannelID),
 		ThreadID:        strings.TrimSpace(req.ThreadID),
 		MessageID:       strings.TrimSpace(req.MessageID),
@@ -583,17 +588,25 @@ func expectedResult(integrationType string, objectType string, resource string, 
 		case "repository":
 			return "canonical-repository"
 		case "merge-request":
+			if operation == "comments" {
+				return "review-remark[]"
+			}
+			if operation == "search" || operation == "list" {
+				return "canonical-merge-request[]"
+			}
 			if resource == "pr" || resource == "pull-request" {
 				if operation == "create" {
 					return "integration-pull-request-status"
 				}
-				return "tracker-pull-request"
 			}
 			if operation == "create" {
 				return "integration-operation-result"
 			}
 			return "canonical-merge-request"
 		case "comment", "review":
+			if operation == "create" || operation == "resolve" {
+				return "integration-operation-result"
+			}
 			return "review-remark[]"
 		}
 	case model.IntegrationTypeMessenger:

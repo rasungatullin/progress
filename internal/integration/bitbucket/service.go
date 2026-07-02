@@ -91,6 +91,11 @@ type apiPullRequest struct {
 	} `json:"destination"`
 }
 
+type apiPullRequestPage struct {
+	Values []apiPullRequest `json:"values"`
+	Next   string           `json:"next"`
+}
+
 type apiUser struct {
 	UUID        string `json:"uuid"`
 	DisplayName string `json:"display_name"`
@@ -105,6 +110,7 @@ type apiUser struct {
 
 type apiCommentPage struct {
 	Values []apiComment `json:"values"`
+	Next   string       `json:"next"`
 }
 
 type apiComment struct {
@@ -190,6 +196,12 @@ type serverActivityPage struct {
 	Values []serverActivity `json:"values"`
 }
 
+type serverPullRequestPage struct {
+	Values        []serverPullRequest `json:"values"`
+	IsLastPage    bool                `json:"isLastPage"`
+	NextPageStart int                 `json:"nextPageStart"`
+}
+
 type serverActivity struct {
 	ID          int            `json:"id"`
 	CreatedDate int64          `json:"createdDate"`
@@ -234,10 +246,19 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executeRepositoryGet(ctx, response, req)
 	case isMergeRequestObject(req) && req.Operation == "get":
 		return s.executePullRequestGet(ctx, response, req)
+	case isMergeRequestObject(req) && (req.Operation == "list" || req.Operation == "search"):
+		return s.executePullRequestList(ctx, response, req)
 	case isMergeRequestObject(req) && req.Operation == "create":
 		return s.executePullRequestCreate(ctx, response, req)
 	case isMergeRequestObject(req) && req.Operation == "comments":
 		return s.executePullRequestComments(ctx, response, req)
+	case isMergeRequestCommentObject(req) && req.Operation == "create":
+		return s.executePullRequestCommentCreate(ctx, response, req)
+	case isMergeRequestCommentObject(req) && req.Operation == "resolve":
+		err := fmt.Errorf("Bitbucket comment resolve is not supported by current integration adapter")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindUnsupportedOperation, Message: err.Error()}
+		return response, err
 	default:
 		err := fmt.Errorf("Bitbucket integration does not support %s %s", firstNonEmpty(req.ObjectType, req.Resource), req.Operation)
 		response.Status = model.ResponseStatusFailed
@@ -460,6 +481,184 @@ func (s *Service) executeServerPullRequestGet(ctx context.Context, response mode
 	return response, nil
 }
 
+func (s *Service) executePullRequestList(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository, err := s.resolveRepository(req.Repository, req.RepoProvided)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	state, states, err := normalizePullRequestListState(req.State)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	scope, err := normalizePullRequestListScope(req.Scope)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 30
+	}
+
+	if s.apiVariant() == apiVariantServer {
+		return s.executeServerPullRequestList(ctx, response, req, repository, state, scope, limit)
+	}
+
+	query := url.Values{}
+	for _, item := range states {
+		query.Add("state", item)
+	}
+	query.Set("pagelen", strconv.Itoa(limit))
+	filter := strings.TrimSpace(req.Query)
+	if scope != "all" {
+		currentUser, userErr := s.currentCloudUser(ctx)
+		if userErr != nil {
+			response.Status = model.ResponseStatusFailed
+			response.Failure = failureForHTTPStatus(0, userErr, "")
+			return response, userErr
+		}
+		userUUID := strings.TrimSpace(currentUser.UUID)
+		if userUUID == "" {
+			err := fmt.Errorf("Bitbucket current user uuid is required for pull request scope %s", scope)
+			response.Status = model.ResponseStatusFailed
+			response.Failure = &model.Failure{Kind: model.FailureKindExternalFailure, Message: err.Error()}
+			return response, err
+		}
+		scopeFilter := fmt.Sprintf(`author.uuid="%s"`, userUUID)
+		if scope == "reviewer" {
+			scopeFilter = fmt.Sprintf(`reviewers.uuid="%s"`, userUUID)
+		}
+		filter = combineBitbucketFilters(filter, scopeFilter)
+	}
+	if filter != "" {
+		query.Set("q", filter)
+	}
+
+	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests?%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), query.Encode())
+	items := make([]apiPullRequest, 0, limit)
+	for endpoint != "" && len(items) < limit {
+		status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			response.Status = model.ResponseStatusFailed
+			response.Failure = failureForHTTPStatus(status, err, string(body))
+			response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+			return response, err
+		}
+
+		var raw apiPullRequestPage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return responseWithDecodeFailure(response, err)
+		}
+		for _, item := range raw.Values {
+			if len(items) >= limit {
+				break
+			}
+			items = append(items, item)
+		}
+		endpoint = strings.TrimSpace(raw.Next)
+	}
+
+	response.MergeRequests = make([]model.MergeRequest, 0, len(items))
+	response.SearchResults = make([]model.TrackerSearchResult, 0, len(items))
+	for _, item := range items {
+		pr := *mergeRequestFromAPI(repository.fullName, item)
+		response.MergeRequests = append(response.MergeRequests, pr)
+		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
+			System:     "bitbucket",
+			Repository: repository.fullName,
+			Kind:       "merge-request",
+			Number:     pr.Number,
+			Title:      pr.Title,
+			State:      pr.State,
+			URL:        pr.URL,
+			UpdatedAt:  pr.UpdatedAt,
+		})
+	}
+	response.Metadata = map[string]string{
+		"repository": repository.fullName,
+		"state":      state,
+		"scope":      scope,
+		"limit":      strconv.Itoa(limit),
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executeServerPullRequestList(ctx context.Context, response model.Response, req model.ProviderRequest, repository repositoryRef, state string, scope string, limit int) (model.Response, error) {
+	if scope != "all" {
+		err := fmt.Errorf("Bitbucket Server pull request scope %s is not supported by current integration adapter", scope)
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindUnsupportedOperation, Message: err.Error()}
+		return response, err
+	}
+	query := url.Values{}
+	query.Set("state", bitbucketServerListState(state))
+	query.Set("limit", strconv.Itoa(limit))
+	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests?%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), query.Encode()))
+	items := make([]serverPullRequest, 0, limit)
+	for endpoint != "" && len(items) < limit {
+		status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			response.Status = model.ResponseStatusFailed
+			response.Failure = failureForHTTPStatus(status, err, string(body))
+			response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+			return response, err
+		}
+
+		var raw serverPullRequestPage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return responseWithDecodeFailure(response, err)
+		}
+		for _, item := range raw.Values {
+			if len(items) >= limit {
+				break
+			}
+			if state == "closed" && item.State != "MERGED" && item.State != "DECLINED" {
+				continue
+			}
+			items = append(items, item)
+		}
+		if raw.IsLastPage || raw.NextPageStart <= 0 {
+			break
+		}
+		nextQuery := url.Values{}
+		nextQuery.Set("state", bitbucketServerListState(state))
+		nextQuery.Set("limit", strconv.Itoa(limit))
+		nextQuery.Set("start", strconv.Itoa(raw.NextPageStart))
+		endpoint = s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests?%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), nextQuery.Encode()))
+	}
+
+	response.MergeRequests = make([]model.MergeRequest, 0, len(items))
+	response.SearchResults = make([]model.TrackerSearchResult, 0, len(items))
+	for _, item := range items {
+		pr := *mergeRequestFromServerAPI(repository.fullName, item)
+		response.MergeRequests = append(response.MergeRequests, pr)
+		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
+			System:     "bitbucket",
+			Repository: repository.fullName,
+			Kind:       "merge-request",
+			Number:     pr.Number,
+			Title:      pr.Title,
+			State:      pr.State,
+			URL:        pr.URL,
+			UpdatedAt:  pr.UpdatedAt,
+		})
+	}
+	response.Metadata = map[string]string{
+		"repository": repository.fullName,
+		"state":      state,
+		"scope":      scope,
+		"limit":      strconv.Itoa(limit),
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
 func (s *Service) executePullRequestCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	repository, err := s.resolveRepository(req.Repository, req.RepoProvided)
 	if err != nil {
@@ -590,39 +789,107 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 	}
 
 	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number)
-	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+	response.ReviewRemarks = []model.ReviewRemark{}
+	for endpoint != "" {
+		status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			response.Status = model.ResponseStatusFailed
+			response.Failure = failureForHTTPStatus(status, err, string(body))
+			response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+			return response, err
+		}
+
+		var raw apiCommentPage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return responseWithDecodeFailure(response, err)
+		}
+		for _, item := range raw.Values {
+			response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarkFromAPIComment(repository.fullName, req.Number, item))
+		}
+		endpoint = strings.TrimSpace(raw.Next)
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executePullRequestCommentCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository, err := s.resolveRepository(req.Repository, req.RepoProvided)
 	if err != nil {
 		response.Status = model.ResponseStatusFailed
-		response.Failure = failureForHTTPStatus(status, err, string(body))
-		response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	if req.Number <= 0 {
+		err := fmt.Errorf("Bitbucket pull request number must be greater than zero")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	body := strings.TrimSpace(firstNonEmpty(req.Text, req.Body))
+	if body == "" {
+		err := fmt.Errorf("Bitbucket pull request comment body is required")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	if strings.TrimSpace(req.Path) == "" && req.Line > 0 {
+		err := fmt.Errorf("Bitbucket pull request inline comment path is required")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	if s.apiVariant() == apiVariantServer {
+		err := fmt.Errorf("Bitbucket Server pull request comment create is not supported by current integration adapter")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindUnsupportedOperation, Message: err.Error()}
 		return response, err
 	}
 
-	var raw apiCommentPage
-	if err := json.Unmarshal(body, &raw); err != nil {
+	payload := map[string]any{
+		"content": map[string]string{"raw": body},
+	}
+	if strings.TrimSpace(req.Path) != "" {
+		if req.Line <= 0 {
+			err := fmt.Errorf("Bitbucket pull request inline comment line must be greater than zero")
+			response.Status = model.ResponseStatusFailed
+			response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+			return response, err
+		}
+		inline := map[string]any{"path": strings.TrimSpace(req.Path)}
+		if strings.EqualFold(strings.TrimSpace(req.Side), "LEFT") {
+			inline["from"] = req.Line
+		} else {
+			inline["to"] = req.Line
+		}
+		payload["inline"] = inline
+	}
+	content, _ := json.Marshal(payload)
+	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number)
+	status, responseBody, err := s.do(ctx, http.MethodPost, endpoint, content)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = failureForHTTPStatus(status, err, string(responseBody))
+		response.OperationResult = operationResult(req, status, http.MethodPost, repository.fullName, err, responseBody)
+		return response, err
+	}
+
+	var raw apiComment
+	if err := json.Unmarshal(responseBody, &raw); err != nil {
 		return responseWithDecodeFailure(response, err)
 	}
-	response.ReviewRemarks = make([]model.ReviewRemark, 0, len(raw.Values))
-	for _, item := range raw.Values {
-		remark := model.ReviewRemark{
-			System:             "bitbucket",
-			Repository:         repository.fullName,
-			MergeRequestNumber: req.Number,
-			ExternalID:         strconv.Itoa(item.ID),
-			Author:             userFromAPI(item.User),
-			Body:               item.Content.Raw,
-			URL:                strings.TrimSpace(item.Links.HTML.Href),
-			CreatedAt:          strings.TrimSpace(item.CreatedOn),
-			UpdatedAt:          strings.TrimSpace(item.UpdatedOn),
-		}
-		if item.Inline != nil {
-			remark.Path = strings.TrimSpace(item.Inline.Path)
-			remark.Line = item.Inline.To
-			if remark.Line == 0 {
-				remark.Line = item.Inline.From
-			}
-		}
-		response.ReviewRemarks = append(response.ReviewRemarks, remark)
+	remark := reviewRemarkFromAPIComment(repository.fullName, req.Number, raw)
+	response.ReviewRemarks = []model.ReviewRemark{remark}
+	response.OperationResult = &model.OperationResult{
+		System:     "bitbucket",
+		ObjectType: "review-remark",
+		Operation:  "create",
+		Status:     model.ResponseStatusOK,
+		ExternalID: remark.ExternalID,
+		URL:        remark.URL,
+		HTTPStatus: status,
+		Method:     http.MethodPost,
+		Endpoint:   endpoint,
+		Message:    fmt.Sprintf("Bitbucket pull request comment created for %s#%d", repository.fullName, req.Number),
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
@@ -667,6 +934,9 @@ func (s *Service) do(ctx context.Context, method string, endpoint string, payloa
 
 	base := strings.TrimRight(firstNonEmpty(s.config.BaseURL, defaultBaseURL), "/")
 	requestURL := base + "/" + strings.TrimLeft(endpoint, "/")
+	if strings.HasPrefix(strings.ToLower(endpoint), "http://") || strings.HasPrefix(strings.ToLower(endpoint), "https://") {
+		requestURL = endpoint
+	}
 	var body io.Reader
 	if payload != nil {
 		body = bytes.NewReader(payload)
@@ -771,6 +1041,78 @@ func (s *Service) token() string {
 	return ""
 }
 
+func (s *Service) currentCloudUser(ctx context.Context) (apiUserResponse, error) {
+	status, body, err := s.do(ctx, http.MethodGet, "user", nil)
+	if err != nil {
+		return apiUserResponse{}, fmt.Errorf("Bitbucket current user request failed with status %d: %w", status, err)
+	}
+	var raw apiUserResponse
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return apiUserResponse{}, err
+	}
+	return raw, nil
+}
+
+func normalizePullRequestListState(raw string) (string, []string, error) {
+	state := strings.TrimSpace(strings.ToLower(raw))
+	switch state {
+	case "":
+		return "closed", []string{"MERGED", "DECLINED"}, nil
+	case "open":
+		return "open", []string{"OPEN"}, nil
+	case "closed":
+		return "closed", []string{"MERGED", "DECLINED"}, nil
+	case "merged":
+		return "merged", []string{"MERGED"}, nil
+	case "declined":
+		return "declined", []string{"DECLINED"}, nil
+	case "all":
+		return "all", []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}, nil
+	default:
+		return "", nil, fmt.Errorf("Bitbucket pull request state must be one of open, closed, merged, declined or all")
+	}
+}
+
+func normalizePullRequestListScope(raw string) (string, error) {
+	scope := strings.TrimSpace(strings.ToLower(raw))
+	switch scope {
+	case "", "all":
+		return "all", nil
+	case "author", "authored", "mine":
+		return "authored", nil
+	case "reviewer", "reviewed", "review":
+		return "reviewer", nil
+	default:
+		return "", fmt.Errorf("Bitbucket pull request scope must be one of all, authored or reviewer")
+	}
+}
+
+func combineBitbucketFilters(left string, right string) string {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	switch {
+	case left == "":
+		return right
+	case right == "":
+		return left
+	default:
+		return "(" + left + ") AND (" + right + ")"
+	}
+}
+
+func bitbucketServerListState(state string) string {
+	switch state {
+	case "open":
+		return "OPEN"
+	case "merged":
+		return "MERGED"
+	case "declined":
+		return "DECLINED"
+	default:
+		return "ALL"
+	}
+}
+
 func mergeRequestFromAPI(repository string, raw apiPullRequest) *model.MergeRequest {
 	return &model.MergeRequest{
 		System:     "bitbucket",
@@ -787,6 +1129,29 @@ func mergeRequestFromAPI(repository string, raw apiPullRequest) *model.MergeRequ
 		CreatedAt:  strings.TrimSpace(raw.CreatedOn),
 		UpdatedAt:  strings.TrimSpace(raw.UpdatedOn),
 	}
+}
+
+func reviewRemarkFromAPIComment(repository string, number int, item apiComment) model.ReviewRemark {
+	remark := model.ReviewRemark{
+		System:             "bitbucket",
+		Repository:         repository,
+		MergeRequestNumber: number,
+		ExternalID:         strconv.Itoa(item.ID),
+		Author:             userFromAPI(item.User),
+		State:              "unresolved",
+		Body:               item.Content.Raw,
+		URL:                strings.TrimSpace(item.Links.HTML.Href),
+		CreatedAt:          strings.TrimSpace(item.CreatedOn),
+		UpdatedAt:          strings.TrimSpace(item.UpdatedOn),
+	}
+	if item.Inline != nil {
+		remark.Path = strings.TrimSpace(item.Inline.Path)
+		remark.Line = item.Inline.To
+		if remark.Line == 0 {
+			remark.Line = item.Inline.From
+		}
+	}
+	return remark
 }
 
 func userFromAPI(raw apiUser) model.User {
@@ -966,6 +1331,11 @@ func isRepositoryObject(req model.ProviderRequest) bool {
 func isMergeRequestObject(req model.ProviderRequest) bool {
 	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
 	return object == "merge-request" || object == "pull-request" || object == "pr" || object == "mr"
+}
+
+func isMergeRequestCommentObject(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
+	return object == "comment" && req.IntegrationType == model.IntegrationTypeRepository
 }
 
 func firstNonEmpty(values ...string) string {
