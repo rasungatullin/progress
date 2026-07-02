@@ -96,8 +96,10 @@ progress synthesize --config ./configs/dev.yaml
 - [docs/contours/integration/README.md](docs/contours/integration/README.md) — контур интеграции с внешними системами;
 - [docs/contours/integration/TARGET_ARCHITECTURE.md](docs/contours/integration/TARGET_ARCHITECTURE.md) — целевое архитектурное состояние контура интеграции;
 - [docs/contours/decision/README.md](docs/contours/decision/README.md) — контур принятия решения;
+- [docs/contours/decision/TARGET_ARCHITECTURE.md](docs/contours/decision/TARGET_ARCHITECTURE.md) — целевое архитектурное состояние контура принятия решения;
 - [docs/contours/decision/PLAN.md](docs/contours/decision/PLAN.md) — прикладной план развития контура решения по циклу задачи;
 - [docs/contours/execution/README.md](docs/contours/execution/README.md) — контур исполнения;
+- [docs/contours/execution/TARGET_ARCHITECTURE.md](docs/contours/execution/TARGET_ARCHITECTURE.md) — целевое архитектурное состояние контура исполнения;
 - [docs/contours/execution/STRUCTURED_IO.md](docs/contours/execution/STRUCTURED_IO.md) — структурированный ввод и вывод контура исполнения;
 - [docs/contours/execution/CLI.md](docs/contours/execution/CLI.md) — изолированный и полный запуск исполнительного контура;
 - [docs/PLAN.md](docs/PLAN.md) — поэтапный план архитектурного развития.
