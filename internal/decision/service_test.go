@@ -112,6 +112,18 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if executionStub.invocation.Action != "implement" {
 		t.Fatalf("unexpected execution action: %q", executionStub.invocation.Action)
 	}
+	if executionStub.invocation.Assignment == nil {
+		t.Fatal("expected execution assignment")
+	}
+	if executionStub.invocation.Assignment.Action != "implement" || executionStub.invocation.Assignment.Profile != defaultExecutionProfile {
+		t.Fatalf("unexpected execution assignment: %#v", executionStub.invocation.Assignment)
+	}
+	if executionStub.invocation.Assignment.CanonicalTask == nil || executionStub.invocation.Assignment.CanonicalTask.Number != 123 {
+		t.Fatalf("assignment must include canonical task: %#v", executionStub.invocation.Assignment)
+	}
+	if len(executionStub.invocation.Assignment.Reasons) == 0 || executionStub.invocation.Assignment.Reasons[0].Code == "" {
+		t.Fatalf("assignment must include decision reasons: %#v", executionStub.invocation.Assignment)
+	}
 	if executionStub.invocation.Profile != defaultExecutionProfile {
 		t.Fatalf("unexpected execution invocation profile: %q", executionStub.invocation.Profile)
 	}
@@ -211,8 +223,17 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 	if result.ExecutionPlan == nil {
 		t.Fatal("expected execution plan")
 	}
+	if result.Context.Task.Number != 211 || result.Context.Task.Traits[0] != "description-assessment" {
+		t.Fatalf("expected canonical task in consideration context: %#v", result.Context.Task)
+	}
 	if result.ExecutionPlan.Action != "task-description-assessment" {
 		t.Fatalf("unexpected action: %q", result.ExecutionPlan.Action)
+	}
+	if result.ExecutionPlan.Assignment == nil {
+		t.Fatal("expected execution assignment")
+	}
+	if result.ExecutionPlan.Assignment.CanonicalTask == nil || result.ExecutionPlan.Assignment.CanonicalTask.Repository != "owner/name" {
+		t.Fatalf("unexpected canonical task assignment: %#v", result.ExecutionPlan.Assignment)
 	}
 	if result.ExecutionPlan.Step != "assess-description" || result.ExecutionPlan.Profile != "task-description-assessor" {
 		t.Fatalf("unexpected execution plan: %#v", result.ExecutionPlan)
@@ -433,7 +454,12 @@ type stubExecutionStarter struct {
 	invocation execution.Invocation
 }
 
-func (s *stubExecutionStarter) Start(_ context.Context, invocation execution.Invocation) (execution.LaunchResult, error) {
+func (s *stubExecutionStarter) Execute(_ context.Context, invocation execution.Invocation) (execution.ExecutionResult, error) {
 	s.invocation = invocation
-	return s.result, s.err
+	return execution.ExecutionResult{
+		Status:     s.result.Status,
+		Summary:    s.result.Summary,
+		Assignment: invocation.Assignment,
+		Launch:     &s.result,
+	}, s.err
 }

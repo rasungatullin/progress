@@ -119,13 +119,41 @@ type RepositorySpec struct {
 	URL string `json:"url,omitempty"`
 }
 
+type AssignmentReason struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type ObjectRef struct {
+	Type       string            `json:"type,omitempty"`
+	System     string            `json:"system,omitempty"`
+	Repository string            `json:"repository,omitempty"`
+	Number     int               `json:"number,omitempty"`
+	ID         string            `json:"id,omitempty"`
+	Title      string            `json:"title,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
+type ExecutionAssignment struct {
+	Action          string             `json:"action,omitempty"`
+	Profile         string             `json:"profile,omitempty"`
+	ExpectedResult  string             `json:"expected_result,omitempty"`
+	Constraints     []string           `json:"constraints,omitempty"`
+	CanonicalTask   *ObjectRef         `json:"canonical_task,omitempty"`
+	RelatedObjects  []ObjectRef        `json:"related_objects,omitempty"`
+	Reasons         []AssignmentReason `json:"reasons,omitempty"`
+	StructuredInput *StructuredInput   `json:"structured_input,omitempty"`
+}
+
 type Invocation struct {
-	Task       string         `json:"task,omitempty"`
-	Action     string         `json:"action,omitempty"`
-	Profile    string         `json:"profile,omitempty"`
-	Repository RepositorySpec `json:"repository,omitempty"`
-	Workplace  WorkplaceSpec  `json:"workplace,omitempty"`
-	Launch     LaunchSpec     `json:"launch,omitempty"`
+	Task       string               `json:"task,omitempty"`
+	Action     string               `json:"action,omitempty"`
+	Assignment *ExecutionAssignment `json:"assignment,omitempty"`
+	Profile    string               `json:"profile,omitempty"`
+	Repository RepositorySpec       `json:"repository,omitempty"`
+	Workplace  WorkplaceSpec        `json:"workplace,omitempty"`
+	Launch     LaunchSpec           `json:"launch,omitempty"`
 }
 
 type Profile struct {
@@ -271,9 +299,23 @@ type OperationResult struct {
 	Name    string          `json:"name,omitempty"`
 	Kind    OperationKind   `json:"kind,omitempty"`
 	Title   string          `json:"title,omitempty"`
+	Input   string          `json:"input,omitempty"`
+	Output  string          `json:"output,omitempty"`
 	Status  OperationStatus `json:"status,omitempty"`
 	Summary string          `json:"summary,omitempty"`
 	Failure *Failure        `json:"failure,omitempty"`
+}
+
+type Artifact struct {
+	Type string `json:"type,omitempty"`
+	Path string `json:"path,omitempty"`
+	URL  string `json:"url,omitempty"`
+}
+
+type DiagnosticLink struct {
+	Type string `json:"type,omitempty"`
+	Path string `json:"path,omitempty"`
+	URL  string `json:"url,omitempty"`
 }
 
 type LaunchResult struct {
@@ -287,10 +329,13 @@ type LaunchResult struct {
 }
 
 type ExecutionResult struct {
-	Status     string            `json:"status,omitempty"`
-	Summary    string            `json:"summary,omitempty"`
-	Action     Action            `json:"action,omitempty"`
-	Operations []OperationResult `json:"operations,omitempty"`
-	Launch     *LaunchResult     `json:"launch,omitempty"`
-	Failure    *Failure          `json:"failure,omitempty"`
+	Status          string               `json:"status,omitempty"`
+	Summary         string               `json:"summary,omitempty"`
+	Assignment      *ExecutionAssignment `json:"assignment,omitempty"`
+	Action          Action               `json:"action,omitempty"`
+	Operations      []OperationResult    `json:"operations,omitempty"`
+	Artifacts       []Artifact           `json:"artifacts,omitempty"`
+	DiagnosticLinks []DiagnosticLink     `json:"diagnostic_links,omitempty"`
+	Launch          *LaunchResult        `json:"launch,omitempty"`
+	Failure         *Failure             `json:"failure,omitempty"`
 }

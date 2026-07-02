@@ -121,6 +121,20 @@ func printDecisionStartResult(cmd *cobra.Command, result decision.StartResult) {
 			cmd.Printf("execution-profile=%s\n", result.Decision.ExecutionPlan.Profile)
 		}
 	}
+	if result.ExecutionResult != nil {
+		if result.ExecutionResult.Status != "" {
+			cmd.Printf("execution-result-status=%s\n", result.ExecutionResult.Status)
+		}
+		if result.ExecutionResult.Action.Name != "" {
+			cmd.Printf("execution-action=%s\n", result.ExecutionResult.Action.Name)
+		}
+		for _, operation := range result.ExecutionResult.Operations {
+			if operation.Name == "" && operation.Status == "" {
+				continue
+			}
+			cmd.Printf("execution-operation=%s:%s\n", operation.Name, operation.Status)
+		}
+	}
 	if result.Execution != nil {
 		if result.Execution.Status != "" {
 			cmd.Printf("execution-status=%s\n", result.Execution.Status)

@@ -20,7 +20,7 @@ type integrationExecutor interface {
 }
 
 type executionStarter interface {
-	Start(context.Context, execution.Invocation) (execution.LaunchResult, error)
+	Execute(context.Context, execution.Invocation) (execution.ExecutionResult, error)
 }
 
 type Service struct {
@@ -71,6 +71,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 
 	decisionContext := DecisionContext{
 		Signal: signal,
+		Task:   canonicalTaskFromIssue(response.Issue),
 		Issue:  response.Issue,
 	}
 	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext})
@@ -93,15 +94,16 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		return result, nil
 	}
 
-	launchResult, err := s.execution.Start(ctx, executionInvocationFromDecisionPlan(decision.ExecutionPlan))
+	executionResult, err := s.execution.Execute(ctx, executionInvocationFromDecisionPlan(decision.ExecutionPlan))
+	result.ExecutionResult = &executionResult
 	if err != nil {
-		if launchResult.Status != "" || strings.TrimSpace(launchResult.Summary) != "" || launchResult.StructuredOutput != nil {
-			result.Execution = &launchResult
+		if executionResult.Launch != nil && (executionResult.Launch.Status != "" || strings.TrimSpace(executionResult.Launch.Summary) != "" || executionResult.Launch.StructuredOutput != nil) {
+			result.Execution = executionResult.Launch
 		}
 
 		return result, err
 	}
-	result.Execution = &launchResult
+	result.Execution = executionResult.Launch
 
 	s.logger.Printf("Контекст решения собран: задача=%d готовность=%t решение=%q", input.TaskNumber, result.Ready, decision.Type)
 	return result, nil
@@ -115,15 +117,18 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 		result.Failure = decisionFailure("missing_issue", err, false, true)
 		return result, err
 	}
+	if result.Context.Task.Number == 0 {
+		result.Context.Task = canonicalTaskFromIssue(input.Context.Issue)
+	}
 
-	route, err := s.selectWorkflowRoute(ctx, input.Context.Issue)
+	route, err := s.selectWorkflowRoute(ctx, result.Context.Task)
 	if err != nil {
 		result.Status = ConsiderationStatusFailed
 		result.Failure = decisionFailure("route_resolution_failed", err, false, true)
 		return result, err
 	}
 
-	decision := buildExecuteDecision(input.Context.Issue, route)
+	decision := buildExecuteDecision(result.Context.Task, input.Context.Issue, route)
 	result.Status = ConsiderationStatusExecution
 	result.Route = route.Route
 	result.Checks = route.Checks
@@ -171,7 +176,7 @@ func (s *Service) resolveCurrentRepository(ctx context.Context) (string, error) 
 	return normalized, nil
 }
 
-func buildExecuteDecision(issue *integration.TrackerIssue, route selectedWorkflowRoute) Decision {
+func buildExecuteDecision(task integration.CanonicalTask, issue *integration.TrackerIssue, route selectedWorkflowRoute) Decision {
 	prompt := buildExecutionTask(issue)
 	if strings.TrimSpace(route.Step) == "" {
 		route.Step = "implement"
@@ -203,6 +208,20 @@ func buildExecuteDecision(issue *integration.TrackerIssue, route selectedWorkflo
 		routeRef.Title = route.Step
 	}
 
+	structuredInput := &execution.StructuredInput{
+		Task:        prompt,
+		Constraints: append([]string(nil), route.Constraints...),
+	}
+	assignment := &execution.ExecutionAssignment{
+		Action:          route.Action,
+		Profile:         route.Profile,
+		ExpectedResult:  route.ExpectedResult,
+		Constraints:     append([]string(nil), route.Constraints...),
+		CanonicalTask:   executionObjectRefFromCanonicalTask(task),
+		Reasons:         executionReasonsFromDecisionReasons(reasons),
+		StructuredInput: structuredInput,
+	}
+
 	return Decision{
 		Type:    DecisionType(DecisionTypeExecute),
 		Status:  ConsiderationStatusExecution,
@@ -210,21 +229,19 @@ func buildExecuteDecision(issue *integration.TrackerIssue, route selectedWorkflo
 		Checks:  append([]RouteCheckResult(nil), route.Checks...),
 		Reasons: reasons,
 		ExecutionPlan: &ExecutionPlan{
-			TaskNumber:     issue.Number,
-			TaskTitle:      issue.Title,
-			Repository:     strings.TrimSpace(issue.Repository),
-			Action:         route.Action,
-			Step:           route.Step,
-			Profile:        route.Profile,
-			Prompt:         prompt,
-			ExpectedResult: route.ExpectedResult,
-			Constraints:    append([]string(nil), route.Constraints...),
-			Route:          routeRef,
-			Reasons:        append([]DecisionReason(nil), reasons...),
-			StructuredInput: &execution.StructuredInput{
-				Task:        prompt,
-				Constraints: append([]string(nil), route.Constraints...),
-			},
+			TaskNumber:      issue.Number,
+			TaskTitle:       issue.Title,
+			Repository:      strings.TrimSpace(issue.Repository),
+			Action:          route.Action,
+			Step:            route.Step,
+			Profile:         route.Profile,
+			Prompt:          prompt,
+			ExpectedResult:  route.ExpectedResult,
+			Constraints:     append([]string(nil), route.Constraints...),
+			Route:           routeRef,
+			Reasons:         append([]DecisionReason(nil), reasons...),
+			Assignment:      assignment,
+			StructuredInput: structuredInput,
 		},
 	}
 }
@@ -252,6 +269,7 @@ func executionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Invocati
 	return execution.Invocation{
 		Task:       fmt.Sprintf("task-%d", plan.TaskNumber),
 		Action:     plan.Action,
+		Assignment: plan.Assignment,
 		Profile:    plan.Profile,
 		Repository: execution.RepositorySpec{URL: plan.Repository},
 		Workplace: execution.WorkplaceSpec{
@@ -262,6 +280,87 @@ func executionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Invocati
 			StructuredOutput: true,
 		},
 	}
+}
+
+func canonicalTaskFromIssue(issue *integration.TrackerIssue) integration.CanonicalTask {
+	if issue == nil {
+		return integration.CanonicalTask{}
+	}
+
+	attributes := make(map[string]string)
+	if state := strings.TrimSpace(issue.State); state != "" {
+		attributes["state"] = state
+	}
+	if repository := strings.TrimSpace(issue.Repository); repository != "" {
+		attributes["repository"] = repository
+	}
+
+	return integration.CanonicalTask{
+		System:     strings.TrimSpace(issue.System),
+		Repository: strings.TrimSpace(issue.Repository),
+		Number:     issue.Number,
+		Title:      strings.TrimSpace(issue.Title),
+		Body:       strings.TrimSpace(issue.Body),
+		State:      strings.TrimSpace(issue.State),
+		URL:        strings.TrimSpace(issue.URL),
+		Traits:     normalizeFeatures(issue.Labels),
+		Attributes: attributes,
+	}
+}
+
+func executionObjectRefFromCanonicalTask(task integration.CanonicalTask) *execution.ObjectRef {
+	if task.Number == 0 && strings.TrimSpace(task.Title) == "" && strings.TrimSpace(task.URL) == "" {
+		return nil
+	}
+
+	return &execution.ObjectRef{
+		Type:       "task",
+		System:     strings.TrimSpace(task.System),
+		Repository: strings.TrimSpace(task.Repository),
+		Number:     task.Number,
+		Title:      strings.TrimSpace(task.Title),
+		URL:        strings.TrimSpace(task.URL),
+		Attributes: cloneStringMap(task.Attributes),
+	}
+}
+
+func executionReasonsFromDecisionReasons(reasons []DecisionReason) []execution.AssignmentReason {
+	if len(reasons) == 0 {
+		return nil
+	}
+
+	result := make([]execution.AssignmentReason, 0, len(reasons))
+	for _, reason := range reasons {
+		if strings.TrimSpace(reason.Code) == "" && strings.TrimSpace(reason.Message) == "" {
+			continue
+		}
+		result = append(result, execution.AssignmentReason{
+			Code:    strings.TrimSpace(reason.Code),
+			Message: strings.TrimSpace(reason.Message),
+		})
+	}
+	if len(result) == 0 {
+		return nil
+	}
+
+	return result
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" && value == "" {
+			continue
+		}
+		result[key] = value
+	}
+	return result
 }
 
 func decisionFailure(code string, err error, retryable bool, manualIntervention bool) *DecisionFailure {

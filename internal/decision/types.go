@@ -34,6 +34,7 @@ type StartInput struct {
 
 type DecisionContext struct {
 	Signal Signal
+	Task   integration.CanonicalTask
 	Issue  *integration.TrackerIssue
 }
 
@@ -79,6 +80,7 @@ type ExecutionPlan struct {
 	Constraints     []string
 	Route           ProcessingRoute
 	Reasons         []DecisionReason
+	Assignment      *execution.ExecutionAssignment
 	StructuredInput *execution.StructuredInput
 }
 
@@ -107,9 +109,10 @@ type ConsiderationResult struct {
 }
 
 type StartResult struct {
-	Context       DecisionContext
-	Ready         bool
-	Consideration *ConsiderationResult
-	Decision      *Decision
-	Execution     *execution.LaunchResult
+	Context         DecisionContext
+	Ready           bool
+	Consideration   *ConsiderationResult
+	Decision        *Decision
+	ExecutionResult *execution.ExecutionResult
+	Execution       *execution.LaunchResult
 }

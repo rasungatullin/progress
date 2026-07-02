@@ -19,18 +19,20 @@ type workflowConfigFile struct {
 }
 
 type workflowRouteConfig struct {
-	Name           string   `json:"name"`
-	Title          string   `json:"title"`
-	Description    string   `json:"description"`
-	Step           string   `json:"step"`
-	Action         string   `json:"action"`
-	Profile        string   `json:"profile"`
-	HasLabels      []string `json:"has_labels"`
-	MissingLabels  []string `json:"missing_labels"`
-	ExpectedResult string   `json:"expected_result"`
-	Constraints    []string `json:"constraints"`
-	ReasonCode     string   `json:"reason_code"`
-	ReasonMessage  string   `json:"reason_message"`
+	Name            string   `json:"name"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	Step            string   `json:"step"`
+	Action          string   `json:"action"`
+	Profile         string   `json:"profile"`
+	HasFeatures     []string `json:"has_features"`
+	MissingFeatures []string `json:"missing_features"`
+	HasLabels       []string `json:"has_labels"`
+	MissingLabels   []string `json:"missing_labels"`
+	ExpectedResult  string   `json:"expected_result"`
+	Constraints     []string `json:"constraints"`
+	ReasonCode      string   `json:"reason_code"`
+	ReasonMessage   string   `json:"reason_message"`
 }
 
 type selectedWorkflowRoute struct {
@@ -45,7 +47,7 @@ type selectedWorkflowRoute struct {
 	Checks         []RouteCheckResult
 }
 
-func (s *Service) selectWorkflowRoute(ctx context.Context, issue *integration.TrackerIssue) (selectedWorkflowRoute, error) {
+func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.CanonicalTask) (selectedWorkflowRoute, error) {
 	config, err := s.loadWorkflowConfig(ctx)
 	if err != nil {
 		return selectedWorkflowRoute{}, err
@@ -74,7 +76,7 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, issue *integration.Tr
 		}},
 	}
 	for index, route := range config.Routes {
-		check := evaluateWorkflowRoute(route, issue)
+		check := evaluateWorkflowRoute(route, task)
 		if check.Status != RouteCheckStatusPassed {
 			continue
 		}
@@ -158,7 +160,9 @@ func validateWorkflowConfig(config workflowConfigFile) error {
 			return fmt.Errorf("routes[%d].profile must be non-empty", index)
 		}
 		if len(normalizeLabels(route.HasLabels)) == 0 && len(normalizeLabels(route.MissingLabels)) == 0 {
-			return fmt.Errorf("routes[%d] must declare at least one matcher", index)
+			if len(normalizeFeatures(route.HasFeatures)) == 0 && len(normalizeFeatures(route.MissingFeatures)) == 0 {
+				return fmt.Errorf("routes[%d] must declare at least one matcher", index)
+			}
 		}
 		if strings.TrimSpace(route.ReasonCode) == "" {
 			return fmt.Errorf("routes[%d].reason_code must be non-empty", index)
@@ -171,26 +175,22 @@ func validateWorkflowConfig(config workflowConfigFile) error {
 	return nil
 }
 
-func workflowRouteMatchesIssue(route workflowRouteConfig, issue *integration.TrackerIssue) bool {
-	return evaluateWorkflowRoute(route, issue).Status == RouteCheckStatusPassed
-}
-
-func evaluateWorkflowRoute(route workflowRouteConfig, issue *integration.TrackerIssue) RouteCheckResult {
-	issueLabels := issueLabelSet(issue)
+func evaluateWorkflowRoute(route workflowRouteConfig, task integration.CanonicalTask) RouteCheckResult {
+	taskFeatures := taskFeatureSet(task)
 	reasons := make([]DecisionReason, 0)
-	for _, label := range normalizeLabels(route.HasLabels) {
-		if _, ok := issueLabels[label]; !ok {
+	for _, feature := range normalizeFeatures(append(route.HasFeatures, route.HasLabels...)) {
+		if _, ok := taskFeatures[feature]; !ok {
 			reasons = append(reasons, DecisionReason{
-				Code:    "required_label_missing",
-				Message: fmt.Sprintf("У задачи отсутствует обязательный признак %q.", label),
+				Code:    "required_feature_missing",
+				Message: fmt.Sprintf("У задачи отсутствует обязательный признак %q.", feature),
 			})
 		}
 	}
-	for _, label := range normalizeLabels(route.MissingLabels) {
-		if _, ok := issueLabels[label]; ok {
+	for _, feature := range normalizeFeatures(append(route.MissingFeatures, route.MissingLabels...)) {
+		if _, ok := taskFeatures[feature]; ok {
 			reasons = append(reasons, DecisionReason{
-				Code:    "forbidden_label_present",
-				Message: fmt.Sprintf("У задачи присутствует запрещающий признак %q.", label),
+				Code:    "forbidden_feature_present",
+				Message: fmt.Sprintf("У задачи присутствует запрещающий признак %q.", feature),
 			})
 		}
 	}
@@ -207,15 +207,11 @@ func evaluateWorkflowRoute(route workflowRouteConfig, issue *integration.Tracker
 	}
 }
 
-func issueLabelSet(issue *integration.TrackerIssue) map[string]struct{} {
-	labels := normalizeLabels(nil)
-	if issue != nil {
-		labels = normalizeLabels(issue.Labels)
-	}
-
-	set := make(map[string]struct{}, len(labels))
-	for _, label := range labels {
-		set[label] = struct{}{}
+func taskFeatureSet(task integration.CanonicalTask) map[string]struct{} {
+	features := normalizeFeatures(task.Traits)
+	set := make(map[string]struct{}, len(features))
+	for _, feature := range features {
+		set[feature] = struct{}{}
 	}
 
 	return set
@@ -241,6 +237,10 @@ func normalizeLabels(labels []string) []string {
 	}
 
 	return result
+}
+
+func normalizeFeatures(features []string) []string {
+	return normalizeLabels(features)
 }
 
 func normalizeRouteConstraints(values []string) []string {
