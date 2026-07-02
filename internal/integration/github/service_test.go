@@ -597,6 +597,39 @@ func TestServiceIssueLabelAddSuccess(t *testing.T) {
 	}
 }
 
+func TestServiceIssueLabelAddFailureUsesIssueEditDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 1, Stderr: "label update failed"},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "github",
+		Resource:        "label",
+		ObjectType:      "label",
+		Operation:       "add",
+		Repository:      "owner/name",
+		Number:          123,
+		Labels:          []string{"external-bug"},
+	})
+	assertGitHubErrorCode(t, err, StateExternalFailure)
+	if response.IssueStatus == nil {
+		t.Fatal("expected issue status")
+	}
+	diagnostics := strings.Join(response.IssueStatus.Diagnostics, "\n")
+	if !strings.Contains(diagnostics, "command=gh issue edit 123 --repo owner/name --add-label external-bug") {
+		t.Fatalf("expected issue edit diagnostic, got %#v", response.IssueStatus.Diagnostics)
+	}
+	if strings.Contains(diagnostics, "issue view") {
+		t.Fatalf("did not expect issue view diagnostic, got %#v", response.IssueStatus.Diagnostics)
+	}
+}
+
 func TestServiceIssueLabelRemoveRequiresLabels(t *testing.T) {
 	t.Parallel()
 

@@ -2,7 +2,7 @@
 
 ## 1. Назначение документа
 
-Настоящий документ определяет практический срез контура интеграции с внешними системами. Контур поддерживает GitHub как трекер и репозиторий, Bitbucket как репозиторий, Mattermost и Telegram как мессенджеры, Confluence как wiki.
+Настоящий документ определяет практический срез контура интеграции с внешними системами. Контур поддерживает GitHub как трекер и репозиторий, Bitbucket как репозиторий, Mattermost и Telegram как мессенджеры, Confluence как тип интеграции `wiki`.
 
 Документ фиксирует:
 
@@ -405,7 +405,7 @@ progress integration github api repos/owner/name/issues/123/events
 
 ### 7.17 `progress integration confluence auth status`
 
-Команда проверяет доступность Confluence через HTTP API. Для self-hosted Confluence Server/Data Center используется базовый адрес из `base_url` и путь `/rest/api/user/current`.
+Команда проверяет доступность Confluence через HTTP API. Для локально размещённой версии Confluence Server/Data Center используется базовый адрес из `base_url` и путь `/rest/api/user/current`.
 
 Настройка поддерживает два режима авторизации:
 
@@ -414,23 +414,23 @@ progress integration github api repos/owner/name/issues/123/events
 
 ### 7.18 `progress integration confluence page get`
 
-Команда получает страницу wiki по идентификатору Confluence.
+Команда получает страницу документации по идентификатору Confluence.
 
 ```bash
 progress integration confluence page get --id 12345
 ```
 
-Вариант HTTP-вызова для self-hosted Confluence:
+Вариант HTTP-вызова для локально размещённой версии Confluence:
 
 ```bash
 GET /rest/api/content/12345?expand=space,body.storage,version,history
 ```
 
-Адаптер возвращает `WikiPage` — страницу wiki с идентификатором, пространством, заголовком, телом в storage-формате, номером версии, временем обновления, пользователем обновления и ссылкой на страницу.
+Адаптер возвращает `WikiPage` — страницу документации с идентификатором, пространством, заголовком, телом в формате `storage`, номером версии, временем обновления, пользователем обновления и ссылкой на страницу.
 
 ### 7.19 `progress integration confluence page search`
 
-Команда ищет страницы wiki по CQL-запросу Confluence.
+Команда ищет страницы документации по CQL-запросу Confluence.
 
 ```bash
 progress integration confluence page search --query 'type=page and text ~ "integration"' --limit 10
@@ -502,7 +502,7 @@ flowchart TD
 1. если операция требует репозиторий, `--repo` обязателен, кроме `github repo get`, `github issue get` и `github pr get`, где можно опустить `--repo` и использовать `default_repo` из конфигурации;
 2. если операция адресует сущность по номеру, `--number` обязателен;
 3. если операция изменяет метки задачи, `--label` задаётся каноническим названием и может повторяться;
-4. если операция адресует страницу wiki, `--id` содержит внешний идентификатор страницы;
+4. если операция адресует страницу документации, `--id` содержит внешний идентификатор страницы;
 5. для машинного использования предпочтителен `--format json`;
 6. текстовый вывод нужен для ручной диагностики и первичного освоения CLI.
 

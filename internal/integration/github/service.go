@@ -966,7 +966,7 @@ func (s *Service) executeIssueLabelsChange(ctx context.Context, response model.R
 		var err error
 		repository, err = normalizeRepository(repository)
 		if err != nil {
-			status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status := issueLabelsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number, operation, req.Labels)
 			status.State = ErrorCodeInvalidRequest
 			status.Message = err.Error()
 			status.Diagnostics = append(status.Diagnostics, "issue label "+action+" request rejected before invoking gh")
@@ -979,7 +979,7 @@ func (s *Service) executeIssueLabelsChange(ctx context.Context, response model.R
 
 	number, err := normalizeIssueNumber(req.Number)
 	if err != nil {
-		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
+		status := issueLabelsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number, operation, req.Labels)
 		status.State = ErrorCodeInvalidRequest
 		status.Message = err.Error()
 		status.Diagnostics = append(status.Diagnostics, "issue label "+action+" request rejected before invoking gh")
@@ -991,7 +991,7 @@ func (s *Service) executeIssueLabelsChange(ctx context.Context, response model.R
 
 	labels := normalizeLabelNames(req.Labels)
 	if len(labels) == 0 {
-		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, number)
+		status := issueLabelsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, number, operation, labels)
 		status.State = ErrorCodeInvalidRequest
 		status.Message = "GitHub issue label is required"
 		status.Diagnostics = append(status.Diagnostics, "issue label "+action+" request rejected before invoking gh")
@@ -1016,7 +1016,7 @@ func (s *Service) executeIssueLabelsChange(ctx context.Context, response model.R
 		config.Command = defaultCommand
 	}
 
-	status := issueErrorStatus(config, result, repository, number)
+	status := issueLabelsErrorStatus(config, result, repository, number, operation, labels)
 	if err != nil {
 		var ghErr *Error
 		if errors.As(err, &ghErr) {
@@ -1660,6 +1660,53 @@ func issueErrorStatus(config resolvedConfig, result CommandResult, repository st
 	}
 	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s issue view %d --repo %s --json number,title,body,state,labels,assignees,author,url,createdAt,updatedAt", status.Command, number, repository))
 	return status
+}
+
+func issueLabelsErrorStatus(config resolvedConfig, result CommandResult, repository string, number int, operation string, labels []string) model.IssueStatus {
+	status := model.IssueStatus{
+		System:     "github",
+		Repository: repository,
+		Number:     number,
+		State:      StateExternalFailure,
+		Command:    config.Command,
+		Path:       result.Path,
+		ExitCode:   result.ExitCode,
+		Stdout:     result.Stdout,
+		Stderr:     result.Stderr,
+	}
+
+	if status.Command == "" {
+		status.Command = defaultCommand
+	}
+	if status.ExitCode == 0 {
+		status.ExitCode = -1
+	}
+
+	labels = normalizeLabelNames(labels)
+	if repository != "" {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("repository=%s", repository))
+	}
+	if number > 0 {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("number=%d", number))
+	}
+	if len(labels) > 0 {
+		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("labels=%s", strings.Join(labels, ",")))
+	}
+	status.Diagnostics = append(status.Diagnostics, issueLabelsCommandDiagnostic(status.Command, repository, number, operation, labels))
+	return status
+}
+
+func issueLabelsCommandDiagnostic(command string, repository string, number int, operation string, labels []string) string {
+	flag := "--remove-label"
+	if operation == "add" {
+		flag = "--add-label"
+	}
+
+	parts := []string{command, "issue", "edit", strconv.Itoa(number), "--repo", repository}
+	for _, label := range labels {
+		parts = append(parts, flag, label)
+	}
+	return "command=" + strings.Join(parts, " ")
 }
 
 func issueCommentsErrorStatus(config resolvedConfig, result CommandResult, repository string, number int) model.IssueStatus {
