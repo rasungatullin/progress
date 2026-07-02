@@ -83,6 +83,7 @@ progress synthesize --config ./configs/dev.yaml
 
 - [CONCEPT.md](CONCEPT.md) — общая концепция комплекса;
 - [docs/MOTIVATION.md](docs/MOTIVATION.md) — мотивация комплекса, причины существования и ключевые идеи;
+- [docs/TARGET_ARCHITECTURE.md](docs/TARGET_ARCHITECTURE.md) — целевое общее описание архитектуры, канонической задачи, маршрутов и контуров;
 - [docs/OPERATING_MODEL.md](docs/OPERATING_MODEL.md) — модель работы комплекса на уровне прикладного цикла разработки;
 - [docs/DEVELOPMENT_MODEL.md](docs/DEVELOPMENT_MODEL.md) — модель развития комплекса, вложенных рабочих циклов, профилей и исполнительных модулей;
 - [docs/UI_CONCEPT.md](docs/UI_CONCEPT.md) — первичный концепт интерфейса наблюдения и навигационного модуля;
@@ -93,6 +94,7 @@ progress synthesize --config ./configs/dev.yaml
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — целевая архитектурная схема;
 - [docs/contours/reactivity/README.md](docs/contours/reactivity/README.md) — контур реакции на внешние события;
 - [docs/contours/integration/README.md](docs/contours/integration/README.md) — контур интеграции с внешними системами;
+- [docs/contours/integration/TARGET_ARCHITECTURE.md](docs/contours/integration/TARGET_ARCHITECTURE.md) — целевое архитектурное состояние контура интеграции;
 - [docs/contours/decision/README.md](docs/contours/decision/README.md) — контур принятия решения;
 - [docs/contours/decision/PLAN.md](docs/contours/decision/PLAN.md) — прикладной план развития контура решения по циклу задачи;
 - [docs/contours/execution/README.md](docs/contours/execution/README.md) — контур исполнения;

@@ -16,8 +16,13 @@ type ghRunner interface {
 	RunRepoView(context.Context, string) (CommandResult, resolvedConfig, error)
 	RunIssueView(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunIssueComments(context.Context, string, int) (CommandResult, resolvedConfig, error)
+	RunIssueCommentCreate(context.Context, string, int, string) (CommandResult, resolvedConfig, error)
 	RunPRView(context.Context, string, int) (CommandResult, resolvedConfig, error)
+	RunPRList(context.Context, string, PRListRequest) (CommandResult, resolvedConfig, error)
 	RunPRCreate(context.Context, string, PRCreateRequest) (CommandResult, resolvedConfig, error)
+	RunPRReviewThreads(context.Context, string, int) (CommandResult, resolvedConfig, error)
+	RunPRCommentCreate(context.Context, string, int, PRCommentCreateRequest) (CommandResult, resolvedConfig, error)
+	RunPRReviewThreadResolve(context.Context, string) (CommandResult, resolvedConfig, error)
 }
 
 type Service struct {
@@ -60,6 +65,7 @@ type ghIssueUser struct {
 }
 
 type ghIssueComment struct {
+	ID        int          `json:"id"`
 	Body      string       `json:"body"`
 	URL       string       `json:"url"`
 	HTMLURL   string       `json:"html_url"`
@@ -87,6 +93,61 @@ type ghIssueLabel struct {
 	Name string `json:"name"`
 }
 
+type ghPRReviewThreadsResponse struct {
+	Data struct {
+		Repository struct {
+			PullRequest *struct {
+				ReviewThreads struct {
+					Nodes []ghPRReviewThread `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+}
+
+type ghPRReviewThread struct {
+	ID         string             `json:"id"`
+	IsResolved bool               `json:"isResolved"`
+	IsOutdated bool               `json:"isOutdated"`
+	Path       string             `json:"path"`
+	Line       int                `json:"line"`
+	Comments   ghPRReviewComments `json:"comments"`
+}
+
+type ghPRReviewComments struct {
+	Nodes []ghPRReviewComment `json:"nodes"`
+}
+
+type ghPRReviewComment struct {
+	ID        string       `json:"id"`
+	Body      string       `json:"body"`
+	URL       string       `json:"url"`
+	Path      string       `json:"path"`
+	Line      int          `json:"line"`
+	Author    *ghIssueUser `json:"author"`
+	CreatedAt string       `json:"createdAt"`
+	UpdatedAt string       `json:"updatedAt"`
+}
+
+type ghPRReviewThreadCreateResponse struct {
+	Data struct {
+		AddPullRequestReviewThread struct {
+			Thread ghPRReviewThread `json:"thread"`
+		} `json:"addPullRequestReviewThread"`
+	} `json:"data"`
+}
+
+type ghPRReviewThreadResolveResponse struct {
+	Data struct {
+		ResolveReviewThread struct {
+			Thread struct {
+				ID         string `json:"id"`
+				IsResolved bool   `json:"isResolved"`
+			} `json:"thread"`
+		} `json:"resolveReviewThread"`
+	} `json:"data"`
+}
+
 func NewService() *Service {
 	return &Service{runner: NewRunner()}
 }
@@ -97,24 +158,36 @@ func NewServiceWithConfig(config model.IntegrationSystemConfig) *Service {
 
 func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model.Response, error) {
 	response := model.Response{
-		System:    "github",
-		Resource:  req.Resource,
-		Operation: req.Operation,
+		IntegrationType: firstNonEmpty(req.IntegrationType, integrationTypeForRequest(req)),
+		System:          "github",
+		Resource:        req.Resource,
+		ObjectType:      firstNonEmpty(req.ObjectType, req.Resource),
+		Operation:       req.Operation,
 	}
 
 	switch {
 	case req.Resource == "auth" && req.Operation == "status":
 		return s.executeAuthStatus(ctx, response)
-	case (req.Resource == "repo" || req.Resource == "repository") && req.Operation == "get":
+	case isRepositoryRequest(req) && req.Operation == "get":
 		return s.executeRepoGet(ctx, response, req)
-	case req.Resource == "issue" && req.Operation == "get":
+	case isIssueRequest(req) && req.Operation == "get":
 		return s.executeIssueGet(ctx, response, req)
-	case req.Resource == "issue" && req.Operation == "comments":
+	case isIssueRequest(req) && req.Operation == "comments":
 		return s.executeIssueComments(ctx, response, req)
-	case (req.Resource == "pr" || req.Resource == "pull-request") && req.Operation == "get":
+	case isIssueCommentRequest(req) && req.Operation == "create":
+		return s.executeIssueCommentCreate(ctx, response, req)
+	case isPullRequestRequest(req) && req.Operation == "get":
 		return s.executePRGet(ctx, response, req)
-	case (req.Resource == "pr" || req.Resource == "pull-request") && req.Operation == "create":
+	case isPullRequestRequest(req) && (req.Operation == "list" || req.Operation == "search"):
+		return s.executePRList(ctx, response, req)
+	case isPullRequestRequest(req) && req.Operation == "create":
 		return s.executePRCreate(ctx, response, req)
+	case isPullRequestRequest(req) && req.Operation == "comments":
+		return s.executePRComments(ctx, response, req)
+	case isPullRequestCommentRequest(req) && req.Operation == "create":
+		return s.executePRCommentCreate(ctx, response, req)
+	case isPullRequestCommentRequest(req) && req.Operation == "resolve":
+		return s.executePRCommentResolve(ctx, response, req)
 	default:
 		err := &Error{
 			Code:    ErrorCodeInvalidRequest,
@@ -222,6 +295,236 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 	status.Message = fmt.Sprintf("GitHub pull request created for %s %s -> %s", repository, prRequest.Head, prRequest.Base)
 	status.Diagnostics = append(status.Diagnostics, "gh pr create completed successfully")
 	response.PullRequestStatus = &status
+	response.OperationResult = &model.OperationResult{
+		System:     "github",
+		ObjectType: "merge-request",
+		Operation:  "create",
+		Status:     model.ResponseStatusOK,
+		ExternalID: strconv.Itoa(status.Number),
+		URL:        status.URL,
+		Method:     "gh",
+		Endpoint:   "pr create",
+		Message:    status.Message,
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executePRList(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository := strings.TrimSpace(req.Repository)
+	if req.RepoProvided {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request list request rejected before invoking gh")
+		}
+	}
+
+	listRequest, err := normalizePRListRequest(PRListRequest{State: req.State, Scope: req.Scope, Query: req.Query, Limit: req.Limit})
+	if err != nil {
+		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request list request rejected before invoking gh")
+	}
+
+	result, config, err := s.runner.RunPRList(ctx, repository, listRequest)
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
+	if err != nil {
+		return responseWithGitHubFailure(response, result, err, "gh pr list failed before returning a pull request payload")
+	}
+	if result.ExitCode != 0 {
+		return responseWithGitHubExitFailure(response, result, repository, 0, "gh pr list exited with a non-zero code")
+	}
+
+	var raw []ghPRView
+	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}, "gh pr list returned malformed JSON")
+	}
+
+	response.MergeRequests = make([]model.MergeRequest, 0, len(raw))
+	response.SearchResults = make([]model.TrackerSearchResult, 0, len(raw))
+	for _, item := range raw {
+		pr := mergeRequestFromGHPR(repository, item)
+		response.MergeRequests = append(response.MergeRequests, pr)
+		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
+			System:     "github",
+			Repository: repository,
+			Kind:       "merge-request",
+			Number:     pr.Number,
+			Title:      pr.Title,
+			State:      pr.State,
+			URL:        pr.URL,
+			UpdatedAt:  pr.UpdatedAt,
+		})
+	}
+	response.Metadata = map[string]string{
+		"repository": repository,
+		"state":      listRequest.State,
+		"scope":      listRequest.Scope,
+		"limit":      strconv.Itoa(listRequest.Limit),
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executePRComments(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository := strings.TrimSpace(req.Repository)
+	if req.RepoProvided {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comments request rejected before invoking gh")
+		}
+	}
+	number, err := normalizePullRequestNumber(req.Number)
+	if err != nil {
+		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comments request rejected before invoking gh")
+	}
+
+	result, config, err := s.runner.RunIssueComments(ctx, repository, number)
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
+	if err != nil {
+		return responseWithGitHubFailure(response, result, err, "gh issue comments for pull request failed before returning a comments payload")
+	}
+	if result.ExitCode != 0 {
+		return responseWithGitHubExitFailure(response, result, repository, number, "gh issue comments for pull request exited with a non-zero code")
+	}
+	rawComments, err := decodeIssueComments(result.Stdout)
+	if err != nil {
+		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}, "gh issue comments for pull request returned malformed JSON")
+	}
+
+	threadResult, _, err := s.runner.RunPRReviewThreads(ctx, repository, number)
+	if err != nil {
+		return responseWithGitHubFailure(response, threadResult, err, "gh pull request review threads failed before returning a comments payload")
+	}
+	if threadResult.ExitCode != 0 {
+		return responseWithGitHubExitFailure(response, threadResult, repository, number, "gh pull request review threads exited with a non-zero code")
+	}
+	var rawThreads ghPRReviewThreadsResponse
+	if err := json.Unmarshal([]byte(threadResult.Stdout), &rawThreads); err != nil {
+		return responseWithGitHubFailure(response, threadResult, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub GraphQL JSON response: %v", err), Result: threadResult, Err: err}, "gh pull request review threads returned malformed JSON")
+	}
+
+	var threadNodes []ghPRReviewThread
+	if rawThreads.Data.Repository.PullRequest != nil {
+		threadNodes = rawThreads.Data.Repository.PullRequest.ReviewThreads.Nodes
+	}
+	response.ReviewRemarks = make([]model.ReviewRemark, 0, len(rawComments)+len(threadNodes))
+	for _, item := range rawComments {
+		response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarkFromIssueComment(repository, number, item))
+	}
+	response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarksFromThreads(repository, number, threadNodes)...)
+	response.Metadata = map[string]string{
+		"repository": repository,
+		"number":     strconv.Itoa(number),
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executePRCommentCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository := strings.TrimSpace(req.Repository)
+	if req.RepoProvided {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comment create request rejected before invoking gh")
+		}
+	}
+	number, err := normalizePullRequestNumber(req.Number)
+	if err != nil {
+		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comment create request rejected before invoking gh")
+	}
+	commentRequest, err := normalizePRCommentCreateRequest(PRCommentCreateRequest{Body: firstNonEmpty(req.Text, req.Body), Path: req.Path, Line: req.Line, Side: req.Side})
+	if err != nil {
+		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comment create request rejected before invoking gh")
+	}
+
+	result, config, err := s.runner.RunPRCommentCreate(ctx, repository, number, commentRequest)
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
+	if err != nil {
+		return responseWithGitHubFailure(response, result, err, "gh pull request comment create failed before returning a comment payload")
+	}
+	if result.ExitCode != 0 {
+		return responseWithGitHubExitFailure(response, result, repository, number, "gh pull request comment create exited with a non-zero code")
+	}
+
+	var remark model.ReviewRemark
+	if commentRequest.Path == "" {
+		var raw ghIssueComment
+		if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}, "gh pull request comment create returned malformed JSON")
+		}
+		remark = reviewRemarkFromIssueComment(repository, number, raw)
+	} else {
+		var raw ghPRReviewThreadCreateResponse
+		if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub GraphQL JSON response: %v", err), Result: result, Err: err}, "gh pull request inline comment create returned malformed JSON")
+		}
+		remarks := reviewRemarksFromThreads(repository, number, []ghPRReviewThread{raw.Data.AddPullRequestReviewThread.Thread})
+		if len(remarks) > 0 {
+			remark = remarks[0]
+		}
+	}
+	if remark.ExternalID == "" && remark.URL == "" {
+		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: "unexpected GitHub response: missing pull request comment identifier", Result: result}, "gh pull request comment create returned an incomplete payload")
+	}
+
+	response.ReviewRemarks = []model.ReviewRemark{remark}
+	response.OperationResult = &model.OperationResult{
+		System:     "github",
+		ObjectType: "review-remark",
+		Operation:  "create",
+		Status:     model.ResponseStatusOK,
+		ExternalID: firstNonEmpty(remark.ExternalID, remark.URL),
+		URL:        remark.URL,
+		Method:     "gh",
+		Endpoint:   "pr comment create",
+		Message:    fmt.Sprintf("GitHub pull request comment created for %s#%d", repository, number),
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executePRCommentResolve(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	threadID := strings.TrimSpace(firstNonEmpty(req.ThreadID, req.ExternalID))
+	if threadID == "" {
+		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review thread id is required"}, "pull request comment resolve request rejected before invoking gh")
+	}
+
+	result, _, err := s.runner.RunPRReviewThreadResolve(ctx, threadID)
+	if err != nil {
+		return responseWithGitHubFailure(response, result, err, "gh pull request review thread resolve failed before returning a payload")
+	}
+	if result.ExitCode != 0 {
+		return responseWithGitHubExitFailure(response, result, "", 0, "gh pull request review thread resolve exited with a non-zero code")
+	}
+
+	var raw ghPRReviewThreadResolveResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub GraphQL JSON response: %v", err), Result: result, Err: err}, "gh pull request review thread resolve returned malformed JSON")
+	}
+	resolvedThreadID := firstNonEmpty(raw.Data.ResolveReviewThread.Thread.ID, threadID)
+	state := "unresolved"
+	if raw.Data.ResolveReviewThread.Thread.IsResolved {
+		state = "resolved"
+	}
+	response.ReviewRemarks = []model.ReviewRemark{{
+		System:     "github",
+		ExternalID: resolvedThreadID,
+		ReplyToID:  resolvedThreadID,
+		State:      state,
+	}}
+	response.OperationResult = &model.OperationResult{
+		System:     "github",
+		ObjectType: "review-remark",
+		Operation:  "resolve",
+		Status:     model.ResponseStatusOK,
+		ExternalID: resolvedThreadID,
+		Method:     "gh",
+		Endpoint:   "resolveReviewThread",
+		Message:    fmt.Sprintf("GitHub pull request review thread resolved: %s", resolvedThreadID),
+	}
+	response.Status = model.ResponseStatusOK
 	return response, nil
 }
 
@@ -343,6 +646,21 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		CreatedAt:  strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:  strings.TrimSpace(raw.UpdatedAt),
 	}
+	response.Task = &model.CanonicalTask{
+		System:     "github",
+		Repository: response.Issue.Repository,
+		Number:     response.Issue.Number,
+		Title:      response.Issue.Title,
+		Body:       response.Issue.Body,
+		State:      response.Issue.State,
+		Traits:     append([]string(nil), response.Issue.Labels...),
+		Author:     userFromTrackerUser(response.Issue.Author),
+		Assignees:  usersFromTrackerUsers(response.Issue.Assignees),
+		URL:        response.Issue.URL,
+		CreatedAt:  response.Issue.CreatedAt,
+		UpdatedAt:  response.Issue.UpdatedAt,
+	}
+	response.Status = model.ResponseStatusOK
 	return response, nil
 }
 
@@ -449,10 +767,184 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 	}
 
 	response.Comments = comments
+	response.TaskComments = make([]model.TaskComment, 0, len(comments))
+	for _, comment := range comments {
+		response.TaskComments = append(response.TaskComments, model.TaskComment{
+			System:     "github",
+			Repository: comment.Repository,
+			TaskNumber: comment.Number,
+			Author: model.User{
+				System:   "github",
+				Login:    comment.Author.Login,
+				Name:     comment.Author.Name,
+				Email:    comment.Author.Email,
+				URL:      comment.Author.URL,
+				IsBot:    comment.Author.IsBot,
+				IsActive: comment.Author.IsActive,
+			},
+			Body:      comment.Body,
+			URL:       comment.URL,
+			CreatedAt: comment.CreatedAt,
+			UpdatedAt: comment.UpdatedAt,
+		})
+	}
 	response.Metadata = map[string]string{
 		"repository": repository,
 		"number":     strconv.Itoa(number),
 	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository := strings.TrimSpace(req.Repository)
+	if req.RepoProvided {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status.State = ErrorCodeInvalidRequest
+			status.Message = err.Error()
+			status.Diagnostics = append(status.Diagnostics, "issue comment create request rejected before invoking gh")
+			response.IssueStatus = &status
+			response.Status = model.ResponseStatusFailed
+			response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: status.Message}
+			return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+		}
+	}
+
+	number, err := normalizeIssueNumber(req.Number)
+	if err != nil {
+		status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
+		status.State = ErrorCodeInvalidRequest
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "issue comment create request rejected before invoking gh")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: status.Message}
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	}
+
+	body := strings.TrimSpace(firstNonEmpty(req.Text, req.Body))
+	if body == "" {
+		status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, number)
+		status.State = ErrorCodeInvalidRequest
+		status.Message = "GitHub issue comment body is required"
+		status.Diagnostics = append(status.Diagnostics, "issue comment create request rejected before invoking gh")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: status.Message}
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+	}
+
+	result, config, err := s.runner.RunIssueCommentCreate(ctx, repository, number, body)
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
+	if err != nil && result.ExitCode == 0 {
+		result.ExitCode = -1
+	}
+	if config.Command == "" {
+		config.Command = defaultCommand
+	}
+
+	status := issueCommentsErrorStatus(config, result, repository, number)
+	if err != nil {
+		var ghErr *Error
+		if errors.As(err, &ghErr) {
+			status.State = repositoryStateForErrorCode(ghErr.Code)
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "gh issue comment create failed before returning a comment payload")
+			response.IssueStatus = &status
+			response.Status = model.ResponseStatusFailed
+			response.Failure = &model.Failure{Kind: failureKindForGitHubError(ghErr.Code), Message: status.Message}
+			return response, ghErr
+		}
+
+		status.State = StateExternalFailure
+		status.Message = err.Error()
+		status.Diagnostics = append(status.Diagnostics, "gh issue comment create failed before returning a comment payload")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindExternalFailure, Message: status.Message}
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+	}
+
+	if result.ExitCode != 0 {
+		switch {
+		case isAuthRequired(result):
+			status.State = ErrorCodeAuthRequired
+			status.Message = "GitHub authentication is required"
+			response.Failure = &model.Failure{Kind: model.FailureKindAuthRequired, Message: status.Message}
+		case isIssueNotFound(result), isRepoNotFound(result):
+			status.State = ErrorCodeNotFound
+			status.Message = fmt.Sprintf("GitHub issue not found: %s#%d", repository, number)
+			response.Failure = &model.Failure{Kind: model.FailureKindNotFound, Message: status.Message}
+		default:
+			status.State = StateExternalFailure
+			status.Message = fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
+			response.Failure = &model.Failure{Kind: model.FailureKindExternalFailure, Message: status.Message}
+		}
+		status.Diagnostics = append(status.Diagnostics, "gh issue comment create exited with a non-zero code")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		return response, &Error{Code: status.State, Message: status.Message, Result: result}
+	}
+
+	var raw ghIssueComment
+	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+		status.State = StateExternalFailure
+		status.Message = fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err)
+		status.Diagnostics = append(status.Diagnostics, "gh issue comment create returned malformed JSON")
+		response.IssueStatus = &status
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindPartialResponse, Retryable: true, Message: status.Message}
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+	}
+
+	author := model.TrackerUser{System: "github"}
+	if raw.User != nil {
+		author = normalizeTrackerUser(*raw.User)
+	}
+	comment := model.TrackerComment{
+		System:     "github",
+		Repository: repository,
+		Number:     number,
+		Author:     author,
+		Body:       raw.Body,
+		URL:        strings.TrimSpace(firstNonEmpty(raw.HTMLURL, raw.URL)),
+		CreatedAt:  strings.TrimSpace(raw.CreatedAt),
+		UpdatedAt:  strings.TrimSpace(raw.UpdatedAt),
+	}
+	response.Comments = []model.TrackerComment{comment}
+	response.TaskComments = []model.TaskComment{{
+		System:     "github",
+		Repository: repository,
+		TaskNumber: number,
+		Author: model.User{
+			System:   "github",
+			Login:    author.Login,
+			Name:     author.Name,
+			Email:    author.Email,
+			URL:      author.URL,
+			IsBot:    author.IsBot,
+			IsActive: author.IsActive,
+		},
+		Body:      comment.Body,
+		URL:       comment.URL,
+		CreatedAt: comment.CreatedAt,
+		UpdatedAt: comment.UpdatedAt,
+	}}
+	response.OperationResult = &model.OperationResult{
+		System:     "github",
+		ObjectType: "comment",
+		Operation:  "create",
+		Status:     model.ResponseStatusOK,
+		ExternalID: comment.URL,
+		URL:        comment.URL,
+		Method:     "gh",
+		Endpoint:   fmt.Sprintf("repos/%s/issues/%d/comments", repository, number),
+		Message:    fmt.Sprintf("GitHub issue comment created for %s#%d", repository, number),
+	}
+	response.Status = model.ResponseStatusOK
 	return response, nil
 }
 
@@ -586,6 +1078,23 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 		CreatedAt:      strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:      strings.TrimSpace(raw.UpdatedAt),
 	}
+	response.MergeRequest = &model.MergeRequest{
+		System:         "github",
+		Repository:     response.PullRequest.Repository,
+		Number:         response.PullRequest.Number,
+		Title:          response.PullRequest.Title,
+		Body:           response.PullRequest.Body,
+		State:          response.PullRequest.State,
+		Traits:         append([]string(nil), response.PullRequest.Labels...),
+		Author:         userFromTrackerUser(response.PullRequest.Author),
+		ReviewDecision: response.PullRequest.ReviewDecision,
+		BaseRef:        response.PullRequest.BaseRef,
+		HeadRef:        response.PullRequest.HeadRef,
+		URL:            response.PullRequest.URL,
+		CreatedAt:      response.PullRequest.CreatedAt,
+		UpdatedAt:      response.PullRequest.UpdatedAt,
+	}
+	response.Status = model.ResponseStatusOK
 	return response, nil
 }
 
@@ -621,6 +1130,7 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 		status.Message = "GitHub CLI is installed and authentication is available"
 		status.Diagnostics = append(status.Diagnostics, "gh auth status completed successfully")
 		response.AuthStatus = &status
+		response.Status = model.ResponseStatusOK
 		return response, nil
 	}
 
@@ -671,6 +1181,152 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 	status.Diagnostics = append(status.Diagnostics, "gh auth status exited with a non-zero code")
 	response.AuthStatus = &status
 	return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+}
+
+func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {
+	author := model.User{System: "github"}
+	if raw.Author != nil {
+		author = userFromTrackerUser(normalizeTrackerUser(*raw.Author))
+	}
+	return model.MergeRequest{
+		System:         "github",
+		Repository:     repository,
+		Number:         raw.Number,
+		ExternalID:     strconv.Itoa(raw.Number),
+		Title:          strings.TrimSpace(raw.Title),
+		Body:           raw.Body,
+		State:          strings.TrimSpace(raw.State),
+		Traits:         normalizeTrackerLabels(raw.Labels),
+		Author:         author,
+		ReviewDecision: strings.TrimSpace(raw.ReviewDecision),
+		BaseRef:        strings.TrimSpace(raw.BaseRefName),
+		HeadRef:        strings.TrimSpace(raw.HeadRefName),
+		URL:            strings.TrimSpace(raw.URL),
+		CreatedAt:      strings.TrimSpace(raw.CreatedAt),
+		UpdatedAt:      strings.TrimSpace(raw.UpdatedAt),
+	}
+}
+
+func reviewRemarkFromIssueComment(repository string, number int, raw ghIssueComment) model.ReviewRemark {
+	author := model.User{System: "github"}
+	if raw.User != nil {
+		author = userFromTrackerUser(normalizeTrackerUser(*raw.User))
+	}
+	externalID := ""
+	if raw.ID > 0 {
+		externalID = strconv.Itoa(raw.ID)
+	}
+	url := strings.TrimSpace(firstNonEmpty(raw.HTMLURL, raw.URL))
+	return model.ReviewRemark{
+		System:             "github",
+		Repository:         repository,
+		MergeRequestNumber: number,
+		ExternalID:         firstNonEmpty(externalID, url),
+		Author:             author,
+		State:              "conversation",
+		Body:               raw.Body,
+		URL:                url,
+		CreatedAt:          strings.TrimSpace(raw.CreatedAt),
+		UpdatedAt:          strings.TrimSpace(raw.UpdatedAt),
+	}
+}
+
+func reviewRemarksFromThreads(repository string, number int, threads []ghPRReviewThread) []model.ReviewRemark {
+	remarks := make([]model.ReviewRemark, 0, len(threads))
+	for _, thread := range threads {
+		state := "unresolved"
+		if thread.IsResolved {
+			state = "resolved"
+		}
+		if len(thread.Comments.Nodes) == 0 {
+			remarks = append(remarks, model.ReviewRemark{
+				System:             "github",
+				Repository:         repository,
+				MergeRequestNumber: number,
+				ExternalID:         strings.TrimSpace(thread.ID),
+				State:              state,
+				Path:               strings.TrimSpace(thread.Path),
+				Line:               thread.Line,
+				ReplyToID:          strings.TrimSpace(thread.ID),
+			})
+			continue
+		}
+		for _, comment := range thread.Comments.Nodes {
+			author := model.User{System: "github"}
+			if comment.Author != nil {
+				author = userFromTrackerUser(normalizeTrackerUser(*comment.Author))
+			}
+			path := strings.TrimSpace(firstNonEmpty(comment.Path, thread.Path))
+			line := comment.Line
+			if line == 0 {
+				line = thread.Line
+			}
+			remarks = append(remarks, model.ReviewRemark{
+				System:             "github",
+				Repository:         repository,
+				MergeRequestNumber: number,
+				ExternalID:         strings.TrimSpace(firstNonEmpty(comment.ID, thread.ID)),
+				Author:             author,
+				State:              state,
+				Body:               comment.Body,
+				Path:               path,
+				Line:               line,
+				ReplyToID:          strings.TrimSpace(thread.ID),
+				URL:                strings.TrimSpace(comment.URL),
+				CreatedAt:          strings.TrimSpace(comment.CreatedAt),
+				UpdatedAt:          strings.TrimSpace(comment.UpdatedAt),
+			})
+		}
+	}
+	return remarks
+}
+
+func responseWithGitHubFailure(response model.Response, result CommandResult, err error, diagnostic string) (model.Response, error) {
+	response.Status = model.ResponseStatusFailed
+	var ghErr *Error
+	if errors.As(err, &ghErr) {
+		response.Failure = &model.Failure{
+			Kind:        failureKindForGitHubError(ghErr.Code),
+			Message:     ghErr.Message,
+			Diagnostics: []string{diagnostic},
+		}
+		return response, ghErr
+	}
+	message := "GitHub integration failed"
+	if err != nil {
+		message = err.Error()
+	}
+	response.Failure = &model.Failure{
+		Kind:        model.FailureKindExternalFailure,
+		Message:     message,
+		Diagnostics: []string{diagnostic},
+	}
+	return response, &Error{Code: ErrorCodeExternalFailure, Message: message, Result: result, Err: err}
+}
+
+func responseWithGitHubExitFailure(response model.Response, result CommandResult, repository string, number int, diagnostic string) (model.Response, error) {
+	code := ErrorCodeExternalFailure
+	message := fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
+	switch {
+	case isAuthRequired(result):
+		code = ErrorCodeAuthRequired
+		message = "GitHub authentication is required"
+	case isPRNotFound(result), isIssueNotFound(result):
+		code = ErrorCodeNotFound
+		if repository != "" && number > 0 {
+			message = fmt.Sprintf("GitHub pull request not found: %s#%d", repository, number)
+		} else {
+			message = "GitHub pull request not found"
+		}
+	case isRepoNotFound(result):
+		code = ErrorCodeNotFound
+		if repository != "" {
+			message = fmt.Sprintf("GitHub repository not found: %s", repository)
+		} else {
+			message = "GitHub repository not found"
+		}
+	}
+	return responseWithGitHubFailure(response, result, &Error{Code: code, Message: message, Result: result}, diagnostic)
 }
 
 func (s *Service) executeRepoGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
@@ -771,6 +1427,16 @@ func (s *Service) executeRepoGet(ctx context.Context, response model.Response, r
 		DefaultBranch: defaultBranch,
 		URL:           strings.TrimSpace(raw.URL),
 	}
+	response.Repository = &model.Repository{
+		System:        "github",
+		FullName:      response.RepositoryRef.FullName,
+		Owner:         response.RepositoryRef.Owner,
+		Name:          response.RepositoryRef.Name,
+		Description:   response.RepositoryRef.Description,
+		DefaultBranch: response.RepositoryRef.DefaultBranch,
+		URL:           response.RepositoryRef.URL,
+	}
+	response.Status = model.ResponseStatusOK
 	return response, nil
 }
 
@@ -1071,4 +1737,78 @@ func maskCommandValue(value string) string {
 	}
 
 	return "<provided>"
+}
+
+func integrationTypeForRequest(req model.ProviderRequest) string {
+	switch {
+	case isIssueRequest(req), isIssueCommentRequest(req):
+		return model.IntegrationTypeTracker
+	case isRepositoryRequest(req), isPullRequestRequest(req), isPullRequestCommentRequest(req):
+		return model.IntegrationTypeRepository
+	default:
+		return ""
+	}
+}
+
+func isRepositoryRequest(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
+	return object == "repository" || object == "repo"
+}
+
+func isIssueRequest(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
+	return object == "issue" || object == "task"
+}
+
+func isIssueCommentRequest(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
+	return object == "comment" && req.IntegrationType == model.IntegrationTypeTracker
+}
+
+func isPullRequestCommentRequest(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
+	return object == "comment" && req.IntegrationType == model.IntegrationTypeRepository
+}
+
+func isPullRequestRequest(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
+	return object == "pr" || object == "pull-request" || object == "merge-request" || object == "mr"
+}
+
+func failureKindForGitHubError(code string) string {
+	switch code {
+	case ErrorCodeAuthRequired:
+		return model.FailureKindAuthRequired
+	case ErrorCodeNotFound:
+		return model.FailureKindNotFound
+	case ErrorCodeInvalidRequest:
+		return model.FailureKindInvalidRequest
+	case ErrorCodeTimeout:
+		return model.FailureKindTemporaryUnavailable
+	default:
+		return model.FailureKindExternalFailure
+	}
+}
+
+func userFromTrackerUser(user model.TrackerUser) model.User {
+	return model.User{
+		System:   user.System,
+		Login:    user.Login,
+		Name:     user.Name,
+		Email:    user.Email,
+		URL:      user.URL,
+		IsBot:    user.IsBot,
+		IsActive: user.IsActive,
+	}
+}
+
+func usersFromTrackerUsers(users []model.TrackerUser) []model.User {
+	if len(users) == 0 {
+		return nil
+	}
+	result := make([]model.User, 0, len(users))
+	for _, user := range users {
+		result = append(result, userFromTrackerUser(user))
+	}
+	return result
 }

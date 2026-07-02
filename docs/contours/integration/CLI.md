@@ -2,36 +2,36 @@
 
 ## 1. Назначение документа
 
-Настоящий документ определяет первый практический срез контура интеграции с внешними системами. На данном этапе контур получает первый рабочий адаптер трекера GitHub, использующий утилиту `gh` как штатный канал доступа к данным.
+Настоящий документ определяет практический срез контура интеграции с внешними системами. Контур поддерживает GitHub как трекер и репозиторий, Bitbucket как репозиторий, Mattermost и Telegram как мессенджеры.
 
 Документ фиксирует:
 
 - модель работы интеграционного слоя;
-- границы ответственности между CLI, сервисом интеграции и `gh`;
+- границы ответственности между CLI, сервисом интеграции, `gh` и HTTP API внешних систем;
 - состав пользовательских команд;
-- этапы реализации первого адаптера.
+- порядок настройки встроенных адаптеров.
 
-## 2. Принцип интеграции через `gh`
+## 2. Принцип встроенных интеграций
 
-В начальной реализации не требуется самостоятельный GitHub-клиент на Go. Вместо этого интеграционный модуль запускает `gh` как внешний инструмент и получает структурированный результат.
+GitHub-адаптер запускает `gh` как внешний инструмент и получает структурированный результат. Bitbucket, Mattermost и Telegram используют HTTP API и нормализуют ответы в те же канонические структуры.
 
 Базовая схема вызова:
 
 1. CLI принимает входной запрос пользователя или другого контура;
 2. сервис интеграции формирует внутренний `IntegrationRequest`;
-3. GitHub-адаптер преобразует запрос в вызов `gh`;
-4. `gh` выполняет авторизованный запрос к GitHub;
-5. адаптер считывает `stdout` и `stderr`;
+3. диспетчер выбирает адаптер по типу интеграции и имени системы;
+4. адаптер выполняет вызов `gh` или HTTP API;
+5. адаптер считывает структурированный ответ;
 6. JSON-ответ преобразуется во внутреннюю нормализованную структуру;
 7. CLI печатает результат в диагностическом или структурированном виде.
 
 ```mermaid
 flowchart LR
-    A[progress integration github issue get] --> B[CLI integration]
+    A[progress integration ...] --> B[CLI integration]
     B --> C[Service]
-    C --> D[GitHub adapter]
-    D --> E[gh]
-    E --> F[GitHub]
+    C --> D[Integration adapter]
+    D --> E[gh или HTTP API]
+    E --> F[External source]
     F --> E
     E --> D
     D --> C
@@ -61,6 +61,9 @@ flowchart LR
 - `internal/integration/model/types.go` — типы запросов и нормализованных ответов;
 - `internal/integration/github/service.go` — адаптер GitHub;
 - `internal/integration/github/runner.go` — безопасный запуск `gh`;
+- `internal/integration/bitbucket/service.go` — адаптер Bitbucket;
+- `internal/integration/mattermost/service.go` — адаптер Mattermost;
+- `internal/integration/telegram/service.go` — адаптер Telegram;
 - `internal/cli/integration.go` — ветка CLI-команд `progress integration ...`.
 
 Минимальные внутренние интерфейсы:
@@ -79,11 +82,24 @@ type Provider interface {
 }
 ```
 
-На первом этапе достаточно одного `Provider` для GitHub, но диспетчер должен сразу закладываться как расширяемый по имени системы.
+Диспетчер выбирает `Provider` по имени интегрируемой системы. Если имя системы не указано, используется `default_systems` для типа интеграции.
 
 ## 5. Нормализованные сущности
 
-Чтобы не распространять GitHub-специфику по другим контурам, вводятся внутренние сущности:
+Чтобы не распространять специфику внешних систем по другим контурам, вводятся канонические сущности:
+
+- `CanonicalTask`;
+- `TaskComment`;
+- `Repository`;
+- `MergeRequest`;
+- `ReviewRemark`;
+- `MessageThread`;
+- `Message`;
+- `MessageReaction`;
+- `Failure`;
+- `OperationResult`.
+
+Для перехода соседних контуров сохраняется заполнение прежних структур, когда результат может быть однозначно преобразован:
 
 - `TrackerIssue`;
 - `TrackerPullRequest`;
@@ -127,18 +143,37 @@ type Provider interface {
 
 ## 6. Состав CLI-команд
 
-В минимальной конфигурации предусматриваются следующие команды:
+В текущей конфигурации поддерживаются следующие команды:
 
 - `progress integration dispatcher`;
+- `progress integration dispatch`;
 - `progress integration github auth status`;
 - `progress integration github repo get`;
 - `progress integration github issue get`;
 - `progress integration github issue comments`;
-- `progress integration github issue search`;
+- `progress integration github issue comment create`;
 - `progress integration github pr get`;
-- `progress integration github pr comments`;
+- `progress integration github pr list`;
 - `progress integration github pr search`;
-- `progress integration github api`.
+- `progress integration github pr create`;
+- `progress integration github pr comments`;
+- `progress integration github pr comment create`;
+- `progress integration github pr comment resolve`;
+- `progress integration bitbucket auth status`;
+- `progress integration bitbucket repo get`;
+- `progress integration bitbucket pr get`;
+- `progress integration bitbucket pr list`;
+- `progress integration bitbucket pr search`;
+- `progress integration bitbucket pr create`;
+- `progress integration bitbucket pr comments`;
+- `progress integration bitbucket pr comment create`;
+- `progress integration bitbucket pr comment resolve`;
+- `progress integration mattermost auth status`;
+- `progress integration mattermost thread get`;
+- `progress integration mattermost message create`;
+- `progress integration telegram auth status`;
+- `progress integration telegram thread get`;
+- `progress integration telegram message create`.
 
 ## 7. Назначение команд
 
@@ -237,19 +272,19 @@ gh pr view 456 --repo owner/name --json number,title,body,state,author,labels,re
 
 Команда получает комментарии запроса на слияние, включая замечания ревизии.
 
-Для первого этапа допустимы два режима:
+Адаптер GitHub читает два источника:
 
-1. обычные комментарии issue-части PR;
-2. замечания ревизии по diff.
+1. обычные комментарии обсуждения PR через issue-часть запроса на слияние;
+2. inline-замечания ревизии через review threads GraphQL API.
 
 Предпочтительные вызовы:
 
 ```bash
-gh api repos/owner/name/issues/456/comments
-gh api repos/owner/name/pulls/456/comments
+gh api --paginate --slurp repos/owner/name/issues/456/comments
+gh api graphql -f query='<review threads query>' -f owner=owner -f name=name -F number=456
 ```
 
-Адаптер должен различать комментарии обсуждения и inline-замечания ревизии, но приводить их к совместимой внутренней схеме.
+Адаптер приводит оба вида комментариев к `ReviewRemark`. Для обычного комментария поля `Path`, `Line` и `ReplyToID` пустые. Для inline-замечания `ReplyToID` содержит идентификатор review thread, а `State` отражает состояние `resolved` или `unresolved`.
 
 ### 7.9 `progress integration github pr search`
 
@@ -258,10 +293,68 @@ gh api repos/owner/name/pulls/456/comments
 Вариант вызова:
 
 ```bash
-gh pr list --repo owner/name --search "is:open review-requested:@me" --json number,title,state,author,reviewDecision,url,updatedAt
+gh pr list --repo owner/name --state closed --limit 30 --json number,title,body,state,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt
 ```
 
-### 7.10 `progress integration github api`
+Команда поддерживает:
+
+- `--state` со значениями `open`, `closed`, `merged` и `all`; по умолчанию используется `closed`;
+- `--scope` со значениями `all`, `authored` и `reviewer`; по умолчанию используется `all`;
+- `--query` для дополнительной строки поиска GitHub;
+- `--limit` для ограничения количества результатов.
+
+Для `--scope authored` адаптер добавляет `--author @me`. Для `--scope reviewer` адаптер добавляет поисковый фильтр `reviewed-by:@me`.
+
+Если `--repo` не передан, GitHub-адаптер сначала использует `default_repo` из конфигурации, а при его отсутствии вызывает `gh pr list` без `--repo`, чтобы `gh` выбрал текущий репозиторий рабочей директории.
+
+### 7.10 `progress integration github pr comment create`
+
+Команда создаёт комментарий к запросу на слияние.
+
+Обычный комментарий обсуждения:
+
+```bash
+progress integration github pr comment create --repo owner/name --number 456 --body "Проверил, замечание принято"
+```
+
+Inline-замечание ревизии:
+
+```bash
+progress integration github pr comment create --repo owner/name --number 456 --body "Нужно обработать пустой ответ" --path internal/service.go --line 42
+```
+
+Если `--path` и `--line` не переданы, адаптер создаёт обычный комментарий обсуждения через issue-часть PR. Если они переданы, адаптер создаёт review thread через GraphQL mutation `addPullRequestReviewThread`. Флаг `--side` задаёт сторону diff и по умолчанию равен `RIGHT`.
+
+### 7.11 `progress integration github pr comment resolve`
+
+Команда разрешает inline-замечание ревизии по идентификатору review thread.
+
+```bash
+progress integration github pr comment resolve --thread PRRT_kw...
+```
+
+Команда использует GraphQL mutation `resolveReviewThread`. Идентификатор thread можно получить из поля `remark_thread_id` команды `progress integration github pr comments`.
+
+### 7.12 `progress integration bitbucket pr search`
+
+Команда выполняет поиск запросов на слияние в Bitbucket.
+
+Для Bitbucket Cloud закрытое состояние разворачивается в состояния API `MERGED` и `DECLINED`, потому что единого внешнего значения `closed` у Cloud API нет. По умолчанию команда ищет закрытые запросы на слияние.
+
+Команда поддерживает:
+
+- `--state` со значениями `open`, `closed`, `merged`, `declined` и `all`;
+- `--scope` со значениями `all`, `authored` и `reviewer` для Bitbucket Cloud;
+- `--query` для выражения фильтра Bitbucket Cloud;
+- `--limit` для ограничения количества результатов.
+
+### 7.13 `progress integration bitbucket pr comment create`
+
+Команда создаёт комментарий к запросу на слияние Bitbucket Cloud. Для inline-комментария используются `--path`, `--line` и `--side`.
+
+`progress integration bitbucket pr comment resolve` присутствует в CLI как единая операция контура, но текущий Bitbucket-адаптер возвращает `unsupported-operation`, потому что механизм разрешения замечаний различается между Bitbucket Cloud и Server/Data Center и требует отдельного контракта.
+
+### 7.14 `progress integration github api`
 
 Команда даёт управляемый escape hatch для редких операций, которые ещё не вынесены в отдельный подкомандный интерфейс.
 
@@ -340,39 +433,77 @@ GitHub-адаптер должен различать как минимум сл
 Локальный слой имеет приоритет над глобальным:
 
 1. `default_system` полностью заменяет глобальное значение;
-2. `systems.<name>` дополняет или переопределяет одноимённую систему из глобального слоя;
-3. простые поля системы, например `command`, `path`, `timeout`, `repository`, `project` и `default_repo`, заменяются локальными значениями;
-4. `operations` сливается по ключу операции;
-5. `enabled=false` в локальном слое выключает систему целиком.
+2. `default_systems.<type>` заменяет систему по умолчанию для конкретного типа интеграции;
+3. `systems.<name>` дополняет или переопределяет одноимённую систему из глобального слоя;
+4. простые поля системы, например `command`, `path`, `timeout`, `base_url`, `token_env`, `repository`, `project`, `channel_id`, `chat_id` и `default_repo`, заменяются локальными значениями;
+5. `operations` сливается по ключу операции;
+6. `enabled=false` в локальном слое выключает систему целиком.
 
-Минимальная конфигурация GitHub-адаптера может выглядеть так:
+Минимальная конфигурация встроенных адаптеров может выглядеть так:
 
 ```json
 {
-  "default_system": "github",
+  "default_systems": {
+    "tracker": "github",
+    "repository": "github",
+    "messenger": "mattermost"
+  },
   "systems": {
     "github": {
       "type": "github",
+      "integration_types": ["tracker", "repository"],
       "enabled": true,
       "command": "gh",
       "timeout": "30s",
       "repository": "owner/name",
       "default_repo": "owner/name"
+    },
+    "bitbucket": {
+      "type": "bitbucket",
+      "integration_type": "repository",
+      "enabled": true,
+      "base_url": "https://api.bitbucket.org/2.0",
+      "api_variant": "cloud",
+      "token_env": "BITBUCKET_TOKEN",
+      "workspace": "workspace",
+      "repository": "workspace/repository"
+    },
+    "mattermost": {
+      "type": "mattermost",
+      "integration_type": "messenger",
+      "enabled": true,
+      "base_url": "https://mattermost.example",
+      "token_env": "MATTERMOST_TOKEN",
+      "channel_id": "channel-id"
+    },
+    "telegram": {
+      "type": "telegram",
+      "integration_type": "messenger",
+      "enabled": true,
+      "token_env": "TELEGRAM_BOT_TOKEN",
+      "chat_id": "chat-id"
     }
   }
 }
 ```
 
-Назначение полей GitHub-системы:
+Назначение общих полей системы:
 
-1. `type` фиксирует тип адаптера и должен быть равен `github`, если требуется штатный GitHub-модуль текущей сборки;
-2. `enabled` включает или выключает систему без удаления её описания;
-3. `command` и `path` позволяют переопределить исполняемый файл `gh`;
-4. `timeout` ограничивает внешний вызов;
-5. `repository` задаёт проектный GitHub-репозиторий в формате `owner/name` и используется как основной резервный репозиторий для вызовов без `--repo`;
-6. `project` резервирует идентификатор внешнего проекта для script-адаптеров и следующих этапов расширения;
-7. `default_repo` сохраняется для переходного периода как совместимое имя того же резервного GitHub-репозитория;
-8. `operations` резервирует пространство для дальнейшей пооперационной настройки, включая будущие script-адаптеры.
+1. `type` фиксирует тип встроенного адаптера: `github`, `bitbucket`, `mattermost`, `telegram` или `script`;
+2. `integration_type` задаёт один тип интеграции, а `integration_types` — несколько типов для одной системы;
+3. `enabled` включает или выключает систему без удаления её описания;
+4. `default=true` делает систему системой по умолчанию для её типов, если `default_systems` не задаёт явное значение;
+5. `command` и `path` позволяют переопределить исполняемый файл `gh`;
+6. `timeout` ограничивает внешний вызов;
+7. `base_url` задаёт базовый адрес HTTP API для Bitbucket, Mattermost или Telegram;
+8. `api_variant` задаёт вариант Bitbucket API: `cloud` для `api.bitbucket.org/2.0` или `server` для Bitbucket Server/Data Center через `rest/api/1.0`;
+9. `token` или `token_env` задают данные авторизации либо ссылку на переменную окружения;
+10. `repository` задаёт резервный репозиторий для репозиторных операций;
+11. `workspace` задаёт рабочее пространство Bitbucket Cloud, если `--repo` передан без префикса;
+12. `project` задаёт ключ проекта Bitbucket Server/Data Center, если `--repo` передан без префикса;
+13. `channel_id` задаёт резервный канал Mattermost;
+14. `chat_id` задаёт резервный чат Telegram;
+15. `operations` резервирует пространство для пооперационной настройки.
 
 Правило приоритета `--repo`, `repository` и `default_repo`:
 
@@ -382,83 +513,16 @@ GitHub-адаптер должен различать как минимум сл
 
 Для переходного периода сохраняется совместимость с локальным файлом `.progress/integration/github.json`, если новый `systems.json` отсутствует. Новый конфигурационный слой считается приоритетным и должен использоваться как основной.
 
-## 12. Порядок реализации
+## 12. Текущее состояние реализации
 
-### 12.1 Этап 1. Каркас контура
+Реализованный рабочий срез включает:
 
-Минимальные работы:
+1. диспетчер `Dispatch`, который выбирает интегрируемую систему по `IntegrationType`, `System` и `default_systems`;
+2. единый вызов `Execute`, который возвращает `Response` с каноническим объектом, маршрутом и отказным состоянием;
+3. GitHub-адаптер через `gh` для задач, комментариев задач, репозиториев и запросов на слияние;
+4. Bitbucket-адаптер через HTTP API для репозиториев и запросов на слияние;
+5. Mattermost-адаптер через HTTP API для цепочек обсуждения и сообщений;
+6. Telegram-адаптер через Bot API для отправки сообщений;
+7. нормализованные отказные состояния для отсутствия авторизации, недоступности, неподдерживаемой операции, неполного ответа и ошибок внешнего источника.
 
-1. ввести ветку `progress integration`;
-2. ввести `internal/integration/service.go`;
-3. определить модели запросов и ответов;
-4. добавить команду `progress integration dispatcher`.
-
-Результат этапа: кодовая база получает самостоятельный каркас контура интеграции, согласованный с общей архитектурой проекта.
-
-### 12.2 Этап 2. Интеграция с `gh`
-
-Минимальные работы:
-
-1. реализовать раннер внешней команды `gh`;
-2. добавить проверку `gh auth status`;
-3. ввести конфигурацию таймаута и пути к бинарю;
-4. унифицировать чтение `stdout` и `stderr`.
-
-Результат этапа: адаптер может надёжно выполнять внешние вызовы и возвращать диагностируемые ошибки.
-
-### 12.3 Этап 3. Чтение сущностей GitHub
-
-Минимальные работы:
-
-1. реализовать `repo get`;
-2. реализовать `issue get` и `issue comments`;
-3. реализовать `pr get` и `pr comments`;
-4. добавить нормализаторы `TrackerIssue`, `TrackerPullRequest`, `TrackerComment`.
-
-Результат этапа: контур способен получать основные объекты трекера в стабильном внутреннем формате.
-
-### 12.4 Этап 4. Поиск и выборки
-
-Минимальные работы:
-
-1. реализовать `issue search`;
-2. реализовать `pr search`;
-3. ввести лимиты и базовое кэширование;
-4. добавить текстовый и JSON-режимы вывода.
-
-Результат этапа: контур способен не только читать карточки по номеру, но и строить выборки для принятия решения.
-
-### 12.5 Этап 5. Расширение командного набора
-
-Следующими кандидатами на добавление являются:
-
-- `progress integration github pr diff`;
-- `progress integration github pr checks`;
-- `progress integration github issue create`;
-- `progress integration github pr create`;
-- `progress integration github repo branches`.
-
-На этом этапе контур начинает переходить от чтения к управляемым операциям изменения состояния, но только после того, как чтение и диагностика стабилизированы.
-
-## 13. Принципы проектирования
-
-Для начальной реализации принимаются следующие правила:
-
-1. другие контуры не должны знать синтаксис `gh`;
-2. все вызовы `gh` должны быть сосредоточены в GitHub-адаптере;
-3. в машинных сценариях нужно предпочитать JSON-режимы `gh`;
-4. ошибки внешнего инструмента должны нормализоваться во внутреннюю модель отказа;
-5. первый этап ограничивается чтением и поиском, а не мутацией данных в GitHub;
-6. расширение на другие трекеры должно происходить через тот же контракт `Provider`, а не через ветвление по всей кодовой базе.
-
-## 14. Ближайший практический приоритет
-
-Первый рабочий срез GitHub-интеграции рекомендуется ограничить следующей схемой:
-
-1. `progress integration github auth status`;
-2. `progress integration github issue get --repo <owner/name> --number <n>`;
-3. `progress integration github pr get --repo <owner/name> --number <n>`;
-4. `progress integration github issue search --repo <owner/name> --query <expr>`;
-5. `progress integration github pr search --repo <owner/name> --query <expr>`.
-
-Этого достаточно, чтобы контур интеграции начал поставлять полезный внешний контекст для задач, связанных с разработкой, ревизией кода и сопровождением изменений.
+Принцип проектирования остаётся прежним: другие контуры не должны знать синтаксис `gh`, HTTP-маршруты Bitbucket, Mattermost или Telegram, формат токенов и поля внешних ответов. Эти сведения остаются внутри адаптеров, а наружу выходит канонический ответ контура интеграции.

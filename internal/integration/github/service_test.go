@@ -1244,6 +1244,229 @@ func TestServicePRCreateMapsMissingRepositoryOrBranchToNotFound(t *testing.T) {
 	}
 }
 
+func TestServicePRListDefaultsToClosedScopeAll(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `[{
+			"number": 42,
+			"title": "Add integration",
+			"body": "Body",
+			"state": "MERGED",
+			"author": {"login": "alice", "url": "https://github.com/alice"},
+			"reviewDecision": "APPROVED",
+			"baseRefName": "main",
+			"headRefName": "feature",
+			"url": "https://github.com/owner/name/pull/42",
+			"updatedAt": "2026-06-01T11:00:00Z"
+		}]`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "search",
+		Repository:      "owner/name",
+		RepoProvided:    true,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if stub.prListCalls != 1 {
+		t.Fatalf("expected one pr list call, got %d", stub.prListCalls)
+	}
+	if stub.prListRequest.State != "closed" || stub.prListRequest.Scope != "all" || stub.prListRequest.Limit != 30 {
+		t.Fatalf("unexpected list request: %#v", stub.prListRequest)
+	}
+	if len(response.MergeRequests) != 1 {
+		t.Fatalf("unexpected merge requests: %#v", response.MergeRequests)
+	}
+	if response.MergeRequests[0].ReviewDecision != "APPROVED" {
+		t.Fatalf("unexpected merge request: %#v", response.MergeRequests[0])
+	}
+	if len(response.SearchResults) != 1 || response.SearchResults[0].Kind != "merge-request" {
+		t.Fatalf("unexpected search results: %#v", response.SearchResults)
+	}
+}
+
+func TestServicePRCommentsCombinesConversationAndReviewThreads(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `[[{
+			"id": 100,
+			"body": "Conversation comment",
+			"html_url": "https://github.com/owner/name/pull/42#issuecomment-100",
+			"user": {"login": "alice", "html_url": "https://github.com/alice"},
+			"created_at": "2026-06-01T10:00:00Z",
+			"updated_at": "2026-06-01T10:01:00Z"
+		}]]`},
+		reviewResult: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `{
+			"data": {
+				"repository": {
+					"pullRequest": {
+						"reviewThreads": {
+							"nodes": [{
+								"id": "thread-1",
+								"isResolved": false,
+								"path": "file.go",
+								"line": 12,
+								"comments": {
+									"nodes": [{
+										"id": "comment-1",
+										"body": "Inline remark",
+										"url": "https://github.com/owner/name/pull/42#discussion_r1",
+										"path": "file.go",
+										"line": 12,
+										"author": {"login": "bob", "url": "https://github.com/bob"},
+										"createdAt": "2026-06-01T11:00:00Z",
+										"updatedAt": "2026-06-01T11:01:00Z"
+									}]
+								}
+							}]
+						}
+					}
+				}
+			}
+		}`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "comments",
+		Repository:      "owner/name",
+		RepoProvided:    true,
+		Number:          42,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if stub.issueCommentCalls != 1 || stub.prReviewCalls != 1 {
+		t.Fatalf("unexpected calls: %#v", stub)
+	}
+	if len(response.ReviewRemarks) != 2 {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+	if response.ReviewRemarks[0].State != "conversation" {
+		t.Fatalf("unexpected conversation remark: %#v", response.ReviewRemarks[0])
+	}
+	if response.ReviewRemarks[1].State != "unresolved" || response.ReviewRemarks[1].ReplyToID != "thread-1" || response.ReviewRemarks[1].Path != "file.go" || response.ReviewRemarks[1].Line != 12 {
+		t.Fatalf("unexpected inline remark: %#v", response.ReviewRemarks[1])
+	}
+}
+
+func TestServicePRCommentCreateInline(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `{
+			"data": {
+				"addPullRequestReviewThread": {
+					"thread": {
+						"id": "thread-1",
+						"isResolved": false,
+						"comments": {
+							"nodes": [{
+								"id": "comment-1",
+								"body": "Inline remark",
+								"url": "https://github.com/owner/name/pull/42#discussion_r1",
+								"path": "file.go",
+								"line": 12,
+								"author": {"login": "alice", "url": "https://github.com/alice"}
+							}]
+						}
+					}
+				}
+			}
+		}`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "comment",
+		Operation:       "create",
+		Repository:      "owner/name",
+		RepoProvided:    true,
+		Number:          42,
+		Body:            "Inline remark",
+		Path:            "file.go",
+		Line:            12,
+		Side:            "RIGHT",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if stub.prCommentCalls != 1 {
+		t.Fatalf("expected one pr comment call, got %d", stub.prCommentCalls)
+	}
+	if stub.prCommentRequest.Path != "file.go" || stub.prCommentRequest.Line != 12 {
+		t.Fatalf("unexpected comment request: %#v", stub.prCommentRequest)
+	}
+	if len(response.ReviewRemarks) != 1 || response.ReviewRemarks[0].ReplyToID != "thread-1" {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+	if response.OperationResult == nil || response.OperationResult.Operation != "create" {
+		t.Fatalf("unexpected operation result: %#v", response.OperationResult)
+	}
+}
+
+func TestServicePRCommentResolve(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `{
+			"data": {
+				"resolveReviewThread": {
+					"thread": {
+						"id": "thread-1",
+						"isResolved": true
+					}
+				}
+			}
+		}`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "comment",
+		Operation:       "resolve",
+		ThreadID:        "thread-1",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if stub.prResolveCalls != 1 || stub.threadID != "thread-1" {
+		t.Fatalf("unexpected resolve call: %#v", stub)
+	}
+	if len(response.ReviewRemarks) != 1 || response.ReviewRemarks[0].State != "resolved" {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+	if response.OperationResult == nil || response.OperationResult.ExternalID != "thread-1" {
+		t.Fatalf("unexpected operation result: %#v", response.OperationResult)
+	}
+}
+
 type stubRunner struct {
 	result            CommandResult
 	config            resolvedConfig
@@ -1253,12 +1476,20 @@ type stubRunner struct {
 	issueCalls        int
 	issueCommentCalls int
 	prViewCalls       int
+	prListCalls       int
+	prReviewCalls     int
+	prCommentCalls    int
+	prResolveCalls    int
 	number            int
 	base              string
 	head              string
 	title             string
 	body              string
 	draft             bool
+	prListRequest     PRListRequest
+	prCommentRequest  PRCommentCreateRequest
+	threadID          string
+	reviewResult      CommandResult
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -1285,10 +1516,25 @@ func (r *stubRunner) RunIssueComments(_ context.Context, repository string, numb
 	return r.result, r.config, r.err
 }
 
+func (r *stubRunner) RunIssueCommentCreate(_ context.Context, repository string, number int, body string) (CommandResult, resolvedConfig, error) {
+	r.issueCommentCalls++
+	r.repo = repository
+	r.number = number
+	r.body = body
+	return r.result, r.config, r.err
+}
+
 func (r *stubRunner) RunPRView(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
 	r.prViewCalls++
 	r.repo = repository
 	r.number = number
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRList(_ context.Context, repository string, request PRListRequest) (CommandResult, resolvedConfig, error) {
+	r.prListCalls++
+	r.repo = repository
+	r.prListRequest = request
 	return r.result, r.config, r.err
 }
 
@@ -1299,5 +1545,29 @@ func (r *stubRunner) RunPRCreate(_ context.Context, repository string, request P
 	r.title = request.Title
 	r.body = request.Body
 	r.draft = request.Draft
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRReviewThreads(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	r.prReviewCalls++
+	r.repo = repository
+	r.number = number
+	if r.reviewResult.Stdout != "" || r.reviewResult.Stderr != "" || r.reviewResult.Command != "" || r.reviewResult.ExitCode != 0 {
+		return r.reviewResult, r.config, r.err
+	}
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRCommentCreate(_ context.Context, repository string, number int, request PRCommentCreateRequest) (CommandResult, resolvedConfig, error) {
+	r.prCommentCalls++
+	r.repo = repository
+	r.number = number
+	r.prCommentRequest = request
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRReviewThreadResolve(_ context.Context, threadID string) (CommandResult, resolvedConfig, error) {
+	r.prResolveCalls++
+	r.threadID = threadID
 	return r.result, r.config, r.err
 }

@@ -120,6 +120,19 @@ func mergeIntegrationLayers(layers []IntegrationConfigLayer) IntegrationConfig {
 		if strings.TrimSpace(layer.Config.DefaultSystem) != "" {
 			merged.DefaultSystem = strings.TrimSpace(layer.Config.DefaultSystem)
 		}
+		if len(layer.Config.DefaultSystems) > 0 {
+			if merged.DefaultSystems == nil {
+				merged.DefaultSystems = map[string]string{}
+			}
+			for integrationType, system := range layer.Config.DefaultSystems {
+				integrationType = normalizeIntegrationTypeName(integrationType)
+				system = normalizeSystemName(system)
+				if integrationType == "" || system == "" {
+					continue
+				}
+				merged.DefaultSystems[integrationType] = system
+			}
+		}
 
 		for name, system := range layer.Config.Systems {
 			name = normalizeSystemName(name)
@@ -145,6 +158,15 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.Type); value != "" {
 		merged.Type = value
 	}
+	if value := strings.TrimSpace(override.IntegrationType); value != "" {
+		merged.IntegrationType = value
+	}
+	if len(override.IntegrationTypes) > 0 {
+		merged.IntegrationTypes = append([]string(nil), override.IntegrationTypes...)
+	}
+	if override.Default {
+		merged.Default = true
+	}
 	if override.Enabled != nil {
 		value := *override.Enabled
 		merged.Enabled = &value
@@ -158,14 +180,38 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.Timeout); value != "" {
 		merged.Timeout = value
 	}
+	if value := strings.TrimSpace(override.BaseURL); value != "" {
+		merged.BaseURL = value
+	}
+	if value := strings.TrimSpace(override.APIVariant); value != "" {
+		merged.APIVariant = value
+	}
+	if value := strings.TrimSpace(override.Token); value != "" {
+		merged.Token = value
+	}
+	if value := strings.TrimSpace(override.TokenEnv); value != "" {
+		merged.TokenEnv = value
+	}
+	if value := strings.TrimSpace(override.Username); value != "" {
+		merged.Username = value
+	}
 	if value := strings.TrimSpace(override.Repository); value != "" {
 		merged.Repository = value
+	}
+	if value := strings.TrimSpace(override.Workspace); value != "" {
+		merged.Workspace = value
 	}
 	if value := strings.TrimSpace(override.Project); value != "" {
 		merged.Project = value
 	}
 	if value := strings.TrimSpace(override.DefaultRepo); value != "" {
 		merged.DefaultRepo = value
+	}
+	if value := strings.TrimSpace(override.ChannelID); value != "" {
+		merged.ChannelID = value
+	}
+	if value := strings.TrimSpace(override.ChatID); value != "" {
+		merged.ChatID = value
 	}
 
 	if len(base.Operations) > 0 || len(override.Operations) > 0 {
@@ -203,9 +249,20 @@ func mergeIntegrationOperationConfig(base, override integrationmodel.Integration
 }
 
 func validateIntegrationLayer(config integrationmodel.IntegrationConfigFile) error {
+	for integrationType, system := range config.DefaultSystems {
+		if normalizeIntegrationTypeName(integrationType) == "" {
+			return fmt.Errorf("default_systems contains empty integration type")
+		}
+		if normalizeSystemName(system) == "" {
+			return fmt.Errorf("default_systems.%s contains empty system name", normalizeIntegrationTypeName(integrationType))
+		}
+	}
 	for name, system := range config.Systems {
 		if normalizeSystemName(name) == "" {
 			return fmt.Errorf("systems contains empty name")
+		}
+		if err := validateIntegrationTypeList(system, name); err != nil {
+			return err
 		}
 		if err := validateIntegrationOperations(system.Operations, name); err != nil {
 			return err
@@ -247,6 +304,20 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 			return fmt.Errorf("default_system references disabled system %q", defaultSystem)
 		}
 	}
+	for integrationType, defaultSystem := range config.DefaultSystems {
+		integrationType = normalizeIntegrationTypeName(integrationType)
+		defaultSystem = normalizeSystemName(defaultSystem)
+		system, ok := config.Systems[defaultSystem]
+		if !ok {
+			return fmt.Errorf("default_systems.%s references unknown system %q", integrationType, defaultSystem)
+		}
+		if !isSystemEnabled(system) {
+			return fmt.Errorf("default_systems.%s references disabled system %q", integrationType, defaultSystem)
+		}
+		if !systemDeclaresIntegrationType(system, integrationType) {
+			return fmt.Errorf("default_systems.%s references system %q without matching integration type", integrationType, defaultSystem)
+		}
+	}
 
 	return nil
 }
@@ -267,10 +338,39 @@ func validateIntegrationSystemType(systemName, systemType string) error {
 	}
 
 	switch systemType {
-	case "github", "script":
+	case "github", "bitbucket", "mattermost", "telegram", "script":
 		return nil
 	default:
 		return fmt.Errorf("system %q uses unknown type %q", normalizeSystemName(systemName), systemType)
+	}
+}
+
+func validateIntegrationTypeList(_ integrationmodel.IntegrationSystemConfig, _ string) error {
+	return nil
+}
+
+func systemDeclaresIntegrationType(system integrationmodel.IntegrationSystemConfig, integrationType string) bool {
+	integrationType = normalizeIntegrationTypeName(integrationType)
+	if integrationType == "" {
+		return true
+	}
+	for _, value := range append([]string{system.IntegrationType}, system.IntegrationTypes...) {
+		if normalizeIntegrationTypeName(value) == integrationType {
+			return true
+		}
+	}
+	if strings.TrimSpace(system.IntegrationType) != "" || len(system.IntegrationTypes) > 0 {
+		return false
+	}
+	switch normalizeSystemName(system.Type) {
+	case "github":
+		return integrationType == "tracker" || integrationType == "repository"
+	case "bitbucket":
+		return integrationType == "repository"
+	case "mattermost", "telegram":
+		return integrationType == "messenger"
+	default:
+		return true
 	}
 }
 
@@ -283,6 +383,10 @@ func normalizeSystemName(name string) string {
 }
 
 func normalizeOperationName(name string) string {
+	return strings.TrimSpace(strings.ToLower(name))
+}
+
+func normalizeIntegrationTypeName(name string) string {
 	return strings.TrimSpace(strings.ToLower(name))
 }
 
