@@ -155,6 +155,9 @@ func NewService() *Service {
 }
 
 func NewServiceWithConfig(config model.IntegrationSystemConfig) *Service {
+	if strings.EqualFold(strings.TrimSpace(config.Transport), "api") {
+		return &Service{runner: NewAPIRunnerWithSystemConfig(config)}
+	}
 	return &Service{runner: NewRunnerWithSystemConfig(config)}
 }
 
@@ -196,9 +199,11 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executePRCommentResolve(ctx, response, req)
 	default:
 		err := &Error{
-			Code:    ErrorCodeInvalidRequest,
+			Code:    ErrorCodeUnsupportedOperation,
 			Message: fmt.Sprintf("GitHub integration does not support %s %s at this stage", req.Resource, req.Operation),
 		}
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindUnsupportedOperation, Message: err.Message}
 		return response, err
 	}
 }
@@ -308,7 +313,7 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 		Status:     model.ResponseStatusOK,
 		ExternalID: strconv.Itoa(status.Number),
 		URL:        status.URL,
-		Method:     "gh",
+		Method:     methodFromConfig(config),
 		Endpoint:   "pr create",
 		Message:    status.Message,
 	}
@@ -483,7 +488,7 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		Status:     model.ResponseStatusOK,
 		ExternalID: firstNonEmpty(remark.ExternalID, remark.URL),
 		URL:        remark.URL,
-		Method:     "gh",
+		Method:     methodFromConfig(config),
 		Endpoint:   "pr comment create",
 		Message:    fmt.Sprintf("GitHub pull request comment created for %s#%d", repository, number),
 	}
@@ -497,7 +502,7 @@ func (s *Service) executePRCommentResolve(ctx context.Context, response model.Re
 		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review thread id is required"}, "pull request comment resolve request rejected before invoking gh")
 	}
 
-	result, _, err := s.runner.RunPRReviewThreadResolve(ctx, threadID)
+	result, config, err := s.runner.RunPRReviewThreadResolve(ctx, threadID)
 	if err != nil {
 		return responseWithGitHubFailure(response, result, err, "gh pull request review thread resolve failed before returning a payload")
 	}
@@ -526,7 +531,7 @@ func (s *Service) executePRCommentResolve(ctx context.Context, response model.Re
 		Operation:  "resolve",
 		Status:     model.ResponseStatusOK,
 		ExternalID: resolvedThreadID,
-		Method:     "gh",
+		Method:     methodFromConfig(config),
 		Endpoint:   "resolveReviewThread",
 		Message:    fmt.Sprintf("GitHub pull request review thread resolved: %s", resolvedThreadID),
 	}
@@ -946,7 +951,7 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 		Status:     model.ResponseStatusOK,
 		ExternalID: comment.URL,
 		URL:        comment.URL,
-		Method:     "gh",
+		Method:     methodFromConfig(config),
 		Endpoint:   fmt.Sprintf("repos/%s/issues/%d/comments", repository, number),
 		Message:    fmt.Sprintf("GitHub issue comment created for %s#%d", repository, number),
 	}
@@ -1065,7 +1070,7 @@ func (s *Service) executeIssueLabelsChange(ctx context.Context, response model.R
 		Operation:  operation,
 		Status:     model.ResponseStatusOK,
 		ExternalID: strconv.Itoa(number),
-		Method:     "gh",
+		Method:     methodFromConfig(config),
 		Endpoint:   "issue edit",
 		Message:    fmt.Sprintf("GitHub issue labels updated for %s#%d", repository, number),
 		Diagnostics: []string{
@@ -1257,8 +1262,13 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 		status.State = StateReady
 		status.Available = true
 		status.Authenticated = true
-		status.Message = "GitHub CLI is installed and authentication is available"
-		status.Diagnostics = append(status.Diagnostics, "gh auth status completed successfully")
+		if config.Command == "http" {
+			status.Message = "GitHub API token is accepted and API is available"
+			status.Diagnostics = append(status.Diagnostics, "GitHub API auth status completed successfully")
+		} else {
+			status.Message = "GitHub CLI is installed and authentication is available"
+			status.Diagnostics = append(status.Diagnostics, "gh auth status completed successfully")
+		}
 		response.AuthStatus = &status
 		response.Status = model.ResponseStatusOK
 		return response, nil
@@ -1277,6 +1287,22 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 			status.State = StateTimeout
 			status.Message = ghErr.Message
 			status.Diagnostics = append(status.Diagnostics, "gh auth status timed out")
+			response.AuthStatus = &status
+			return response, &Error{Code: ghErr.Code, Message: status.Message, Result: result, Err: ghErr}
+		case ErrorCodeAuthRequired:
+			status.State = StateAuthRequired
+			status.Available = config.Command == "http" && result.Path != ""
+			status.Authenticated = false
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "GitHub API token is required")
+			response.AuthStatus = &status
+			return response, &Error{Code: ghErr.Code, Message: status.Message, Result: result, Err: ghErr}
+		case ErrorCodePermissionDenied:
+			status.State = ErrorCodePermissionDenied
+			status.Available = true
+			status.Authenticated = false
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "GitHub API rejected the configured token")
 			response.AuthStatus = &status
 			return response, &Error{Code: ghErr.Code, Message: status.Message, Result: result, Err: ghErr}
 		default:
@@ -1608,6 +1634,14 @@ func repositoryStateForErrorCode(code string) string {
 		return ErrorCodeNotFound
 	case ErrorCodeTimeout:
 		return StateTimeout
+	case ErrorCodePermissionDenied:
+		return ErrorCodePermissionDenied
+	case ErrorCodeTemporaryUnavailable:
+		return model.FailureKindTemporaryUnavailable
+	case ErrorCodeUnsupportedOperation:
+		return model.FailureKindUnsupportedOperation
+	case ErrorCodeInternalIntegration:
+		return ErrorCodeInternalIntegration
 	default:
 		return StateExternalFailure
 	}
@@ -1627,6 +1661,14 @@ func prStateForErrorCode(code string) string {
 		return ErrorCodeAlreadyExists
 	case ErrorCodeTimeout:
 		return StateTimeout
+	case ErrorCodePermissionDenied:
+		return ErrorCodePermissionDenied
+	case ErrorCodeTemporaryUnavailable:
+		return model.FailureKindTemporaryUnavailable
+	case ErrorCodeUnsupportedOperation:
+		return model.FailureKindUnsupportedOperation
+	case ErrorCodeInternalIntegration:
+		return ErrorCodeInternalIntegration
 	default:
 		return StateExternalFailure
 	}
@@ -1985,9 +2027,24 @@ func failureKindForGitHubError(code string) string {
 		return model.FailureKindInvalidRequest
 	case ErrorCodeTimeout:
 		return model.FailureKindTemporaryUnavailable
+	case ErrorCodePermissionDenied:
+		return model.FailureKindPermissionDenied
+	case ErrorCodeTemporaryUnavailable:
+		return model.FailureKindTemporaryUnavailable
+	case ErrorCodeUnsupportedOperation:
+		return model.FailureKindUnsupportedOperation
+	case ErrorCodeInternalIntegration:
+		return model.FailureKindPartialResponse
 	default:
 		return model.FailureKindExternalFailure
 	}
+}
+
+func methodFromConfig(config resolvedConfig) string {
+	if strings.TrimSpace(config.Command) == "" {
+		return defaultCommand
+	}
+	return strings.TrimSpace(config.Command)
 }
 
 func userFromTrackerUser(user model.TrackerUser) model.User {

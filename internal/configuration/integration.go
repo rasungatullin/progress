@@ -279,6 +279,9 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.Timeout); value != "" {
 		merged.Timeout = value
 	}
+	if value := strings.TrimSpace(override.Transport); value != "" {
+		merged.Transport = value
+	}
 	if value := strings.TrimSpace(override.BaseURL); value != "" {
 		merged.BaseURL = value
 	}
@@ -461,6 +464,9 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 		if err := validateIntegrationSystemType(name, system.Type); err != nil {
 			return err
 		}
+		if err := validateIntegrationTransport(system, name); err != nil {
+			return err
+		}
 		if !isSystemEnabled(system) {
 			continue
 		}
@@ -577,6 +583,22 @@ func validateIntegrationSystemType(systemName, systemType string) error {
 		return nil
 	default:
 		return fmt.Errorf("system %q uses unknown type %q", normalizeSystemName(systemName), systemType)
+	}
+}
+
+func validateIntegrationTransport(system integrationmodel.IntegrationSystemConfig, systemName string) error {
+	transport := strings.TrimSpace(strings.ToLower(system.Transport))
+	if transport == "" {
+		return nil
+	}
+	if normalizeSystemName(system.Type) != "github" {
+		return fmt.Errorf("system %q defines transport for unsupported adapter type %q", normalizeSystemName(systemName), normalizeSystemName(system.Type))
+	}
+	switch transport {
+	case "cli", "api":
+		return nil
+	default:
+		return fmt.Errorf("system %q uses unknown GitHub transport %q", normalizeSystemName(systemName), transport)
 	}
 }
 

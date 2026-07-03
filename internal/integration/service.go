@@ -73,6 +73,7 @@ type systemState struct {
 	Enabled          bool
 	Registered       bool
 	Default          bool
+	Transport        string
 	TaskLabelMapping map[string]string
 	Operations       map[string]model.IntegrationOperationConfig
 }
@@ -121,6 +122,7 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 			Configured:       true,
 			Enabled:          systemEnabled(systemConfig),
 			Default:          systemConfig.Default,
+			Transport:        normalizeSystem(systemConfig.Transport),
 			TaskLabelMapping: normalizeLabelMapping(systemConfig.TaskLabelMapping),
 			Operations:       normalizeOperationConfigMap(systemConfig.Operations),
 		}
@@ -656,6 +658,9 @@ func buildDiagnostics(integrationType string, system string, resource string, ob
 		diagnostics = append(diagnostics, fmt.Sprintf("provider=%s registered", system))
 		if state.Type != "" {
 			diagnostics = append(diagnostics, fmt.Sprintf("provider-type=%s", state.Type))
+		}
+		if state.Transport != "" {
+			diagnostics = append(diagnostics, fmt.Sprintf("transport=%s", state.Transport))
 		}
 		return diagnostics
 	}

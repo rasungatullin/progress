@@ -13,7 +13,7 @@
 
 ## 2. Принцип встроенных интеграций
 
-GitHub-адаптер запускает `gh` как внешний инструмент и получает структурированный результат. Bitbucket, Mattermost, Telegram и Confluence используют HTTP API и нормализуют ответы в те же канонические структуры.
+GitHub-адаптер поддерживает два способа обращения к внешней системе: режим `cli` через `gh` и режим `api` через GitHub REST API и GraphQL API. Если способ не указан, сохраняется совместимый режим `cli`. Bitbucket, Mattermost, Telegram и Confluence используют HTTP API и нормализуют ответы в те же канонические структуры.
 
 Базовая схема вызова:
 
@@ -38,9 +38,9 @@ flowchart LR
     C --> B
 ```
 
-## 3. Причины выбора `gh`
+## 3. Режимы GitHub-адаптера
 
-На первом этапе такой подход предпочтителен по следующим причинам:
+Режим `cli` запускает `gh` как внешний инструмент. На первом этапе такой подход был предпочтителен по следующим причинам:
 
 - для GitHub не требуется отдельно реализовывать OAuth, PAT и хранение приватных значений;
 - можно опереться на уже существующую авторизацию пользователя в `gh auth login`;
@@ -53,6 +53,8 @@ flowchart LR
 - часть ошибок приходит как текст из `stderr` и должна быть нормализована;
 - доступные операции ограничены возможностями установленной версии `gh`.
 
+Режим `api` выполняет прямые HTTP-вызовы к GitHub REST API и GraphQL API. Он использует `token` или `token_env` из описания системы, по умолчанию обращается к `https://api.github.com`, а для GitHub Enterprise Server может получать базовый адрес через `base_url`. CLI-команды контура при этом не меняются: наружу возвращаются те же канонические объекты `Response`, `CanonicalTask`, `Repository`, `MergeRequest`, `ReviewRemark`, `OperationResult` и `Failure`.
+
 ## 4. Внутренние модули реализации
 
 Минимальный состав кода для первого этапа:
@@ -61,6 +63,7 @@ flowchart LR
 - `internal/integration/model/types.go` — типы запросов и нормализованных ответов;
 - `internal/integration/github/service.go` — адаптер GitHub;
 - `internal/integration/github/runner.go` — безопасный запуск `gh`;
+- `internal/integration/github/api_runner.go` — прямой вызов GitHub REST API и GraphQL API;
 - `internal/integration/bitbucket/service.go` — адаптер Bitbucket;
 - `internal/integration/mattermost/service.go` — адаптер Mattermost;
 - `internal/integration/telegram/service.go` — адаптер Telegram;
@@ -240,7 +243,7 @@ progress integration operations --name tracker.task.get
 
 ### 7.4 `progress integration github auth status`
 
-Команда проверяет, доступен ли `gh` и авторизован ли пользователь.
+Команда проверяет доступность GitHub-интеграции. В режиме `cli` она проверяет, доступен ли `gh` и авторизован ли пользователь. В режиме `api` она проверяет, что токен задан и GitHub API принимает запрос.
 
 Базовый системный вызов:
 
@@ -253,6 +256,8 @@ gh auth status
 1. проверить наличие `gh` в `PATH`;
 2. убедиться, что для GitHub выполнена авторизация;
 3. вернуть диагностируемую ошибку, если дальнейшие вызовы невозможны.
+
+Для режима `api` вместо системного вызова выполняется `GET /user` с заголовком `Authorization: Bearer <token>`.
 
 ### 7.5 `progress integration github repo get`
 
@@ -393,6 +398,8 @@ gh pr list --repo owner/name --state closed --limit 30 --json number,title,body,
 Для `--scope authored` адаптер добавляет `--author @me`. Для `--scope reviewer` адаптер добавляет поисковый фильтр `reviewed-by:@me`.
 
 Если `--repo` не передан, GitHub-адаптер сначала использует `default_repo` из конфигурации, а при его отсутствии вызывает `gh pr list` без `--repo`, чтобы `gh` выбрал текущий репозиторий рабочей директории.
+
+В режиме `api` базовый список запросов на слияние поддерживает `--state`, `--limit` и явный или резервный репозиторий. Расширенные фильтры `--query`, `--scope authored` и `--scope reviewer` временно возвращают отказ `unsupported-operation`, пока сопоставление с поисковым API GitHub не закреплено в адаптере.
 
 ### 7.14 `progress integration github pr comment create`
 
@@ -562,6 +569,7 @@ GitHub-адаптер должен различать как минимум сл
 
 - `gh` не установлен;
 - `gh` не авторизован;
+- токен API не задан или отклонён внешней системой;
 - репозиторий не найден;
 - issue или PR не найден;
 - доступ запрещён;
@@ -573,8 +581,10 @@ GitHub-адаптер должен различать как минимум сл
 
 - `temporary-unavailable`;
 - `auth-required`;
+- `permission-denied`;
 - `not-found`;
 - `invalid-request`;
+- `unsupported-operation`;
 - `internal-integration-error`.
 
 ## 11. Конфигурация
@@ -590,7 +600,7 @@ GitHub-адаптер должен различать как минимум сл
 2. `default_systems.<type>` заменяет систему по умолчанию для конкретного типа интеграции;
 3. `private_store` задаёт реализацию хранилища приватных значений и сливается по простым полям;
 4. `systems.<name>` дополняет или переопределяет одноимённую систему из глобального слоя;
-5. простые поля системы, например `command`, `path`, `timeout`, `base_url`, `token_private`, `token_env`, `repository`, `project`, `channel_id`, `chat_id` и `default_repo`, заменяются локальными значениями;
+5. простые поля системы, например `transport`, `command`, `path`, `timeout`, `base_url`, `token_private`, `token_env`, `repository`, `project`, `channel_id`, `chat_id` и `default_repo`, заменяются локальными значениями;
 6. `database` дополняется по полям `driver`, `path` и `dsn`;
 7. `task_label_mapping` сливается по внешней метке;
 8. `operations` сливается по ключу операции;
@@ -615,6 +625,7 @@ GitHub-адаптер должен различать как минимум сл
       "type": "github",
       "integration_types": ["tracker", "repository"],
       "enabled": true,
+      "transport": "cli",
       "command": "gh",
       "timeout": "30s",
       "repository": "owner/name",
@@ -679,17 +690,39 @@ GitHub-адаптер должен различать как минимум сл
 4. `default=true` делает систему системой по умолчанию для её типов, если `default_systems` не задаёт явное значение;
 5. `command` и `path` позволяют переопределить исполняемый файл `gh`;
 6. `timeout` ограничивает внешний вызов;
-7. `base_url` задаёт базовый адрес HTTP API для Bitbucket, Mattermost, Telegram или Confluence;
-8. `api_variant` задаёт вариант Bitbucket API: `cloud` для `api.bitbucket.org/2.0` или `server` для Bitbucket Server/Data Center через `rest/api/1.0`;
-9. `token`, `token_private` или `token_env` задают данные авторизации, ссылку на приватное значение или ссылку на переменную окружения;
-10. `repository` задаёт резервный репозиторий для репозиторных операций;
-11. `workspace` задаёт рабочее пространство Bitbucket Cloud, если `--repo` передан без префикса;
-12. `project` задаёт ключ проекта Bitbucket Server/Data Center, если `--repo` передан без префикса;
-13. `channel_id` задаёт резервный канал Mattermost;
-14. `chat_id` задаёт резервный чат Telegram;
-15. `database` задаёт хранилище локального трекера; в текущем срезе поддержан `driver=sqlite`;
-16. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
-17. `operations` резервирует пространство для пооперационной настройки.
+7. `transport` для GitHub выбирает способ обращения: `cli` через `gh` или `api` через GitHub REST API и GraphQL API; если поле не задано, используется `cli`;
+8. `base_url` задаёт базовый адрес HTTP API для GitHub в режиме `api`, Bitbucket, Mattermost, Telegram или Confluence;
+9. `api_variant` задаёт вариант Bitbucket API: `cloud` для `api.bitbucket.org/2.0` или `server` для Bitbucket Server/Data Center через `rest/api/1.0`;
+10. `token`, `token_private` или `token_env` задают данные авторизации, ссылку на приватное значение или ссылку на переменную окружения;
+11. `repository` задаёт резервный репозиторий для репозиторных операций;
+12. `workspace` задаёт рабочее пространство Bitbucket Cloud, если `--repo` передан без префикса;
+13. `project` задаёт ключ проекта Bitbucket Server/Data Center, если `--repo` передан без префикса;
+14. `channel_id` задаёт резервный канал Mattermost;
+15. `chat_id` задаёт резервный чат Telegram;
+16. `database` задаёт хранилище локального трекера; в текущем срезе поддержан `driver=sqlite`;
+17. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
+18. `operations` резервирует пространство для пооперационной настройки.
+
+Пример GitHub-системы в режиме `api`:
+
+```json
+{
+  "systems": {
+    "github": {
+      "type": "github",
+      "integration_types": ["tracker", "repository"],
+      "enabled": true,
+      "transport": "api",
+      "base_url": "https://api.github.com",
+      "token_env": "GITHUB_TOKEN",
+      "repository": "owner/name",
+      "timeout": "30s"
+    }
+  }
+}
+```
+
+Если `base_url` не задан для GitHub в режиме `api`, используется `https://api.github.com`. Для локально размещённого GitHub Enterprise Server указывается базовый адрес REST API, например `https://github.example/api/v3`; GraphQL-вызовы будут направлены в соответствующий путь `/api/graphql`.
 
 ### 11.1 Локальный трекер задач
 
@@ -779,11 +812,11 @@ progress integration private set mt_auth_token --stdin
 
 1. диспетчер `Dispatch`, который выбирает интегрируемую систему по `IntegrationType`, `System` и `default_systems`;
 2. единый вызов `Execute`, который возвращает `Response` с каноническим объектом, маршрутом и отказным состоянием;
-3. GitHub-адаптер через `gh` для задач, комментариев задач, репозиториев и запросов на слияние;
+3. GitHub-адаптер через `gh` или прямой GitHub API для задач, комментариев задач, репозиториев и запросов на слияние;
 4. Bitbucket-адаптер через HTTP API для репозиториев и запросов на слияние;
 5. Mattermost-адаптер через HTTP API для цепочек обсуждения и сообщений;
 6. Telegram-адаптер через Bot API для отправки сообщений;
 7. локальный трекер задач с SQLite-хранилищем по умолчанию;
 8. нормализованные отказные состояния для отсутствия авторизации, недоступности, неподдерживаемой операции, неполного ответа и ошибок внешнего источника.
 
-Принцип проектирования остаётся прежним: другие контуры не должны знать синтаксис `gh`, HTTP-маршруты Bitbucket, Mattermost или Telegram, формат токенов и поля внешних ответов. Эти сведения остаются внутри адаптеров, а наружу выходит канонический ответ контура интеграции.
+Принцип проектирования остаётся прежним: другие контуры не должны знать синтаксис `gh`, HTTP-маршруты GitHub, Bitbucket, Mattermost или Telegram, формат токенов и поля внешних ответов. Эти сведения остаются внутри адаптеров, а наружу выходит канонический ответ контура интеграции.
