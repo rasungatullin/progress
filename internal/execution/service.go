@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rasungatullin/progress/internal/execution/dispatcher"
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
@@ -26,7 +25,20 @@ type WorkplaceSpec = model.WorkplaceSpec
 type Profile = model.Profile
 type Allocation = model.Allocation
 type Workplace = model.Workplace
+type AssignmentReason = model.AssignmentReason
+type ObjectRef = model.ObjectRef
+type ExecutionAssignment = model.ExecutionAssignment
+type Action = model.Action
+type ActionClass = model.ActionClass
+type OperationKind = model.OperationKind
+type OperationSpec = model.OperationSpec
+type OperationStatus = model.OperationStatus
+type OperationResult = model.OperationResult
+type Artifact = model.Artifact
+type DiagnosticLink = model.DiagnosticLink
+type Failure = model.Failure
 type LaunchResult = model.LaunchResult
+type ExecutionResult = model.ExecutionResult
 type StructuredInput = model.StructuredInput
 type StructuredOutput = model.StructuredOutput
 type StructuredExtensions = model.StructuredExtensions
@@ -73,7 +85,6 @@ type Service struct {
 	resources  ResourceProvider
 	workplaces WorkplaceManager
 	launcher   Launcher
-	dispatcher *dispatcher.Service
 }
 
 func NewService(logger *log.Logger) *Service {
@@ -88,11 +99,35 @@ func NewService(logger *log.Logger) *Service {
 		resources:  resources,
 		workplaces: workplaces,
 		launcher:   launcher,
-		dispatcher: dispatcher.NewService(logger),
 	}
 }
 
 func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error) {
+	result, err := s.Execute(ctx, in)
+	if result.Launch == nil {
+		return LaunchResult{}, err
+	}
+
+	return *result.Launch, err
+}
+
+func (s *Service) Execute(ctx context.Context, in Invocation) (ExecutionResult, error) {
+	assignment := assignmentFromInvocation(in)
+	in.Assignment = assignment
+	if in.Launch.StructuredInput == nil && assignment.StructuredInput != nil {
+		in.Launch.StructuredInput = assignment.StructuredInput
+	}
+	if strings.TrimSpace(in.Action) == "" {
+		in.Action = assignment.Action
+	}
+	if strings.TrimSpace(in.Profile) == "" {
+		in.Profile = assignment.Profile
+	}
+	action := resolveAction(in)
+	operations := newOperationTracker(action)
+	operations.complete(OperationKindResolveAction, fmt.Sprintf("action=%s class=%s", action.Name, action.Class))
+	operations.completeIO(OperationKindPrepareData, assignmentSummary(assignment), structuredInputSummary(assignment.StructuredInput), "Данные задания подготовлены для выполнения.")
+
 	s.logger.Printf("Контур исполнения принят к пуску: задача=%q", in.Task)
 	historyRoot := executionHistoryRoot(in, Workplace{})
 	historyHandle := s.beginStartHistory(ctx, historyRoot, in)
@@ -101,22 +136,28 @@ func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error
 	if err != nil {
 		result := failedStartResult(err)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, Profile{}, Allocation{}, Workplace{}, result, err)
-		return result, err
+		operations.fail(OperationKindResolveProfile, "Исполнительный профиль не определён.", err, "profile_not_found", false, true)
+		return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
 	}
+	operations.complete(OperationKindResolveProfile, fmt.Sprintf("profile=%s mode=%s", profile.Name, profile.Mode))
 
 	allocation, err := s.AllocateResources(ctx, in, profile)
 	if err != nil {
 		result := failedStartResult(err)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, Allocation{}, Workplace{}, result, err)
-		return result, err
+		operations.fail(OperationKindAllocateResources, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
+		return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
 	}
+	operations.complete(OperationKindAllocateResources, fmt.Sprintf("resource=%s runner=%s model=%s", allocation.Resource, allocation.Runner, allocation.Model))
 
 	workplace, err := s.PrepareWorkplace(ctx, in, profile, allocation)
 	if err != nil {
 		result := failedStartResult(err)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, Workplace{}, result, err)
-		return result, err
+		operations.fail(OperationKindPrepareWorkplace, "Исполнительное рабочее место не подготовлено.", err, "workplace_not_prepared", true, true)
+		return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
 	}
+	operations.complete(OperationKindPrepareWorkplace, fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
 
 	if strings.TrimSpace(in.Launch.Directory) == "" {
 		in.Launch.Directory = workplace.Name
@@ -126,16 +167,38 @@ func (s *Service) Start(ctx context.Context, in Invocation) (LaunchResult, error
 	if strings.TrimSpace(in.Launch.ModelBinding) == "" {
 		in.Launch.ModelBinding = allocation.ModelBinding
 	}
+	operations.completeIO(OperationKindBuildDirective, structuredInputSummary(in.Launch.StructuredInput), fmt.Sprintf("runner=%s model=%s", in.Launch.Runner, in.Launch.Model), "Исполнительная директива подготовлена к запуску.")
 	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, workplace, LaunchResult{Status: "running"}, nil)
 
 	launchCtx := launch.WithHistoryHandle(ctx, historyHandle)
 	result, err := s.Launch(launchCtx, in, profile, allocation, workplace)
 	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, workplace, result, err)
-	return result, err
+	if err != nil {
+		if result.StructuredOutput != nil {
+			operations.complete(OperationKindLaunchSynthesis, fmt.Sprintf("status=%s", result.Status))
+			operations.completeIO(OperationKindParseResult, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат синтеза получен и нормализован.")
+			operations.fail(OperationKindFinalize, "Завершающая операция после синтеза не выполнена.", err, "final_operation_failed", true, true)
+			return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
+		}
+		operations.fail(OperationKindLaunchSynthesis, "Запуск синтеза завершился отказом.", err, "synthesis_failed", true, true)
+		operations.fail(OperationKindParseResult, "Результат выполнения не приведён к нормализованной форме.", err, "result_not_parsed", false, true)
+		return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
+	}
+	operations.complete(OperationKindLaunchSynthesis, fmt.Sprintf("status=%s", result.Status))
+	operations.completeIO(OperationKindParseResult, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат выполнения нормализован.")
+	operations.complete(OperationKindFinalize, finalizeSummary(result))
+	return executionResultFromLaunch(assignment, action, operations.snapshot(), result, nil), nil
 }
 
 func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
-	return s.dispatcher.Plan(ctx, in)
+	_ = ctx
+	action := resolveAction(in)
+	stages := make([]string, 0, len(action.Operations))
+	for _, operation := range action.Operations {
+		stages = append(stages, operation.Name)
+	}
+	s.logger.Printf("Диспетчер сформировал действие: задача=%q действие=%q операции=%s", in.Task, action.Name, strings.Join(stages, " -> "))
+	return stages
 }
 
 func (s *Service) Resume(ctx context.Context, req ResumeRequest) (LaunchResult, error) {

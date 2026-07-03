@@ -34,6 +34,14 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 					URL:    "https://github.com/owner/name/issues/123",
 				},
 			},
+			Consideration: &decision.ConsiderationResult{
+				Status: decision.ConsiderationStatusExecution,
+				Route:  decision.ProcessingRoute{Name: "default"},
+				Checks: []decision.RouteCheckResult{{
+					Name:   "default-route",
+					Status: decision.RouteCheckStatusPassed,
+				}},
+			},
 			Decision: &decision.Decision{
 				Type: decision.DecisionType(decision.DecisionTypeExecute),
 				Reasons: []decision.DecisionReason{{
@@ -41,6 +49,14 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 					Message: "Issue-backed decision context is ready for direct execution handoff.",
 				}},
 				ExecutionPlan: &decision.ExecutionPlan{Profile: "default"},
+			},
+			ExecutionResult: &execution.ExecutionResult{
+				Status: "completed",
+				Action: execution.Action{Name: "implement"},
+				Operations: []execution.OperationResult{{
+					Name:   "resolve-action",
+					Status: "completed",
+				}},
 			},
 			Execution: &execution.LaunchResult{Status: "completed", Summary: "profile=default runner=opencode"},
 		}}
@@ -56,9 +72,15 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 		"signal-source=task\n",
 		"signal-kind=task-number\n",
 		"context-ready=true\n",
+		"consideration-status=execution\n",
+		"processing-route=default\n",
+		"route-check=default-route:passed\n",
 		"decision-type=execute\n",
 		"decision-reason=issue_context_ready:Issue-backed decision context is ready for direct execution handoff.\n",
 		"execution-profile=default\n",
+		"execution-result-status=completed\n",
+		"execution-action=implement\n",
+		"execution-operation=resolve-action:completed\n",
 		"execution-status=completed\n",
 		"execution-summary=profile=default runner=opencode\n",
 		"issue-number=123\n",
@@ -143,7 +165,7 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 					Status:  "failed",
 					Summary: "Applied the requested changes.",
 					StructuredOutput: &execution.StructuredOutput{
-						Summary:         "Need follow-up.",
+						Summary: "Need follow-up.",
 						Remarks: []execution.StructuredRemark{{
 							ID:    "remark-1",
 							Title: "Rollback plan",

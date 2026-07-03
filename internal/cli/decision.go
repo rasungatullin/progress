@@ -87,6 +87,20 @@ func printDecisionStartResultOnError(cmd *cobra.Command, result decision.StartRe
 func printDecisionStartResult(cmd *cobra.Command, result decision.StartResult) {
 	issue := result.Context.Issue
 	cmd.Printf("task=%d\nsignal-source=%s\nsignal-kind=%s\ncontext-ready=%t\n", result.Context.Signal.TaskNumber, result.Context.Signal.Source, result.Context.Signal.Kind, result.Ready)
+	if result.Consideration != nil {
+		if result.Consideration.Status != "" {
+			cmd.Printf("consideration-status=%s\n", result.Consideration.Status)
+		}
+		if result.Consideration.Route.Name != "" {
+			cmd.Printf("processing-route=%s\n", result.Consideration.Route.Name)
+		}
+		for _, check := range result.Consideration.Checks {
+			if check.Name == "" && check.Status == "" {
+				continue
+			}
+			cmd.Printf("route-check=%s:%s\n", check.Name, check.Status)
+		}
+	}
 	if result.Decision != nil {
 		cmd.Printf("decision-type=%s\n", result.Decision.Type)
 		for _, reason := range result.Decision.Reasons {
@@ -105,6 +119,20 @@ func printDecisionStartResult(cmd *cobra.Command, result decision.StartResult) {
 		}
 		if result.Decision.ExecutionPlan != nil && result.Decision.ExecutionPlan.Profile != "" {
 			cmd.Printf("execution-profile=%s\n", result.Decision.ExecutionPlan.Profile)
+		}
+	}
+	if result.ExecutionResult != nil {
+		if result.ExecutionResult.Status != "" {
+			cmd.Printf("execution-result-status=%s\n", result.ExecutionResult.Status)
+		}
+		if result.ExecutionResult.Action.Name != "" {
+			cmd.Printf("execution-action=%s\n", result.ExecutionResult.Action.Name)
+		}
+		for _, operation := range result.ExecutionResult.Operations {
+			if operation.Name == "" && operation.Status == "" {
+				continue
+			}
+			cmd.Printf("execution-operation=%s:%s\n", operation.Name, operation.Status)
 		}
 	}
 	if result.Execution != nil {
