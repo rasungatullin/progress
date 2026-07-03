@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	githubprovider "github.com/rasungatullin/progress/internal/integration/github"
 	mattermostprovider "github.com/rasungatullin/progress/internal/integration/mattermost"
 	"github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/integration/secrets"
 	telegramprovider "github.com/rasungatullin/progress/internal/integration/telegram"
 )
 
@@ -90,6 +92,10 @@ func NewService(logger *log.Logger) *Service {
 }
 
 func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile) *Service {
+	return NewServiceFromConfigWithPrivateStore(logger, config, nil)
+}
+
+func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.IntegrationConfigFile, store secrets.Store) *Service {
 	service := newEmptyService(logger)
 	service.defaultSystem = normalizeSystem(config.DefaultSystem)
 	for integrationType, system := range config.DefaultSystems {
@@ -123,17 +129,26 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 			continue
 		}
 
+		providerConfig := systemConfig
+		if err := resolvePrivateSystemConfig(context.Background(), name, &providerConfig, store); err != nil {
+			service.registerConfiguredProvider(name, state, failingProvider{
+				kind:    model.FailureKindAuthRequired,
+				message: err.Error(),
+			})
+			continue
+		}
+
 		switch state.Type {
 		case "github":
-			service.registerConfiguredProvider(name, state, githubprovider.NewServiceWithConfig(systemConfig))
+			service.registerConfiguredProvider(name, state, githubprovider.NewServiceWithConfig(providerConfig))
 		case "bitbucket":
-			service.registerConfiguredProvider(name, state, bitbucketprovider.NewService(systemConfig))
+			service.registerConfiguredProvider(name, state, bitbucketprovider.NewService(providerConfig))
 		case "mattermost":
-			service.registerConfiguredProvider(name, state, mattermostprovider.NewService(systemConfig))
+			service.registerConfiguredProvider(name, state, mattermostprovider.NewService(providerConfig))
 		case "telegram":
-			service.registerConfiguredProvider(name, state, telegramprovider.NewService(systemConfig))
+			service.registerConfiguredProvider(name, state, telegramprovider.NewService(providerConfig))
 		case "confluence":
-			service.registerConfiguredProvider(name, state, confluenceprovider.NewService(systemConfig))
+			service.registerConfiguredProvider(name, state, confluenceprovider.NewService(providerConfig))
 		case "":
 			service.systems[name] = state
 		default:
@@ -143,6 +158,61 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 
 	service.applyConfiguredDefaults()
 	return service
+}
+
+func resolvePrivateSystemConfig(ctx context.Context, system string, config *model.IntegrationSystemConfig, store secrets.Store) error {
+	if config == nil {
+		return nil
+	}
+	if strings.TrimSpace(config.Token) != "" || strings.TrimSpace(config.TokenPrivate) == "" {
+		return nil
+	}
+	if store == nil {
+		return fmt.Errorf("integration system %q requires private value %q but private store is not configured", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+	}
+	value, err := store.Get(ctx, config.TokenPrivate)
+	if err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+		}
+		return fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate), err)
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("integration system %q references empty private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+	}
+	config.Token = value
+	return nil
+}
+
+type failingProvider struct {
+	kind    string
+	message string
+}
+
+func (p failingProvider) Execute(_ context.Context, req ProviderRequest) (Response, error) {
+	message := strings.TrimSpace(p.message)
+	if message == "" {
+		message = "integration provider is not configured"
+	}
+	return Response{
+		IntegrationType: req.IntegrationType,
+		System:          req.System,
+		Resource:        req.Resource,
+		ObjectType:      req.ObjectType,
+		Operation:       req.Operation,
+		Status:          model.ResponseStatusFailed,
+		Failure: &Failure{
+			Kind:    firstNonEmpty(p.kind, model.FailureKindNotConfigured),
+			Message: message,
+		},
+		AuthStatus: &AuthStatus{
+			System:        req.System,
+			State:         firstNonEmpty(p.kind, model.FailureKindNotConfigured),
+			Available:     false,
+			Authenticated: false,
+			Message:       message,
+		},
+	}, fmt.Errorf("%s", message)
 }
 
 func newEmptyService(logger *log.Logger) *Service {

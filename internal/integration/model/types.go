@@ -91,7 +91,14 @@ type ProviderRequest struct {
 type IntegrationConfigFile struct {
 	DefaultSystem  string                             `json:"default_system"`
 	DefaultSystems map[string]string                  `json:"default_systems,omitempty"`
+	PrivateStore   IntegrationPrivateStoreConfig      `json:"private_store,omitempty"`
 	Systems        map[string]IntegrationSystemConfig `json:"systems"`
+}
+
+type IntegrationPrivateStoreConfig struct {
+	Type    string `json:"type,omitempty"`
+	Service string `json:"service,omitempty"`
+	Path    string `json:"path,omitempty"`
 }
 
 type IntegrationSystemConfig struct {
@@ -106,6 +113,7 @@ type IntegrationSystemConfig struct {
 	BaseURL          string                                `json:"base_url,omitempty"`
 	APIVariant       string                                `json:"api_variant,omitempty"`
 	Token            string                                `json:"token,omitempty"`
+	TokenPrivate     string                                `json:"token_private,omitempty"`
 	TokenEnv         string                                `json:"token_env,omitempty"`
 	Username         string                                `json:"username,omitempty"`
 	Repository       string                                `json:"repository,omitempty"`

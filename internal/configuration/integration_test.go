@@ -15,6 +15,10 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 		case "/config-home/integration/systems.json":
 			return []byte(`{
 				"default_system": "github",
+				"private_store": {
+					"type": "keychain",
+					"service": "progress-global"
+				},
 				"systems": {
 					"github": {
 						"type": "github",
@@ -23,6 +27,7 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 						"project": "global-project",
 						"repository": "global/repository",
 						"default_repo": "global/repo",
+						"token_env": "GITHUB_TOKEN",
 						"operations": {
 							"issue.get": {"timeout": "20s"},
 							"issue.comments": {"type": "script", "script": "./global.sh"}
@@ -34,11 +39,15 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 		case "/repo/.progress/integration/systems.json":
 			return []byte(`{
 				"default_system": "github",
+				"private_store": {
+					"service": "progress-local"
+				},
 				"systems": {
 					"github": {
 						"project": "local-project",
 						"repository": "local/repository",
 						"default_repo": "local/repo",
+						"token_private": "github_auth_token",
 						"task_label_mapping": {
 							"bug": "defect",
 							"triage": ""
@@ -76,6 +85,12 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	if github.Project != "local-project" {
 		t.Fatalf("unexpected project: %q", github.Project)
 	}
+	if github.TokenPrivate != "github_auth_token" {
+		t.Fatalf("unexpected private token reference: %q", github.TokenPrivate)
+	}
+	if github.TokenEnv != "GITHUB_TOKEN" {
+		t.Fatalf("expected global token env to remain as fallback, got: %q", github.TokenEnv)
+	}
 	if github.Operations["issue.get"].Timeout != "10s" {
 		t.Fatalf("unexpected merged issue.get timeout: %q", github.Operations["issue.get"].Timeout)
 	}
@@ -106,8 +121,45 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	if config.LocalConfigPath != "/repo/.progress/integration/systems.json" {
 		t.Fatalf("unexpected local config path: %q", config.LocalConfigPath)
 	}
+	if config.ConfigHome != "/config-home" {
+		t.Fatalf("unexpected config home: %q", config.ConfigHome)
+	}
+	if config.RepoRoot != "/repo" {
+		t.Fatalf("unexpected repo root: %q", config.RepoRoot)
+	}
+	if config.Config.PrivateStore.Type != "keychain" {
+		t.Fatalf("unexpected private store type: %q", config.Config.PrivateStore.Type)
+	}
+	if config.Config.PrivateStore.Service != "progress-local" {
+		t.Fatalf("unexpected private store service: %q", config.Config.PrivateStore.Service)
+	}
 	if len(config.Layers) != 2 {
 		t.Fatalf("unexpected layer count: %d", len(config.Layers))
+	}
+}
+
+func TestLoadIntegrationPrivateStoreConfigDoesNotRequireSystems(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/config-home/integration/systems.json" {
+			return []byte(`{"private_store":{"type":"file","path":"/tmp/progress-private.json"}}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	config, err := LoadIntegrationPrivateStoreConfigWithHome("", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load private store config: %v", err)
+	}
+	if config.Config.Type != "file" {
+		t.Fatalf("unexpected private store type: %q", config.Config.Type)
+	}
+	if config.Config.Path != "/tmp/progress-private.json" {
+		t.Fatalf("unexpected private store path: %q", config.Config.Path)
+	}
+	if config.ConfigHome != "/config-home" {
+		t.Fatalf("unexpected config home: %q", config.ConfigHome)
 	}
 }
 
