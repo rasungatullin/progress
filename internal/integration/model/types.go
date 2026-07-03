@@ -119,11 +119,14 @@ type IntegrationSystemConfig struct {
 }
 
 type IntegrationOperationConfig struct {
-	Type    string `json:"type,omitempty"`
-	Command string `json:"command,omitempty"`
-	Path    string `json:"path,omitempty"`
-	Timeout string `json:"timeout,omitempty"`
-	Script  string `json:"script,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Command  string            `json:"command,omitempty"`
+	Path     string            `json:"path,omitempty"`
+	Timeout  string            `json:"timeout,omitempty"`
+	Script   string            `json:"script,omitempty"`
+	Required []string          `json:"required,omitempty"`
+	Optional []string          `json:"optional,omitempty"`
+	Defaults map[string]string `json:"defaults,omitempty"`
 }
 
 type Response struct {
@@ -257,6 +260,47 @@ type Route struct {
 	Operation         string
 	ExpectedResult    string
 	Diagnostics       []string
+}
+
+type OperationFilter struct {
+	System          string
+	IntegrationType string
+	Name            string
+}
+
+type OperationDescriptor struct {
+	Name            string                  `json:"name"`
+	IntegrationType string                  `json:"integration_type"`
+	System          string                  `json:"system"`
+	AdapterType     string                  `json:"adapter_type"`
+	ObjectType      string                  `json:"object_type"`
+	Operation       string                  `json:"operation"`
+	Enabled         bool                    `json:"enabled"`
+	Available       bool                    `json:"available"`
+	SideEffect      bool                    `json:"side_effect"`
+	DryRunSupported bool                    `json:"dry_run_supported"`
+	Input           OperationInputContract  `json:"input"`
+	Output          OperationOutputContract `json:"output"`
+	FailureKinds    []string                `json:"failure_kinds,omitempty"`
+	Diagnostics     []string                `json:"diagnostics,omitempty"`
+}
+
+type OperationInputContract struct {
+	Required []OperationField `json:"required,omitempty"`
+	Optional []OperationField `json:"optional,omitempty"`
+}
+
+type OperationField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	Default     string `json:"default,omitempty"`
+	Repeated    bool   `json:"repeated,omitempty"`
+}
+
+type OperationOutputContract struct {
+	Resource string `json:"resource"`
+	Shape    string `json:"shape"`
 }
 
 type CanonicalTask struct {

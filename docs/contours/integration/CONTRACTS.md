@@ -257,6 +257,7 @@ import "context"
 type Service interface {
     Dispatch(context.Context, Request) (Route, error)
     Execute(context.Context, Request) (Response, error)
+    Operations(context.Context, OperationFilter) []OperationDescriptor
 }
 ```
 
@@ -268,7 +269,74 @@ type Service interface {
 - если `SystemProvided=true` и `System` пустой, запрос отклоняется как `invalid-request`;
 - вызывающему коду не нужно знать устройство GitHub, Bitbucket, Mattermost, Telegram или другой внешней системы.
 
-## 7. Типовой запрос
+## 7. Каталог операций
+
+Контур интеграции публикует каталог операций, чтобы соседние контуры могли заранее понять, какие действия доступны в текущей конфигурации и какие поля нужны для вызова. Каталог не заменяет выполнение операции: он описывает контракт и доступность.
+
+Каноническое имя операции строится по схеме:
+
+```text
+<integration-type>.<object>.<operation>
+```
+
+Примеры:
+
+- `tracker.task.get`;
+- `tracker.task.comment.list`;
+- `tracker.task.comment.create`;
+- `tracker.task.label.add`;
+- `repository.repo.get`;
+- `repository.merge-request.create`;
+- `repository.review-remark.resolve`;
+- `messenger.thread.get`;
+- `wiki.page.search`.
+
+Внешние имена команд, например `github issue comments` или `bitbucket pr get`, не являются каноническими именами операций. Они остаются диагностическим способом вызова конкретного адаптера.
+
+Публичная модель каталога:
+
+```go
+type OperationDescriptor struct {
+    Name            string
+    IntegrationType string
+    System          string
+    AdapterType     string
+    ObjectType      string
+    Operation       string
+    Enabled         bool
+    Available       bool
+    SideEffect      bool
+    DryRunSupported bool
+    Input           OperationInputContract
+    Output          OperationOutputContract
+    FailureKinds    []string
+    Diagnostics     []string
+}
+
+type OperationInputContract struct {
+    Required []OperationField
+    Optional []OperationField
+}
+
+type OperationField struct {
+    Name        string
+    Type        string
+    Description string
+    Default     string
+    Repeated    bool
+}
+
+type OperationOutputContract struct {
+    Resource string
+    Shape    string
+}
+```
+
+Поле `Available` означает, что операция может быть выполнена через зарегистрированный адаптер при текущей конфигурации. Отключённые системы и системы без подключённого адаптера не должны публиковать операции как доступные. При этом каталог может сохранить их описатели с `available=false`, если это полезно для диагностики настройки.
+
+Для сценарных систем типа `script` каталог строится из `systems.<name>.operations`: обязательные и необязательные поля берутся из конфигурации операции, а значения по умолчанию попадают в описатель поля. Это позволяет контуру исполнения увидеть контракт сценарной операции до фактического запуска внешнего сценария.
+
+## 8. Типовой запрос
 
 Основной типовой запрос к контуру звучит так:
 
@@ -304,7 +372,7 @@ type IssueGetRequest struct {
 - вернуть базовый набор плюс requested fields;
 - вернуть частичный результат, если часть полей не поддерживается конкретной интеграцией.
 
-## 8. Типовой ответ
+## 9. Типовой ответ
 
 ```go
 type IssueGetResult struct {
@@ -337,7 +405,7 @@ type Failure struct {
 - `unsupported-action`;
 - `internal-integration-error`.
 
-## 9. Поведение контура
+## 10. Поведение контура
 
 Контур должен вести себя следующим образом:
 
@@ -348,7 +416,7 @@ type Failure struct {
 - поддерживать `explain` для диагностики выбора интеграции и способа вызова;
 - различать полный, частичный и неуспешный результат.
 
-## 10. Границы ответственности
+## 11. Границы ответственности
 
 Контур интеграции не должен:
 

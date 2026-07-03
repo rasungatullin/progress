@@ -58,6 +58,7 @@ func newIntegrationCommand() *cobra.Command {
 	cmd.PersistentFlags().String("format", integrationOutputText, "Формат вывода: text (по умолчанию) или json")
 
 	cmd.AddCommand(newIntegrationDispatcherCommand())
+	cmd.AddCommand(newIntegrationOperationsCommand())
 	cmd.AddCommand(newIntegrationGitHubCommand())
 	cmd.AddCommand(newIntegrationBitbucketCommand())
 	cmd.AddCommand(newIntegrationMattermostCommand())
@@ -1124,6 +1125,37 @@ func newIntegrationDispatcherCommand() *cobra.Command {
 	return cmd
 }
 
+func newIntegrationOperationsCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{
+		Use:   "operations",
+		Short: "Каталог доступных операций контура интеграции",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
+			service := newIntegrationService(cmd)
+			operations := service.Operations(context.Background(), integration.OperationFilter{
+				System:          flags.system,
+				IntegrationType: flags.integrationType,
+				Name:            flags.operation,
+			})
+			if format == integrationOutputJSON {
+				return printIntegrationJSON(cmd, operations)
+			}
+			printIntegrationOperations(cmd, operations)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.integrationType, "type", "", "Тип интеграции")
+	cmd.Flags().StringVar(&flags.system, "system", "", "Имя внешней системы")
+	cmd.Flags().StringVar(&flags.operation, "name", "", "Каноническое имя операции")
+	return cmd
+}
+
 func newIntegrationService(cmd *cobra.Command) *integration.Service {
 	return integrationServiceFactory(cmd)
 }
@@ -1142,6 +1174,33 @@ func printIntegrationRouteOrJSON(cmd *cobra.Command, route integration.Route, fo
 
 	printIntegrationRoute(cmd, route)
 	return nil
+}
+
+func printIntegrationOperations(cmd *cobra.Command, operations []integration.OperationDescriptor) {
+	if len(operations) == 0 {
+		cmd.Println("operations=<none>")
+		return
+	}
+
+	for _, operation := range operations {
+		cmd.Printf("name=%s\nsystem=%s\ntype=%s\nadapter-type=%s\nobject=%s\noperation=%s\nenabled=%t\navailable=%t\nside-effect=%t\noutput-resource=%s\noutput-shape=%s\n", operation.Name, operation.System, operation.IntegrationType, operation.AdapterType, operation.ObjectType, operation.Operation, operation.Enabled, operation.Available, operation.SideEffect, operation.Output.Resource, operation.Output.Shape)
+		for _, field := range operation.Input.Required {
+			cmd.Printf("required=%s:%s\n", field.Name, field.Type)
+		}
+		for _, field := range operation.Input.Optional {
+			if field.Default != "" {
+				cmd.Printf("optional=%s:%s=%s\n", field.Name, field.Type, field.Default)
+				continue
+			}
+			cmd.Printf("optional=%s:%s\n", field.Name, field.Type)
+		}
+		for _, failureKind := range operation.FailureKinds {
+			cmd.Printf("failure=%s\n", failureKind)
+		}
+		for _, diagnostic := range operation.Diagnostics {
+			cmd.Printf("diagnostic=%s\n", diagnostic)
+		}
+	}
 }
 
 func printIntegrationResponseOrJSON(cmd *cobra.Command, response integration.Response, format string, textPrinter func(*cobra.Command, integration.Response)) error {

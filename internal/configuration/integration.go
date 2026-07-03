@@ -262,6 +262,29 @@ func mergeIntegrationOperationConfig(base, override integrationmodel.Integration
 	if value := strings.TrimSpace(override.Script); value != "" {
 		merged.Script = value
 	}
+	if len(override.Required) > 0 {
+		merged.Required = trimConfigStrings(override.Required)
+	}
+	if len(override.Optional) > 0 {
+		merged.Optional = trimConfigStrings(override.Optional)
+	}
+	if len(base.Defaults) > 0 || len(override.Defaults) > 0 {
+		merged.Defaults = map[string]string{}
+		for name, value := range base.Defaults {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			merged.Defaults[name] = strings.TrimSpace(value)
+		}
+		for name, value := range override.Defaults {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			merged.Defaults[name] = strings.TrimSpace(value)
+		}
+	}
 	return merged
 }
 
@@ -346,9 +369,29 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 }
 
 func validateIntegrationOperations(operations map[string]integrationmodel.IntegrationOperationConfig, systemName string) error {
-	for name := range operations {
+	for name, operation := range operations {
 		if normalizeOperationName(name) == "" {
 			return fmt.Errorf("system %q contains operation with empty name", normalizeSystemName(systemName))
+		}
+		if err := validateOperationFields(operation.Required, systemName, name, "required"); err != nil {
+			return err
+		}
+		if err := validateOperationFields(operation.Optional, systemName, name, "optional"); err != nil {
+			return err
+		}
+		for field := range operation.Defaults {
+			if strings.TrimSpace(field) == "" {
+				return fmt.Errorf("system %q operation %q contains defaults with empty field name", normalizeSystemName(systemName), normalizeOperationName(name))
+			}
+		}
+	}
+	return nil
+}
+
+func validateOperationFields(fields []string, systemName string, operationName string, group string) error {
+	for _, field := range fields {
+		if strings.TrimSpace(field) == "" {
+			return fmt.Errorf("system %q operation %q contains %s with empty field name", normalizeSystemName(systemName), normalizeOperationName(operationName), group)
 		}
 	}
 	return nil
@@ -422,6 +465,17 @@ func normalizeOperationName(name string) string {
 
 func normalizeIntegrationTypeName(name string) string {
 	return strings.TrimSpace(strings.ToLower(name))
+}
+
+func trimConfigStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func getIntegrationLayerPath(layers []IntegrationConfigLayer, source ConfigFileSource) string {

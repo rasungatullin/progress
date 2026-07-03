@@ -372,6 +372,134 @@ func TestDispatchWikiPageUsesWikiResultContract(t *testing.T) {
 	}
 }
 
+func TestOperationsCatalogIncludesBuiltInGitHubOperation(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	operations := service.Operations(context.Background(), OperationFilter{System: "github", Name: "tracker.task.get"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one operation, got %#v", operations)
+	}
+	operation := operations[0]
+	if operation.Name != "tracker.task.get" || operation.IntegrationType != model.IntegrationTypeTracker {
+		t.Fatalf("unexpected operation identity: %#v", operation)
+	}
+	if operation.System != "github" || operation.AdapterType != "github" || !operation.Enabled || !operation.Available {
+		t.Fatalf("unexpected operation availability: %#v", operation)
+	}
+	if operation.Output.Shape != "CanonicalTask" {
+		t.Fatalf("unexpected output shape: %q", operation.Output.Shape)
+	}
+	if len(operation.Input.Required) != 1 || operation.Input.Required[0].Name != "number" || operation.Input.Required[0].Type != "integer" {
+		t.Fatalf("unexpected required fields: %#v", operation.Input.Required)
+	}
+}
+
+func TestOperationsCatalogDoesNotPublishTelegramThreadRead(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"telegram": {Type: "telegram"},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "telegram", Name: "messenger.thread.get"})
+
+	if len(operations) != 0 {
+		t.Fatalf("telegram must not publish thread read operation: %#v", operations)
+	}
+
+	messageOperations := service.Operations(context.Background(), OperationFilter{System: "telegram", Name: "messenger.message.create"})
+	if len(messageOperations) != 1 || !messageOperations[0].Available {
+		t.Fatalf("telegram message create operation must stay available: %#v", messageOperations)
+	}
+}
+
+func TestOperationsCatalogPublishesExecutableGitHubTaskCommentsRead(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	operations := service.Operations(context.Background(), OperationFilter{System: "github", Name: "tracker.task.comment.list"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one operation, got %#v", operations)
+	}
+	operation := operations[0]
+	if operation.ObjectType != "task" || operation.Operation != "comments" {
+		t.Fatalf("task comment list operation must use executable GitHub route, got %#v", operation)
+	}
+	if operation.Output.Resource != "task-comment" || operation.Output.Shape != "TaskComment[]" {
+		t.Fatalf("unexpected comment output contract: %#v", operation.Output)
+	}
+}
+
+func TestOperationsCatalogMarksDisabledSystemUnavailable(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github", Enabled: boolPtr(false)},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "github", Name: "tracker.task.get"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one disabled operation, got %#v", operations)
+	}
+	if operations[0].Enabled || operations[0].Available {
+		t.Fatalf("disabled system must not publish operation as available: %#v", operations[0])
+	}
+	if !contains(operations[0].Diagnostics, "system disabled by integration configuration") {
+		t.Fatalf("expected disabled diagnostic, got %#v", operations[0].Diagnostics)
+	}
+}
+
+func TestOperationsCatalogIncludesScriptOperationConfig(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {
+				Type:            "script",
+				IntegrationType: model.IntegrationTypeTracker,
+				Operations: map[string]model.IntegrationOperationConfig{
+					"tracker.task.get": {
+						Script:   ".progress/integration/work-tracker/task-get.sh",
+						Required: []string{"number"},
+						Optional: []string{"project"},
+						Defaults: map[string]string{"project": "${system.project}"},
+					},
+				},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "work-tracker"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one script operation, got %#v", operations)
+	}
+	operation := operations[0]
+	if operation.Name != "tracker.task.get" || operation.AdapterType != "script" {
+		t.Fatalf("unexpected script operation: %#v", operation)
+	}
+	if operation.Available {
+		t.Fatalf("script operation must stay unavailable before adapter registration: %#v", operation)
+	}
+	if len(operation.Input.Required) != 1 || operation.Input.Required[0].Name != "number" {
+		t.Fatalf("unexpected required fields: %#v", operation.Input.Required)
+	}
+	if len(operation.Input.Optional) != 1 || operation.Input.Optional[0].Name != "project" || operation.Input.Optional[0].Default != "${system.project}" {
+		t.Fatalf("unexpected optional fields: %#v", operation.Input.Optional)
+	}
+	if operation.Output.Shape != "CanonicalTask" {
+		t.Fatalf("unexpected script operation output shape: %q", operation.Output.Shape)
+	}
+	if !contains(operation.Diagnostics, "script=.progress/integration/work-tracker/task-get.sh") {
+		t.Fatalf("expected script diagnostic, got %#v", operation.Diagnostics)
+	}
+}
+
 func TestExecutePropagatesProviderError(t *testing.T) {
 	t.Parallel()
 
