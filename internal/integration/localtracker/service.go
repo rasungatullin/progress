@@ -101,7 +101,9 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.searchTasks(ctx, db, response, req)
 	case isTaskObject(req) && req.Operation == "update":
 		return s.updateTask(ctx, db, response, req)
-	case isTaskCommentObject(req) && (req.Operation == "comments" || req.Operation == "list"):
+	case isTaskObject(req) && isCommentListOperation(req.Operation):
+		return s.listComments(ctx, db, response, req)
+	case isTaskCommentObject(req) && isCommentListOperation(req.Operation):
 		return s.listComments(ctx, db, response, req)
 	case isTaskCommentObject(req) && req.Operation == "create":
 		return s.createComment(ctx, db, response, req)
@@ -540,6 +542,15 @@ func isTaskObject(req model.ProviderRequest) bool {
 func isTaskCommentObject(req model.ProviderRequest) bool {
 	object := normalizeObjectType(firstNonEmpty(req.ObjectType, req.Resource))
 	return object == "comment" || object == "task-comment"
+}
+
+func isCommentListOperation(operation string) bool {
+	switch strings.TrimSpace(strings.ToLower(operation)) {
+	case "comments", "list", "list-comments":
+		return true
+	default:
+		return false
+	}
 }
 
 func isTaskLabelObject(req model.ProviderRequest) bool {

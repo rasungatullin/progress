@@ -160,6 +160,53 @@ func TestSearchAppliesLimitAfterLabelFilter(t *testing.T) {
 	}
 }
 
+func TestServiceListsCommentsForTaskCatalogRequest(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewService(model.IntegrationSystemConfig{
+		Database: model.IntegrationDatabaseConfig{Driver: "sqlite", Path: filepath.Join(root, "tasks.sqlite")},
+	})
+	service.resolveRepoRoot = func(context.Context) (string, error) { return root, nil }
+
+	create, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "create",
+		Title:      "Локальная задача",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "comment",
+		ObjectType: "comment",
+		Operation:  "create",
+		Number:     create.Task.Number,
+		Body:       "Комментарий",
+	}); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+
+	for _, operation := range []string{"comments", "list"} {
+		comments, err := service.Execute(context.Background(), model.ProviderRequest{
+			System:     "local",
+			Resource:   "task",
+			ObjectType: "task",
+			Operation:  operation,
+			Number:     create.Task.Number,
+		})
+		if err != nil {
+			t.Fatalf("list comments with operation %q: %v", operation, err)
+		}
+		if len(comments.TaskComments) != 1 || comments.TaskComments[0].Body != "Комментарий" {
+			t.Fatalf("unexpected comments for operation %q: %#v", operation, comments.TaskComments)
+		}
+	}
+}
+
 func TestServiceUsesDefaultDatabasePath(t *testing.T) {
 	t.Parallel()
 
