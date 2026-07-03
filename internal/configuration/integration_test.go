@@ -187,6 +187,53 @@ func TestLoadIntegrationConfigLetsLocalTokenEnvOverridePrivateToken(t *testing.T
 	}
 }
 
+func TestLoadIntegrationConfigKeepsTokenPriorityWithinLayer(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{
+				"systems": {
+					"mattermost": {
+						"type": "mattermost",
+						"base_url": "https://mattermost.example",
+						"token": "direct-token",
+						"token_private": "mt_auth_token",
+						"token_env": "MATTERMOST_TOKEN"
+					},
+					"telegram": {
+						"type": "telegram",
+						"token_private": "telegram_auth_token",
+						"token_env": "TELEGRAM_TOKEN"
+					}
+				}
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	config, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load integration config: %v", err)
+	}
+
+	mattermost := config.Config.Systems["mattermost"]
+	if mattermost.Token != "direct-token" {
+		t.Fatalf("expected direct token to win within one layer, got: %q", mattermost.Token)
+	}
+	if mattermost.TokenPrivate != "" || mattermost.TokenEnv != "" {
+		t.Fatalf("expected direct token to clear alternative sources, got private=%q env=%q", mattermost.TokenPrivate, mattermost.TokenEnv)
+	}
+
+	telegram := config.Config.Systems["telegram"]
+	if telegram.TokenPrivate != "telegram_auth_token" {
+		t.Fatalf("expected private token to win over token_env within one layer, got: %q", telegram.TokenPrivate)
+	}
+	if telegram.Token != "" || telegram.TokenEnv != "" {
+		t.Fatalf("expected private token to clear alternative sources, got token=%q env=%q", telegram.Token, telegram.TokenEnv)
+	}
+}
+
 func TestLoadIntegrationPrivateStoreConfigDoesNotRequireSystems(t *testing.T) {
 	t.Parallel()
 

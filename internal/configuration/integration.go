@@ -285,17 +285,19 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.APIVariant); value != "" {
 		merged.APIVariant = value
 	}
-	if value := strings.TrimSpace(override.Token); value != "" {
+	switch {
+	case strings.TrimSpace(override.Token) != "":
+		value := strings.TrimSpace(override.Token)
 		merged.Token = value
 		merged.TokenPrivate = ""
 		merged.TokenEnv = ""
-	}
-	if value := strings.TrimSpace(override.TokenPrivate); value != "" {
+	case strings.TrimSpace(override.TokenPrivate) != "":
+		value := strings.TrimSpace(override.TokenPrivate)
 		merged.TokenPrivate = value
 		merged.Token = ""
 		merged.TokenEnv = ""
-	}
-	if value := strings.TrimSpace(override.TokenEnv); value != "" {
+	case strings.TrimSpace(override.TokenEnv) != "":
+		value := strings.TrimSpace(override.TokenEnv)
 		merged.TokenEnv = value
 		merged.Token = ""
 		merged.TokenPrivate = ""

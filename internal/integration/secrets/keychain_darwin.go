@@ -26,6 +26,10 @@ func defaultStoreType() string {
 	return "keychain"
 }
 
+func keychainStoreSupported() bool {
+	return true
+}
+
 func setKeychainValue(ctx context.Context, service string, name string, value string) error {
 	if err := ctx.Err(); err != nil {
 		return err

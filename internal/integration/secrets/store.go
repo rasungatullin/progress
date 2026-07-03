@@ -42,6 +42,9 @@ func NewStore(config model.IntegrationPrivateStoreConfig, configHome string) (St
 
 	switch storeType {
 	case "keychain":
+		if !keychainStoreSupported() {
+			return nil, Descriptor{}, fmt.Errorf("private store type %q is not supported in current build", storeType)
+		}
 		service := strings.TrimSpace(config.Service)
 		if service == "" {
 			service = defaultServiceName
