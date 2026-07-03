@@ -300,6 +300,28 @@ func TestLoadIntegrationConfigRejectsLocalTrackerDefaultForRepository(t *testing
 	}
 }
 
+func TestLoadIntegrationConfigRejectsScriptDefaultForRepository(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{
+				"default_systems": {"repository": "work-tracker"},
+				"systems": {"work-tracker": {"type": "script"}}
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if err.Error() != "invalid integration config after merge of 1 layers: default_systems.repository references system \"work-tracker\" without matching integration type" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadIntegrationConfigUsesLocalLayerWhenGlobalHomeMissing(t *testing.T) {
 	originalResolveUserHome := resolveUserHome
 	resolveUserHome = func() (string, error) {

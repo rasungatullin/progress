@@ -660,7 +660,7 @@ func systemDeclaresIntegrationType(system integrationmodel.IntegrationSystemConf
 		return integrationType == "messenger"
 	case "confluence":
 		return integrationType == "wiki"
-	case "local-tracker":
+	case "local-tracker", "script":
 		return integrationType == "tracker"
 	default:
 		return true

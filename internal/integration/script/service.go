@@ -347,11 +347,15 @@ func decodeScriptResponse(response model.Response, stdout string) (model.Respons
 func operationNameForRequest(req model.ProviderRequest) string {
 	integrationType := normalizeIntegrationType(firstNonEmpty(req.IntegrationType, model.IntegrationTypeTracker))
 	objectType := normalizeObjectType(firstNonEmpty(req.ObjectType, req.Resource))
+	rawOperation := strings.TrimSpace(strings.ToLower(req.Operation))
 	operation := normalizeOperation(req.Operation)
 	switch integrationType {
 	case model.IntegrationTypeTracker:
 		switch objectType {
 		case "task", "issue":
+			if rawOperation == "comments" || rawOperation == "list-comments" {
+				return "tracker.task.comment.list"
+			}
 			return "tracker.task." + operation
 		case "comment":
 			if operation == "comments" || operation == "list" {

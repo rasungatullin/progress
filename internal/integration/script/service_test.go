@@ -77,6 +77,36 @@ func TestServiceExecutesConfiguredOperation(t *testing.T) {
 	}
 }
 
+func TestOperationNameForTaskCommentsRequest(t *testing.T) {
+	t.Parallel()
+
+	name := operationNameForRequest(model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "comments",
+	})
+
+	if name != "tracker.task.comment.list" {
+		t.Fatalf("unexpected operation name: %q", name)
+	}
+}
+
+func TestOperationNameForTaskListRequest(t *testing.T) {
+	t.Parallel()
+
+	name := operationNameForRequest(model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "list",
+	})
+
+	if name != "tracker.task.list" {
+		t.Fatalf("unexpected operation name: %q", name)
+	}
+}
+
 func TestServiceRejectsMissingRequiredFieldBeforeScript(t *testing.T) {
 	t.Parallel()
 
