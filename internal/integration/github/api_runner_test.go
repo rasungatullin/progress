@@ -637,3 +637,89 @@ func TestAPITransportFiltersMergedPullRequestsFromClosedState(t *testing.T) {
 		t.Fatalf("closed pull request must be exposed as closed, got %q", pulls[0].State)
 	}
 }
+
+func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		body           map[string]any
+		expectedCode   string
+		expectedState  string
+		expectedURL    string
+		expectedNumber int
+	}{
+		{
+			name: "already exists",
+			body: map[string]any{
+				"message": "Validation Failed",
+				"errors": []map[string]string{
+					{"message": "A pull request already exists for branch feature into branch main: https://github.com/owner/name/pull/15"},
+				},
+			},
+			expectedCode:   ErrorCodeAlreadyExists,
+			expectedState:  ErrorCodeAlreadyExists,
+			expectedURL:    "https://github.com/owner/name/pull/15",
+			expectedNumber: 15,
+		},
+		{
+			name: "branch not found",
+			body: map[string]any{
+				"message": "Validation Failed",
+				"errors": []map[string]string{
+					{"message": "Head ref must be a branch"},
+				},
+			},
+			expectedCode:  ErrorCodeNotFound,
+			expectedState: ErrorCodeNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/repos/owner/name/pulls" {
+					t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_ = json.NewEncoder(w).Encode(tt.body)
+			}))
+			defer server.Close()
+
+			service := NewServiceWithConfig(model.IntegrationSystemConfig{
+				Transport:  "api",
+				BaseURL:    server.URL,
+				Token:      "secret",
+				Repository: "owner/name",
+			})
+
+			response, err := service.Execute(context.Background(), model.ProviderRequest{
+				System:     "github",
+				Resource:   "pr",
+				ObjectType: "pr",
+				Operation:  "create",
+				Repository: "owner/name",
+				Base:       "main",
+				Head:       "feature",
+				Title:      "Title",
+				Body:       "Body",
+			})
+			assertGitHubErrorCode(t, err, tt.expectedCode)
+			if response.PullRequestStatus == nil {
+				t.Fatal("expected pull request status")
+			}
+			if response.PullRequestStatus.State != tt.expectedState {
+				t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+			}
+			if response.PullRequestStatus.URL != tt.expectedURL {
+				t.Fatalf("unexpected url: %q", response.PullRequestStatus.URL)
+			}
+			if response.PullRequestStatus.Number != tt.expectedNumber {
+				t.Fatalf("unexpected number: %d", response.PullRequestStatus.Number)
+			}
+		})
+	}
+}

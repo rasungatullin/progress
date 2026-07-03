@@ -300,10 +300,47 @@ func (r *APIRunner) RunPRCreate(ctx context.Context, repository string, request 
 	var raw apiPullRequest
 	result, err := r.do(ctx, config, http.MethodPost, "repos/"+repository+"/pulls", map[string]any{"base": request.Base, "head": request.Head, "title": request.Title, "body": request.Body, "draft": request.Draft}, &raw)
 	if err != nil {
+		if classifiedResult, ok := prCreateHTTPFailureForServiceClassification(result); ok {
+			result = classifiedResult
+			return result, apiResolvedConfig(config), nil
+		}
 		return result, apiResolvedConfig(config), err
 	}
 	result.Stdout = raw.HTMLURL
 	return result, apiResolvedConfig(config), nil
+}
+
+func prCreateHTTPFailureForServiceClassification(result CommandResult) (CommandResult, bool) {
+	if result.ExitCode != http.StatusUnprocessableEntity {
+		return result, false
+	}
+	if message := apiErrorMessage(result.Stdout); message != "" {
+		result.Stderr = message
+		result.Stdout = ""
+	}
+	return result, isPRAlreadyExists(result) || isPRCreateBranchNotFound(result) || isPRCreateNoCommits(result) || isRepoNotFound(result)
+}
+
+func apiErrorMessage(body string) string {
+	var payload struct {
+		Message string `json:"message"`
+		Errors  []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return ""
+	}
+	messages := make([]string, 0, 1+len(payload.Errors))
+	if message := strings.TrimSpace(payload.Message); message != "" {
+		messages = append(messages, message)
+	}
+	for _, item := range payload.Errors {
+		if message := strings.TrimSpace(item.Message); message != "" {
+			messages = append(messages, message)
+		}
+	}
+	return strings.Join(messages, "\n")
 }
 
 func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
