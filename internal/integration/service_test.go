@@ -687,6 +687,32 @@ func TestOperationsCatalogMarksScriptOperationWithoutExecutableUnavailable(t *te
 	}
 }
 
+func TestOperationsCatalogMarksUnsupportedConfiguredOperationUnavailable(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {
+				Type: "script",
+				Operations: map[string]model.IntegrationOperationConfig{
+					"repository.merge-request.get": {Script: ".progress/integration/work-tracker/pr-get.sh"},
+				},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "work-tracker", Name: "repository.merge-request.get"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one script operation, got %#v", operations)
+	}
+	if operations[0].Available {
+		t.Fatalf("unsupported script operation must be unavailable: %#v", operations[0])
+	}
+	if !contains(operations[0].Diagnostics, "system does not support integration type=repository") {
+		t.Fatalf("expected unsupported integration type diagnostic, got %#v", operations[0].Diagnostics)
+	}
+}
+
 func TestOperationsCatalogUsesSearchResultContractForTaskSearch(t *testing.T) {
 	t.Parallel()
 

@@ -154,6 +154,10 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 	optional := operationFields(operation.Optional, operation.Defaults)
 
 	available := state.Enabled && state.Registered
+	unsupportedIntegrationType := !systemSupportsIntegrationType(state, integrationType)
+	if unsupportedIntegrationType {
+		available = false
+	}
 	missingScriptExecutable := state.Type == "script" && !scriptOperationHasExecutable(operation)
 	if missingScriptExecutable {
 		available = false
@@ -175,6 +179,9 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 	}
 	if missingScriptExecutable {
 		descriptor.Diagnostics = append(descriptor.Diagnostics, "script operation has no script, command or path")
+	}
+	if unsupportedIntegrationType {
+		descriptor.Diagnostics = append(descriptor.Diagnostics, "system does not support integration type="+integrationType)
 	}
 	if operation.Script != "" {
 		descriptor.Diagnostics = append(descriptor.Diagnostics, "script="+strings.TrimSpace(operation.Script))
