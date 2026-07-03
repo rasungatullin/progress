@@ -57,3 +57,29 @@ func TestServiceSelectReportsMissingAction(t *testing.T) {
 		t.Fatal("expected missing action error")
 	}
 }
+
+func TestServiceSelectDoesNotUseInstructionForAnotherProfile(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewService(nil).Select(context.Background(), Catalog{
+		Routes: []Route{{Name: "default", Action: "engineering-synthesis", Profile: "default"}},
+		Actions: []Action{{
+			Name:    "engineering-synthesis",
+			Profile: "default",
+		}},
+		Instructions: []Instruction{{
+			Name:    "review-directive",
+			Profile: "review",
+			Body:    "Провести ревизию.",
+		}},
+	}, SelectionRequest{})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if result.Instruction.Name != "" {
+		t.Fatalf("unexpected incompatible instruction: %#v", result.Instruction)
+	}
+	if len(result.Diagnostics) == 0 || result.Diagnostics[len(result.Diagnostics)-1] != "instruction-missing-for-profile=default" {
+		t.Fatalf("expected missing instruction diagnostic: %#v", result.Diagnostics)
+	}
+}

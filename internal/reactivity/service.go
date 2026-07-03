@@ -90,6 +90,12 @@ func (s *Service) Normalize(ctx context.Context, event Event, process Process) (
 	event.Kind = strings.TrimSpace(event.Kind)
 	event.ObjectType = strings.TrimSpace(event.ObjectType)
 	event.ObjectID = strings.TrimSpace(event.ObjectID)
+	if expected := strings.TrimSpace(process.EventSource); expected != "" && expected != event.Source {
+		return ignored("source_mismatch", "Источник события не соответствует процессу реакции."), nil
+	}
+	if expected := strings.TrimSpace(process.EventKind); expected != "" && expected != event.Kind {
+		return ignored("kind_mismatch", "Вид события не соответствует процессу реакции."), nil
+	}
 	if event.Source == "" {
 		return Result{}, fmt.Errorf("источник события должен быть непустым")
 	}
@@ -98,13 +104,6 @@ func (s *Service) Normalize(ctx context.Context, event Event, process Process) (
 	}
 	if event.ObjectID == "" {
 		return Result{}, fmt.Errorf("идентификатор объекта события должен быть непустым")
-	}
-
-	if expected := strings.TrimSpace(process.EventSource); expected != "" && expected != event.Source {
-		return ignored("source_mismatch", "Источник события не соответствует процессу реакции."), nil
-	}
-	if expected := strings.TrimSpace(process.EventKind); expected != "" && expected != event.Kind {
-		return ignored("kind_mismatch", "Вид события не соответствует процессу реакции."), nil
 	}
 
 	occurredAt := event.OccurredAt

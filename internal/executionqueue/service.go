@@ -65,6 +65,10 @@ func (s *Service) Enqueue(ctx context.Context, request EnqueueRequest) (Item, er
 	if request.Task.Number <= 0 && strings.TrimSpace(request.Task.ExternalID) == "" {
 		return Item{}, fmt.Errorf("задача очереди должна задавать номер или внешний идентификатор")
 	}
+	request.AssignmentID = strings.TrimSpace(request.AssignmentID)
+	if request.AssignmentID == "" {
+		return Item{}, fmt.Errorf("элемент очереди должен ссылаться на задание на выполнение")
+	}
 	if request.MaxAttempts == 0 {
 		request.MaxAttempts = 1
 	}
@@ -82,7 +86,7 @@ func (s *Service) Enqueue(ctx context.Context, request EnqueueRequest) (Item, er
 		Priority:     request.Priority,
 		NotBefore:    request.NotBefore,
 		MaxAttempts:  request.MaxAttempts,
-		AssignmentID: strings.TrimSpace(request.AssignmentID),
+		AssignmentID: request.AssignmentID,
 		Status:       StatusQueued,
 		CreatedAt:    s.nowFunc(),
 	}

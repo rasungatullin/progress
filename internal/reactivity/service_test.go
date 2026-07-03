@@ -72,3 +72,25 @@ func TestServiceNormalizeIgnoresForeignEvent(t *testing.T) {
 		t.Fatalf("ignored event must not return signal: %#v", result.Signal)
 	}
 }
+
+func TestServiceNormalizeIgnoresForeignEventBeforeObjectValidation(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewService(nil).Normalize(context.Background(), Event{
+		Source: "mattermost",
+		Kind:   "message",
+	}, Process{
+		Name:        "github-events",
+		EventSource: "github",
+		EventKind:   "issue-comment",
+	})
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if result.Status != StatusIgnored {
+		t.Fatalf("unexpected status: %q", result.Status)
+	}
+	if len(result.Reasons) == 0 || result.Reasons[0].Code != "source_mismatch" {
+		t.Fatalf("unexpected reasons: %#v", result.Reasons)
+	}
+}

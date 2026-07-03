@@ -94,6 +94,8 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 	}
 	if instruction.Name != "" {
 		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("instruction=%s", instruction.Name))
+	} else if profile != "" {
+		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("instruction-missing-for-profile=%s", profile))
 	}
 
 	s.logger.Printf("Контур методик выбрал маршрут: маршрут=%q действие=%q профиль=%q", route.Name, action.Name, profile)
@@ -138,10 +140,7 @@ func selectInstruction(instructions []Instruction, profile string) Instruction {
 			return instruction
 		}
 	}
-	if len(instructions) == 0 {
-		return Instruction{}
-	}
-	return instructions[0]
+	return Instruction{}
 }
 
 func firstNonEmpty(values ...string) string {
