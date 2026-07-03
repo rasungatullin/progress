@@ -396,6 +396,26 @@ func TestOperationsCatalogIncludesBuiltInGitHubOperation(t *testing.T) {
 	}
 }
 
+func TestOperationsCatalogDoesNotPublishTelegramThreadRead(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"telegram": {Type: "telegram"},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "telegram", Name: "messenger.thread.get"})
+
+	if len(operations) != 0 {
+		t.Fatalf("telegram must not publish thread read operation: %#v", operations)
+	}
+
+	messageOperations := service.Operations(context.Background(), OperationFilter{System: "telegram", Name: "messenger.message.create"})
+	if len(messageOperations) != 1 || !messageOperations[0].Available {
+		t.Fatalf("telegram message create operation must stay available: %#v", messageOperations)
+	}
+}
+
 func TestOperationsCatalogMarksDisabledSystemUnavailable(t *testing.T) {
 	t.Parallel()
 

@@ -114,9 +114,13 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			mergeRequestCommentListOperation(),
 			mergeRequestCommentCreateOperation(),
 		}
-	case "mattermost", "telegram":
+	case "mattermost":
 		return []operationTemplate{
 			messengerThreadGetOperation(),
+			messengerMessageCreateOperation(),
+		}
+	case "telegram":
+		return []operationTemplate{
 			messengerMessageCreateOperation(),
 		}
 	case "confluence":
