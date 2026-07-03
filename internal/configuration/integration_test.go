@@ -39,6 +39,10 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 						"project": "local-project",
 						"repository": "local/repository",
 						"default_repo": "local/repo",
+						"task_label_mapping": {
+							"bug": "defect",
+							"triage": ""
+						},
 						"operations": {
 							"issue.get": {"timeout": "10s", "command": "/usr/local/bin/gh"}
 						}
@@ -80,6 +84,12 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	}
 	if github.Operations["issue.comments"].Script != "./global.sh" {
 		t.Fatalf("expected global issue.comments script to remain, got: %q", github.Operations["issue.comments"].Script)
+	}
+	if github.TaskLabelMapping["bug"] != "defect" {
+		t.Fatalf("unexpected bug mapping: %q", github.TaskLabelMapping["bug"])
+	}
+	if value, ok := github.TaskLabelMapping["triage"]; !ok || value != "" {
+		t.Fatalf("expected triage mapping to ignore label, got value=%q ok=%t", value, ok)
 	}
 	if config.SystemSources["github"] != ConfigFileSourceLocal {
 		t.Fatalf("expected github source local, got: %q", config.SystemSources["github"])

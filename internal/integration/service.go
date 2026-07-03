@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
+	confluenceprovider "github.com/rasungatullin/progress/internal/integration/confluence"
 	githubprovider "github.com/rasungatullin/progress/internal/integration/github"
 	mattermostprovider "github.com/rasungatullin/progress/internal/integration/mattermost"
 	"github.com/rasungatullin/progress/internal/integration/model"
@@ -26,6 +27,7 @@ type ReviewRemark = model.ReviewRemark
 type MessageThread = model.MessageThread
 type Message = model.Message
 type MessageReaction = model.MessageReaction
+type WikiPage = model.WikiPage
 type OperationResult = model.OperationResult
 type User = model.User
 type ObjectLink = model.ObjectLink
@@ -63,6 +65,7 @@ type systemState struct {
 	Enabled          bool
 	Registered       bool
 	Default          bool
+	TaskLabelMapping map[string]string
 }
 
 func NewService(logger *log.Logger) *Service {
@@ -105,6 +108,7 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 			Configured:       true,
 			Enabled:          systemEnabled(systemConfig),
 			Default:          systemConfig.Default,
+			TaskLabelMapping: normalizeLabelMapping(systemConfig.TaskLabelMapping),
 		}
 		service.systems[name] = state
 
@@ -121,6 +125,8 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 			service.registerConfiguredProvider(name, state, mattermostprovider.NewService(systemConfig))
 		case "telegram":
 			service.registerConfiguredProvider(name, state, telegramprovider.NewService(systemConfig))
+		case "confluence":
+			service.registerConfiguredProvider(name, state, confluenceprovider.NewService(systemConfig))
 		case "":
 			service.systems[name] = state
 		default:
@@ -174,6 +180,7 @@ func (s *Service) registerConfiguredProvider(system string, state systemState, p
 		state.IntegrationTypes = defaultIntegrationTypesForProvider(state.Type)
 	}
 	state.IntegrationTypes = dedupeStrings(state.IntegrationTypes)
+	state.TaskLabelMapping = normalizeLabelMapping(state.TaskLabelMapping)
 	s.systems[name] = state
 }
 
@@ -280,6 +287,9 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 
 	result, err := provider.Execute(ctx, normalized)
 	applyRouteToResponse(&result, route)
+	if state, ok := s.systems[route.System]; ok {
+		applyTaskLabelMapping(&result, state.TaskLabelMapping)
+	}
 	if result.Status == "" {
 		if err != nil || result.Failure != nil {
 			result.Status = model.ResponseStatusFailed
@@ -353,9 +363,13 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		MessageID:       strings.TrimSpace(req.MessageID),
 		Reaction:        strings.TrimSpace(req.Reaction),
 		Fields:          trimStrings(req.Fields),
+		Labels:          trimStrings(req.Labels),
 	}
 	if normalized.ObjectType == "" {
 		normalized.ObjectType = normalizeObjectType(normalized.Resource)
+	}
+	if state, ok := s.systems[system]; ok {
+		normalized.Labels = mapCanonicalLabelsToExternal(normalized.Labels, state.TaskLabelMapping)
 	}
 
 	return normalized, nil
@@ -439,6 +453,10 @@ func normalizeObjectType(objectType string) string {
 		return "comment"
 	case "thread", "discussion":
 		return "thread"
+	case "wiki-page", "document", "doc":
+		return "page"
+	case "task-label", "label":
+		return "label"
 	default:
 		return objectType
 	}
@@ -460,6 +478,10 @@ func normalizeOperation(operation string) string {
 	switch operation {
 	case "list-comments":
 		return "comments"
+	case "add-label", "add-labels":
+		return "add"
+	case "remove-label", "remove-labels", "delete-label", "delete-labels":
+		return "remove"
 	case "send", "post":
 		return "create"
 	default:
@@ -469,12 +491,14 @@ func normalizeOperation(operation string) string {
 
 func inferIntegrationType(objectType string) string {
 	switch normalizeObjectType(objectType) {
-	case "task", "issue", "comment":
+	case "task", "issue", "comment", "label":
 		return model.IntegrationTypeTracker
 	case "repository", "branch", "commit", "pull-request", "pr", "merge-request", "mr":
 		return model.IntegrationTypeRepository
 	case "channel", "thread", "message", "reaction":
 		return model.IntegrationTypeMessenger
+	case "page", "wiki-page", "document", "doc":
+		return model.IntegrationTypeWiki
 	default:
 		return ""
 	}
@@ -503,6 +527,8 @@ func defaultIntegrationTypesForProvider(providerType string) []string {
 		return []string{model.IntegrationTypeRepository}
 	case "mattermost", "telegram":
 		return []string{model.IntegrationTypeMessenger}
+	case "confluence":
+		return []string{model.IntegrationTypeWiki}
 	default:
 		return nil
 	}
@@ -582,6 +608,11 @@ func expectedResult(integrationType string, objectType string, resource string, 
 			return "canonical-task"
 		case "comment":
 			return "task-comment"
+		case "label":
+			if operation == "add" || operation == "remove" {
+				return "integration-operation-result"
+			}
+			return "task-label"
 		}
 	case model.IntegrationTypeRepository:
 		switch normalizeObjectType(firstNonEmpty(objectType, resource)) {
@@ -620,6 +651,14 @@ func expectedResult(integrationType string, objectType string, resource string, 
 			return "message[]"
 		case "reaction":
 			return "integration-operation-result"
+		}
+	case model.IntegrationTypeWiki:
+		switch normalizeObjectType(firstNonEmpty(objectType, resource)) {
+		case "page":
+			if operation == "search" || operation == "list" {
+				return "wiki-page[]"
+			}
+			return "wiki-page"
 		}
 	}
 
@@ -711,6 +750,14 @@ func applyResponseSystem(result *Response, system string) {
 		result.Message.System = system
 		result.Message.Author.System = system
 	}
+	if result.WikiPage != nil {
+		result.WikiPage.System = system
+		result.WikiPage.UpdatedBy.System = system
+	}
+	for i := range result.WikiPages {
+		result.WikiPages[i].System = system
+		result.WikiPages[i].UpdatedBy.System = system
+	}
 	if result.OperationResult != nil {
 		result.OperationResult.System = system
 	}
@@ -792,6 +839,24 @@ func normalizeDerivedObjects(result *Response) {
 	if result.PullRequest == nil && result.MergeRequest != nil {
 		pr := trackerPullRequestFromMergeRequest(*result.MergeRequest)
 		result.PullRequest = &pr
+	}
+}
+
+func applyTaskLabelMapping(result *Response, mapping map[string]string) {
+	if result == nil {
+		return
+	}
+	if result.Issue != nil {
+		externalLabels := append([]string(nil), result.Issue.Labels...)
+		canonicalLabels := mapExternalLabelsToCanonical(result.Issue.Labels, mapping)
+		result.Issue.Labels = canonicalLabels
+		if result.Task != nil && (len(result.Task.Traits) == 0 || sameStrings(result.Task.Traits, externalLabels)) {
+			result.Task.Traits = append([]string(nil), canonicalLabels...)
+		}
+		return
+	}
+	if result.Task != nil {
+		result.Task.Traits = mapExternalLabelsToCanonical(result.Task.Traits, mapping)
 	}
 }
 
@@ -961,6 +1026,114 @@ func trackerUsersFromUsers(users []User) []TrackerUser {
 		result = append(result, trackerUserFromUser(user))
 	}
 	return result
+}
+
+func normalizeLabelMapping(mapping map[string]string) map[string]string {
+	if len(mapping) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(mapping))
+	for external, canonical := range mapping {
+		external = strings.TrimSpace(external)
+		if external == "" {
+			continue
+		}
+		result[external] = strings.TrimSpace(canonical)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func mapExternalLabelsToCanonical(labels []string, mapping map[string]string) []string {
+	if len(labels) == 0 {
+		return nil
+	}
+	lookup := make(map[string]string, len(mapping))
+	for external, canonical := range mapping {
+		lookup[strings.ToLower(strings.TrimSpace(external))] = strings.TrimSpace(canonical)
+	}
+
+	result := make([]string, 0, len(labels))
+	seen := map[string]struct{}{}
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if canonical, ok := lookup[strings.ToLower(label)]; ok {
+			if canonical == "" {
+				continue
+			}
+			label = canonical
+		}
+		key := strings.ToLower(label)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, label)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func mapCanonicalLabelsToExternal(labels []string, mapping map[string]string) []string {
+	if len(labels) == 0 {
+		return nil
+	}
+	reverse := make(map[string][]string, len(mapping))
+	for external, canonical := range mapping {
+		external = strings.TrimSpace(external)
+		canonical = strings.TrimSpace(canonical)
+		if external == "" || canonical == "" {
+			continue
+		}
+		key := strings.ToLower(canonical)
+		reverse[key] = append(reverse[key], external)
+	}
+	for key := range reverse {
+		sort.Slice(reverse[key], func(i, j int) bool {
+			return strings.ToLower(reverse[key][i]) < strings.ToLower(reverse[key][j])
+		})
+	}
+
+	result := make([]string, 0, len(labels))
+	seen := map[string]struct{}{}
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if external := reverse[strings.ToLower(label)]; len(external) > 0 {
+			label = external[0]
+		}
+		key := strings.ToLower(label)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, label)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func sameStrings(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if strings.TrimSpace(left[i]) != strings.TrimSpace(right[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func responseWithFailure(route Route, kind string, retryable bool, err error) Response {

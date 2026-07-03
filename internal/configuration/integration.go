@@ -213,6 +213,23 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.ChatID); value != "" {
 		merged.ChatID = value
 	}
+	if len(base.TaskLabelMapping) > 0 || len(override.TaskLabelMapping) > 0 {
+		merged.TaskLabelMapping = map[string]string{}
+		for external, canonical := range base.TaskLabelMapping {
+			external = strings.TrimSpace(external)
+			if external == "" {
+				continue
+			}
+			merged.TaskLabelMapping[external] = strings.TrimSpace(canonical)
+		}
+		for external, canonical := range override.TaskLabelMapping {
+			external = strings.TrimSpace(external)
+			if external == "" {
+				continue
+			}
+			merged.TaskLabelMapping[external] = strings.TrimSpace(canonical)
+		}
+	}
 
 	if len(base.Operations) > 0 || len(override.Operations) > 0 {
 		merged.Operations = map[string]integrationmodel.IntegrationOperationConfig{}
@@ -264,6 +281,9 @@ func validateIntegrationLayer(config integrationmodel.IntegrationConfigFile) err
 		if err := validateIntegrationTypeList(system, name); err != nil {
 			return err
 		}
+		if err := validateTaskLabelMapping(system.TaskLabelMapping, name); err != nil {
+			return err
+		}
 		if err := validateIntegrationOperations(system.Operations, name); err != nil {
 			return err
 		}
@@ -289,6 +309,9 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 		}
 		if strings.TrimSpace(system.Type) == "" {
 			return fmt.Errorf("system %q must define type when enabled", name)
+		}
+		if err := validateTaskLabelMapping(system.TaskLabelMapping, name); err != nil {
+			return err
 		}
 		if err := validateIntegrationOperations(system.Operations, name); err != nil {
 			return err
@@ -331,6 +354,15 @@ func validateIntegrationOperations(operations map[string]integrationmodel.Integr
 	return nil
 }
 
+func validateTaskLabelMapping(mapping map[string]string, systemName string) error {
+	for external := range mapping {
+		if strings.TrimSpace(external) == "" {
+			return fmt.Errorf("system %q contains task_label_mapping with empty external label", normalizeSystemName(systemName))
+		}
+	}
+	return nil
+}
+
 func validateIntegrationSystemType(systemName, systemType string) error {
 	systemType = normalizeSystemName(systemType)
 	if systemType == "" {
@@ -338,7 +370,7 @@ func validateIntegrationSystemType(systemName, systemType string) error {
 	}
 
 	switch systemType {
-	case "github", "bitbucket", "mattermost", "telegram", "script":
+	case "github", "bitbucket", "mattermost", "telegram", "confluence", "script":
 		return nil
 	default:
 		return fmt.Errorf("system %q uses unknown type %q", normalizeSystemName(systemName), systemType)
@@ -369,6 +401,8 @@ func systemDeclaresIntegrationType(system integrationmodel.IntegrationSystemConf
 		return integrationType == "repository"
 	case "mattermost", "telegram":
 		return integrationType == "messenger"
+	case "confluence":
+		return integrationType == "wiki"
 	default:
 		return true
 	}

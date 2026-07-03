@@ -469,6 +469,74 @@ func TestRunnerRunIssueCommentsUsesConfiguredDefaultRepository(t *testing.T) {
 	}
 }
 
+func TestRunnerRunIssueLabelsAddBuildsEditCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"issue", "edit", "123", "--repo", "owner/name", "--add-label", "external-bug", "--add-label", "backend"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{}
+	}
+
+	result, config, err := runner.RunIssueLabelsAdd(context.Background(), "owner/name", 123, []string{"external-bug", "backend"})
+	if err != nil {
+		t.Fatalf("run issue label add: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
+func TestRunnerRunIssueLabelsRemoveBuildsEditCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"issue", "edit", "123", "--repo", "owner/name", "--remove-label", "external-bug"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{}
+	}
+
+	_, _, err := runner.RunIssueLabelsRemove(context.Background(), "owner/name", 123, []string{"external-bug"})
+	if err != nil {
+		t.Fatalf("run issue label remove: %v", err)
+	}
+}
+
+func TestRunnerRunIssueLabelsRejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	_, _, err := runner.RunIssueLabelsAdd(context.Background(), "owner/name", 0, []string{"bug"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+
+	_, _, err = runner.RunIssueLabelsAdd(context.Background(), "owner/name", 123, nil)
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+
+	_, _, err = runner.RunIssueLabelsAdd(context.Background(), "owner", 123, []string{"bug"})
+	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+}
+
 func TestRunnerRunPRViewBuildsJSONCommand(t *testing.T) {
 	t.Parallel()
 

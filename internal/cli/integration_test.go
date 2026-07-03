@@ -2161,6 +2161,92 @@ func TestIntegrationGitHubPRCommentResolveCommandPassesThread(t *testing.T) {
 	}
 }
 
+func TestIntegrationGitHubIssueLabelAddCommandSendsCanonicalLabels(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "label", "add", "--repo", "owner/name", "--number", "123", "--label", "bug", "--label", "backend"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			OperationResult: &integration.OperationResult{System: "github", ObjectType: "label", Operation: "add", Status: "ok", ExternalID: "123", Message: "labels updated"},
+		},
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue label add command: %v", err)
+	}
+	if provider.request.Operation != "add" || provider.request.IntegrationType != "tracker" {
+		t.Fatalf("unexpected request: %#v", provider.request)
+	}
+	if strings.Join(provider.request.Labels, ",") != "bug,backend" {
+		t.Fatalf("unexpected labels: %#v", provider.request.Labels)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "object=label\n") || !strings.Contains(output, "operation=add\n") {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestIntegrationConfluencePageGetCommandPrintsWikiPage(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "confluence", "page", "get", "--id", "123"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			WikiPage: &integration.WikiPage{
+				System:     "confluence",
+				Space:      "ENG",
+				ExternalID: "123",
+				Title:      "Architecture",
+				BodyFormat: "storage",
+				Version:    7,
+				URL:        "https://confluence.example/display/ENG/Architecture",
+				UpdatedBy:  integration.User{System: "confluence", Login: "alice", Name: "Alice"},
+			},
+		},
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("confluence", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute confluence page get command: %v", err)
+	}
+	if provider.request.IntegrationType != "wiki" || provider.request.ExternalID != "123" {
+		t.Fatalf("unexpected request: %#v", provider.request)
+	}
+	output := stdout.String()
+	for _, fragment := range []string{
+		"system=confluence\n",
+		"resource=page\n",
+		"operation=get\n",
+		"page_id=123\n",
+		"space=ENG\n",
+		"title=Architecture\n",
+		"version=7\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("confluence output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
 type stubCLIProvider struct {
 	response integration.Response
 	err      error

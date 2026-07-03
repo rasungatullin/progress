@@ -154,6 +154,73 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	}
 }
 
+func TestExecuteMapsExternalTaskLabelsToCanonical(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {
+				Type: "github",
+				TaskLabelMapping: map[string]string{
+					"external-bug": "bug",
+					"noise":        "",
+				},
+			},
+		},
+	})
+	service.RegisterProvider("github", stubProvider{
+		response: Response{
+			Issue: &TrackerIssue{
+				Labels: []string{"external-bug", "noise", "plain"},
+			},
+		},
+	})
+
+	result, err := service.Execute(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if result.Issue == nil || len(result.Issue.Labels) != 2 || result.Issue.Labels[0] != "bug" || result.Issue.Labels[1] != "plain" {
+		t.Fatalf("unexpected canonical issue labels: %#v", result.Issue)
+	}
+	if result.Task == nil || len(result.Task.Traits) != 2 || result.Task.Traits[0] != "bug" || result.Task.Traits[1] != "plain" {
+		t.Fatalf("unexpected canonical task traits: %#v", result.Task)
+	}
+}
+
+func TestExecuteMapsCanonicalTaskLabelsToExternal(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {
+				Type: "github",
+				TaskLabelMapping: map[string]string{
+					"external-bug": "bug",
+					"noise":        "",
+				},
+			},
+		},
+	})
+	provider := &capturingProvider{}
+	service.RegisterProvider("github", provider)
+
+	_, err := service.Execute(context.Background(), Request{
+		IntegrationType: "tracker",
+		System:          "github",
+		Resource:        "label",
+		ObjectType:      "label",
+		Operation:       "add",
+		Labels:          []string{"bug", "plain"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(provider.seen.Labels) != 2 || provider.seen.Labels[0] != "external-bug" || provider.seen.Labels[1] != "plain" {
+		t.Fatalf("unexpected provider labels: %#v", provider.seen.Labels)
+	}
+}
+
 func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 	t.Parallel()
 
@@ -279,6 +346,28 @@ func TestDispatchPRCreateUsesStatusResultContract(t *testing.T) {
 	}
 
 	if route.ExpectedResult != "integration-pull-request-status" {
+		t.Fatalf("unexpected expected result: %q", route.ExpectedResult)
+	}
+}
+
+func TestDispatchWikiPageUsesWikiResultContract(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{"wiki": "docs"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"docs": {Type: "confluence"},
+		},
+	})
+	route, err := service.Dispatch(context.Background(), Request{IntegrationType: "wiki", Resource: "page", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	if route.System != "docs" {
+		t.Fatalf("unexpected system: %q", route.System)
+	}
+	if route.ExpectedResult != "wiki-page" {
 		t.Fatalf("unexpected expected result: %q", route.ExpectedResult)
 	}
 }
