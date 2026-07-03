@@ -107,6 +107,21 @@ func TestOperationNameForTaskListRequest(t *testing.T) {
 	}
 }
 
+func TestOperationNameForTaskCommentCreateRequest(t *testing.T) {
+	t.Parallel()
+
+	name := operationNameForRequest(model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		Resource:        "task-comment",
+		ObjectType:      "task-comment",
+		Operation:       "create",
+	})
+
+	if name != "tracker.task.comment.create" {
+		t.Fatalf("unexpected operation name: %q", name)
+	}
+}
+
 func TestServiceRejectsMissingRequiredFieldBeforeScript(t *testing.T) {
 	t.Parallel()
 
@@ -133,6 +148,36 @@ func TestServiceRejectsMissingRequiredFieldBeforeScript(t *testing.T) {
 		t.Fatal("expected missing required field error")
 	}
 	if response.Failure == nil || response.Failure.Kind != model.FailureKindInvalidRequest {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
+	}
+}
+
+func TestServiceRejectsEmptySuccessfulTaskResponse(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(model.IntegrationSystemConfig{
+		IntegrationType: model.IntegrationTypeTracker,
+		Operations: map[string]model.IntegrationOperationConfig{
+			"tracker.task.get": {Script: "task-get.sh"},
+		},
+	})
+	service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
+	service.runCommand = func(context.Context, string, []string, []string, string) commandResult {
+		return commandResult{stdout: `{"status":"ok"}`}
+	}
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "work-tracker",
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "get",
+		Number:          123,
+	})
+	if err == nil {
+		t.Fatal("expected empty successful response error")
+	}
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindExternalFailure {
 		t.Fatalf("unexpected failure: %#v", response.Failure)
 	}
 }
