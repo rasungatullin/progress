@@ -113,6 +113,52 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 	}
 }
 
+func TestSearchAppliesLimitAfterLabelFilter(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewService(model.IntegrationSystemConfig{
+		Database: model.IntegrationDatabaseConfig{Driver: "sqlite", Path: filepath.Join(root, "tasks.sqlite")},
+	})
+	service.resolveRepoRoot = func(context.Context) (string, error) { return root, nil }
+
+	matching, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "create",
+		Title:      "Старая подходящая задача",
+		Labels:     []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("create matching task: %v", err)
+	}
+	if _, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "create",
+		Title:      "Новая задача без метки",
+	}); err != nil {
+		t.Fatalf("create newer task: %v", err)
+	}
+
+	search, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "search",
+		Labels:     []string{"bug"},
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("search tasks: %v", err)
+	}
+	if len(search.SearchResults) != 1 || search.SearchResults[0].Number != matching.Task.Number {
+		t.Fatalf("unexpected search results: %#v", search.SearchResults)
+	}
+}
+
 func TestServiceUsesDefaultDatabasePath(t *testing.T) {
 	t.Parallel()
 

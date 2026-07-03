@@ -371,6 +371,7 @@ func (s *Service) queryTasks(ctx context.Context, db *sql.DB, req model.Provider
 	query := `SELECT number, external_id, title, body, state, traits_json, attributes_json, author, created_at, updated_at FROM tasks`
 	var where []string
 	var args []any
+	labels := normalizeStrings(req.Labels)
 	if value := strings.TrimSpace(req.Query); value != "" {
 		where = append(where, `(title LIKE ? OR body LIKE ? OR external_id LIKE ?)`)
 		pattern := "%" + value + "%"
@@ -384,7 +385,7 @@ func (s *Service) queryTasks(ctx context.Context, db *sql.DB, req model.Provider
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += " ORDER BY updated_at DESC, number DESC"
-	if req.Limit > 0 {
+	if req.Limit > 0 && len(labels) == 0 {
 		query += " LIMIT ?"
 		args = append(args, req.Limit)
 	}
@@ -399,10 +400,13 @@ func (s *Service) queryTasks(ctx context.Context, db *sql.DB, req model.Provider
 		if err != nil {
 			return nil, err
 		}
-		if len(req.Labels) > 0 && !hasAllStrings(record.Traits, normalizeStrings(req.Labels)) {
+		if len(labels) > 0 && !hasAllStrings(record.Traits, labels) {
 			continue
 		}
 		records = append(records, record)
+		if req.Limit > 0 && len(records) >= req.Limit {
+			break
+		}
 	}
 	return records, rows.Err()
 }
