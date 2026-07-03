@@ -207,7 +207,12 @@ func (r *APIRunner) RunPRView(ctx context.Context, repository string, number int
 	if err != nil {
 		return result, apiResolvedConfig(config), err
 	}
-	result.Stdout = mustJSON(prViewFromAPI(raw))
+	view := prViewFromAPI(raw)
+	metadataResult, err := r.enrichPullRequestView(ctx, config, repository, &view)
+	if err != nil {
+		return metadataResult, apiResolvedConfig(config), err
+	}
+	result.Stdout = mustJSON(view)
 	return result, apiResolvedConfig(config), nil
 }
 
@@ -261,7 +266,12 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 	}
 	views := make([]ghPRView, 0, len(pullRequests))
 	for _, item := range pullRequests {
-		views = append(views, prViewFromAPI(item))
+		view := prViewFromAPI(item)
+		metadataResult, err := r.enrichPullRequestView(ctx, config, repository, &view)
+		if err != nil {
+			return metadataResult, apiResolvedConfig(config), err
+		}
+		views = append(views, view)
 	}
 	result.Stdout = mustJSON(views)
 	return result, apiResolvedConfig(config), nil
@@ -314,6 +324,29 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 	}
 	result.Stdout = string(raw)
 	return result, apiResolvedConfig(config), nil
+}
+
+func (r *APIRunner) enrichPullRequestView(ctx context.Context, config apiConfig, repository string, view *ghPRView) (CommandResult, error) {
+	if view == nil || view.Number <= 0 {
+		return CommandResult{}, nil
+	}
+	owner, name, err := splitRepository(repository)
+	if err != nil {
+		return CommandResult{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	query := `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewDecision labels(first: 100) { nodes { name } } } } }`
+	var metadata apiPullRequestMetadataResponse
+	result, err := r.graphql(ctx, config, query, map[string]any{"owner": owner, "name": name, "number": view.Number}, &metadata)
+	if err != nil {
+		return result, err
+	}
+	pr := metadata.Data.Repository.PullRequest
+	if pr == nil {
+		return result, &Error{Code: ErrorCodeNotFound, Message: fmt.Sprintf("GitHub pull request not found: %s#%d", repository, view.Number), Result: result}
+	}
+	view.ReviewDecision = strings.TrimSpace(pr.ReviewDecision)
+	view.Labels = append([]ghIssueLabel(nil), pr.Labels.Nodes...)
+	return result, nil
 }
 
 func (r *APIRunner) RunPRCommentCreate(ctx context.Context, repository string, number int, request PRCommentCreateRequest) (CommandResult, resolvedConfig, error) {
@@ -538,6 +571,19 @@ type apiPullRequest struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
 	MergedAt string `json:"merged_at"`
+}
+
+type apiPullRequestMetadataResponse struct {
+	Data struct {
+		Repository struct {
+			PullRequest *struct {
+				ReviewDecision string `json:"reviewDecision"`
+				Labels         struct {
+					Nodes []ghIssueLabel `json:"nodes"`
+				} `json:"labels"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
 }
 
 type graphqlErrorEnvelope struct {

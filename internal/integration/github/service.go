@@ -581,6 +581,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 			status.Message = ghErr.Message
 			status.Diagnostics = append(status.Diagnostics, "gh issue view failed before returning an issue payload")
 			response.IssueStatus = &status
+			applyGitHubFailure(&response, ghErr.Code, status.Message, status.Diagnostics)
 			return response, ghErr
 		}
 
@@ -1142,6 +1143,7 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 			status.Message = ghErr.Message
 			status.Diagnostics = append(status.Diagnostics, "gh pr view failed before returning a pull request payload")
 			response.PullRequestStatus = &status
+			applyGitHubFailure(&response, ghErr.Code, status.Message, status.Diagnostics)
 			return response, ghErr
 		}
 
@@ -1460,6 +1462,15 @@ func responseWithGitHubFailure(response model.Response, result CommandResult, er
 	return response, &Error{Code: ErrorCodeExternalFailure, Message: message, Result: result, Err: err}
 }
 
+func applyGitHubFailure(response *model.Response, code string, message string, diagnostics []string) {
+	response.Status = model.ResponseStatusFailed
+	response.Failure = &model.Failure{
+		Kind:        failureKindForGitHubError(code),
+		Message:     message,
+		Diagnostics: append([]string(nil), diagnostics...),
+	}
+}
+
 func responseWithGitHubExitFailure(response model.Response, result CommandResult, repository string, number int, diagnostic string) (model.Response, error) {
 	code := ErrorCodeExternalFailure
 	message := fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
@@ -1517,6 +1528,7 @@ func (s *Service) executeRepoGet(ctx context.Context, response model.Response, r
 			status.Message = ghErr.Message
 			status.Diagnostics = append(status.Diagnostics, "gh repo view failed before returning a repository payload")
 			response.RepositoryStatus = &status
+			applyGitHubFailure(&response, ghErr.Code, status.Message, status.Diagnostics)
 			return response, ghErr
 		}
 

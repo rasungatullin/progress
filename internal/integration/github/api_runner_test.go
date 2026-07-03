@@ -169,6 +169,105 @@ func TestAPITransportMapsNotFound(t *testing.T) {
 	if response.IssueStatus == nil || response.IssueStatus.State != ErrorCodeNotFound {
 		t.Fatalf("unexpected issue status: %#v", response.IssueStatus)
 	}
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindNotFound {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
+	}
+}
+
+func TestAPITransportPRGetEnrichesLabelsAndReviewDecision(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/name/pulls/7":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"number":     7,
+				"title":      "API PR",
+				"body":       "Body",
+				"state":      "open",
+				"html_url":   "https://github.com/owner/name/pull/7",
+				"created_at": "2026-07-03T07:00:00Z",
+				"updated_at": "2026-07-03T07:01:00Z",
+				"user":       map[string]string{"login": "alice"},
+				"base":       map[string]string{"ref": "main"},
+				"head":       map[string]string{"ref": "feature"},
+			})
+		case "/graphql":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"repository": map[string]any{
+						"pullRequest": map[string]any{
+							"reviewDecision": "APPROVED",
+							"labels": map[string]any{
+								"nodes": []map[string]string{{"name": "backend"}},
+							},
+						},
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	service := NewServiceWithConfig(model.IntegrationSystemConfig{
+		Transport:  "api",
+		BaseURL:    server.URL,
+		Token:      "secret",
+		Repository: "owner/name",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "github",
+		Resource:   "pr",
+		ObjectType: "pr",
+		Operation:  "get",
+		Number:     7,
+	})
+	if err != nil {
+		t.Fatalf("execute pr get through api transport: %v", err)
+	}
+	if response.PullRequest == nil || response.PullRequest.ReviewDecision != "APPROVED" || len(response.PullRequest.Labels) != 1 || response.PullRequest.Labels[0] != "backend" {
+		t.Fatalf("unexpected pull request response: %#v", response.PullRequest)
+	}
+	if response.MergeRequest == nil || response.MergeRequest.ReviewDecision != "APPROVED" || len(response.MergeRequest.Traits) != 1 || response.MergeRequest.Traits[0] != "backend" {
+		t.Fatalf("unexpected merge request response: %#v", response.MergeRequest)
+	}
+}
+
+func TestAPITransportPRGetPreservesHTTPFailureKind(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Resource not accessible"}`))
+	}))
+	defer server.Close()
+
+	service := NewServiceWithConfig(model.IntegrationSystemConfig{
+		Transport:  "api",
+		BaseURL:    server.URL,
+		Token:      "secret",
+		Repository: "owner/name",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "github",
+		Resource:   "pr",
+		ObjectType: "pr",
+		Operation:  "get",
+		Number:     7,
+	})
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+	if response.PullRequestStatus == nil || response.PullRequestStatus.State != model.FailureKindPermissionDenied {
+		t.Fatalf("unexpected pull request status: %#v", response.PullRequestStatus)
+	}
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindPermissionDenied {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
+	}
 }
 
 func TestAPITransportMapsRateLimit(t *testing.T) {
@@ -399,7 +498,21 @@ func TestAPITransportDoesNotSendMergedAsRESTState(t *testing.T) {
 
 	var seenState string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/owner/name/pulls" {
+		switch r.URL.Path {
+		case "/repos/owner/name/pulls":
+		case "/graphql":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"repository": map[string]any{
+						"pullRequest": map[string]any{
+							"reviewDecision": "REVIEW_REQUIRED",
+							"labels":         map[string]any{"nodes": []map[string]string{{"name": "release"}}},
+						},
+					},
+				},
+			})
+			return
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		seenState = r.URL.Query().Get("state")
@@ -448,5 +561,8 @@ func TestAPITransportDoesNotSendMergedAsRESTState(t *testing.T) {
 	}
 	if pulls[0].State != "merged" {
 		t.Fatalf("merged pull request must be exposed as merged, got %q", pulls[0].State)
+	}
+	if pulls[0].ReviewDecision != "REVIEW_REQUIRED" || len(pulls[0].Labels) != 1 || pulls[0].Labels[0].Name != "release" {
+		t.Fatalf("expected enriched pull request metadata, got %#v", pulls[0])
 	}
 }
