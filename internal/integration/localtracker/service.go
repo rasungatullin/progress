@@ -101,7 +101,7 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.searchTasks(ctx, db, response, req)
 	case isTaskObject(req) && req.Operation == "update":
 		return s.updateTask(ctx, db, response, req)
-	case isTaskObject(req) && isCommentListOperation(req.Operation):
+	case isTaskObject(req) && isTaskCommentListOperation(req.Operation):
 		return s.listComments(ctx, db, response, req)
 	case isTaskCommentObject(req) && isCommentListOperation(req.Operation):
 		return s.listComments(ctx, db, response, req)
@@ -223,6 +223,9 @@ func (s *Service) listComments(ctx context.Context, db *sql.DB, response model.R
 		comment := taskComment(req.System, record)
 		response.TaskComments = append(response.TaskComments, comment)
 		response.Comments = append(response.Comments, trackerComment(comment))
+	}
+	if err := rows.Err(); err != nil {
+		return failureResponse(response, model.FailureKindExternalFailure, fmt.Errorf("list local tracker comments: %w", err))
 	}
 	response.Metadata = map[string]string{"number": strconv.Itoa(task.Number), "count": strconv.Itoa(len(response.TaskComments))}
 	response.Status = model.ResponseStatusOK
@@ -547,6 +550,15 @@ func isTaskCommentObject(req model.ProviderRequest) bool {
 func isCommentListOperation(operation string) bool {
 	switch strings.TrimSpace(strings.ToLower(operation)) {
 	case "comments", "list", "list-comments":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTaskCommentListOperation(operation string) bool {
+	switch strings.TrimSpace(strings.ToLower(operation)) {
+	case "comments", "list-comments":
 		return true
 	default:
 		return false

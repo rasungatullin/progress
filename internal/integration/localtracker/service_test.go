@@ -190,7 +190,7 @@ func TestServiceListsCommentsForTaskCatalogRequest(t *testing.T) {
 		t.Fatalf("create comment: %v", err)
 	}
 
-	for _, operation := range []string{"comments", "list"} {
+	for _, operation := range []string{"comments", "list-comments"} {
 		comments, err := service.Execute(context.Background(), model.ProviderRequest{
 			System:     "local",
 			Resource:   "task",
@@ -204,6 +204,20 @@ func TestServiceListsCommentsForTaskCatalogRequest(t *testing.T) {
 		if len(comments.TaskComments) != 1 || comments.TaskComments[0].Body != "Комментарий" {
 			t.Fatalf("unexpected comments for operation %q: %#v", operation, comments.TaskComments)
 		}
+	}
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "list",
+		Number:     create.Task.Number,
+	})
+	if err == nil {
+		t.Fatal("expected unsupported task list operation")
+	}
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindUnsupportedOperation {
+		t.Fatalf("unexpected task list failure: %#v", response.Failure)
 	}
 }
 
