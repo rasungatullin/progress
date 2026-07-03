@@ -240,11 +240,7 @@ func (s keychainStore) Set(ctx context.Context, name string, value string) error
 	if err != nil {
 		return err
 	}
-	output, err := execCommandContext(ctx, "security", "add-generic-password", "-U", "-s", s.service, "-a", name, "-w", value).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("write private value %q to keychain service %q: %w: %s", name, s.service, err, strings.TrimSpace(string(output)))
-	}
-	return nil
+	return setKeychainValue(ctx, s.service, name, value)
 }
 
 func (s keychainStore) Delete(ctx context.Context, name string) error {
