@@ -320,8 +320,8 @@ func trackerTaskCommentListOperation() operationTemplate {
 	return operationTemplate{
 		Name:            "tracker.task.comment.list",
 		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task-comment",
-		Operation:       "list",
+		ObjectType:      "task",
+		Operation:       "comments",
 		Input:           input(requiredField("number", "integer"), optionalFields("repository")...),
 		Output:          output("task-comment", "TaskComment[]"),
 		FailureKinds:    defaultFailureKinds(),

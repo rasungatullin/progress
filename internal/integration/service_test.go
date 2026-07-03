@@ -416,6 +416,24 @@ func TestOperationsCatalogDoesNotPublishTelegramThreadRead(t *testing.T) {
 	}
 }
 
+func TestOperationsCatalogPublishesExecutableGitHubTaskCommentsRead(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	operations := service.Operations(context.Background(), OperationFilter{System: "github", Name: "tracker.task.comment.list"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one operation, got %#v", operations)
+	}
+	operation := operations[0]
+	if operation.ObjectType != "task" || operation.Operation != "comments" {
+		t.Fatalf("task comment list operation must use executable GitHub route, got %#v", operation)
+	}
+	if operation.Output.Resource != "task-comment" || operation.Output.Shape != "TaskComment[]" {
+		t.Fatalf("unexpected comment output contract: %#v", operation.Output)
+	}
+}
+
 func TestOperationsCatalogMarksDisabledSystemUnavailable(t *testing.T) {
 	t.Parallel()
 
