@@ -152,7 +152,7 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 	}
 	workdir = resolveConfiguredWorkdir(workdir, s.config.Path)
 
-	scriptPath, err := resolveScriptPath(workdir, operation)
+	commandPath, err := resolveCommandPath(workdir, operation)
 	if err != nil {
 		return failureResponse(response, model.FailureKindInvalidRequest, false, err, nil)
 	}
@@ -183,19 +183,19 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		"PROGRESS_INTEGRATION_REQUEST_FILE="+inputPath,
 		"PROGRESS_INTEGRATION_TIMEOUT="+timeout.String(),
 	)
-	result := s.runCommand(runCtx, scriptPath, nil, env, workdir)
+	result := s.runCommand(runCtx, commandPath, nil, env, workdir)
 	if errors.Is(result.err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		return failureResponse(response, model.FailureKindTimeout, true, fmt.Errorf("script operation timed out after %s", timeout), []string{"script=" + scriptPath})
+		return failureResponse(response, model.FailureKindTimeout, true, fmt.Errorf("script operation timed out after %s", timeout), []string{"script=" + commandPath})
 	}
 	if result.err != nil {
 		kind := model.FailureKindExternalFailure
 		if result.exitCode == -1 {
 			kind = model.FailureKindInvalidRequest
 		}
-		return failureResponse(response, kind, false, fmt.Errorf("script operation failed: %w", result.err), []string{"script=" + scriptPath, "stderr=" + strings.TrimSpace(result.stderr)})
+		return failureResponse(response, kind, false, fmt.Errorf("script operation failed: %w", result.err), []string{"script=" + commandPath, "stderr=" + strings.TrimSpace(result.stderr)})
 	}
 	if result.exitCode != 0 {
-		return failureResponse(response, model.FailureKindExternalFailure, false, fmt.Errorf("script operation exited with code %d", result.exitCode), []string{"script=" + scriptPath, "stderr=" + strings.TrimSpace(result.stderr)})
+		return failureResponse(response, model.FailureKindExternalFailure, false, fmt.Errorf("script operation exited with code %d", result.exitCode), []string{"script=" + commandPath, "stderr=" + strings.TrimSpace(result.stderr)})
 	}
 
 	return decodeScriptResponse(response, result.stdout)
@@ -404,15 +404,24 @@ func operationNameForRequest(req model.ProviderRequest) string {
 	return integrationType + "." + objectType + "." + operation
 }
 
-func resolveScriptPath(workdir string, operation model.IntegrationOperationConfig) (string, error) {
-	path := strings.TrimSpace(firstNonEmpty(operation.Script, operation.Command, operation.Path))
-	if path == "" {
-		return "", fmt.Errorf("script operation must define script")
+func resolveCommandPath(workdir string, operation model.IntegrationOperationConfig) (string, error) {
+	if path := strings.TrimSpace(operation.Script); path != "" {
+		return resolveFilePath(workdir, path), nil
 	}
+	if command := strings.TrimSpace(operation.Command); command != "" {
+		return command, nil
+	}
+	if path := strings.TrimSpace(operation.Path); path != "" {
+		return resolveFilePath(workdir, path), nil
+	}
+	return "", fmt.Errorf("script operation must define script, command or path")
+}
+
+func resolveFilePath(workdir string, path string) string {
 	if filepath.IsAbs(path) {
-		return path, nil
+		return path
 	}
-	return filepath.Join(workdir, path), nil
+	return filepath.Join(workdir, path)
 }
 
 func resolveConfiguredWorkdir(repoRoot string, configured string) string {

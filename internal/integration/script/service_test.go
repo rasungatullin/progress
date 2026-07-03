@@ -77,6 +77,43 @@ func TestServiceExecutesConfiguredOperation(t *testing.T) {
 	}
 }
 
+func TestServiceRunsConfiguredCommandWithoutJoiningWorkdir(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewService(model.IntegrationSystemConfig{
+		IntegrationType: model.IntegrationTypeTracker,
+		Operations: map[string]model.IntegrationOperationConfig{
+			"tracker.task.get": {Command: "tracker-get"},
+		},
+	})
+	service.resolveWorkdir = func(context.Context) (string, error) { return root, nil }
+	service.runCommand = func(_ context.Context, path string, _ []string, _ []string, dir string) commandResult {
+		if path != "tracker-get" {
+			t.Fatalf("unexpected command path: %q", path)
+		}
+		if dir != root {
+			t.Fatalf("unexpected command workdir: %q", dir)
+		}
+		return commandResult{stdout: `{"status":"ok","task":{"system":"work-tracker","number":123,"title":"Задача","state":"open"}}`}
+	}
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "work-tracker",
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "get",
+		Number:          123,
+	})
+	if err != nil {
+		t.Fatalf("execute script operation: %v", err)
+	}
+	if response.Task == nil || response.Task.Number != 123 {
+		t.Fatalf("unexpected task response: %#v", response.Task)
+	}
+}
+
 func TestOperationNameForTaskCommentsRequest(t *testing.T) {
 	t.Parallel()
 
