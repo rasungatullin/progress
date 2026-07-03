@@ -92,8 +92,8 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	if github.Token != "" {
 		t.Fatalf("expected private token reference to clear inherited direct token, got: %q", github.Token)
 	}
-	if github.TokenEnv != "GITHUB_TOKEN" {
-		t.Fatalf("expected global token env to remain as fallback, got: %q", github.TokenEnv)
+	if github.TokenEnv != "" {
+		t.Fatalf("expected private token reference to clear inherited token env, got: %q", github.TokenEnv)
 	}
 	if github.Operations["issue.get"].Timeout != "10s" {
 		t.Fatalf("unexpected merged issue.get timeout: %q", github.Operations["issue.get"].Timeout)
@@ -139,6 +139,51 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	}
 	if len(config.Layers) != 2 {
 		t.Fatalf("unexpected layer count: %d", len(config.Layers))
+	}
+}
+
+func TestLoadIntegrationConfigLetsLocalTokenEnvOverridePrivateToken(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/integration/systems.json":
+			return []byte(`{
+				"systems": {
+					"mattermost": {
+						"type": "mattermost",
+						"base_url": "https://mattermost.example",
+						"token_private": "mt_auth_token"
+					}
+				}
+			}`), nil
+		case "/repo/.progress/integration/systems.json":
+			return []byte(`{
+				"systems": {
+					"mattermost": {
+						"token_env": "MATTERMOST_TOKEN"
+					}
+				}
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load integration config: %v", err)
+	}
+
+	mattermost := config.Config.Systems["mattermost"]
+	if mattermost.TokenEnv != "MATTERMOST_TOKEN" {
+		t.Fatalf("unexpected token env: %q", mattermost.TokenEnv)
+	}
+	if mattermost.TokenPrivate != "" {
+		t.Fatalf("expected token_env to clear inherited private token reference, got: %q", mattermost.TokenPrivate)
+	}
+	if mattermost.Token != "" {
+		t.Fatalf("expected token_env to clear inherited direct token, got: %q", mattermost.Token)
 	}
 }
 

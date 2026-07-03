@@ -287,13 +287,18 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	}
 	if value := strings.TrimSpace(override.Token); value != "" {
 		merged.Token = value
+		merged.TokenPrivate = ""
+		merged.TokenEnv = ""
 	}
 	if value := strings.TrimSpace(override.TokenPrivate); value != "" {
 		merged.TokenPrivate = value
 		merged.Token = ""
+		merged.TokenEnv = ""
 	}
 	if value := strings.TrimSpace(override.TokenEnv); value != "" {
 		merged.TokenEnv = value
+		merged.Token = ""
+		merged.TokenPrivate = ""
 	}
 	if value := strings.TrimSpace(override.Username); value != "" {
 		merged.Username = value
