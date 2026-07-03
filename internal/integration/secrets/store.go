@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/integration/model"
@@ -57,13 +56,6 @@ func NewStore(config model.IntegrationPrivateStoreConfig, configHome string) (St
 	default:
 		return nil, Descriptor{}, fmt.Errorf("private store type is not supported: %s", storeType)
 	}
-}
-
-func defaultStoreType() string {
-	if runtime.GOOS == "darwin" {
-		return "keychain"
-	}
-	return "file"
 }
 
 func fileStorePath(configPath string, configHome string) (string, error) {

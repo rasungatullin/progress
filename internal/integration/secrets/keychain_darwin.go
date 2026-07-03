@@ -22,6 +22,10 @@ const (
 	keychainStatusDuplicateItem = -25299
 )
 
+func defaultStoreType() string {
+	return "keychain"
+}
+
 func setKeychainValue(ctx context.Context, service string, name string, value string) error {
 	if err := ctx.Err(); err != nil {
 		return err

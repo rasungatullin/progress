@@ -27,6 +27,7 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 						"project": "global-project",
 						"repository": "global/repository",
 						"default_repo": "global/repo",
+						"token": "global-direct-token",
 						"token_env": "GITHUB_TOKEN",
 						"operations": {
 							"issue.get": {"timeout": "20s"},
@@ -87,6 +88,9 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	}
 	if github.TokenPrivate != "github_auth_token" {
 		t.Fatalf("unexpected private token reference: %q", github.TokenPrivate)
+	}
+	if github.Token != "" {
+		t.Fatalf("expected private token reference to clear inherited direct token, got: %q", github.Token)
 	}
 	if github.TokenEnv != "GITHUB_TOKEN" {
 		t.Fatalf("expected global token env to remain as fallback, got: %q", github.TokenEnv)
