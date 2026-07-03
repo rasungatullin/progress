@@ -27,6 +27,17 @@ type IntegrationConfig struct {
 	SystemSources    map[string]ConfigFileSource
 	GlobalConfigPath string
 	LocalConfigPath  string
+	ConfigHome       string
+	RepoRoot         string
+}
+
+type IntegrationPrivateStoreConfig struct {
+	Config           integrationmodel.IntegrationPrivateStoreConfig
+	Layers           []IntegrationConfigLayer
+	GlobalConfigPath string
+	LocalConfigPath  string
+	ConfigHome       string
+	RepoRoot         string
 }
 
 func LoadIntegrationConfig(repoRoot string, readFile ReadFileFunc) (IntegrationConfig, error) {
@@ -90,7 +101,63 @@ func LoadIntegrationConfigWithHome(repoRoot, configHome string, readFile ReadFil
 
 	merged.GlobalConfigPath = getIntegrationLayerPath(merged.Layers, ConfigFileSourceGlobal)
 	merged.LocalConfigPath = getIntegrationLayerPath(merged.Layers, ConfigFileSourceLocal)
+	merged.ConfigHome = home
+	merged.RepoRoot = repoRoot
 	return merged, nil
+}
+
+func LoadIntegrationPrivateStoreConfig(repoRoot string, readFile ReadFileFunc) (IntegrationPrivateStoreConfig, error) {
+	return LoadIntegrationPrivateStoreConfigWithHome(repoRoot, "", readFile)
+}
+
+func LoadIntegrationPrivateStoreConfigWithHome(repoRoot, configHome string, readFile ReadFileFunc) (IntegrationPrivateStoreConfig, error) {
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+
+	home, globalHomeErr := resolveConfigHome(configHome)
+
+	globalPath := ""
+	useGlobalLayer := globalHomeErr == nil
+	localPath := ""
+	useLocalLayer := strings.TrimSpace(repoRoot) != ""
+	if useLocalLayer {
+		localPath = filepath.Join(repoRoot, integrationLocalFilePath)
+	}
+
+	if useGlobalLayer {
+		globalPath = filepath.Join(home, integrationConfigPath)
+	}
+
+	var layers []IntegrationConfigLayer
+	if useGlobalLayer {
+		if config, err := readIntegrationPrivateStoreLayer(globalPath, ConfigFileSourceGlobal, readFile); err == nil {
+			layers = append(layers, config)
+		} else if !isNotExistErr(err) {
+			return IntegrationPrivateStoreConfig{}, err
+		}
+	}
+	if useLocalLayer {
+		if config, err := readIntegrationPrivateStoreLayer(localPath, ConfigFileSourceLocal, readFile); err == nil {
+			layers = append(layers, config)
+		} else if !isNotExistErr(err) {
+			return IntegrationPrivateStoreConfig{}, err
+		}
+	}
+
+	merged := integrationmodel.IntegrationPrivateStoreConfig{}
+	for _, layer := range layers {
+		merged = mergeIntegrationPrivateStoreConfig(merged, layer.Config.PrivateStore)
+	}
+
+	return IntegrationPrivateStoreConfig{
+		Config:           merged,
+		Layers:           layers,
+		GlobalConfigPath: getIntegrationLayerPath(layers, ConfigFileSourceGlobal),
+		LocalConfigPath:  getIntegrationLayerPath(layers, ConfigFileSourceLocal),
+		ConfigHome:       home,
+		RepoRoot:         repoRoot,
+	}, nil
 }
 
 func readIntegrationLayer(path string, source ConfigFileSource, readFile ReadFileFunc) (IntegrationConfigLayer, error) {
@@ -110,6 +177,23 @@ func readIntegrationLayer(path string, source ConfigFileSource, readFile ReadFil
 	return IntegrationConfigLayer{Source: source, Path: path, Config: config}, nil
 }
 
+func readIntegrationPrivateStoreLayer(path string, source ConfigFileSource, readFile ReadFileFunc) (IntegrationConfigLayer, error) {
+	content, err := readFile(path)
+	if err != nil {
+		return IntegrationConfigLayer{}, err
+	}
+
+	var config integrationmodel.IntegrationConfigFile
+	if err := json.Unmarshal(content, &config); err != nil {
+		return IntegrationConfigLayer{}, fmt.Errorf("parse integration private store config %s: %w", path, err)
+	}
+	if err := validateIntegrationPrivateStoreConfig(config.PrivateStore); err != nil {
+		return IntegrationConfigLayer{}, fmt.Errorf("invalid integration private store config %s: %w", path, err)
+	}
+
+	return IntegrationConfigLayer{Source: source, Path: path, Config: config}, nil
+}
+
 func mergeIntegrationLayers(layers []IntegrationConfigLayer) IntegrationConfig {
 	merged := integrationmodel.IntegrationConfigFile{
 		Systems: map[string]integrationmodel.IntegrationSystemConfig{},
@@ -120,6 +204,7 @@ func mergeIntegrationLayers(layers []IntegrationConfigLayer) IntegrationConfig {
 		if strings.TrimSpace(layer.Config.DefaultSystem) != "" {
 			merged.DefaultSystem = strings.TrimSpace(layer.Config.DefaultSystem)
 		}
+		merged.PrivateStore = mergeIntegrationPrivateStoreConfig(merged.PrivateStore, layer.Config.PrivateStore)
 		if len(layer.Config.DefaultSystems) > 0 {
 			if merged.DefaultSystems == nil {
 				merged.DefaultSystems = map[string]string{}
@@ -150,6 +235,20 @@ func mergeIntegrationLayers(layers []IntegrationConfigLayer) IntegrationConfig {
 		Layers:        layers,
 		SystemSources: sources,
 	}
+}
+
+func mergeIntegrationPrivateStoreConfig(base, override integrationmodel.IntegrationPrivateStoreConfig) integrationmodel.IntegrationPrivateStoreConfig {
+	merged := base
+	if value := strings.TrimSpace(override.Type); value != "" {
+		merged.Type = value
+	}
+	if value := strings.TrimSpace(override.Service); value != "" {
+		merged.Service = value
+	}
+	if value := strings.TrimSpace(override.Path); value != "" {
+		merged.Path = value
+	}
+	return merged
 }
 
 func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSystemConfig) integrationmodel.IntegrationSystemConfig {
@@ -186,11 +285,22 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.APIVariant); value != "" {
 		merged.APIVariant = value
 	}
-	if value := strings.TrimSpace(override.Token); value != "" {
+	switch {
+	case strings.TrimSpace(override.Token) != "":
+		value := strings.TrimSpace(override.Token)
 		merged.Token = value
-	}
-	if value := strings.TrimSpace(override.TokenEnv); value != "" {
+		merged.TokenPrivate = ""
+		merged.TokenEnv = ""
+	case strings.TrimSpace(override.TokenPrivate) != "":
+		value := strings.TrimSpace(override.TokenPrivate)
+		merged.TokenPrivate = value
+		merged.Token = ""
+		merged.TokenEnv = ""
+	case strings.TrimSpace(override.TokenEnv) != "":
+		value := strings.TrimSpace(override.TokenEnv)
 		merged.TokenEnv = value
+		merged.Token = ""
+		merged.TokenPrivate = ""
 	}
 	if value := strings.TrimSpace(override.Username); value != "" {
 		merged.Username = value
@@ -289,6 +399,9 @@ func mergeIntegrationOperationConfig(base, override integrationmodel.Integration
 }
 
 func validateIntegrationLayer(config integrationmodel.IntegrationConfigFile) error {
+	if err := validateIntegrationPrivateStoreConfig(config.PrivateStore); err != nil {
+		return err
+	}
 	for integrationType, system := range config.DefaultSystems {
 		if normalizeIntegrationTypeName(integrationType) == "" {
 			return fmt.Errorf("default_systems contains empty integration type")
@@ -315,6 +428,9 @@ func validateIntegrationLayer(config integrationmodel.IntegrationConfigFile) err
 }
 
 func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) error {
+	if err := validateIntegrationPrivateStoreConfig(config.PrivateStore); err != nil {
+		return err
+	}
 	if len(config.Systems) == 0 {
 		return fmt.Errorf("systems must not be empty")
 	}
@@ -366,6 +482,19 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 	}
 
 	return nil
+}
+
+func validateIntegrationPrivateStoreConfig(config integrationmodel.IntegrationPrivateStoreConfig) error {
+	storeType := normalizeSystemName(config.Type)
+	if storeType == "" {
+		return nil
+	}
+	switch storeType {
+	case "keychain", "file":
+		return nil
+	default:
+		return fmt.Errorf("private_store uses unknown type %q", storeType)
+	}
 }
 
 func validateIntegrationOperations(operations map[string]integrationmodel.IntegrationOperationConfig, systemName string) error {

@@ -15,6 +15,10 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 		case "/config-home/integration/systems.json":
 			return []byte(`{
 				"default_system": "github",
+				"private_store": {
+					"type": "keychain",
+					"service": "progress-global"
+				},
 				"systems": {
 					"github": {
 						"type": "github",
@@ -23,6 +27,8 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 						"project": "global-project",
 						"repository": "global/repository",
 						"default_repo": "global/repo",
+						"token": "global-direct-token",
+						"token_env": "GITHUB_TOKEN",
 						"operations": {
 							"issue.get": {"timeout": "20s"},
 							"issue.comments": {"type": "script", "script": "./global.sh"}
@@ -34,11 +40,15 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 		case "/repo/.progress/integration/systems.json":
 			return []byte(`{
 				"default_system": "github",
+				"private_store": {
+					"service": "progress-local"
+				},
 				"systems": {
 					"github": {
 						"project": "local-project",
 						"repository": "local/repository",
 						"default_repo": "local/repo",
+						"token_private": "github_auth_token",
 						"task_label_mapping": {
 							"bug": "defect",
 							"triage": ""
@@ -76,6 +86,15 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	if github.Project != "local-project" {
 		t.Fatalf("unexpected project: %q", github.Project)
 	}
+	if github.TokenPrivate != "github_auth_token" {
+		t.Fatalf("unexpected private token reference: %q", github.TokenPrivate)
+	}
+	if github.Token != "" {
+		t.Fatalf("expected private token reference to clear inherited direct token, got: %q", github.Token)
+	}
+	if github.TokenEnv != "" {
+		t.Fatalf("expected private token reference to clear inherited token env, got: %q", github.TokenEnv)
+	}
 	if github.Operations["issue.get"].Timeout != "10s" {
 		t.Fatalf("unexpected merged issue.get timeout: %q", github.Operations["issue.get"].Timeout)
 	}
@@ -106,8 +125,137 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 	if config.LocalConfigPath != "/repo/.progress/integration/systems.json" {
 		t.Fatalf("unexpected local config path: %q", config.LocalConfigPath)
 	}
+	if config.ConfigHome != "/config-home" {
+		t.Fatalf("unexpected config home: %q", config.ConfigHome)
+	}
+	if config.RepoRoot != "/repo" {
+		t.Fatalf("unexpected repo root: %q", config.RepoRoot)
+	}
+	if config.Config.PrivateStore.Type != "keychain" {
+		t.Fatalf("unexpected private store type: %q", config.Config.PrivateStore.Type)
+	}
+	if config.Config.PrivateStore.Service != "progress-local" {
+		t.Fatalf("unexpected private store service: %q", config.Config.PrivateStore.Service)
+	}
 	if len(config.Layers) != 2 {
 		t.Fatalf("unexpected layer count: %d", len(config.Layers))
+	}
+}
+
+func TestLoadIntegrationConfigLetsLocalTokenEnvOverridePrivateToken(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/integration/systems.json":
+			return []byte(`{
+				"systems": {
+					"mattermost": {
+						"type": "mattermost",
+						"base_url": "https://mattermost.example",
+						"token_private": "mt_auth_token"
+					}
+				}
+			}`), nil
+		case "/repo/.progress/integration/systems.json":
+			return []byte(`{
+				"systems": {
+					"mattermost": {
+						"token_env": "MATTERMOST_TOKEN"
+					}
+				}
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load integration config: %v", err)
+	}
+
+	mattermost := config.Config.Systems["mattermost"]
+	if mattermost.TokenEnv != "MATTERMOST_TOKEN" {
+		t.Fatalf("unexpected token env: %q", mattermost.TokenEnv)
+	}
+	if mattermost.TokenPrivate != "" {
+		t.Fatalf("expected token_env to clear inherited private token reference, got: %q", mattermost.TokenPrivate)
+	}
+	if mattermost.Token != "" {
+		t.Fatalf("expected token_env to clear inherited direct token, got: %q", mattermost.Token)
+	}
+}
+
+func TestLoadIntegrationConfigKeepsTokenPriorityWithinLayer(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{
+				"systems": {
+					"mattermost": {
+						"type": "mattermost",
+						"base_url": "https://mattermost.example",
+						"token": "direct-token",
+						"token_private": "mt_auth_token",
+						"token_env": "MATTERMOST_TOKEN"
+					},
+					"telegram": {
+						"type": "telegram",
+						"token_private": "telegram_auth_token",
+						"token_env": "TELEGRAM_TOKEN"
+					}
+				}
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	config, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load integration config: %v", err)
+	}
+
+	mattermost := config.Config.Systems["mattermost"]
+	if mattermost.Token != "direct-token" {
+		t.Fatalf("expected direct token to win within one layer, got: %q", mattermost.Token)
+	}
+	if mattermost.TokenPrivate != "" || mattermost.TokenEnv != "" {
+		t.Fatalf("expected direct token to clear alternative sources, got private=%q env=%q", mattermost.TokenPrivate, mattermost.TokenEnv)
+	}
+
+	telegram := config.Config.Systems["telegram"]
+	if telegram.TokenPrivate != "telegram_auth_token" {
+		t.Fatalf("expected private token to win over token_env within one layer, got: %q", telegram.TokenPrivate)
+	}
+	if telegram.Token != "" || telegram.TokenEnv != "" {
+		t.Fatalf("expected private token to clear alternative sources, got token=%q env=%q", telegram.Token, telegram.TokenEnv)
+	}
+}
+
+func TestLoadIntegrationPrivateStoreConfigDoesNotRequireSystems(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/config-home/integration/systems.json" {
+			return []byte(`{"private_store":{"type":"file","path":"/tmp/progress-private.json"}}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	config, err := LoadIntegrationPrivateStoreConfigWithHome("", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load private store config: %v", err)
+	}
+	if config.Config.Type != "file" {
+		t.Fatalf("unexpected private store type: %q", config.Config.Type)
+	}
+	if config.Config.Path != "/tmp/progress-private.json" {
+		t.Fatalf("unexpected private store path: %q", config.Config.Path)
+	}
+	if config.ConfigHome != "/config-home" {
+		t.Fatalf("unexpected config home: %q", config.ConfigHome)
 	}
 }
 

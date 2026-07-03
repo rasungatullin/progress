@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/configuration"
+	"github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/integration/secrets"
 )
 
 var (
@@ -32,7 +34,17 @@ func NewConfiguredService(logger *log.Logger) *Service {
 		return newEmptyService(logger)
 	}
 
-	return NewServiceFromConfig(logger, loaded.Config)
+	if !configUsesPrivateValues(loaded.Config) {
+		return NewServiceFromConfig(logger, loaded.Config)
+	}
+
+	store, _, err := secrets.NewStore(loaded.Config.PrivateStore, loaded.ConfigHome)
+	if err != nil {
+		logger.Printf("Контур интеграции не подключил хранилище приватных значений: %v", err)
+		return NewServiceFromConfigWithPrivateStore(logger, loaded.Config, nil)
+	}
+
+	return NewServiceFromConfigWithPrivateStore(logger, loaded.Config, store)
 }
 
 func ensureLogger(logger *log.Logger) *log.Logger {
@@ -52,4 +64,13 @@ func resolveRepoRoot(ctx context.Context) (string, error) {
 
 func isMissingIntegrationConfig(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "integration config not found")
+}
+
+func configUsesPrivateValues(config model.IntegrationConfigFile) bool {
+	for _, system := range config.Systems {
+		if strings.TrimSpace(system.TokenPrivate) != "" {
+			return true
+		}
+	}
+	return false
 }

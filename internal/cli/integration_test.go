@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/integration"
+	"github.com/rasungatullin/progress/internal/integration/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -162,6 +163,80 @@ func TestIntegrationOperationsCommandPrintsJSONCatalog(t *testing.T) {
 	}
 	if !payload[0].Available {
 		t.Fatalf("expected github operation to be available: %#v", payload[0])
+	}
+}
+
+func TestIntegrationPrivateSetCommandStoresValueWithoutPrintingIt(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "private", "set", "mt_auth_token", "--value", "secret-token"})
+
+	store := &capturingPrivateStore{values: map[string]string{}}
+	original := integrationPrivateStoreFactory
+	integrationPrivateStoreFactory = func(*cobra.Command) (secrets.Store, secrets.Descriptor, error) {
+		return store, secrets.Descriptor{Type: "file", Location: "/tmp/progress-private.json"}, nil
+	}
+	t.Cleanup(func() { integrationPrivateStoreFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute private set command: %v", err)
+	}
+	if store.values["mt_auth_token"] != "secret-token" {
+		t.Fatalf("unexpected stored private value: %q", store.values["mt_auth_token"])
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"status=stored\n",
+		"name=mt_auth_token\n",
+		"store=file\n",
+		"location=/tmp/progress-private.json\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("private set output must include %q, got %q", fragment, output)
+		}
+	}
+	if strings.Contains(output, "secret-token") {
+		t.Fatalf("private set output must not include stored value, got %q", output)
+	}
+}
+
+func TestIntegrationPrivateSetCommandReadsValueFromStdin(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetIn(strings.NewReader("stdin-token\n"))
+	cmd.SetArgs([]string{"integration", "private", "set", "mt_auth_token", "--stdin", "--format", "json"})
+
+	store := &capturingPrivateStore{values: map[string]string{}}
+	original := integrationPrivateStoreFactory
+	integrationPrivateStoreFactory = func(*cobra.Command) (secrets.Store, secrets.Descriptor, error) {
+		return store, secrets.Descriptor{Type: "keychain", Location: "progress"}, nil
+	}
+	t.Cleanup(func() { integrationPrivateStoreFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute private set command with stdin: %v", err)
+	}
+	if store.values["mt_auth_token"] != "stdin-token" {
+		t.Fatalf("unexpected stored private value from stdin: %q", store.values["mt_auth_token"])
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integrationPrivateResult
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("private set json parse: %v, output: %q", err, output)
+	}
+	if payload.Status != "stored" || payload.Name != "mt_auth_token" || payload.Store != "keychain" {
+		t.Fatalf("unexpected private set json payload: %#v", payload)
+	}
+	if strings.Contains(output, "stdin-token") {
+		t.Fatalf("private set json output must not include stored value, got %q", output)
 	}
 }
 
@@ -2336,6 +2411,28 @@ type capturingCLIProvider struct {
 func (p *capturingCLIProvider) Execute(_ context.Context, req integration.ProviderRequest) (integration.Response, error) {
 	p.request = req
 	return p.response, p.err
+}
+
+type capturingPrivateStore struct {
+	values map[string]string
+}
+
+func (s *capturingPrivateStore) Get(_ context.Context, name string) (string, error) {
+	value, ok := s.values[name]
+	if !ok {
+		return "", secrets.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *capturingPrivateStore) Set(_ context.Context, name string, value string) error {
+	s.values[name] = value
+	return nil
+}
+
+func (s *capturingPrivateStore) Delete(_ context.Context, name string) error {
+	delete(s.values, name)
+	return nil
 }
 
 func TestIntegrationDispatcherCommandPrintsDiagnosticsOnInvalidRequest(t *testing.T) {

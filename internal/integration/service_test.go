@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/integration/secrets"
 	"github.com/rasungatullin/progress/internal/logging"
 )
 
@@ -63,6 +66,66 @@ func TestNewServiceFromConfigUsesDefaultSystem(t *testing.T) {
 	}
 }
 
+func TestNewServiceFromConfigWithPrivateStoreResolvesMattermostToken(t *testing.T) {
+	t.Parallel()
+
+	seenAuth := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"u1","username":"service-user"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	service := NewServiceFromConfigWithPrivateStore(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"mattermost": {
+				Type:            "mattermost",
+				IntegrationType: "messenger",
+				BaseURL:         server.URL,
+				TokenPrivate:    "mt_auth_token",
+			},
+		},
+	}, mapPrivateStore{values: map[string]string{"mt_auth_token": "resolved-token"}})
+
+	result, err := service.Execute(context.Background(), Request{System: "mattermost", Resource: "auth", Operation: "status"})
+	if err != nil {
+		t.Fatalf("execute mattermost auth status: %v", err)
+	}
+	if result.AuthStatus == nil || !result.AuthStatus.Authenticated {
+		t.Fatalf("expected authenticated status, got %#v", result.AuthStatus)
+	}
+	if seenAuth != "Bearer resolved-token" {
+		t.Fatalf("expected private token in authorization header, got %q", seenAuth)
+	}
+}
+
+func TestNewServiceFromConfigWithPrivateStoreReportsMissingPrivateValue(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfigWithPrivateStore(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"mattermost": {
+				Type:            "mattermost",
+				IntegrationType: "messenger",
+				BaseURL:         "https://mattermost.example",
+				TokenPrivate:    "missing",
+			},
+		},
+	}, mapPrivateStore{values: map[string]string{}})
+
+	result, err := service.Execute(context.Background(), Request{System: "mattermost", Resource: "auth", Operation: "status"})
+	if err == nil {
+		t.Fatal("expected missing private value error")
+	}
+	if result.Failure == nil || result.Failure.Kind != model.FailureKindAuthRequired {
+		t.Fatalf("expected auth-required failure, got %#v", result.Failure)
+	}
+	if result.AuthStatus == nil || result.AuthStatus.Authenticated {
+		t.Fatalf("expected unavailable auth status, got %#v", result.AuthStatus)
+	}
+}
+
 func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
 	t.Parallel()
 
@@ -82,6 +145,28 @@ func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
 	if !contains(route.Diagnostics, "provider=github disabled by integration configuration") {
 		t.Fatalf("expected disabled-system diagnostic, got %#v", route.Diagnostics)
 	}
+}
+
+type mapPrivateStore struct {
+	values map[string]string
+}
+
+func (s mapPrivateStore) Get(_ context.Context, name string) (string, error) {
+	value, ok := s.values[name]
+	if !ok {
+		return "", secrets.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s mapPrivateStore) Set(_ context.Context, name string, value string) error {
+	s.values[name] = value
+	return nil
+}
+
+func (s mapPrivateStore) Delete(_ context.Context, name string) error {
+	delete(s.values, name)
+	return nil
 }
 
 func TestExecuteReturnsDisabledSystemError(t *testing.T) {
