@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -305,5 +306,144 @@ func TestAPITransportReportsUnsupportedPRSearch(t *testing.T) {
 	}
 	if response.Failure == nil || response.Failure.Kind != model.FailureKindUnsupportedOperation {
 		t.Fatalf("unexpected failure: %#v", response.Failure)
+	}
+}
+
+func TestAPITransportPaginatesIssueComments(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/name/issues/123/comments" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		page := r.URL.Query().Get("page")
+		switch page {
+		case "1":
+			comments := make([]map[string]any, 100)
+			for i := range comments {
+				comments[i] = map[string]any{"id": i + 1, "body": fmt.Sprintf("page one %d", i+1)}
+			}
+			_ = json.NewEncoder(w).Encode(comments)
+		case "2":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 101, "body": "page two"}})
+		default:
+			t.Fatalf("unexpected page: %q", page)
+		}
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:    server.URL,
+			Token:      "secret",
+			Repository: "owner/name",
+		},
+		client: server.Client(),
+		getenv: func(string) string { return "" },
+	}
+
+	result, _, err := runner.RunIssueComments(context.Background(), "", 123)
+	if err != nil {
+		t.Fatalf("list issue comments: %v", err)
+	}
+	var comments []ghIssueComment
+	if err := json.Unmarshal([]byte(result.Stdout), &comments); err != nil {
+		t.Fatalf("decode comments: %v", err)
+	}
+	if len(comments) != 101 || comments[100].Body != "page two" {
+		t.Fatalf("unexpected comments: len=%d last=%#v", len(comments), comments[len(comments)-1])
+	}
+}
+
+func TestAPITransportMapsGraphQLErrors(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"errors": []map[string]string{{"message": "Could not resolve to a node with the global id"}},
+		})
+	}))
+	defer server.Close()
+
+	service := NewServiceWithConfig(model.IntegrationSystemConfig{
+		Transport: "api",
+		BaseURL:   server.URL,
+		Token:     "secret",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "comment",
+		Operation:       "resolve",
+		ThreadID:        "thread-id",
+	})
+	if err == nil {
+		t.Fatal("expected graphql error")
+	}
+	var ghErr *Error
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodeNotFound {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+	if response.OperationResult != nil || response.Status == model.ResponseStatusOK {
+		t.Fatalf("graphql errors must not produce successful operation result: %#v", response.OperationResult)
+	}
+}
+
+func TestAPITransportDoesNotSendMergedAsRESTState(t *testing.T) {
+	t.Parallel()
+
+	var seenState string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/name/pulls" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		seenState = r.URL.Query().Get("state")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"number":    1,
+				"title":     "closed",
+				"state":     "closed",
+				"html_url":  "https://github.com/owner/name/pull/1",
+				"merged_at": "",
+			},
+			{
+				"number":    2,
+				"title":     "merged",
+				"state":     "closed",
+				"html_url":  "https://github.com/owner/name/pull/2",
+				"merged_at": "2026-07-03T08:00:00Z",
+			},
+		})
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:    server.URL,
+			Token:      "secret",
+			Repository: "owner/name",
+		},
+		client: server.Client(),
+		getenv: func(string) string { return "" },
+	}
+
+	result, _, err := runner.RunPRList(context.Background(), "", PRListRequest{State: "merged", Limit: 10})
+	if err != nil {
+		t.Fatalf("list merged pull requests: %v", err)
+	}
+	if seenState != "closed" {
+		t.Fatalf("merged state must be requested from REST as closed, got %q", seenState)
+	}
+	var pulls []ghPRView
+	if err := json.Unmarshal([]byte(result.Stdout), &pulls); err != nil {
+		t.Fatalf("decode pulls: %v", err)
+	}
+	if len(pulls) != 1 || pulls[0].Number != 2 {
+		t.Fatalf("unexpected pulls: %#v", pulls)
 	}
 }

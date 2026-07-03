@@ -105,12 +105,20 @@ func (r *APIRunner) RunIssueComments(ctx context.Context, repository string, num
 	if err != nil {
 		return apiErrorResult("issue comments", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	var raw []ghIssueComment
-	result, err := r.do(ctx, config, http.MethodGet, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", repository, number), nil, &raw)
-	if err != nil {
-		return result, apiResolvedConfig(config), err
+	var result CommandResult
+	var comments []ghIssueComment
+	for page := 1; ; page++ {
+		var raw []ghIssueComment
+		result, err = r.do(ctx, config, http.MethodGet, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100&page=%d", repository, number, page), nil, &raw)
+		if err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		comments = append(comments, raw...)
+		if len(raw) < 100 {
+			break
+		}
 	}
-	result.Stdout = mustJSON(raw)
+	result.Stdout = mustJSON(comments)
 	return result, apiResolvedConfig(config), nil
 }
 
@@ -219,14 +227,40 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 	if err != nil {
 		return apiErrorResult("pr list", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	var raw []apiPullRequest
-	endpoint := fmt.Sprintf("repos/%s/pulls?state=%s&per_page=%d", repository, request.State, request.Limit)
-	result, err := r.do(ctx, config, http.MethodGet, endpoint, nil, &raw)
-	if err != nil {
-		return result, apiResolvedConfig(config), err
+	apiState := request.State
+	filterMerged := false
+	if apiState == "merged" {
+		apiState = "closed"
+		filterMerged = true
 	}
-	views := make([]ghPRView, 0, len(raw))
-	for _, item := range raw {
+	perPage := request.Limit
+	if perPage <= 0 || perPage > 100 {
+		perPage = 100
+	}
+	var result CommandResult
+	var pullRequests []apiPullRequest
+	for page := 1; len(pullRequests) < request.Limit; page++ {
+		var raw []apiPullRequest
+		endpoint := fmt.Sprintf("repos/%s/pulls?state=%s&per_page=%d&page=%d", repository, apiState, perPage, page)
+		result, err = r.do(ctx, config, http.MethodGet, endpoint, nil, &raw)
+		if err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		for _, item := range raw {
+			if filterMerged && strings.TrimSpace(item.MergedAt) == "" {
+				continue
+			}
+			pullRequests = append(pullRequests, item)
+			if len(pullRequests) >= request.Limit {
+				break
+			}
+		}
+		if len(raw) < perPage {
+			break
+		}
+	}
+	views := make([]ghPRView, 0, len(pullRequests))
+	for _, item := range pullRequests {
 		views = append(views, prViewFromAPI(item))
 	}
 	result.Stdout = mustJSON(views)
@@ -446,6 +480,14 @@ func (r *APIRunner) graphql(ctx context.Context, config apiConfig, query string,
 		result.ExitCode = resp.StatusCode
 		return result, errorForHTTPStatus(resp.StatusCode, result.Stdout, result)
 	}
+	var envelope graphqlErrorEnvelope
+	if err := json.Unmarshal(content, &envelope); err != nil {
+		result.ExitCode = -1
+		return result, &Error{Code: ErrorCodeInternalIntegration, Message: fmt.Sprintf("decode GitHub GraphQL response: %v", err), Err: err, Result: result}
+	}
+	if len(envelope.Errors) > 0 {
+		return result, &Error{Code: errorCodeForGraphQLErrors(envelope.Errors), Message: "GitHub GraphQL returned errors: " + graphqlErrorsMessage(envelope.Errors), Result: result}
+	}
 	if out != nil {
 		if raw, ok := out.(*json.RawMessage); ok {
 			*raw = append((*raw)[:0], content...)
@@ -495,6 +537,16 @@ type apiPullRequest struct {
 	Head struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
+	MergedAt string `json:"merged_at"`
+}
+
+type graphqlErrorEnvelope struct {
+	Errors []graphqlError `json:"errors"`
+}
+
+type graphqlError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
 }
 
 func issueViewFromAPI(raw apiIssue) ghIssueView {
@@ -548,6 +600,34 @@ func isTimeoutError(err error, ctx context.Context) bool {
 func isRateLimitBody(body string) bool {
 	body = strings.ToLower(body)
 	return strings.Contains(body, "rate limit") || strings.Contains(body, "secondary rate limit")
+}
+
+func errorCodeForGraphQLErrors(errors []graphqlError) string {
+	message := strings.ToLower(graphqlErrorsMessage(errors))
+	switch {
+	case strings.Contains(message, "rate limit"):
+		return ErrorCodeTemporaryUnavailable
+	case strings.Contains(message, "resource not accessible") || strings.Contains(message, "permission") || strings.Contains(message, "forbidden"):
+		return ErrorCodePermissionDenied
+	case strings.Contains(message, "not found") || strings.Contains(message, "could not resolve"):
+		return ErrorCodeNotFound
+	default:
+		return ErrorCodeExternalFailure
+	}
+}
+
+func graphqlErrorsMessage(errors []graphqlError) string {
+	messages := make([]string, 0, len(errors))
+	for _, item := range errors {
+		message := strings.TrimSpace(item.Message)
+		if message == "" {
+			message = strings.TrimSpace(item.Type)
+		}
+		if message != "" {
+			messages = append(messages, message)
+		}
+	}
+	return strings.Join(messages, "; ")
 }
 
 func apiResolvedConfig(config apiConfig) resolvedConfig {
