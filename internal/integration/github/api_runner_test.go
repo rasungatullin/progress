@@ -446,4 +446,7 @@ func TestAPITransportDoesNotSendMergedAsRESTState(t *testing.T) {
 	if len(pulls) != 1 || pulls[0].Number != 2 {
 		t.Fatalf("unexpected pulls: %#v", pulls)
 	}
+	if pulls[0].State != "merged" {
+		t.Fatalf("merged pull request must be exposed as merged, got %q", pulls[0].State)
+	}
 }

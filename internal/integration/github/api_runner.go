@@ -554,7 +554,15 @@ func issueViewFromAPI(raw apiIssue) ghIssueView {
 }
 
 func prViewFromAPI(raw apiPullRequest) ghPRView {
-	return ghPRView{Number: raw.Number, Title: raw.Title, Body: raw.Body, State: raw.State, Author: raw.User, BaseRefName: raw.Base.Ref, HeadRefName: raw.Head.Ref, URL: raw.HTMLURL, CreatedAt: raw.CreatedAt, UpdatedAt: raw.UpdatedAt}
+	return ghPRView{Number: raw.Number, Title: raw.Title, Body: raw.Body, State: prStateFromAPI(raw), Author: raw.User, BaseRefName: raw.Base.Ref, HeadRefName: raw.Head.Ref, URL: raw.HTMLURL, CreatedAt: raw.CreatedAt, UpdatedAt: raw.UpdatedAt}
+}
+
+func prStateFromAPI(raw apiPullRequest) string {
+	state := strings.TrimSpace(raw.State)
+	if strings.EqualFold(state, "closed") && strings.TrimSpace(raw.MergedAt) != "" {
+		return "merged"
+	}
+	return state
 }
 
 func encodePayload(payload any) (io.Reader, error) {
