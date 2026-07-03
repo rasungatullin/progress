@@ -660,6 +660,70 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 	}
 }
 
+func TestOperationsCatalogMarksScriptOperationWithoutExecutableUnavailable(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {
+				Type:            "script",
+				IntegrationType: model.IntegrationTypeTracker,
+				Operations: map[string]model.IntegrationOperationConfig{
+					"tracker.task.get": {Required: []string{"number"}},
+				},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "work-tracker", Name: "tracker.task.get"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one script operation, got %#v", operations)
+	}
+	if operations[0].Available {
+		t.Fatalf("script operation without executable must be unavailable: %#v", operations[0])
+	}
+	if !contains(operations[0].Diagnostics, "script operation has no script, command or path") {
+		t.Fatalf("expected missing executable diagnostic, got %#v", operations[0].Diagnostics)
+	}
+}
+
+func TestOperationsCatalogUsesSearchResultContractForTaskSearch(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {
+				Type:            "script",
+				IntegrationType: model.IntegrationTypeTracker,
+				Operations: map[string]model.IntegrationOperationConfig{
+					"tracker.task.search": {Script: ".progress/integration/work-tracker/task-search.sh"},
+				},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "work-tracker", Name: "tracker.task.search"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one script search operation, got %#v", operations)
+	}
+	if operations[0].Output.Shape != "TrackerSearchResult[]" {
+		t.Fatalf("unexpected search output shape: %#v", operations[0].Output)
+	}
+	route, err := service.Dispatch(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "work-tracker",
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "search",
+	})
+	if err != nil {
+		t.Fatalf("dispatch task search: %v", err)
+	}
+	if route.ExpectedResult != "tracker-search-result[]" {
+		t.Fatalf("unexpected task search result contract: %q", route.ExpectedResult)
+	}
+}
+
 func TestNewServiceFromConfigRegistersScriptProvider(t *testing.T) {
 	t.Parallel()
 
