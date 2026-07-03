@@ -135,6 +135,36 @@ func TestIntegrationCommandRejectsUnknownFormat(t *testing.T) {
 	}
 }
 
+func TestIntegrationOperationsCommandPrintsJSONCatalog(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "operations", "--format", "json", "--system", "github", "--name", "tracker.task.get"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute operations command: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload []integration.OperationDescriptor
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("operations json parse: %v, output: %q", err, output)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("expected one operation, got %#v", payload)
+	}
+	if payload[0].Name != "tracker.task.get" || payload[0].System != "github" {
+		t.Fatalf("unexpected operation descriptor: %#v", payload[0])
+	}
+	if !payload[0].Available {
+		t.Fatalf("expected github operation to be available: %#v", payload[0])
+	}
+}
+
 func TestIntegrationGitHubAuthStatusCommandPrintsJSONResult(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}

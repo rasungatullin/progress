@@ -149,6 +149,7 @@ type Provider interface {
 
 - `progress integration dispatcher`;
 - `progress integration dispatch`;
+- `progress integration operations`;
 - `progress integration github auth status`;
 - `progress integration github repo get`;
 - `progress integration github issue get`;
@@ -188,7 +189,40 @@ type Provider interface {
 
 Команда вызывает диспетчер интеграционного контура как отдельный модуль. Она нужна для диагностики маршрута: какой адаптер будет выбран, какие требования к доступу предъявляются и какой тип нормализованного объекта ожидается на выходе.
 
-### 7.2 `progress integration github auth status`
+### 7.2 `progress integration operations`
+
+Команда публикует каталог интеграционных операций, доступных по текущей конфигурации систем. Каталог нужен контуру исполнения и диагностическим проверкам: он показывает каноническое имя операции, интегрируемую систему, тип адаптера, контракт входных полей, тип результата, признак побочного действия и возможные отказные состояния.
+
+Базовые вызовы:
+
+```bash
+progress integration operations
+progress integration operations --format json
+progress integration operations --type tracker
+progress integration operations --system github
+progress integration operations --name tracker.task.get
+```
+
+Каноническое имя операции строится по схеме:
+
+```text
+<тип-интеграции>.<объект>.<операция>
+```
+
+Примеры:
+
+- `tracker.task.get`;
+- `tracker.task.comment.create`;
+- `repository.merge-request.create`;
+- `repository.review-remark.resolve`;
+- `messenger.message.create`;
+- `wiki.page.search`.
+
+Текстовый вывод предназначен для ручной диагностики. JSON-вывод возвращает массив `OperationDescriptor` и пригоден для машинного чтения.
+
+Отключённая система может присутствовать в каталоге только с `available=false`. Сценарные системы типа `script` публикуют операции из `systems.<name>.operations`; до подключения адаптера они также помечаются как недоступные, но сохраняют контракт входных полей из конфигурации.
+
+### 7.3 `progress integration github auth status`
 
 Команда проверяет, доступен ли `gh` и авторизован ли пользователь.
 
@@ -204,7 +238,7 @@ gh auth status
 2. убедиться, что для GitHub выполнена авторизация;
 3. вернуть диагностируемую ошибку, если дальнейшие вызовы невозможны.
 
-### 7.3 `progress integration github repo get`
+### 7.4 `progress integration github repo get`
 
 Команда получает сведения о репозитории по `owner/name`.
 
@@ -216,7 +250,7 @@ gh repo view owner/name --json name,owner,description,defaultBranchRef,url
 
 Возвращаемые сведения используются как базовый контекст для последующих вызовов задач и запросов на слияние.
 
-### 7.4 `progress integration github issue get`
+### 7.5 `progress integration github issue get`
 
 Команда получает одну карточку issue по номеру и репозиторию.
 
@@ -232,7 +266,7 @@ gh issue view 123 --repo owner/name --json number,title,body,state,labels,assign
 2. дать контуру принятия решения исходную карточку задачи;
 3. поддержать прямую диагностику интеграции через CLI.
 
-### 7.5 `progress integration github issue comments`
+### 7.6 `progress integration github issue comments`
 
 Команда получает комментарии issue.
 
@@ -246,7 +280,7 @@ gh api --paginate --slurp repos/owner/name/issues/123/comments
 
 Адаптер преобразует paginated REST-ответ GitHub в массив `TrackerComment` с полями `System`, `Repository`, `Number`, `Author`, `Body`, `URL`, `CreatedAt` и `UpdatedAt`. В текстовом выводе команда печатает общий `comment_count`, затем поля каждого комментария и тело построчно.
 
-### 7.6 `progress integration github issue label add`
+### 7.7 `progress integration github issue label add`
 
 Команда добавляет к задаче одну или несколько меток по каноническим названиям.
 
@@ -262,7 +296,7 @@ progress integration github issue label add --repo owner/name --number 123 --lab
 gh issue edit 123 --repo owner/name --add-label bug --add-label backend
 ```
 
-### 7.7 `progress integration github issue label remove`
+### 7.8 `progress integration github issue label remove`
 
 Команда снимает с задачи одну или несколько меток по каноническим названиям.
 
@@ -276,7 +310,7 @@ progress integration github issue label remove --repo owner/name --number 123 --
 gh issue edit 123 --repo owner/name --remove-label bug
 ```
 
-### 7.8 `progress integration github issue search`
+### 7.9 `progress integration github issue search`
 
 Команда выполняет поиск issue в репозитории или во всём доступном GitHub-пространстве.
 
@@ -293,7 +327,7 @@ gh issue list --repo owner/name --search "is:open label:bug" --json number,title
 - ограничение количества результатов;
 - режим краткого и подробного вывода.
 
-### 7.9 `progress integration github pr get`
+### 7.10 `progress integration github pr get`
 
 Команда получает одну карточку запроса на слияние.
 
@@ -305,7 +339,7 @@ gh pr view 456 --repo owner/name --json number,title,body,state,author,labels,re
 
 Результат должен использоваться как нормализованная карточка запроса на слияние.
 
-### 7.10 `progress integration github pr comments`
+### 7.11 `progress integration github pr comments`
 
 Команда получает комментарии запроса на слияние, включая замечания ревизии.
 
@@ -323,7 +357,7 @@ gh api graphql -f query='<review threads query>' -f owner=owner -f name=name -F 
 
 Адаптер приводит оба вида комментариев к `ReviewRemark`. Для обычного комментария поля `Path`, `Line` и `ReplyToID` пустые. Для inline-замечания `ReplyToID` содержит идентификатор review thread, а `State` отражает состояние `resolved` или `unresolved`.
 
-### 7.11 `progress integration github pr search`
+### 7.12 `progress integration github pr search`
 
 Команда выполняет поиск запросов на слияние по фильтрам GitHub.
 
@@ -344,7 +378,7 @@ gh pr list --repo owner/name --state closed --limit 30 --json number,title,body,
 
 Если `--repo` не передан, GitHub-адаптер сначала использует `default_repo` из конфигурации, а при его отсутствии вызывает `gh pr list` без `--repo`, чтобы `gh` выбрал текущий репозиторий рабочей директории.
 
-### 7.12 `progress integration github pr comment create`
+### 7.13 `progress integration github pr comment create`
 
 Команда создаёт комментарий к запросу на слияние.
 
@@ -362,7 +396,7 @@ progress integration github pr comment create --repo owner/name --number 456 --b
 
 Если `--path` и `--line` не переданы, адаптер создаёт обычный комментарий обсуждения через issue-часть PR. Если они переданы, адаптер создаёт review thread через GraphQL mutation `addPullRequestReviewThread`. Флаг `--side` задаёт сторону diff и по умолчанию равен `RIGHT`.
 
-### 7.13 `progress integration github pr comment resolve`
+### 7.14 `progress integration github pr comment resolve`
 
 Команда разрешает inline-замечание ревизии по идентификатору review thread.
 
@@ -372,7 +406,7 @@ progress integration github pr comment resolve --thread PRRT_kw...
 
 Команда использует GraphQL mutation `resolveReviewThread`. Идентификатор thread можно получить из поля `remark_thread_id` команды `progress integration github pr comments`.
 
-### 7.14 `progress integration bitbucket pr search`
+### 7.15 `progress integration bitbucket pr search`
 
 Команда выполняет поиск запросов на слияние в Bitbucket.
 
@@ -385,13 +419,13 @@ progress integration github pr comment resolve --thread PRRT_kw...
 - `--query` для выражения фильтра Bitbucket Cloud;
 - `--limit` для ограничения количества результатов.
 
-### 7.15 `progress integration bitbucket pr comment create`
+### 7.16 `progress integration bitbucket pr comment create`
 
 Команда создаёт комментарий к запросу на слияние Bitbucket Cloud. Для inline-комментария используются `--path`, `--line` и `--side`.
 
 `progress integration bitbucket pr comment resolve` присутствует в CLI как единая операция контура, но текущий Bitbucket-адаптер возвращает `unsupported-operation`, потому что механизм разрешения замечаний различается между Bitbucket Cloud и Server/Data Center и требует отдельного контракта.
 
-### 7.16 `progress integration github api`
+### 7.17 `progress integration github api`
 
 Команда даёт управляемый резервный путь для редких операций, которые ещё не вынесены в отдельный подкомандный интерфейс.
 
@@ -403,7 +437,7 @@ progress integration github api repos/owner/name/issues/123/events
 
 Ограничение команды состоит в том, что она не должна становиться основным пользовательским интерфейсом контура. Её задача — ускорить расширение адаптера без немедленного разрастания CLI-дерева.
 
-### 7.17 `progress integration confluence auth status`
+### 7.18 `progress integration confluence auth status`
 
 Команда проверяет доступность Confluence через HTTP API. Для локально размещённой версии Confluence Server/Data Center используется базовый адрес из `base_url` и путь `/rest/api/user/current`.
 
@@ -412,7 +446,7 @@ progress integration github api repos/owner/name/issues/123/events
 - `username` + `token` или `token_env` — HTTP Basic;
 - только `token` или `token_env` — заголовок `Authorization: Bearer`.
 
-### 7.18 `progress integration confluence page get`
+### 7.19 `progress integration confluence page get`
 
 Команда получает страницу документации по идентификатору Confluence.
 
@@ -428,7 +462,7 @@ GET /rest/api/content/12345?expand=space,body.storage,version,history
 
 Адаптер возвращает `WikiPage` — страницу документации с идентификатором, пространством, заголовком, телом в формате `storage`, номером версии, временем обновления, пользователем обновления и ссылкой на страницу.
 
-### 7.19 `progress integration confluence page search`
+### 7.20 `progress integration confluence page search`
 
 Команда ищет страницы документации по CQL-запросу Confluence.
 

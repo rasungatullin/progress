@@ -44,6 +44,11 @@ type AuthStatus = model.AuthStatus
 type RepositoryStatus = model.RepositoryStatus
 type IssueStatus = model.IssueStatus
 type PullRequestStatus = model.PullRequestStatus
+type OperationFilter = model.OperationFilter
+type OperationDescriptor = model.OperationDescriptor
+type OperationInputContract = model.OperationInputContract
+type OperationOutputContract = model.OperationOutputContract
+type OperationField = model.OperationField
 
 type Provider interface {
 	Execute(context.Context, ProviderRequest) (Response, error)
@@ -66,6 +71,7 @@ type systemState struct {
 	Registered       bool
 	Default          bool
 	TaskLabelMapping map[string]string
+	Operations       map[string]model.IntegrationOperationConfig
 }
 
 func NewService(logger *log.Logger) *Service {
@@ -109,6 +115,7 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 			Enabled:          systemEnabled(systemConfig),
 			Default:          systemConfig.Default,
 			TaskLabelMapping: normalizeLabelMapping(systemConfig.TaskLabelMapping),
+			Operations:       normalizeOperationConfigMap(systemConfig.Operations),
 		}
 		service.systems[name] = state
 
@@ -517,6 +524,22 @@ func normalizeIntegrationTypes(config model.IntegrationSystemConfig) []string {
 		values[i] = normalizeIntegrationType(values[i])
 	}
 	return dedupeStrings(values)
+}
+
+func normalizeOperationConfigMap(operations map[string]model.IntegrationOperationConfig) map[string]model.IntegrationOperationConfig {
+	if len(operations) == 0 {
+		return nil
+	}
+
+	result := make(map[string]model.IntegrationOperationConfig, len(operations))
+	for name, operation := range operations {
+		name = strings.TrimSpace(strings.ToLower(name))
+		if name == "" {
+			continue
+		}
+		result[name] = operation
+	}
+	return result
 }
 
 func defaultIntegrationTypesForProvider(providerType string) []string {
