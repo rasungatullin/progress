@@ -213,6 +213,35 @@ func TestServiceUsesDatabaseDSNBeforePath(t *testing.T) {
 	}
 }
 
+func TestServiceCreatesDirectoryForRelativeFileDSN(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dsn := "file:.progress/local-tracker/tasks.sqlite?cache=shared"
+	service := NewService(model.IntegrationSystemConfig{
+		Database: model.IntegrationDatabaseConfig{Driver: "sqlite", DSN: dsn},
+	})
+	service.resolveRepoRoot = func(context.Context) (string, error) { return root, nil }
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "create",
+		Title:      "Задача из file-DSN",
+	})
+	if err != nil {
+		t.Fatalf("create task with relative file dsn: %v", err)
+	}
+	if response.Task == nil || response.Task.Title != "Задача из file-DSN" {
+		t.Fatalf("unexpected task response: %#v", response.Task)
+	}
+	expected := filepath.Join(root, ".progress", "local-tracker", "tasks.sqlite")
+	if _, err := os.Stat(expected); err != nil {
+		t.Fatalf("expected database from relative file dsn: %v", err)
+	}
+}
+
 func TestServiceRejectsUnsupportedDatabaseDriver(t *testing.T) {
 	t.Parallel()
 

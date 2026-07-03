@@ -700,8 +700,8 @@ func expectedResult(integrationType string, objectType string, resource string, 
 			if operation == "comments" {
 				return "task-comment[]"
 			}
-			if operation == "search" {
-				return "canonical-task[]"
+			if operation == "search" || operation == "list" {
+				return "tracker-search-result[]"
 			}
 			return "canonical-task"
 		case "comment":

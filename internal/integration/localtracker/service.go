@@ -303,9 +303,11 @@ func (s *Service) open(ctx context.Context) (*sql.DB, string, error) {
 			dbPath = filepath.Join(repoRoot, dbPath)
 		}
 		dbSource = sqlitePathDataSourceName(dbPath)
+	} else {
+		dbSource, dbPath = normalizeSQLiteDataSourceName(dbSource, repoRoot)
 	}
-	if path, ok := sqliteDatabasePath(dbPath); ok {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if dbPath != "" {
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 			return nil, "", fmt.Errorf("prepare local tracker database directory: %w", err)
 		}
 	}
@@ -656,22 +658,38 @@ func sqlitePathDataSourceName(path string) string {
 	return fileURL.String()
 }
 
-func sqliteDatabasePath(dataSourceName string) (string, bool) {
+func normalizeSQLiteDataSourceName(dataSourceName string, repoRoot string) (string, string) {
 	dataSourceName = strings.TrimSpace(dataSourceName)
 	if dataSourceName == "" || dataSourceName == ":memory:" || strings.HasPrefix(dataSourceName, "file::memory:") {
-		return "", false
+		return dataSourceName, ""
 	}
 	if strings.HasPrefix(dataSourceName, "file:") {
 		fileURL, err := url.Parse(dataSourceName)
-		if err != nil || strings.TrimSpace(fileURL.Path) == "" {
-			return "", false
+		if err != nil {
+			return dataSourceName, ""
 		}
-		return fileURL.Path, true
+		path := strings.TrimSpace(fileURL.Path)
+		if path == "" {
+			path = strings.TrimSpace(fileURL.Opaque)
+		}
+		if path == "" {
+			return dataSourceName, ""
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(repoRoot, path)
+		}
+		return (&url.URL{Scheme: "file", Path: path, RawQuery: fileURL.RawQuery}).String(), path
 	}
-	path, _, _ := strings.Cut(dataSourceName, "?")
+	path, query, hasQuery := strings.Cut(dataSourceName, "?")
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return "", false
+		return dataSourceName, ""
 	}
-	return path, true
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repoRoot, path)
+	}
+	if hasQuery {
+		return path + "?" + query, path
+	}
+	return path, path
 }

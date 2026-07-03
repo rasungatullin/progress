@@ -609,6 +609,19 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 	if len(searchOperations) != 1 || searchOperations[0].Output.Shape != "TrackerSearchResult[]" {
 		t.Fatalf("expected local tracker search result contract, got %#v", searchOperations)
 	}
+	searchRoute, err := service.Dispatch(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "local",
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "search",
+	})
+	if err != nil {
+		t.Fatalf("dispatch local tracker search: %v", err)
+	}
+	if searchRoute.ExpectedResult != "tracker-search-result[]" {
+		t.Fatalf("expected local tracker search route contract, got %q", searchRoute.ExpectedResult)
+	}
 
 	result, err := service.Execute(context.Background(), Request{
 		IntegrationType: model.IntegrationTypeTracker,
