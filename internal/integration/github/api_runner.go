@@ -234,9 +234,12 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 	}
 	apiState := request.State
 	filterMerged := false
+	filterClosed := false
 	if apiState == "merged" {
 		apiState = "closed"
 		filterMerged = true
+	} else if apiState == "closed" {
+		filterClosed = true
 	}
 	perPage := request.Limit
 	if perPage <= 0 || perPage > 100 {
@@ -252,7 +255,11 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 			return result, apiResolvedConfig(config), err
 		}
 		for _, item := range raw {
-			if filterMerged && strings.TrimSpace(item.MergedAt) == "" {
+			merged := strings.TrimSpace(item.MergedAt) != ""
+			if filterMerged && !merged {
+				continue
+			}
+			if filterClosed && merged {
 				continue
 			}
 			pullRequests = append(pullRequests, item)

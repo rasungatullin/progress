@@ -566,3 +566,74 @@ func TestAPITransportDoesNotSendMergedAsRESTState(t *testing.T) {
 		t.Fatalf("expected enriched pull request metadata, got %#v", pulls[0])
 	}
 }
+
+func TestAPITransportFiltersMergedPullRequestsFromClosedState(t *testing.T) {
+	t.Parallel()
+
+	var seenState string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/name/pulls":
+		case "/graphql":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"repository": map[string]any{
+						"pullRequest": map[string]any{
+							"reviewDecision": "",
+							"labels":         map[string]any{"nodes": []map[string]string{}},
+						},
+					},
+				},
+			})
+			return
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		seenState = r.URL.Query().Get("state")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"number":    1,
+				"title":     "closed",
+				"state":     "closed",
+				"html_url":  "https://github.com/owner/name/pull/1",
+				"merged_at": "",
+			},
+			{
+				"number":    2,
+				"title":     "merged",
+				"state":     "closed",
+				"html_url":  "https://github.com/owner/name/pull/2",
+				"merged_at": "2026-07-03T08:00:00Z",
+			},
+		})
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:    server.URL,
+			Token:      "secret",
+			Repository: "owner/name",
+		},
+		client: server.Client(),
+		getenv: func(string) string { return "" },
+	}
+
+	result, _, err := runner.RunPRList(context.Background(), "", PRListRequest{State: "closed", Limit: 10})
+	if err != nil {
+		t.Fatalf("list closed pull requests: %v", err)
+	}
+	if seenState != "closed" {
+		t.Fatalf("closed state must be requested from REST as closed, got %q", seenState)
+	}
+	var pulls []ghPRView
+	if err := json.Unmarshal([]byte(result.Stdout), &pulls); err != nil {
+		t.Fatalf("decode pulls: %v", err)
+	}
+	if len(pulls) != 1 || pulls[0].Number != 1 {
+		t.Fatalf("unexpected pulls: %#v", pulls)
+	}
+	if pulls[0].State != "closed" {
+		t.Fatalf("closed pull request must be exposed as closed, got %q", pulls[0].State)
+	}
+}
