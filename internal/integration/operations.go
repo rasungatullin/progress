@@ -608,7 +608,9 @@ func defaultFailureKinds() []string {
 		model.FailureKindNotFound,
 		model.FailureKindTemporaryUnavailable,
 		model.FailureKindRateLimited,
+		model.FailureKindTimeout,
 		model.FailureKindUnsupportedOperation,
+		model.FailureKindInternalIntegration,
 		model.FailureKindExternalFailure,
 	}
 }
