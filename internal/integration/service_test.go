@@ -605,6 +605,10 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 	if len(operations) != 1 || !operations[0].Available {
 		t.Fatalf("expected available local tracker operation, got %#v", operations)
 	}
+	searchOperations := service.Operations(context.Background(), OperationFilter{System: "local", Name: "tracker.task.search"})
+	if len(searchOperations) != 1 || searchOperations[0].Output.Shape != "TrackerSearchResult[]" {
+		t.Fatalf("expected local tracker search result contract, got %#v", searchOperations)
+	}
 
 	result, err := service.Execute(context.Background(), Request{
 		IntegrationType: model.IntegrationTypeTracker,

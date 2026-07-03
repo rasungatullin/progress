@@ -292,17 +292,24 @@ func (s *Service) open(ctx context.Context) (*sql.DB, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	dbPath := strings.TrimSpace(s.config.Database.Path)
-	if dbPath == "" {
-		dbPath = defaultDatabasePath
+	dbSource := strings.TrimSpace(s.config.Database.DSN)
+	dbPath := dbSource
+	if dbSource == "" {
+		dbPath = strings.TrimSpace(s.config.Database.Path)
+		if dbPath == "" {
+			dbPath = defaultDatabasePath
+		}
+		if !filepath.IsAbs(dbPath) {
+			dbPath = filepath.Join(repoRoot, dbPath)
+		}
+		dbSource = sqlitePathDataSourceName(dbPath)
 	}
-	if !filepath.IsAbs(dbPath) {
-		dbPath = filepath.Join(repoRoot, dbPath)
+	if path, ok := sqliteDatabasePath(dbPath); ok {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, "", fmt.Errorf("prepare local tracker database directory: %w", err)
+		}
 	}
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return nil, "", fmt.Errorf("prepare local tracker database directory: %w", err)
-	}
-	db, err := s.openDatabase(dbPath)
+	db, err := s.openDatabase(dbSource)
 	if err != nil {
 		return nil, "", err
 	}
@@ -637,10 +644,34 @@ func resolveRepoRoot(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func openSQLite(path string) (*sql.DB, error) {
+func openSQLite(dataSourceName string) (*sql.DB, error) {
+	return sql.Open("sqlite3", dataSourceName)
+}
+
+func sqlitePathDataSourceName(path string) string {
 	fileURL := url.URL{Scheme: "file", Path: path}
 	query := fileURL.Query()
 	query.Set("_foreign_keys", "on")
 	fileURL.RawQuery = query.Encode()
-	return sql.Open("sqlite3", fileURL.String())
+	return fileURL.String()
+}
+
+func sqliteDatabasePath(dataSourceName string) (string, bool) {
+	dataSourceName = strings.TrimSpace(dataSourceName)
+	if dataSourceName == "" || dataSourceName == ":memory:" || strings.HasPrefix(dataSourceName, "file::memory:") {
+		return "", false
+	}
+	if strings.HasPrefix(dataSourceName, "file:") {
+		fileURL, err := url.Parse(dataSourceName)
+		if err != nil || strings.TrimSpace(fileURL.Path) == "" {
+			return "", false
+		}
+		return fileURL.Path, true
+	}
+	path, _, _ := strings.Cut(dataSourceName, "?")
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false
+	}
+	return path, true
 }

@@ -2,6 +2,7 @@ package localtracker
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -177,6 +178,38 @@ func TestServiceUsesDefaultDatabasePath(t *testing.T) {
 	expected := filepath.Join(root, defaultDatabasePath)
 	if response.AuthStatus == nil || response.AuthStatus.Path != expected {
 		t.Fatalf("unexpected auth status: %#v, expected path %q", response.AuthStatus, expected)
+	}
+}
+
+func TestServiceUsesDatabaseDSNBeforePath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dsnPath := filepath.Join(root, "dsn", "tasks.sqlite")
+	path := filepath.Join(root, "path", "tasks.sqlite")
+	service := NewService(model.IntegrationSystemConfig{
+		Database: model.IntegrationDatabaseConfig{Driver: "sqlite", DSN: dsnPath, Path: path},
+	})
+	service.resolveRepoRoot = func(context.Context) (string, error) { return root, nil }
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "create",
+		Title:      "Задача из DSN",
+	})
+	if err != nil {
+		t.Fatalf("create task with dsn: %v", err)
+	}
+	if response.Task == nil || response.Task.Title != "Задача из DSN" {
+		t.Fatalf("unexpected task response: %#v", response.Task)
+	}
+	if _, err := os.Stat(dsnPath); err != nil {
+		t.Fatalf("expected database from dsn: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("database.path must not be used when database.dsn is set: %v", err)
 	}
 }
 

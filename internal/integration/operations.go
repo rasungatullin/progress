@@ -347,7 +347,7 @@ func trackerTaskSearchOperation() operationTemplate {
 		ObjectType:      "task",
 		Operation:       "search",
 		Input:           model.OperationInputContract{Optional: optionalFields("query", "state", "labels", "limit")},
-		Output:          output("task", "CanonicalTask[]"),
+		Output:          output("tracker-search-result", "TrackerSearchResult[]"),
 		FailureKinds:    defaultFailureKinds(),
 	}
 }
