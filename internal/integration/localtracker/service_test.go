@@ -1,0 +1,152 @@
+package localtracker
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/rasungatullin/progress/internal/integration/model"
+)
+
+func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewService(model.IntegrationSystemConfig{
+		Database: model.IntegrationDatabaseConfig{Driver: "sqlite", Path: filepath.Join(root, "tasks.sqlite")},
+	})
+	service.resolveRepoRoot = func(context.Context) (string, error) { return root, nil }
+
+	create, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "create",
+		Title:      "Локальная задача",
+		Body:       "Описание",
+		Labels:     []string{"backend"},
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if create.Task == nil || create.Task.Number != 1 || create.Task.Title != "Локальная задача" {
+		t.Fatalf("unexpected created task: %#v", create.Task)
+	}
+
+	comment, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "comment",
+		ObjectType: "comment",
+		Operation:  "create",
+		Number:     create.Task.Number,
+		Body:       "Комментарий",
+	})
+	if err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if len(comment.TaskComments) != 1 || comment.TaskComments[0].Body != "Комментарий" {
+		t.Fatalf("unexpected created comment: %#v", comment.TaskComments)
+	}
+
+	if _, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "label",
+		ObjectType: "label",
+		Operation:  "add",
+		Number:     create.Task.Number,
+		Labels:     []string{"bug"},
+	}); err != nil {
+		t.Fatalf("add label: %v", err)
+	}
+	if _, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "label",
+		ObjectType: "label",
+		Operation:  "remove",
+		Number:     create.Task.Number,
+		Labels:     []string{"backend"},
+	}); err != nil {
+		t.Fatalf("remove label: %v", err)
+	}
+
+	got, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "get",
+		Number:     create.Task.Number,
+	})
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if len(got.Task.Traits) != 1 || got.Task.Traits[0] != "bug" {
+		t.Fatalf("unexpected labels after changes: %#v", got.Task.Traits)
+	}
+
+	comments, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "comment",
+		ObjectType: "comment",
+		Operation:  "comments",
+		Number:     create.Task.Number,
+	})
+	if err != nil {
+		t.Fatalf("list comments: %v", err)
+	}
+	if len(comments.TaskComments) != 1 || comments.Comments[0].Body != "Комментарий" {
+		t.Fatalf("unexpected comments: %#v %#v", comments.TaskComments, comments.Comments)
+	}
+
+	search, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "local",
+		Resource:   "task",
+		ObjectType: "task",
+		Operation:  "search",
+		Query:      "Локальная",
+		Labels:     []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("search tasks: %v", err)
+	}
+	if len(search.SearchResults) != 1 || search.SearchResults[0].Number != create.Task.Number {
+		t.Fatalf("unexpected search results: %#v", search.SearchResults)
+	}
+}
+
+func TestServiceUsesDefaultDatabasePath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewService(model.IntegrationSystemConfig{})
+	service.resolveRepoRoot = func(context.Context) (string, error) { return root, nil }
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:    "local",
+		Resource:  "auth",
+		Operation: "status",
+	})
+	if err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+	expected := filepath.Join(root, defaultDatabasePath)
+	if response.AuthStatus == nil || response.AuthStatus.Path != expected {
+		t.Fatalf("unexpected auth status: %#v, expected path %q", response.AuthStatus, expected)
+	}
+}
+
+func TestServiceRejectsUnsupportedDatabaseDriver(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(model.IntegrationSystemConfig{
+		Database: model.IntegrationDatabaseConfig{Driver: "postgres"},
+	})
+	service.resolveRepoRoot = func(context.Context) (string, error) { return t.TempDir(), nil }
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "local", Resource: "auth", Operation: "status"})
+	if err == nil {
+		t.Fatal("expected unsupported driver error")
+	}
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindInvalidRequest {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
+	}
+}

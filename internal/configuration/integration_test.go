@@ -343,3 +343,22 @@ func TestLoadIntegrationConfigRejectsUnknownSystemType(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLoadIntegrationConfigRejectsUnsupportedDatabaseDriver(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{"systems":{"local":{"type":"local-tracker","database":{"driver":"postgres"}}}}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if err.Error() != "invalid integration config /repo/.progress/integration/systems.json: system \"local\" uses unsupported database driver \"postgres\"" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
