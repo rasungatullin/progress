@@ -92,7 +92,9 @@ progress synthesize --config ./configs/dev.yaml
 - [AGENTS.md](AGENTS.md) — обязательные инструкции для агентских контуров;
 - [docs/styleguide/agent-workflows.md](docs/styleguide/agent-workflows.md) — прикладные правила подготовки агентских текстов, коммитов, запросов на слияние и ревизионных материалов;
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — целевая архитектурная схема;
+- [docs/contours/CONTRACTS.md](docs/contours/CONTRACTS.md) — проверяемая карта межконтурных контрактов;
 - [docs/contours/reactivity/README.md](docs/contours/reactivity/README.md) — контур реакции на внешние события;
+- [docs/contours/reactivity/TARGET_ARCHITECTURE.md](docs/contours/reactivity/TARGET_ARCHITECTURE.md) — целевое архитектурное состояние контура реакции на внешние события;
 - [docs/contours/integration/README.md](docs/contours/integration/README.md) — контур интеграции с внешними системами;
 - [docs/contours/integration/TARGET_ARCHITECTURE.md](docs/contours/integration/TARGET_ARCHITECTURE.md) — целевое архитектурное состояние контура интеграции;
 - [docs/contours/decision/README.md](docs/contours/decision/README.md) — контур принятия решения;
@@ -102,6 +104,15 @@ progress synthesize --config ./configs/dev.yaml
 - [docs/contours/execution/TARGET_ARCHITECTURE.md](docs/contours/execution/TARGET_ARCHITECTURE.md) — целевое архитектурное состояние контура исполнения;
 - [docs/contours/execution/STRUCTURED_IO.md](docs/contours/execution/STRUCTURED_IO.md) — структурированный ввод и вывод контура исполнения;
 - [docs/contours/execution/CLI.md](docs/contours/execution/CLI.md) — изолированный и полный запуск исполнительного контура;
+- [docs/contours/methodology/README.md](docs/contours/methodology/README.md) — контур методик;
+- [docs/contours/settings-resources/README.md](docs/contours/settings-resources/README.md) — контур настроек и ресурсов;
+- [docs/contours/observability/README.md](docs/contours/observability/README.md) — контур журналирования и наблюдаемости;
+- [docs/contours/user-interface/README.md](docs/contours/user-interface/README.md) — контур пользовательского интерфейса;
+- [docs/contours/authorization/README.md](docs/contours/authorization/README.md) — контур авторизации;
+- [docs/contours/execution-queue/README.md](docs/contours/execution-queue/README.md) — очередь исполнения задач;
+- [docs/contours/analytics/README.md](docs/contours/analytics/README.md) — контур аналитики и статистики;
+- [docs/contours/task-bank/README.md](docs/contours/task-bank/README.md) — банк задач;
+- [docs/contours/research/README.md](docs/contours/research/README.md) — контур исследований;
 - [docs/PLAN.md](docs/PLAN.md) — поэтапный план архитектурного развития.
 
 ## Принципы терминологии
