@@ -128,6 +128,17 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			wikiPageGetOperation(),
 			wikiPageSearchOperation(),
 		}
+	case "local-tracker":
+		return []operationTemplate{
+			trackerTaskCreateOperation(),
+			trackerTaskGetOperation(),
+			trackerTaskSearchOperation(),
+			trackerTaskUpdateOperation(),
+			trackerTaskCommentListOperation(),
+			trackerTaskCommentCreateOperation(),
+			trackerTaskLabelAddOperation(),
+			trackerTaskLabelRemoveOperation(),
+		}
 	default:
 		return nil
 	}
@@ -311,6 +322,44 @@ func trackerTaskGetOperation() operationTemplate {
 		ObjectType:      "task",
 		Operation:       "get",
 		Input:           input(requiredField("number", "integer"), optionalFields("repository", "fields")...),
+		Output:          output("task", "CanonicalTask"),
+		FailureKinds:    defaultFailureKinds(),
+	}
+}
+
+func trackerTaskCreateOperation() operationTemplate {
+	return operationTemplate{
+		Name:            "tracker.task.create",
+		IntegrationType: model.IntegrationTypeTracker,
+		ObjectType:      "task",
+		Operation:       "create",
+		SideEffect:      true,
+		Input:           input(requiredField("title", "string"), optionalFields("body", "state", "external_id", "labels")...),
+		Output:          output("task", "CanonicalTask"),
+		FailureKinds:    defaultFailureKinds(),
+	}
+}
+
+func trackerTaskSearchOperation() operationTemplate {
+	return operationTemplate{
+		Name:            "tracker.task.search",
+		IntegrationType: model.IntegrationTypeTracker,
+		ObjectType:      "task",
+		Operation:       "search",
+		Input:           model.OperationInputContract{Optional: optionalFields("query", "state", "labels", "limit")},
+		Output:          output("tracker-search-result", "TrackerSearchResult[]"),
+		FailureKinds:    defaultFailureKinds(),
+	}
+}
+
+func trackerTaskUpdateOperation() operationTemplate {
+	return operationTemplate{
+		Name:            "tracker.task.update",
+		IntegrationType: model.IntegrationTypeTracker,
+		ObjectType:      "task",
+		Operation:       "update",
+		SideEffect:      true,
+		Input:           input(requiredField("number", "integer"), optionalFields("title", "body", "state", "labels")...),
 		Output:          output("task", "CanonicalTask"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -533,7 +582,7 @@ func optionalField(name string, fieldType string) model.OperationField {
 func optionalFields(names ...string) []model.OperationField {
 	fields := make([]model.OperationField, 0, len(names))
 	for _, name := range names {
-		fields = append(fields, model.OperationField{Name: name, Type: operationFieldType(name), Repeated: name == "fields"})
+		fields = append(fields, model.OperationField{Name: name, Type: operationFieldType(name), Repeated: name == "fields" || name == "labels"})
 	}
 	return fields
 }

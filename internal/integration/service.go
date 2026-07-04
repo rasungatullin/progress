@@ -11,6 +11,7 @@ import (
 	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
 	confluenceprovider "github.com/rasungatullin/progress/internal/integration/confluence"
 	githubprovider "github.com/rasungatullin/progress/internal/integration/github"
+	localtrackerprovider "github.com/rasungatullin/progress/internal/integration/localtracker"
 	mattermostprovider "github.com/rasungatullin/progress/internal/integration/mattermost"
 	"github.com/rasungatullin/progress/internal/integration/model"
 	"github.com/rasungatullin/progress/internal/integration/secrets"
@@ -149,6 +150,8 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 			service.registerConfiguredProvider(name, state, telegramprovider.NewService(providerConfig))
 		case "confluence":
 			service.registerConfiguredProvider(name, state, confluenceprovider.NewService(providerConfig))
+		case "local-tracker":
+			service.registerConfiguredProvider(name, state, localtrackerprovider.NewService(providerConfig))
 		case "":
 			service.systems[name] = state
 		default:
@@ -622,6 +625,8 @@ func defaultIntegrationTypesForProvider(providerType string) []string {
 		return []string{model.IntegrationTypeMessenger}
 	case "confluence":
 		return []string{model.IntegrationTypeWiki}
+	case "local-tracker":
+		return []string{model.IntegrationTypeTracker}
 	default:
 		return nil
 	}
@@ -695,8 +700,8 @@ func expectedResult(integrationType string, objectType string, resource string, 
 			if operation == "comments" {
 				return "task-comment[]"
 			}
-			if operation == "search" {
-				return "canonical-task[]"
+			if operation == "search" || operation == "list" {
+				return "tracker-search-result[]"
 			}
 			return "canonical-task"
 		case "comment":

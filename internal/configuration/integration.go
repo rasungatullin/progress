@@ -323,6 +323,7 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 	if value := strings.TrimSpace(override.ChatID); value != "" {
 		merged.ChatID = value
 	}
+	merged.Database = mergeIntegrationDatabaseConfig(merged.Database, override.Database)
 	if len(base.TaskLabelMapping) > 0 || len(override.TaskLabelMapping) > 0 {
 		merged.TaskLabelMapping = map[string]string{}
 		for external, canonical := range base.TaskLabelMapping {
@@ -352,6 +353,20 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 		}
 	}
 
+	return merged
+}
+
+func mergeIntegrationDatabaseConfig(base, override integrationmodel.IntegrationDatabaseConfig) integrationmodel.IntegrationDatabaseConfig {
+	merged := base
+	if value := strings.TrimSpace(override.Driver); value != "" {
+		merged.Driver = value
+	}
+	if value := strings.TrimSpace(override.Path); value != "" {
+		merged.Path = value
+	}
+	if value := strings.TrimSpace(override.DSN); value != "" {
+		merged.DSN = value
+	}
 	return merged
 }
 
@@ -420,6 +435,9 @@ func validateIntegrationLayer(config integrationmodel.IntegrationConfigFile) err
 		if err := validateTaskLabelMapping(system.TaskLabelMapping, name); err != nil {
 			return err
 		}
+		if err := validateIntegrationDatabase(system.Database, name); err != nil {
+			return err
+		}
 		if err := validateIntegrationOperations(system.Operations, name); err != nil {
 			return err
 		}
@@ -450,6 +468,9 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 			return fmt.Errorf("system %q must define type when enabled", name)
 		}
 		if err := validateTaskLabelMapping(system.TaskLabelMapping, name); err != nil {
+			return err
+		}
+		if err := validateIntegrationDatabase(system.Database, name); err != nil {
 			return err
 		}
 		if err := validateIntegrationOperations(system.Operations, name); err != nil {
@@ -535,6 +556,16 @@ func validateTaskLabelMapping(mapping map[string]string, systemName string) erro
 	return nil
 }
 
+func validateIntegrationDatabase(database integrationmodel.IntegrationDatabaseConfig, systemName string) error {
+	driver := strings.TrimSpace(strings.ToLower(database.Driver))
+	switch driver {
+	case "", "sqlite":
+		return nil
+	default:
+		return fmt.Errorf("system %q uses unsupported database driver %q", normalizeSystemName(systemName), driver)
+	}
+}
+
 func validateIntegrationSystemType(systemName, systemType string) error {
 	systemType = normalizeSystemName(systemType)
 	if systemType == "" {
@@ -542,7 +573,7 @@ func validateIntegrationSystemType(systemName, systemType string) error {
 	}
 
 	switch systemType {
-	case "github", "bitbucket", "mattermost", "telegram", "confluence", "script":
+	case "github", "bitbucket", "mattermost", "telegram", "confluence", "script", "local-tracker":
 		return nil
 	default:
 		return fmt.Errorf("system %q uses unknown type %q", normalizeSystemName(systemName), systemType)
@@ -575,6 +606,8 @@ func systemDeclaresIntegrationType(system integrationmodel.IntegrationSystemConf
 		return integrationType == "messenger"
 	case "confluence":
 		return integrationType == "wiki"
+	case "local-tracker":
+		return integrationType == "tracker"
 	default:
 		return true
 	}

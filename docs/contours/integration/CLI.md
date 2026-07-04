@@ -591,9 +591,10 @@ GitHub-адаптер должен различать как минимум сл
 3. `private_store` задаёт реализацию хранилища приватных значений и сливается по простым полям;
 4. `systems.<name>` дополняет или переопределяет одноимённую систему из глобального слоя;
 5. простые поля системы, например `command`, `path`, `timeout`, `base_url`, `token_private`, `token_env`, `repository`, `project`, `channel_id`, `chat_id` и `default_repo`, заменяются локальными значениями;
-6. `task_label_mapping` сливается по внешней метке;
-7. `operations` сливается по ключу операции;
-8. `enabled=false` в локальном слое выключает систему целиком.
+6. `database` дополняется по полям `driver`, `path` и `dsn`;
+7. `task_label_mapping` сливается по внешней метке;
+8. `operations` сливается по ключу операции;
+9. `enabled=false` в локальном слое выключает систему целиком.
 
 Минимальная конфигурация встроенных адаптеров может выглядеть так:
 
@@ -656,6 +657,15 @@ GitHub-адаптер должен различать как минимум сл
       "base_url": "https://confluence.example/confluence",
       "username": "service-user",
       "token_env": "CONFLUENCE_TOKEN"
+    },
+    "local": {
+      "type": "local-tracker",
+      "integration_type": "tracker",
+      "enabled": true,
+      "database": {
+        "driver": "sqlite",
+        "path": ".progress/local-tracker/tasks.sqlite"
+      }
     }
   }
 }
@@ -663,7 +673,7 @@ GitHub-адаптер должен различать как минимум сл
 
 Назначение общих полей системы:
 
-1. `type` фиксирует тип встроенного адаптера: `github`, `bitbucket`, `mattermost`, `telegram`, `confluence` или `script`;
+1. `type` фиксирует тип встроенного адаптера: `github`, `bitbucket`, `mattermost`, `telegram`, `confluence`, `local-tracker` или `script`;
 2. `integration_type` задаёт один тип интеграции, а `integration_types` — несколько типов для одной системы;
 3. `enabled` включает или выключает систему без удаления её описания;
 4. `default=true` делает систему системой по умолчанию для её типов, если `default_systems` не задаёт явное значение;
@@ -677,8 +687,43 @@ GitHub-адаптер должен различать как минимум сл
 12. `project` задаёт ключ проекта Bitbucket Server/Data Center, если `--repo` передан без префикса;
 13. `channel_id` задаёт резервный канал Mattermost;
 14. `chat_id` задаёт резервный чат Telegram;
-15. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
-16. `operations` резервирует пространство для пооперационной настройки.
+15. `database` задаёт хранилище локального трекера; в текущем срезе поддержан `driver=sqlite`;
+16. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
+17. `operations` резервирует пространство для пооперационной настройки.
+
+### 11.1 Локальный трекер задач
+
+Система `type=local-tracker` подключает локальное хранилище задач как обычную интегрируемую систему типа `tracker`. Если `database` не задан, используется SQLite-файл `.progress/local-tracker/tasks.sqlite` относительно корня репозитория.
+
+Минимальная настройка:
+
+```json
+{
+  "default_systems": {
+    "tracker": "local"
+  },
+  "systems": {
+    "local": {
+      "type": "local-tracker",
+      "integration_type": "tracker",
+      "enabled": true
+    }
+  }
+}
+```
+
+Локальный трекер поддерживает операции:
+
+- `tracker.task.create`;
+- `tracker.task.get`;
+- `tracker.task.search`;
+- `tracker.task.update`;
+- `tracker.task.comment.list`;
+- `tracker.task.comment.create`;
+- `tracker.task.label.add`;
+- `tracker.task.label.remove`.
+
+Хранилище создаёт схему при первом обращении. Задачи и комментарии возвращаются как `CanonicalTask`, `TaskComment`, `OperationResult` и совместимые структуры `TrackerIssue`/`TrackerComment`.
 
 Настройка `private_store` выбирает реализацию хранилища приватных значений. Если `type` не задан, на macOS в сборке с `cgo` используется `keychain` с сервисом `progress`. В остальных средах используется файловая реализация `file` в `$PROGRESS_CONFIG_HOME/integration/private-values.json` или `~/.config/progress/integration/private-values.json` с правами доступа `0600`. Явный `keychain` отклоняется при запуске сборки, где macOS Keychain недоступен.
 
@@ -738,6 +783,7 @@ progress integration private set mt_auth_token --stdin
 4. Bitbucket-адаптер через HTTP API для репозиториев и запросов на слияние;
 5. Mattermost-адаптер через HTTP API для цепочек обсуждения и сообщений;
 6. Telegram-адаптер через Bot API для отправки сообщений;
-7. нормализованные отказные состояния для отсутствия авторизации, недоступности, неподдерживаемой операции, неполного ответа и ошибок внешнего источника.
+7. локальный трекер задач с SQLite-хранилищем по умолчанию;
+8. нормализованные отказные состояния для отсутствия авторизации, недоступности, неподдерживаемой операции, неполного ответа и ошибок внешнего источника.
 
 Принцип проектирования остаётся прежним: другие контуры не должны знать синтаксис `gh`, HTTP-маршруты Bitbucket, Mattermost или Telegram, формат токенов и поля внешних ответов. Эти сведения остаются внутри адаптеров, а наружу выходит канонический ответ контура интеграции.

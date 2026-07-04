@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/integration/model"
@@ -582,6 +583,61 @@ func TestOperationsCatalogIncludesScriptOperationConfig(t *testing.T) {
 	}
 	if !contains(operation.Diagnostics, "script=.progress/integration/work-tracker/task-get.sh") {
 		t.Fatalf("expected script diagnostic, got %#v", operation.Diagnostics)
+	}
+}
+
+func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeTracker: "local"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"local": {
+				Type:            "local-tracker",
+				IntegrationType: model.IntegrationTypeTracker,
+				Database:        model.IntegrationDatabaseConfig{Driver: "sqlite", Path: filepath.Join(root, "tasks.sqlite")},
+			},
+		},
+	})
+
+	operations := service.Operations(context.Background(), OperationFilter{System: "local", Name: "tracker.task.create"})
+	if len(operations) != 1 || !operations[0].Available {
+		t.Fatalf("expected available local tracker operation, got %#v", operations)
+	}
+	searchOperations := service.Operations(context.Background(), OperationFilter{System: "local", Name: "tracker.task.search"})
+	if len(searchOperations) != 1 || searchOperations[0].Output.Shape != "TrackerSearchResult[]" {
+		t.Fatalf("expected local tracker search result contract, got %#v", searchOperations)
+	}
+	searchRoute, err := service.Dispatch(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "local",
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "search",
+	})
+	if err != nil {
+		t.Fatalf("dispatch local tracker search: %v", err)
+	}
+	if searchRoute.ExpectedResult != "tracker-search-result[]" {
+		t.Fatalf("expected local tracker search route contract, got %q", searchRoute.ExpectedResult)
+	}
+
+	result, err := service.Execute(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeTracker,
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "create",
+		Title:           "Локальная задача",
+	})
+	if err != nil {
+		t.Fatalf("execute local tracker provider: %v", err)
+	}
+	if result.Task == nil || result.Task.Number != 1 || result.Task.Title != "Локальная задача" {
+		t.Fatalf("unexpected local tracker task: %#v", result.Task)
+	}
+	if result.Route.System != "local" {
+		t.Fatalf("expected default local tracker route, got %#v", result.Route)
 	}
 }
 

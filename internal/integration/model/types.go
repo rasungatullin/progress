@@ -16,11 +16,13 @@ const (
 	FailureKindNotFound             = "not-found"
 	FailureKindTemporaryUnavailable = "temporary-unavailable"
 	FailureKindRateLimited          = "rate-limited"
+	FailureKindTimeout              = "timeout"
 	FailureKindUnsupportedOperation = "unsupported-operation"
 	FailureKindPartialResponse      = "partial-response"
 	FailureKindStateConflict        = "state-conflict"
 	FailureKindInvalidRequest       = "invalid-request"
 	FailureKindExternalFailure      = "external-failure"
+	FailureKindInternalIntegration  = "internal-integration-error"
 )
 
 type Request struct {
@@ -122,8 +124,15 @@ type IntegrationSystemConfig struct {
 	DefaultRepo      string                                `json:"default_repo,omitempty"`
 	ChannelID        string                                `json:"channel_id,omitempty"`
 	ChatID           string                                `json:"chat_id,omitempty"`
+	Database         IntegrationDatabaseConfig             `json:"database,omitempty"`
 	TaskLabelMapping map[string]string                     `json:"task_label_mapping,omitempty"`
 	Operations       map[string]IntegrationOperationConfig `json:"operations,omitempty"`
+}
+
+type IntegrationDatabaseConfig struct {
+	Driver string `json:"driver,omitempty"`
+	Path   string `json:"path,omitempty"`
+	DSN    string `json:"dsn,omitempty"`
 }
 
 type IntegrationOperationConfig struct {
