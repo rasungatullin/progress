@@ -112,7 +112,8 @@ type ResumeSpec struct {
 }
 
 type WorkplaceSpec struct {
-	Name string `json:"name,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Environment string `json:"environment,omitempty"`
 }
 
 type RepositorySpec struct {
@@ -208,6 +209,8 @@ type Allocation struct {
 	Runner           string `json:"runner,omitempty"`
 	Model            string `json:"model,omitempty"`
 	ModelBinding     string `json:"model_binding,omitempty"`
+	Environment      string `json:"environment,omitempty"`
+	EnvironmentType  string `json:"environment_type,omitempty"`
 	BindingSource    string `json:"binding_source,omitempty"`
 	Source           string `json:"source,omitempty"`
 	FallbackUsed     bool   `json:"fallback_used,omitempty"`
@@ -217,25 +220,55 @@ type Allocation struct {
 
 type ResourceConfigFile struct {
 	Defaults ResourceDefaultsConfig           `json:"defaults"`
-	Runners  []string                         `json:"runners"`
-	Models   []string                         `json:"models"`
-	Bindings map[string]ResourceBindingConfig `json:"bindings"`
+	Runners  []string                         `json:"runners,omitempty"`
+	Models   []string                         `json:"models,omitempty"`
+	Bindings map[string]ResourceBindingConfig `json:"bindings,omitempty"`
+
+	Environments map[string]EnvironmentConfig `json:"environments,omitempty"`
+	Tools        map[string]ToolConfig        `json:"tools,omitempty"`
+	Resources    map[string]ResourceConfig    `json:"resources,omitempty"`
 }
 
 type ResourceBindingConfig struct {
-	Runner string `json:"runner"`
-	Model  string `json:"model"`
+	Runner      string `json:"runner,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Tool        string `json:"tool,omitempty"`
+	Resource    string `json:"resource,omitempty"`
+	Environment string `json:"environment,omitempty"`
+}
+
+type EnvironmentConfig struct {
+	Type    string            `json:"type,omitempty"`
+	Enabled bool              `json:"enabled"`
+	Config  map[string]string `json:"config,omitempty"`
+}
+
+type ToolConfig struct {
+	Type    string            `json:"type,omitempty"`
+	Enabled bool              `json:"enabled"`
+	Config  map[string]string `json:"config,omitempty"`
+}
+
+type ResourceConfig struct {
+	Type    string            `json:"type,omitempty"`
+	Enabled bool              `json:"enabled"`
+	Tools   []string          `json:"tools,omitempty"`
+	Traits  []string          `json:"traits,omitempty"`
+	Config  map[string]string `json:"config,omitempty"`
 }
 
 type ResourceDefaultsConfig struct {
 	ModelBinding string `json:"model-binding"`
+	Environment  string `json:"environment,omitempty"`
 }
 
 type Workplace struct {
-	Name           string `json:"name,omitempty"`
-	RepositoryURL  string `json:"repository_url,omitempty"`
-	RepositoryRoot string `json:"repository_root,omitempty"`
-	Ready          bool   `json:"ready,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Environment     string `json:"environment,omitempty"`
+	EnvironmentType string `json:"environment_type,omitempty"`
+	RepositoryURL   string `json:"repository_url,omitempty"`
+	RepositoryRoot  string `json:"repository_root,omitempty"`
+	Ready           bool   `json:"ready,omitempty"`
 }
 
 type ActionClass string

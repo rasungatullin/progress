@@ -71,6 +71,29 @@ func TestPrepareClonesExternalRepositoryWhenCacheIsMissing(t *testing.T) {
 	})
 }
 
+func TestPrepareUsesLocalEnvironmentFromAllocation(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	service, gitCalls := newStubService(t, hostRepoRoot, nil)
+
+	workplace, err := service.Prepare(context.Background(), model.Invocation{}, model.Profile{}, model.Allocation{
+		Environment:     "same-process",
+		EnvironmentType: "local",
+	})
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+
+	if workplace.Name != hostRepoRoot || workplace.RepositoryRoot != hostRepoRoot {
+		t.Fatalf("unexpected local workplace: %#v", workplace)
+	}
+	if workplace.Environment != "same-process" || workplace.EnvironmentType != "local" {
+		t.Fatalf("unexpected environment: %#v", workplace)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{})
+}
+
 func TestPrepareFetchesExternalRepositoryWhenCacheExists(t *testing.T) {
 	t.Parallel()
 

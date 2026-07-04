@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/execution/model"
@@ -17,6 +18,18 @@ const (
 	configHomeEnvVar       = "PROGRESS_CONFIG_HOME"
 	executionConfigPath    = "execution/resources.json"
 	executionLocalFilePath = ".progress/execution/resources.json"
+
+	EnvironmentTypeLocal    = "local"
+	EnvironmentTypeWorktree = "worktree"
+
+	ToolTypeAgenticSystem = "agentic-system"
+
+	ResourceTypeModel = "model"
+)
+
+const (
+	defaultLocalEnvironmentName    = "local"
+	defaultWorktreeEnvironmentName = "worktree"
 )
 
 type ConfigFileSource string
@@ -35,9 +48,23 @@ type ExecutionResourceLayer struct {
 }
 
 type ExecutionResourceConfig struct {
-	Config         model.ResourceConfigFile
-	Layers         []ExecutionResourceLayer
-	BindingSources map[string]ConfigFileSource
+	Config             model.ResourceConfigFile
+	Layers             []ExecutionResourceLayer
+	EnvironmentSources map[string]ConfigFileSource
+	ToolSources        map[string]ConfigFileSource
+	ResourceSources    map[string]ConfigFileSource
+	BindingSources     map[string]ConfigFileSource
+	ConfigHome         string
+}
+
+func NewExecutionResourceConfigFile() model.ResourceConfigFile {
+	return normalizeExecutionResourceConfig(model.ResourceConfigFile{
+		Defaults:     model.ResourceDefaultsConfig{},
+		Environments: map[string]model.EnvironmentConfig{},
+		Tools:        map[string]model.ToolConfig{},
+		Resources:    map[string]model.ResourceConfig{},
+		Bindings:     map[string]model.ResourceBindingConfig{},
+	}, false)
 }
 
 func LoadExecutionResourceConfig(repoRoot string, readFile ReadFileFunc) (ExecutionResourceConfig, error) {
@@ -83,11 +110,160 @@ func LoadExecutionResourceConfigWithHome(repoRoot, configHome string, readFile R
 	}
 
 	merged := mergeExecutionResourceLayers(layers)
-	if err := validateResourceConfig(merged.Config); err != nil {
+	merged.ConfigHome = home
+	if err := ValidateExecutionResourceConfig(merged.Config); err != nil {
 		return ExecutionResourceConfig{}, fmt.Errorf("invalid execution resource config after merge of %d layers: %w", len(layers), err)
 	}
 
 	return merged, nil
+}
+
+func ExecutionResourceConfigPath(repoRoot, configHome string, source ConfigFileSource) (string, error) {
+	switch source {
+	case ConfigFileSourceLocal:
+		if strings.TrimSpace(repoRoot) == "" {
+			return "", fmt.Errorf("repo root is required for local execution resource config")
+		}
+		return filepath.Join(repoRoot, executionLocalFilePath), nil
+	case ConfigFileSourceGlobal:
+		home, err := resolveConfigHome(configHome)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, executionConfigPath), nil
+	default:
+		return "", fmt.Errorf("unknown config source: %s", source)
+	}
+}
+
+func LoadExecutionResourceConfigFile(path string, readFile ReadFileFunc) (model.ResourceConfigFile, error) {
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+
+	content, err := readFile(path)
+	if err != nil {
+		return model.ResourceConfigFile{}, err
+	}
+
+	config, err := parseExecutionResourceConfig(path, content)
+	if err != nil {
+		return model.ResourceConfigFile{}, err
+	}
+
+	return config, nil
+}
+
+func NormalizeExecutionResourceConfig(config model.ResourceConfigFile) model.ResourceConfigFile {
+	return normalizeExecutionResourceConfig(config, true)
+}
+
+func NormalizeExecutionResourceLayerConfig(config model.ResourceConfigFile) model.ResourceConfigFile {
+	return normalizeExecutionResourceConfig(config, false)
+}
+
+func ValidateExecutionResourceConfig(config model.ResourceConfigFile) error {
+	config = normalizeExecutionResourceConfig(config, true)
+
+	if len(config.Environments) == 0 {
+		return fmt.Errorf("environments must define at least one entry")
+	}
+	for name, environment := range config.Environments {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("environments contains empty name")
+		}
+		if strings.TrimSpace(environment.Type) == "" {
+			return fmt.Errorf("environment %q has empty type", name)
+		}
+		if environment.Enabled && !isSupportedEnvironmentType(environment.Type) {
+			return fmt.Errorf("environment %q has unsupported type %q", name, environment.Type)
+		}
+	}
+
+	if len(config.Tools) == 0 {
+		return fmt.Errorf("tools must define at least one entry")
+	}
+	for name, tool := range config.Tools {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("tools contains empty name")
+		}
+		if strings.TrimSpace(tool.Type) == "" {
+			return fmt.Errorf("tool %q has empty type", name)
+		}
+	}
+
+	if len(config.Resources) == 0 {
+		return fmt.Errorf("resources must define at least one entry")
+	}
+	for name, resource := range config.Resources {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("resources contains empty name")
+		}
+		if strings.TrimSpace(resource.Type) == "" {
+			return fmt.Errorf("resource %q has empty type", name)
+		}
+		for _, tool := range resource.Tools {
+			if _, ok := config.Tools[strings.TrimSpace(tool)]; !ok {
+				return fmt.Errorf("resource %q references unknown tool %q", name, strings.TrimSpace(tool))
+			}
+		}
+	}
+
+	if len(config.Bindings) == 0 {
+		return fmt.Errorf("bindings must define at least one entry")
+	}
+	for name, binding := range config.Bindings {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("bindings contains empty name")
+		}
+
+		toolName := bindingTool(binding)
+		resourceName := bindingResource(binding)
+		if toolName == "" {
+			return fmt.Errorf("binding %q has empty tool", name)
+		}
+		if resourceName == "" {
+			return fmt.Errorf("binding %q has empty resource", name)
+		}
+		if _, ok := config.Tools[toolName]; !ok {
+			if strings.TrimSpace(binding.Runner) == toolName {
+				return fmt.Errorf("binding %q references unknown runner %q", name, toolName)
+			}
+			return fmt.Errorf("binding %q references unknown tool %q", name, toolName)
+		}
+		resource, ok := config.Resources[resourceName]
+		if !ok {
+			if strings.TrimSpace(binding.Model) == resourceName {
+				return fmt.Errorf("binding %q references unknown model %q", name, resourceName)
+			}
+			return fmt.Errorf("binding %q references unknown resource %q", name, resourceName)
+		}
+		if !resourceAllowsTool(resource, toolName) {
+			return fmt.Errorf("binding %q uses tool %q that is not allowed for resource %q", name, toolName, resourceName)
+		}
+		if environment := strings.TrimSpace(binding.Environment); environment != "" {
+			if _, ok := config.Environments[environment]; !ok {
+				return fmt.Errorf("binding %q references unknown environment %q", name, environment)
+			}
+		}
+	}
+
+	if defaultBinding := strings.TrimSpace(config.Defaults.ModelBinding); defaultBinding != "" {
+		if _, ok := config.Bindings[defaultBinding]; !ok {
+			return fmt.Errorf("defaults.model-binding references unknown binding %q", defaultBinding)
+		}
+	}
+	if defaultEnvironment := strings.TrimSpace(config.Defaults.Environment); defaultEnvironment != "" {
+		if _, ok := config.Environments[defaultEnvironment]; !ok {
+			return fmt.Errorf("defaults.environment references unknown environment %q", defaultEnvironment)
+		}
+	}
+
+	return nil
 }
 
 func readLayer(path string, source ConfigFileSource, readFile ReadFileFunc) (ExecutionResourceLayer, error) {
@@ -96,56 +272,326 @@ func readLayer(path string, source ConfigFileSource, readFile ReadFileFunc) (Exe
 		return ExecutionResourceLayer{}, err
 	}
 
-	var config model.ResourceConfigFile
-	if err := json.Unmarshal(content, &config); err != nil {
-		return ExecutionResourceLayer{}, fmt.Errorf("parse execution resource config %s: %w", path, err)
+	config, err := parseExecutionResourceConfig(path, content)
+	if err != nil {
+		return ExecutionResourceLayer{}, err
 	}
-	if err := validateResourceConfig(config); err != nil {
+	if err := validateExecutionResourceLayer(config); err != nil {
 		return ExecutionResourceLayer{}, fmt.Errorf("invalid execution resource config %s: %w", path, err)
 	}
 
 	return ExecutionResourceLayer{Source: source, Path: path, Config: config}, nil
 }
 
+func parseExecutionResourceConfig(path string, content []byte) (model.ResourceConfigFile, error) {
+	var config model.ResourceConfigFile
+	if err := json.Unmarshal(content, &config); err != nil {
+		return model.ResourceConfigFile{}, fmt.Errorf("parse execution resource config %s: %w", path, err)
+	}
+
+	return normalizeExecutionResourceConfig(config, false), nil
+}
+
+func validateExecutionResourceLayer(config model.ResourceConfigFile) error {
+	config = normalizeExecutionResourceConfig(config, false)
+
+	for _, name := range config.Runners {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("runners contains empty name")
+		}
+	}
+	for _, name := range config.Models {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("models contains empty name")
+		}
+	}
+	for name, environment := range config.Environments {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("environments contains empty name")
+		}
+		if strings.TrimSpace(environment.Type) == "" {
+			return fmt.Errorf("environment %q has empty type", name)
+		}
+		if environment.Enabled && !isSupportedEnvironmentType(environment.Type) {
+			return fmt.Errorf("environment %q has unsupported type %q", name, environment.Type)
+		}
+	}
+	for name, tool := range config.Tools {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("tools contains empty name")
+		}
+		if strings.TrimSpace(tool.Type) == "" {
+			return fmt.Errorf("tool %q has empty type", name)
+		}
+	}
+	for name, resource := range config.Resources {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("resources contains empty name")
+		}
+		if strings.TrimSpace(resource.Type) == "" {
+			return fmt.Errorf("resource %q has empty type", name)
+		}
+	}
+	for name, binding := range config.Bindings {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("bindings contains empty name")
+		}
+		if bindingTool(binding) == "" {
+			return fmt.Errorf("binding %q has empty tool", name)
+		}
+		if bindingResource(binding) == "" {
+			return fmt.Errorf("binding %q has empty resource", name)
+		}
+	}
+
+	return nil
+}
+
 func mergeExecutionResourceLayers(layers []ExecutionResourceLayer) ExecutionResourceConfig {
 	merged := model.ResourceConfigFile{
-		Defaults: model.ResourceDefaultsConfig{},
-		Bindings: map[string]model.ResourceBindingConfig{},
+		Defaults:     model.ResourceDefaultsConfig{},
+		Environments: map[string]model.EnvironmentConfig{},
+		Tools:        map[string]model.ToolConfig{},
+		Resources:    map[string]model.ResourceConfig{},
+		Bindings:     map[string]model.ResourceBindingConfig{},
 	}
+	environmentSources := map[string]ConfigFileSource{}
+	toolSources := map[string]ConfigFileSource{}
+	resourceSources := map[string]ConfigFileSource{}
 	bindingSources := map[string]ConfigFileSource{}
 
-	runnerSeen := map[string]struct{}{}
-	modelSeen := map[string]struct{}{}
-
 	for _, layer := range layers {
-		for _, name := range layer.Config.Runners {
-			name = strings.TrimSpace(name)
-			if _, ok := runnerSeen[name]; !ok {
-				runnerSeen[name] = struct{}{}
-				merged.Runners = append(merged.Runners, name)
-			}
+		config := normalizeExecutionResourceConfig(layer.Config, false)
+
+		merged.Runners = mergeNameList(merged.Runners, config.Runners)
+		merged.Models = mergeNameList(merged.Models, config.Models)
+		for name, environment := range config.Environments {
+			merged.Environments[name] = environment
+			environmentSources[name] = layer.Source
 		}
-		for _, name := range layer.Config.Models {
-			name = strings.TrimSpace(name)
-			if _, ok := modelSeen[name]; !ok {
-				modelSeen[name] = struct{}{}
-				merged.Models = append(merged.Models, name)
-			}
+		for name, tool := range config.Tools {
+			merged.Tools[name] = tool
+			toolSources[name] = layer.Source
 		}
-		for name, binding := range layer.Config.Bindings {
+		for name, resource := range config.Resources {
+			merged.Resources[name] = resource
+			resourceSources[name] = layer.Source
+		}
+		for name, binding := range config.Bindings {
 			merged.Bindings[name] = binding
 			bindingSources[name] = layer.Source
 		}
-		if strings.TrimSpace(layer.Config.Defaults.ModelBinding) != "" {
-			merged.Defaults.ModelBinding = layer.Config.Defaults.ModelBinding
+		if strings.TrimSpace(config.Defaults.ModelBinding) != "" {
+			merged.Defaults.ModelBinding = config.Defaults.ModelBinding
+		}
+		if strings.TrimSpace(config.Defaults.Environment) != "" {
+			merged.Defaults.Environment = config.Defaults.Environment
 		}
 	}
 
+	merged = normalizeExecutionResourceConfig(merged, true)
+
 	return ExecutionResourceConfig{
-		Config:         merged,
-		Layers:         layers,
-		BindingSources: bindingSources,
+		Config:             merged,
+		Layers:             layers,
+		EnvironmentSources: environmentSources,
+		ToolSources:        toolSources,
+		ResourceSources:    resourceSources,
+		BindingSources:     bindingSources,
 	}
+}
+
+func normalizeExecutionResourceConfig(config model.ResourceConfigFile, addDefaultEnvironments bool) model.ResourceConfigFile {
+	normalized := config
+	normalized.Defaults.ModelBinding = strings.TrimSpace(normalized.Defaults.ModelBinding)
+	normalized.Defaults.Environment = strings.TrimSpace(normalized.Defaults.Environment)
+
+	normalized.Runners = normalizeStringList(normalized.Runners)
+	normalized.Models = normalizeStringList(normalized.Models)
+
+	normalized.Environments = normalizeEnvironments(normalized.Environments)
+	normalized.Tools = normalizeTools(normalized.Tools)
+	normalized.Resources = normalizeResources(normalized.Resources)
+	normalized.Bindings = normalizeBindings(normalized.Bindings)
+
+	if addDefaultEnvironments && len(normalized.Environments) == 0 {
+		normalized.Environments = map[string]model.EnvironmentConfig{
+			defaultLocalEnvironmentName: {
+				Type:    EnvironmentTypeLocal,
+				Enabled: true,
+			},
+			defaultWorktreeEnvironmentName: {
+				Type:    EnvironmentTypeWorktree,
+				Enabled: true,
+			},
+		}
+	}
+
+	for _, name := range normalized.Runners {
+		if _, ok := normalized.Tools[name]; !ok {
+			normalized.Tools[name] = model.ToolConfig{Type: ToolTypeAgenticSystem, Enabled: true}
+		}
+	}
+	for _, name := range normalized.Models {
+		if _, ok := normalized.Resources[name]; !ok {
+			normalized.Resources[name] = model.ResourceConfig{Type: ResourceTypeModel, Enabled: true}
+		}
+	}
+
+	normalized.Runners = mergeNameList(normalized.Runners, sortedMapKeys(normalized.Tools))
+	normalized.Models = mergeNameList(normalized.Models, sortedMapKeys(normalized.Resources))
+
+	return normalized
+}
+
+func normalizeEnvironments(values map[string]model.EnvironmentConfig) map[string]model.EnvironmentConfig {
+	normalized := map[string]model.EnvironmentConfig{}
+	for name, environment := range values {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			normalized[name] = environment
+			continue
+		}
+		environment.Type = strings.TrimSpace(environment.Type)
+		if environment.Type == "" {
+			switch name {
+			case defaultLocalEnvironmentName:
+				environment.Type = EnvironmentTypeLocal
+			case defaultWorktreeEnvironmentName:
+				environment.Type = EnvironmentTypeWorktree
+			}
+		}
+		normalized[name] = environment
+	}
+	return normalized
+}
+
+func normalizeTools(values map[string]model.ToolConfig) map[string]model.ToolConfig {
+	normalized := map[string]model.ToolConfig{}
+	for name, tool := range values {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			normalized[name] = tool
+			continue
+		}
+		tool.Type = strings.TrimSpace(tool.Type)
+		if tool.Type == "" {
+			tool.Type = ToolTypeAgenticSystem
+		}
+		normalized[name] = tool
+	}
+	return normalized
+}
+
+func normalizeResources(values map[string]model.ResourceConfig) map[string]model.ResourceConfig {
+	normalized := map[string]model.ResourceConfig{}
+	for name, resource := range values {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			normalized[name] = resource
+			continue
+		}
+		resource.Type = strings.TrimSpace(resource.Type)
+		if resource.Type == "" {
+			resource.Type = ResourceTypeModel
+		}
+		resource.Tools = normalizeStringList(resource.Tools)
+		resource.Traits = normalizeStringList(resource.Traits)
+		normalized[name] = resource
+	}
+	return normalized
+}
+
+func normalizeBindings(values map[string]model.ResourceBindingConfig) map[string]model.ResourceBindingConfig {
+	normalized := map[string]model.ResourceBindingConfig{}
+	for name, binding := range values {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			normalized[name] = binding
+			continue
+		}
+		binding.Runner = strings.TrimSpace(binding.Runner)
+		binding.Model = strings.TrimSpace(binding.Model)
+		binding.Tool = strings.TrimSpace(binding.Tool)
+		binding.Resource = strings.TrimSpace(binding.Resource)
+		binding.Environment = strings.TrimSpace(binding.Environment)
+		if binding.Tool == "" {
+			binding.Tool = binding.Runner
+		}
+		if binding.Runner == "" {
+			binding.Runner = binding.Tool
+		}
+		if binding.Resource == "" {
+			binding.Resource = binding.Model
+		}
+		if binding.Model == "" {
+			binding.Model = binding.Resource
+		}
+		normalized[name] = binding
+	}
+	return normalized
+}
+
+func normalizeStringList(values []string) []string {
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			normalized = append(normalized, value)
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	return normalized
+}
+
+func mergeNameList(existing []string, additions []string) []string {
+	seen := map[string]struct{}{}
+	merged := make([]string, 0, len(existing)+len(additions))
+	for _, value := range existing {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		merged = append(merged, value)
+	}
+	for _, value := range additions {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		merged = append(merged, value)
+	}
+	return merged
+}
+
+func sortedMapKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func isNotExistErr(err error) bool {
@@ -169,54 +615,35 @@ func resolveConfigHome(configHome string) (string, error) {
 	return filepath.Join(userHome, configDefaultHome), nil
 }
 
-func validateResourceConfig(config model.ResourceConfigFile) error {
-	if len(config.Runners) == 0 {
-		return fmt.Errorf("runners must define at least one entry")
+func bindingTool(binding model.ResourceBindingConfig) string {
+	if tool := strings.TrimSpace(binding.Tool); tool != "" {
+		return tool
 	}
-	for _, name := range config.Runners {
-		if strings.TrimSpace(name) == "" {
-			return fmt.Errorf("runners contains empty name")
-		}
-	}
+	return strings.TrimSpace(binding.Runner)
+}
 
-	if len(config.Models) == 0 {
-		return fmt.Errorf("models must define at least one entry")
+func bindingResource(binding model.ResourceBindingConfig) string {
+	if resource := strings.TrimSpace(binding.Resource); resource != "" {
+		return resource
 	}
-	for _, name := range config.Models {
-		if strings.TrimSpace(name) == "" {
-			return fmt.Errorf("models contains empty name")
-		}
-	}
+	return strings.TrimSpace(binding.Model)
+}
 
-	if len(config.Bindings) == 0 {
-		return fmt.Errorf("bindings must define at least one entry")
+func resourceAllowsTool(resource model.ResourceConfig, tool string) bool {
+	tool = strings.TrimSpace(tool)
+	if len(resource.Tools) == 0 {
+		return true
 	}
-	for name, binding := range config.Bindings {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return fmt.Errorf("bindings contains empty name")
-		}
-		if strings.TrimSpace(binding.Runner) == "" {
-			return fmt.Errorf("binding %q has empty runner", name)
-		}
-		if strings.TrimSpace(binding.Model) == "" {
-			return fmt.Errorf("binding %q has empty model", name)
-		}
-		if !containsName(config.Runners, binding.Runner) {
-			return fmt.Errorf("binding %q references unknown runner %q", name, binding.Runner)
-		}
-		if !containsName(config.Models, binding.Model) {
-			return fmt.Errorf("binding %q references unknown model %q", name, binding.Model)
-		}
-	}
+	return containsName(resource.Tools, tool)
+}
 
-	if defaultBinding := strings.TrimSpace(config.Defaults.ModelBinding); defaultBinding != "" {
-		if _, ok := config.Bindings[defaultBinding]; !ok {
-			return fmt.Errorf("defaults.model-binding references unknown binding %q", defaultBinding)
-		}
+func isSupportedEnvironmentType(value string) bool {
+	switch strings.TrimSpace(value) {
+	case EnvironmentTypeLocal, EnvironmentTypeWorktree:
+		return true
+	default:
+		return false
 	}
-
-	return nil
 }
 
 func containsName(values []string, expected string) bool {

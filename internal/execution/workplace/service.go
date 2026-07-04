@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rasungatullin/progress/internal/configuration"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
@@ -22,7 +23,8 @@ func NewService() *Service {
 	return &Service{runGit: runGit, runGitOutput: runGitOutput, resolveRepoRoot: resolveRepoRoot}
 }
 
-func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile model.Profile, _ model.Allocation) (model.Workplace, error) {
+func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile model.Profile, allocation model.Allocation) (model.Workplace, error) {
+	environment, environmentType := selectedEnvironment(in, allocation)
 	if in.Launch.Directory != "" {
 		info, err := os.Stat(in.Launch.Directory)
 		if err != nil {
@@ -33,7 +35,37 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 			return model.Workplace{}, fmt.Errorf("execution directory is not a folder: %s", in.Launch.Directory)
 		}
 
-		return model.Workplace{Name: in.Launch.Directory, Ready: true}, nil
+		if environmentType == "" {
+			environmentType = configuration.EnvironmentTypeLocal
+		}
+		if environment == "" {
+			environment = configuration.EnvironmentTypeLocal
+		}
+		if environmentType != configuration.EnvironmentTypeLocal {
+			return model.Workplace{}, fmt.Errorf("execution directory can be used only with local environment")
+		}
+
+		return model.Workplace{Name: in.Launch.Directory, Environment: environment, EnvironmentType: environmentType, Ready: true}, nil
+	}
+
+	if environmentType == "" {
+		environmentType = configuration.EnvironmentTypeWorktree
+		if strings.TrimSpace(in.Workplace.Name) == "" && strings.TrimSpace(in.Repository.URL) == "" {
+			environmentType = configuration.EnvironmentTypeLocal
+		}
+	}
+	if environment == "" {
+		environment = environmentType
+	}
+	if environmentType == configuration.EnvironmentTypeLocal {
+		hostRepoRoot, err := s.resolveRepoRoot(ctx)
+		if err != nil {
+			return model.Workplace{}, err
+		}
+		return model.Workplace{Name: hostRepoRoot, Environment: environment, EnvironmentType: environmentType, RepositoryRoot: hostRepoRoot, Ready: true}, nil
+	}
+	if environmentType != configuration.EnvironmentTypeWorktree {
+		return model.Workplace{}, fmt.Errorf("execution environment is unsupported by workplace preparation: %s", environment)
 	}
 
 	name := strings.TrimSpace(in.Workplace.Name)
@@ -84,7 +116,7 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 			return model.Workplace{}, err
 		}
 
-		return model.Workplace{Name: targetDir, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
+		return model.Workplace{Name: targetDir, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
 	} else if !os.IsNotExist(err) {
 		return model.Workplace{}, fmt.Errorf("check workplace directory: %w", err)
 	}
@@ -97,7 +129,30 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 		return model.Workplace{}, fmt.Errorf("create git worktree %q: %w", name, err)
 	}
 
-	return model.Workplace{Name: targetDir, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
+	return model.Workplace{Name: targetDir, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
+}
+
+func selectedEnvironment(in model.Invocation, allocation model.Allocation) (string, string) {
+	if environment := strings.TrimSpace(in.Workplace.Environment); environment != "" {
+		return environment, environmentTypeFromName(environment)
+	}
+	environment := strings.TrimSpace(allocation.Environment)
+	environmentType := strings.TrimSpace(allocation.EnvironmentType)
+	if environmentType == "" {
+		environmentType = environmentTypeFromName(environment)
+	}
+	return environment, environmentType
+}
+
+func environmentTypeFromName(environment string) string {
+	switch strings.TrimSpace(environment) {
+	case configuration.EnvironmentTypeLocal:
+		return configuration.EnvironmentTypeLocal
+	case configuration.EnvironmentTypeWorktree:
+		return configuration.EnvironmentTypeWorktree
+	default:
+		return ""
+	}
 }
 
 func validateWorkplaceName(value string) error {
