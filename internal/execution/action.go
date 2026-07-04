@@ -35,16 +35,16 @@ const (
 	OperationOriginBuiltin = "builtin"
 )
 
-type ActionResolver interface {
-	ResolveAction(context.Context, Invocation) (Action, error)
+type actionResolver interface {
+	ResolveAction(context.Context, invocation) (Action, error)
 }
 
-type ActionCatalog struct {
+type actionCatalog struct {
 	actions map[string]model.Action
 	aliases map[string]string
 }
 
-func NewActionCatalog() *ActionCatalog {
+func newActionCatalog() *actionCatalog {
 	actions := map[string]model.Action{
 		ActionClassEngineeringSynthesis: newActionTemplate(ActionClassEngineeringSynthesis, ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза в нормализованной форме."),
 		"engineering-synthesis-commit":  newActionTemplateWithOperations("engineering-synthesis-commit", ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза, создать коммит и отправить ветку.", actionOperationsWithCommitPush()),
@@ -73,27 +73,19 @@ func NewActionCatalog() *ActionCatalog {
 		"diagnostics":                 ActionClassService,
 	}
 
-	return &ActionCatalog{actions: actions, aliases: aliases}
+	return &actionCatalog{actions: actions, aliases: aliases}
 }
 
-func (c *ActionCatalog) ResolveAction(ctx context.Context, in Invocation) (Action, error) {
+func (c *actionCatalog) ResolveAction(ctx context.Context, in invocation) (Action, error) {
 	_ = ctx
 	if c == nil {
-		c = NewActionCatalog()
+		c = newActionCatalog()
 	}
 
 	name := actionNameFromInvocation(in)
 	if name == "" {
 		name = defaultActionName()
 	}
-	profileName := strings.TrimSpace(in.Profile)
-	if in.Assignment != nil && strings.TrimSpace(in.Assignment.Profile) != "" {
-		profileName = strings.TrimSpace(in.Assignment.Profile)
-	}
-	if profileName == "" {
-		profileName = "default"
-	}
-
 	canonicalName := strings.ToLower(strings.TrimSpace(name))
 	if alias := strings.TrimSpace(c.aliases[canonicalName]); alias != "" {
 		canonicalName = alias
@@ -105,8 +97,8 @@ func (c *ActionCatalog) ResolveAction(ctx context.Context, in Invocation) (Actio
 
 	action := cloneAction(template)
 	action.Name = name
-	if strings.TrimSpace(action.Profile) == "" || strings.TrimSpace(in.Profile) != "" || in.Assignment != nil && strings.TrimSpace(in.Assignment.Profile) != "" {
-		action.Profile = profileName
+	if strings.TrimSpace(action.Profile) == "" {
+		action.Profile = "default"
 	}
 	if in.Assignment != nil && strings.TrimSpace(in.Assignment.ExpectedResult) != "" {
 		action.ExpectedResult = strings.TrimSpace(in.Assignment.ExpectedResult)
@@ -127,9 +119,6 @@ func assignmentFromInvocation(in model.Invocation) *model.ExecutionAssignment {
 		if strings.TrimSpace(assignment.Action) == "" {
 			assignment.Action = strings.TrimSpace(in.Action)
 		}
-		if strings.TrimSpace(assignment.Profile) == "" {
-			assignment.Profile = strings.TrimSpace(in.Profile)
-		}
 		if strings.TrimSpace(assignment.Action) == "" {
 			assignment.Action = defaultActionName()
 		}
@@ -141,7 +130,6 @@ func assignmentFromInvocation(in model.Invocation) *model.ExecutionAssignment {
 
 	assignment := &model.ExecutionAssignment{
 		Action:          strings.TrimSpace(in.Action),
-		Profile:         strings.TrimSpace(in.Profile),
 		ExpectedResult:  "Получить результат выполнения действия в нормализованной форме.",
 		StructuredInput: in.Launch.StructuredInput,
 	}
@@ -385,7 +373,6 @@ func assignmentSummary(assignment *model.ExecutionAssignment) string {
 
 	parts := []string{
 		"action=" + strings.TrimSpace(assignment.Action),
-		"profile=" + strings.TrimSpace(assignment.Profile),
 	}
 	if assignment.CanonicalTask != nil {
 		if assignment.CanonicalTask.Number != 0 {

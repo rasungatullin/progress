@@ -79,20 +79,11 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Decision.ExecutionPlan == nil {
 		t.Fatal("expected execution plan")
 	}
-	if result.Decision.ExecutionPlan.Repository != "owner/name" {
-		t.Fatalf("unexpected execution repository: %q", result.Decision.ExecutionPlan.Repository)
-	}
 	if result.Decision.ExecutionPlan.Action != "implement" {
 		t.Fatalf("unexpected execution action: %q", result.Decision.ExecutionPlan.Action)
 	}
-	if result.Decision.ExecutionPlan.Step != "implement" {
-		t.Fatalf("unexpected execution step: %q", result.Decision.ExecutionPlan.Step)
-	}
-	if result.Decision.ExecutionPlan.Profile != defaultExecutionProfile {
-		t.Fatalf("unexpected execution profile: %q", result.Decision.ExecutionPlan.Profile)
-	}
-	if !strings.Contains(result.Decision.ExecutionPlan.Prompt, "Task #123: Implement decision start") {
-		t.Fatalf("unexpected execution prompt: %q", result.Decision.ExecutionPlan.Prompt)
+	if result.Decision.ExecutionPlan.StructuredInput == nil || !strings.Contains(result.Decision.ExecutionPlan.StructuredInput.Task, "Task #123: Implement decision start") {
+		t.Fatalf("unexpected execution structured input: %#v", result.Decision.ExecutionPlan.StructuredInput)
 	}
 	if result.Execution == nil {
 		t.Fatal("expected execution result")
@@ -106,50 +97,20 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if integrationStub.request.Number != 123 {
 		t.Fatalf("unexpected integration request number: %d", integrationStub.request.Number)
 	}
-	if executionStub.invocation.Task != "task-123" {
-		t.Fatalf("unexpected execution task: %q", executionStub.invocation.Task)
-	}
-	if executionStub.invocation.Action != "implement" {
-		t.Fatalf("unexpected execution action: %q", executionStub.invocation.Action)
-	}
-	if executionStub.invocation.Assignment == nil {
+	if executionStub.request.Assignment == nil {
 		t.Fatal("expected execution assignment")
 	}
-	if executionStub.invocation.Assignment.Action != "implement" || executionStub.invocation.Assignment.Profile != defaultExecutionProfile {
-		t.Fatalf("unexpected execution assignment: %#v", executionStub.invocation.Assignment)
+	if executionStub.request.Assignment.Action != "implement" {
+		t.Fatalf("unexpected execution assignment: %#v", executionStub.request.Assignment)
 	}
-	if executionStub.invocation.Assignment.CanonicalTask == nil || executionStub.invocation.Assignment.CanonicalTask.Number != 123 {
-		t.Fatalf("assignment must include canonical task: %#v", executionStub.invocation.Assignment)
+	if executionStub.request.Assignment.CanonicalTask == nil || executionStub.request.Assignment.CanonicalTask.Number != 123 || executionStub.request.Assignment.CanonicalTask.Repository != "owner/name" {
+		t.Fatalf("assignment must include canonical task: %#v", executionStub.request.Assignment)
 	}
-	if len(executionStub.invocation.Assignment.Reasons) == 0 || executionStub.invocation.Assignment.Reasons[0].Code == "" {
-		t.Fatalf("assignment must include decision reasons: %#v", executionStub.invocation.Assignment)
+	if len(executionStub.request.Assignment.Reasons) == 0 || executionStub.request.Assignment.Reasons[0].Code == "" {
+		t.Fatalf("assignment must include decision reasons: %#v", executionStub.request.Assignment)
 	}
-	if executionStub.invocation.Profile != defaultExecutionProfile {
-		t.Fatalf("unexpected execution invocation profile: %q", executionStub.invocation.Profile)
-	}
-	if executionStub.invocation.Repository.URL != "owner/name" {
-		t.Fatalf("unexpected execution invocation repository: %q", executionStub.invocation.Repository.URL)
-	}
-	if executionStub.invocation.Workplace.Name != "task-123" {
-		t.Fatalf("unexpected workplace name: %q", executionStub.invocation.Workplace.Name)
-	}
-	if executionStub.invocation.Launch.Runner != "" {
-		t.Fatalf("expected execution runner to be inherited from profile, got %q", executionStub.invocation.Launch.Runner)
-	}
-	if executionStub.invocation.Launch.Model != "" {
-		t.Fatalf("expected model to be inherited from profile, got %q", executionStub.invocation.Launch.Model)
-	}
-	if executionStub.invocation.Launch.Prompt != "" {
-		t.Fatalf("execution prompt must not carry full-route task: %q", executionStub.invocation.Launch.Prompt)
-	}
-	if executionStub.invocation.Launch.StructuredInput == nil || executionStub.invocation.Launch.StructuredInput.Task != result.Decision.ExecutionPlan.Prompt {
-		t.Fatalf("unexpected execution structured input: %#v", executionStub.invocation.Launch.StructuredInput)
-	}
-	if !executionStub.invocation.Launch.StructuredOutput {
-		t.Fatal("expected decision-triggered execution to request structured output")
-	}
-	if executionStub.invocation.Launch.StructuredOutputRequired {
-		t.Fatal("structured output must remain optional for decision-triggered execution")
+	if executionStub.request.Assignment.StructuredInput == nil || executionStub.request.Assignment.StructuredInput.Task != result.Decision.ExecutionPlan.StructuredInput.Task {
+		t.Fatalf("unexpected execution structured input: %#v", executionStub.request.Assignment.StructuredInput)
 	}
 }
 
@@ -165,8 +126,7 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 		"defaults": {
 			"name": "default",
 			"title": "Маршрут по умолчанию",
-			"step": "implement",
-			"profile": "default",
+			"action": "implement",
 			"reason_code": "issue_context_ready",
 			"reason_message": "Контекст задачи готов."
 		},
@@ -175,9 +135,7 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 				"name": "description-assessment",
 				"title": "Оценка описания",
 				"description": "Проверяет достаточность постановки.",
-				"step": "assess-description",
 				"action": "task-description-assessment",
-				"profile": "task-description-assessor",
 				"has_labels": ["description-assessment"],
 				"missing_labels": ["description-assessed"],
 				"expected_result": "Сформировать заключение о достаточности описания.",
@@ -235,9 +193,6 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 	if result.ExecutionPlan.Assignment.CanonicalTask == nil || result.ExecutionPlan.Assignment.CanonicalTask.Repository != "owner/name" {
 		t.Fatalf("unexpected canonical task assignment: %#v", result.ExecutionPlan.Assignment)
 	}
-	if result.ExecutionPlan.Step != "assess-description" || result.ExecutionPlan.Profile != "task-description-assessor" {
-		t.Fatalf("unexpected execution plan: %#v", result.ExecutionPlan)
-	}
 	if result.ExecutionPlan.ExpectedResult != "Сформировать заключение о достаточности описания." {
 		t.Fatalf("unexpected expected result: %q", result.ExecutionPlan.ExpectedResult)
 	}
@@ -290,17 +245,14 @@ func TestServiceStartRoutesTaskDescriptionAssessment(t *testing.T) {
 	if result.Decision == nil || result.Decision.ExecutionPlan == nil {
 		t.Fatalf("expected execution plan, got %#v", result.Decision)
 	}
-	if result.Decision.ExecutionPlan.Step != "assess-description" {
-		t.Fatalf("unexpected execution step: %q", result.Decision.ExecutionPlan.Step)
-	}
-	if result.Decision.ExecutionPlan.Profile != "task-description-assessor" {
-		t.Fatalf("unexpected execution profile: %q", result.Decision.ExecutionPlan.Profile)
+	if result.Decision.ExecutionPlan.Action != "task-description-assessment" {
+		t.Fatalf("unexpected execution action: %q", result.Decision.ExecutionPlan.Action)
 	}
 	if len(result.Decision.Reasons) != 1 || result.Decision.Reasons[0].Code != "task_description_not_assessed" {
 		t.Fatalf("unexpected decision reasons: %#v", result.Decision.Reasons)
 	}
-	if executionStub.invocation.Profile != "task-description-assessor" {
-		t.Fatalf("unexpected execution invocation profile: %q", executionStub.invocation.Profile)
+	if executionStub.request.Assignment == nil || executionStub.request.Assignment.Action != "task-description-assessment" {
+		t.Fatalf("unexpected execution request: %#v", executionStub.request)
 	}
 }
 
@@ -410,8 +362,8 @@ func TestServiceStartPassesExternalRepositoryToExecution(t *testing.T) {
 	if result.Execution == nil || result.Execution.Status != "completed" {
 		t.Fatalf("expected execution result, got %#v", result.Execution)
 	}
-	if executionStub.invocation.Repository.URL != "owner/name" {
-		t.Fatalf("execution must receive issue repository, got %#v", executionStub.invocation)
+	if executionStub.request.Assignment == nil || executionStub.request.Assignment.CanonicalTask == nil || executionStub.request.Assignment.CanonicalTask.Repository != "owner/name" {
+		t.Fatalf("execution must receive issue repository, got %#v", executionStub.request)
 	}
 }
 
@@ -449,17 +401,17 @@ func (s *stubIntegrationExecutor) Execute(_ context.Context, request integration
 }
 
 type stubExecutionStarter struct {
-	result     execution.LaunchResult
-	err        error
-	invocation execution.Invocation
+	result  execution.LaunchResult
+	err     error
+	request execution.ActionInvocation
 }
 
-func (s *stubExecutionStarter) Execute(_ context.Context, invocation execution.Invocation) (execution.ExecutionResult, error) {
-	s.invocation = invocation
+func (s *stubExecutionStarter) ExecuteAction(_ context.Context, request execution.ActionInvocation) (execution.ExecutionResult, error) {
+	s.request = request
 	return execution.ExecutionResult{
 		Status:     s.result.Status,
 		Summary:    s.result.Summary,
-		Assignment: invocation.Assignment,
+		Assignment: request.Assignment,
 		Launch:     &s.result,
 	}, s.err
 }

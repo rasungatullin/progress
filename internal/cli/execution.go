@@ -7,67 +7,34 @@ import (
 	"io"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/rasungatullin/progress/internal/execution"
-	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/logging"
 	"github.com/spf13/cobra"
 )
 
-const defaultLaunchModel = "openai/gpt-5.4"
-
-type launchFlags struct {
-	directory                string
-	name                     string
-	repo                     string
-	action                   string
-	profile                  string
-	inputFile                string
-	task                     string
-	constraints              []string
-	projectContexts          []string
-	operationalContexts      []string
-	previousRunResults       []string
-	reviewRemarks            []string
-	reviewResponses          []string
-	integrationActions       []string
-	runner                   string
-	model                    string
-	modelBinding             string
-	prompt                   string
-	structuredOutput         bool
-	structuredOutputRequired bool
-	commitPush               bool
+type actionFlags struct {
+	action              string
+	inputFile           string
+	task                string
+	constraints         []string
+	projectContexts     []string
+	operationalContexts []string
+	previousRunResults  []string
+	reviewRemarks       []string
+	reviewResponses     []string
+	integrationActions  []string
 }
 
-type executionRunsFlags struct {
-	jsonOutput bool
-	limit      int
-	name       string
-	status     string
-}
-
-type resumeFlags struct {
-	run                      string
-	message                  string
-	messageFile              string
-	name                     string
-	profile                  string
-	structuredOutput         bool
-	structuredOutputRequired bool
-	dryRun                   bool
+type operationFlags struct {
+	actionFlags
+	operation string
 }
 
 type executionCommandService interface {
-	Start(context.Context, execution.Invocation) (execution.LaunchResult, error)
-	Dispatch(context.Context, execution.Invocation) []string
-	ResolveProfile(context.Context, execution.Invocation) (execution.Profile, error)
-	AllocateResources(context.Context, execution.Invocation, execution.Profile) (execution.Allocation, error)
-	PrepareWorkplace(context.Context, execution.Invocation, execution.Profile, execution.Allocation) (execution.Workplace, error)
-	LaunchDirect(context.Context, execution.Invocation) (execution.LaunchResult, error)
-	Resume(context.Context, execution.ResumeRequest) (execution.LaunchResult, error)
+	ExecuteAction(context.Context, execution.ActionInvocation) (execution.ExecutionResult, error)
+	ExecuteOperation(context.Context, execution.OperationInvocation) (execution.OperationResult, error)
 }
 
 type executionServiceFactoryFunc func(*cobra.Command) executionCommandService
@@ -94,240 +61,71 @@ func newExecutionCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(
-		newExecutionStartCommand(),
-		newExecutionResumeCommand(),
-		newExecutionDispatcherCommand(),
-		newExecutionProfileCommand(),
-		newExecutionResourcesCommand(),
-		newExecutionWorkplaceCommand(),
-		newExecutionLaunchCommand(),
-		newExecutionRunsCommand(),
+		newExecutionActionCommand(),
+		newExecutionOperationCommand(),
 	)
 
 	return cmd
 }
 
-func newExecutionRunsCommand() *cobra.Command {
-	flags := executionRunsFlags{limit: 20}
+func newExecutionActionCommand() *cobra.Command {
+	flags := newActionFlags()
 
 	cmd := &cobra.Command{
-		Use:   "runs",
-		Short: "История запусков execution",
+		Use:   "action",
+		Short: "Вызов действия контура исполнения",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cwd, err := os.Getwd()
+			service := newExecutionService(cmd)
+			request, err := actionInvocationFromFlags(flags)
 			if err != nil {
 				return err
 			}
 
-			runs, err := history.List(context.Background(), cwd, history.ListFilter{Limit: flags.limit, Name: flags.name, Status: flags.status})
+			result, err := service.ExecuteAction(context.Background(), request)
 			if err != nil {
+				printExecutionResultOnError(cmd, result)
 				return err
 			}
 
-			if flags.jsonOutput {
-				payload, err := json.Marshal(runs)
-				if err != nil {
-					return err
-				}
-				cmd.Println(string(payload))
-				return nil
-			}
-
-			printExecutionRunsTable(cmd, runs)
+			printExecutionResult(cmd, result)
 			return nil
 		},
 	}
 
-	cmd.Flags().BoolVar(&flags.jsonOutput, "json", false, "Вывести историю в JSON")
-	cmd.Flags().IntVar(&flags.limit, "limit", flags.limit, "Максимальное число записей")
-	cmd.Flags().StringVar(&flags.name, "name", "", "Фильтр по имени запуска")
-	cmd.Flags().StringVar(&flags.status, "status", "", "Фильтр по статусу запуска")
+	bindActionFlags(cmd, flags)
 	return cmd
 }
 
-func newExecutionStartCommand() *cobra.Command {
-	flags := newStartFlags()
+func newExecutionOperationCommand() *cobra.Command {
+	flags := newOperationFlags()
 
 	cmd := &cobra.Command{
-		Use:   "start",
-		Short: "Полный запуск контура исполнения",
+		Use:   "operation <operation>",
+		Short: "Вызов операции контура исполнения",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			in, err := invocationFromStructuredFlags(flags)
+			request, err := operationInvocationFromFlags(flags)
 			if err != nil {
 				return err
 			}
 
-			result, err := service.Start(context.Background(), in)
+			result, err := service.ExecuteOperation(context.Background(), request)
 			if err != nil {
-				printLaunchResultOnError(cmd, result)
+				printOperationResultOnError(cmd, result)
 				return err
 			}
 
-			printLaunchResult(cmd, result)
+			printOperationResult(cmd, result)
 			return nil
 		},
 	}
 
-	bindStartFlags(cmd, flags)
-	return cmd
-}
-
-func newExecutionResumeCommand() *cobra.Command {
-	flags := &resumeFlags{}
-
-	cmd := &cobra.Command{
-		Use:   "resume",
-		Short: "Возобновление сеанса исполнительного модуля",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			service := newExecutionService(cmd)
-			request, err := resumeRequestFromFlags(flags)
-			if err != nil {
-				return err
-			}
-
-			result, err := service.Resume(context.Background(), request)
-			if err != nil {
-				printLaunchResultOnError(cmd, result)
-				return err
-			}
-
-			printLaunchResult(cmd, result)
-			return nil
-		},
+	bindOperationFlags(cmd, flags)
+	cmd.PreRunE = func(_ *cobra.Command, args []string) error {
+		flags.operation = strings.TrimSpace(args[0])
+		return nil
 	}
-
-	bindResumeFlags(cmd, flags)
-	return cmd
-}
-
-func newExecutionDispatcherCommand() *cobra.Command {
-	flags := &launchFlags{action: execution.ActionClassEngineeringSynthesis, profile: "default"}
-	cmd := &cobra.Command{
-		Use:   "dispatcher",
-		Short: "Диагностика маршрута диспетчера исполнения",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			service := newExecutionService(cmd)
-			stages := service.Dispatch(context.Background(), execution.Invocation{
-				Action:  strings.TrimSpace(flags.action),
-				Profile: strings.TrimSpace(flags.profile),
-			})
-			for _, stage := range stages {
-				cmd.Println(stage)
-			}
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&flags.action, "action", flags.action, "Действие контура исполнения")
-	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Исполнительный профиль")
-	return cmd
-}
-
-func newExecutionProfileCommand() *cobra.Command {
-	flags := &launchFlags{}
-
-	cmd := &cobra.Command{
-		Use:   "profile",
-		Short: "Выбор исполнительного профиля",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			service := newExecutionService(cmd)
-			profile, err := service.ResolveProfile(context.Background(), invocationFromProfileFlags(flags))
-			if err != nil {
-				return err
-			}
-
-			cmd.Printf("profile=%s\ndescription=%s\nmode=%s\nmodel-binding=%s\nallow-model-fallback=%t\nprompt-additions=%s\nstructured-output=%t\nstructured-output-required=%t\nstructured-output-fields=%s\n", profile.Name, profile.Description, profile.Mode, profile.ModelBinding, profile.AllowModelFallback, strings.Join(profile.PromptAdditions, " | "), profile.StructuredOutput, profile.StructuredOutputRequired, strings.Join(profile.StructuredOutputFields, ","))
-			return nil
-		},
-	}
-
-	bindProfileFlags(cmd, flags)
-	return cmd
-}
-
-func newExecutionResourcesCommand() *cobra.Command {
-	flags := newStartFlags()
-
-	cmd := &cobra.Command{
-		Use:   "resources",
-		Short: "Проверка и резервирование ресурсов",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			service := newExecutionService(cmd)
-			in := invocationFromProfileFlags(flags)
-			in.Launch.Runner = flags.runner
-			in.Launch.Model = flags.model
-			in.Launch.ModelBinding = flags.modelBinding
-
-			profile, err := service.ResolveProfile(context.Background(), in)
-			if err != nil {
-				return err
-			}
-
-			allocation, err := service.AllocateResources(context.Background(), in, profile)
-			if err != nil {
-				return err
-			}
-
-			cmd.Printf("resource=%s\nreserved=%t\nrunner=%s\nmodel=%s\nmodel-binding=%s\nsource=%s\n", allocation.Resource, allocation.Reserved, allocation.Runner, allocation.Model, allocation.ModelBinding, allocation.Source)
-			cmd.Printf("binding-source=%s\nfallback-used=%t\n", allocation.BindingSource, allocation.FallbackUsed)
-			cmd.Printf("global-config=%s\nlocal-config=%s\n", allocation.GlobalConfigPath, allocation.LocalConfigPath)
-			return nil
-		},
-	}
-
-	bindProfileFlags(cmd, flags)
-	cmd.Flags().StringVar(&flags.runner, "runner", "", "Исполнительный runner")
-	cmd.Flags().StringVar(&flags.model, "model", "", "Идентификатор модели")
-	cmd.Flags().StringVar(&flags.modelBinding, "model-binding", "", "Семантический binding runner+model")
-	return cmd
-}
-
-func newExecutionWorkplaceCommand() *cobra.Command {
-	flags := &launchFlags{}
-
-	cmd := &cobra.Command{
-		Use:   "workplace",
-		Short: "Подготовка исполнительного рабочего места",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			service := newExecutionService(cmd)
-			in := invocationFromWorkplaceFlags(flags)
-
-			workplace, err := service.PrepareWorkplace(context.Background(), in, execution.Profile{}, execution.Allocation{})
-			if err != nil {
-				return err
-			}
-
-			cmd.Println(formatExecutionWorkplaceDiagnostics(workplace))
-			return nil
-		},
-	}
-
-	bindWorkplaceFlags(cmd, flags)
-	return cmd
-}
-
-func newExecutionLaunchCommand() *cobra.Command {
-	flags := newLaunchFlags()
-
-	cmd := &cobra.Command{
-		Use:   "launch",
-		Short: "Пуск задачи после завершения аллокаций",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			service := newExecutionService(cmd)
-			in := invocationFromLaunchFlags(flags)
-
-			result, err := service.LaunchDirect(context.Background(), in)
-			if err != nil {
-				printLaunchResultOnError(cmd, result)
-				return err
-			}
-
-			printLaunchResult(cmd, result)
-			return nil
-		},
-	}
-
-	bindLaunchFlags(cmd, flags)
 	return cmd
 }
 
@@ -339,161 +137,73 @@ func newExecutionService(cmd *cobra.Command) executionCommandService {
 	return executionServiceFactory(cmd)
 }
 
-func newLaunchFlags() *launchFlags {
-	return &launchFlags{
-		runner: launch.RunnerOpenCode,
-		model:  defaultLaunchModel,
-	}
+func newActionFlags() *actionFlags {
+	return &actionFlags{action: execution.ActionClassEngineeringSynthesis}
 }
 
-func newStartFlags() *launchFlags {
-	return &launchFlags{
-		profile: "default",
-		action:  execution.ActionClassEngineeringSynthesis,
-	}
+func newOperationFlags() *operationFlags {
+	return &operationFlags{actionFlags: *newActionFlags()}
 }
 
-func bindLaunchFlags(cmd *cobra.Command, flags *launchFlags) {
-	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
-	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
-	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
-	cmd.Flags().StringVar(&flags.modelBinding, "model-binding", flags.modelBinding, "Семантический binding runner+model")
-	cmd.Flags().StringVar(&flags.prompt, "prompt", "", "Промпт для запуска runner")
-	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
-	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
-	cmd.Flags().BoolVar(&flags.commitPush, "commit-push", false, "После успешного запуска выполнить git commit и git push")
-	_ = cmd.MarkFlagRequired("dir")
-	_ = cmd.MarkFlagRequired("prompt")
-}
-
-func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
-	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
-	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
-	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
+func bindActionFlags(cmd *cobra.Command, flags *actionFlags) {
 	cmd.Flags().StringVar(&flags.action, "action", flags.action, "Действие контура исполнения")
-	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Тип исполнительного профиля")
-	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
-	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
-	cmd.Flags().StringVar(&flags.modelBinding, "model-binding", flags.modelBinding, "Семантический binding runner+model")
 	bindStructuredInputFlags(cmd, flags)
-	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
-	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
 }
 
-func bindResumeFlags(cmd *cobra.Command, flags *resumeFlags) {
-	cmd.Flags().StringVar(&flags.run, "run", "", "Исходный запуск: числовой id или latest")
-	cmd.Flags().StringVar(&flags.message, "message", "", "Дополнительное сообщение для возобновления")
-	cmd.Flags().StringVar(&flags.messageFile, "message-file", "", "Путь к файлу с дополнительным сообщением")
-	cmd.Flags().StringVar(&flags.name, "name", "", "Фильтр имени запуска для выбора latest")
-	cmd.Flags().StringVar(&flags.profile, "profile", "", "Опциональное переопределение исполнительного профиля")
-	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
-	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
-	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "Показать задание на возобновление без запуска исполнительного модуля")
-	_ = cmd.MarkFlagRequired("run")
+func bindOperationFlags(cmd *cobra.Command, flags *operationFlags) {
+	bindActionFlags(cmd, &flags.actionFlags)
 }
 
-func bindStructuredInputFlags(cmd *cobra.Command, flags *launchFlags) {
-	cmd.Flags().StringVar(&flags.inputFile, "input-file", "", "Путь к JSON-файлу structured input")
-	cmd.Flags().StringVar(&flags.task, "task", "", "Текстовая постановка structured input")
-	cmd.Flags().StringArrayVar(&flags.constraints, "constraint", nil, "Ограничение structured input, флаг можно повторять")
-	cmd.Flags().StringArrayVar(&flags.projectContexts, "project-context", nil, "JSON object для project_context, флаг можно повторять")
-	cmd.Flags().StringArrayVar(&flags.operationalContexts, "operational-context", nil, "JSON object для operational_context, флаг можно повторять")
-	cmd.Flags().StringArrayVar(&flags.previousRunResults, "previous-run-result", nil, "JSON object для previous_run_results, флаг можно повторять")
-	cmd.Flags().StringArrayVar(&flags.reviewRemarks, "review-remark", nil, "JSON object для review_remarks, флаг можно повторять")
-	cmd.Flags().StringArrayVar(&flags.reviewResponses, "review-response", nil, "JSON object для review_responses, флаг можно повторять")
-	cmd.Flags().StringArrayVar(&flags.integrationActions, "integration-action", nil, "JSON object для integration_actions, флаг можно повторять")
+func bindStructuredInputFlags(cmd *cobra.Command, flags *actionFlags) {
+	cmd.Flags().StringVar(&flags.inputFile, "input-file", "", "Путь к JSON-файлу структурированного ввода")
+	cmd.Flags().StringVar(&flags.task, "task", "", "Текстовая постановка структурированного ввода")
+	cmd.Flags().StringArrayVar(&flags.constraints, "constraint", nil, "Ограничение структурированного ввода, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.projectContexts, "project-context", nil, "JSON-объект для project_context, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.operationalContexts, "operational-context", nil, "JSON-объект для operational_context, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.previousRunResults, "previous-run-result", nil, "JSON-объект для previous_run_results, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.reviewRemarks, "review-remark", nil, "JSON-объект для review_remarks, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.reviewResponses, "review-response", nil, "JSON-объект для review_responses, флаг можно повторять")
+	cmd.Flags().StringArrayVar(&flags.integrationActions, "integration-action", nil, "JSON-объект для integration_actions, флаг можно повторять")
 }
 
-func bindProfileFlags(cmd *cobra.Command, flags *launchFlags) {
-	cmd.Flags().StringVar(&flags.profile, "profile", "default", "Тип исполнительного профиля")
-}
-
-func bindWorkplaceFlags(cmd *cobra.Command, flags *launchFlags) {
-	cmd.Flags().StringVar(&flags.directory, "dir", "", "Существующий рабочий каталог")
-	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
-	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
-}
-
-func invocationFromLaunchFlags(flags *launchFlags) execution.Invocation {
-	return execution.Invocation{
-		Profile:    flags.profile,
-		Repository: execution.RepositorySpec{URL: flags.repo},
-		Workplace:  execution.WorkplaceSpec{Name: flags.name},
-		Launch: execution.LaunchSpec{
-			Directory:                flags.directory,
-			Runner:                   flags.runner,
-			Model:                    flags.model,
-			ModelBinding:             flags.modelBinding,
-			Prompt:                   flags.prompt,
-			StructuredOutput:         flags.structuredOutput,
-			StructuredOutputRequired: flags.structuredOutputRequired,
-			CommitPush:               flags.commitPush,
-		},
-	}
-}
-
-func invocationFromStructuredFlags(flags *launchFlags) (execution.Invocation, error) {
+func actionInvocationFromFlags(flags *actionFlags) (execution.ActionInvocation, error) {
 	input, err := structuredInputFromFlags(flags)
 	if err != nil {
-		return execution.Invocation{}, err
+		return execution.ActionInvocation{}, err
 	}
-	input, err = launch.NormalizeStructuredInput(input)
-	if err != nil {
-		return execution.Invocation{}, err
-	}
-
-	invocation := invocationFromLaunchFlags(flags)
-	invocation.Action = strings.TrimSpace(flags.action)
-	invocation.Launch.Prompt = ""
-	invocation.Launch.StructuredInput = input
-	return invocation, nil
-}
-
-func invocationFromProfileFlags(flags *launchFlags) execution.Invocation {
-	return execution.Invocation{Profile: flags.profile}
-}
-
-func invocationFromWorkplaceFlags(flags *launchFlags) execution.Invocation {
-	return execution.Invocation{
-		Repository: execution.RepositorySpec{URL: flags.repo},
-		Workplace:  execution.WorkplaceSpec{Name: flags.name},
-		Launch:     execution.LaunchSpec{Directory: flags.directory},
-	}
-}
-
-func resumeRequestFromFlags(flags *resumeFlags) (execution.ResumeRequest, error) {
-	if strings.TrimSpace(flags.message) != "" && strings.TrimSpace(flags.messageFile) != "" {
-		return execution.ResumeRequest{}, fmt.Errorf("message and message-file are mutually exclusive")
-	}
-
-	message := strings.TrimSpace(flags.message)
-	messageSource := "message"
-	if strings.TrimSpace(flags.messageFile) != "" {
-		content, err := os.ReadFile(flags.messageFile)
+	if input != nil {
+		input, err = launch.NormalizeStructuredInput(input)
 		if err != nil {
-			return execution.ResumeRequest{}, fmt.Errorf("read message file %s: %w", flags.messageFile, err)
+			return execution.ActionInvocation{}, err
 		}
-		message = strings.TrimSpace(string(content))
-		messageSource = "message-file"
-	}
-	if message == "" {
-		return execution.ResumeRequest{}, fmt.Errorf("resume message must be non-empty")
 	}
 
-	return execution.ResumeRequest{
-		Run:                      strings.TrimSpace(flags.run),
-		Name:                     strings.TrimSpace(flags.name),
-		Message:                  message,
-		MessageSource:            messageSource,
-		Profile:                  strings.TrimSpace(flags.profile),
-		StructuredOutput:         flags.structuredOutput,
-		StructuredOutputRequired: flags.structuredOutputRequired,
-		DryRun:                   flags.dryRun,
+	return execution.ActionInvocation{
+		Assignment: &execution.ExecutionAssignment{
+			Action:          strings.TrimSpace(flags.action),
+			StructuredInput: input,
+		},
 	}, nil
 }
 
-func structuredInputFromFlags(flags *launchFlags) (*execution.StructuredInput, error) {
+func operationInvocationFromFlags(flags *operationFlags) (execution.OperationInvocation, error) {
+	actionInvocation, err := actionInvocationFromFlags(&flags.actionFlags)
+	if err != nil {
+		return execution.OperationInvocation{}, err
+	}
+
+	return execution.OperationInvocation{
+		Operation:  strings.TrimSpace(flags.operation),
+		Assignment: actionInvocation.Assignment,
+	}, nil
+}
+
+func structuredInputFromFlags(flags *actionFlags) (*execution.StructuredInput, error) {
 	input := execution.StructuredInput{}
+	if !hasStructuredInputFlags(flags) {
+		return nil, nil
+	}
+
 	if strings.TrimSpace(flags.inputFile) != "" {
 		loaded, err := readStructuredInputFile(flags.inputFile)
 		if err != nil {
@@ -533,6 +243,21 @@ func structuredInputFromFlags(flags *launchFlags) (*execution.StructuredInput, e
 	}
 
 	return &input, nil
+}
+
+func hasStructuredInputFlags(flags *actionFlags) bool {
+	if flags == nil {
+		return false
+	}
+	return strings.TrimSpace(flags.inputFile) != "" ||
+		strings.TrimSpace(flags.task) != "" ||
+		len(flags.constraints) != 0 ||
+		len(flags.projectContexts) != 0 ||
+		len(flags.operationalContexts) != 0 ||
+		len(flags.previousRunResults) != 0 ||
+		len(flags.reviewRemarks) != 0 ||
+		len(flags.reviewResponses) != 0 ||
+		len(flags.integrationActions) != 0
 }
 
 func readStructuredInputFile(path string) (execution.StructuredInput, error) {
@@ -582,6 +307,53 @@ func decodeStrictJSON(content []byte, target any) error {
 	return nil
 }
 
+func printExecutionResult(cmd *cobra.Command, result execution.ExecutionResult) {
+	if result.Launch != nil {
+		printLaunchResult(cmd, *result.Launch)
+		return
+	}
+
+	printLaunchResult(cmd, execution.LaunchResult{Status: result.Status, Summary: result.Summary})
+}
+
+func printExecutionResultOnError(cmd *cobra.Command, result execution.ExecutionResult) {
+	if result.Launch != nil {
+		printLaunchResultOnError(cmd, *result.Launch)
+		return
+	}
+	if strings.TrimSpace(result.Status) == "" && strings.TrimSpace(result.Summary) == "" {
+		return
+	}
+
+	printExecutionResult(cmd, result)
+}
+
+func printOperationResult(cmd *cobra.Command, result execution.OperationResult) {
+	cmd.Printf("operation=%s\n", result.Name)
+	cmd.Printf("status=%s\n", result.Status)
+	if strings.TrimSpace(result.Summary) != "" {
+		cmd.Printf("summary=%s\n", normalizeStructuredValue(result.Summary))
+	}
+	if strings.TrimSpace(result.Input) != "" {
+		cmd.Printf("input=%s\n", normalizeStructuredValue(result.Input))
+	}
+	if strings.TrimSpace(result.Output) != "" {
+		cmd.Printf("output=%s\n", normalizeStructuredValue(result.Output))
+	}
+	if result.Failure != nil {
+		cmd.Printf("failure-code=%s\n", result.Failure.Code)
+		cmd.Printf("failure-message=%s\n", normalizeStructuredValue(result.Failure.Message))
+	}
+}
+
+func printOperationResultOnError(cmd *cobra.Command, result execution.OperationResult) {
+	if strings.TrimSpace(result.Name) == "" && strings.TrimSpace(string(result.Status)) == "" && result.Failure == nil {
+		return
+	}
+
+	printOperationResult(cmd, result)
+}
+
 func printLaunchResult(cmd *cobra.Command, result execution.LaunchResult) {
 	cmd.Printf("state=%s\n", result.Status)
 	printLaunchSummary(cmd, result.Summary)
@@ -627,32 +399,6 @@ func printLaunchStructuredOutput(cmd *cobra.Command, result execution.LaunchResu
 
 	cmd.Println("structured-output:")
 	printStructuredOutputBlock(cmd, result.StructuredOutput)
-}
-
-func printExecutionRunsTable(cmd *cobra.Command, runs []history.ListedRun) {
-	writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "ID\tCREATED_AT\tSTATUS\tNAME\tPROFILE\tRUNNER\tSUMMARY")
-	for _, run := range runs {
-		fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", run.ID, run.CreatedAt, run.Status, run.Name, run.ProfileName, run.Runner, singleLine(run.Summary))
-	}
-	_ = writer.Flush()
-}
-
-func singleLine(value string) string {
-	return strings.Join(strings.Fields(value), " ")
-}
-
-func formatExecutionWorkplaceDiagnostics(workplace execution.Workplace) string {
-	lines := make([]string, 0, 4)
-	if strings.TrimSpace(workplace.RepositoryURL) != "" {
-		lines = append(lines, fmt.Sprintf("repository=%s", workplace.RepositoryURL))
-	}
-	if strings.TrimSpace(workplace.RepositoryRoot) != "" {
-		lines = append(lines, fmt.Sprintf("repository-root=%s", workplace.RepositoryRoot))
-	}
-	lines = append(lines, fmt.Sprintf("workplace=%s", workplace.Name))
-	lines = append(lines, fmt.Sprintf("ready=%t", workplace.Ready))
-	return strings.Join(lines, "\n")
 }
 
 func printStructuredOutputBlock(cmd *cobra.Command, output *execution.StructuredOutput) {

@@ -13,14 +13,12 @@ import (
 	"github.com/rasungatullin/progress/internal/integration"
 )
 
-const defaultExecutionProfile = "default"
-
 type integrationExecutor interface {
 	Execute(context.Context, integration.Request) (integration.Response, error)
 }
 
 type executionStarter interface {
-	Execute(context.Context, execution.Invocation) (execution.ExecutionResult, error)
+	ExecuteAction(context.Context, execution.ActionInvocation) (execution.ExecutionResult, error)
 }
 
 type Service struct {
@@ -94,7 +92,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		return result, nil
 	}
 
-	executionResult, err := s.execution.Execute(ctx, executionInvocationFromDecisionPlan(decision.ExecutionPlan))
+	executionResult, err := s.execution.ExecuteAction(ctx, executionActionInvocationFromDecisionPlan(decision.ExecutionPlan))
 	result.ExecutionResult = &executionResult
 	if err != nil {
 		if executionResult.Launch != nil && (executionResult.Launch.Status != "" || strings.TrimSpace(executionResult.Launch.Summary) != "" || executionResult.Launch.StructuredOutput != nil) {
@@ -178,14 +176,8 @@ func (s *Service) resolveCurrentRepository(ctx context.Context) (string, error) 
 
 func buildExecuteDecision(task integration.CanonicalTask, issue *integration.TrackerIssue, route selectedWorkflowRoute) Decision {
 	prompt := buildExecutionTask(issue)
-	if strings.TrimSpace(route.Step) == "" {
-		route.Step = "implement"
-	}
 	if strings.TrimSpace(route.Action) == "" {
-		route.Action = route.Step
-	}
-	if strings.TrimSpace(route.Profile) == "" {
-		route.Profile = defaultExecutionProfile
+		route.Action = "implement"
 	}
 	if strings.TrimSpace(route.ExpectedResult) == "" {
 		route.ExpectedResult = "Выполнить выбранное действие и вернуть диагностируемый результат."
@@ -205,7 +197,7 @@ func buildExecuteDecision(task integration.CanonicalTask, issue *integration.Tra
 		routeRef.Name = "default"
 	}
 	if strings.TrimSpace(routeRef.Title) == "" {
-		routeRef.Title = route.Step
+		routeRef.Title = route.Action
 	}
 
 	structuredInput := &execution.StructuredInput{
@@ -214,7 +206,6 @@ func buildExecuteDecision(task integration.CanonicalTask, issue *integration.Tra
 	}
 	assignment := &execution.ExecutionAssignment{
 		Action:          route.Action,
-		Profile:         route.Profile,
 		ExpectedResult:  route.ExpectedResult,
 		Constraints:     append([]string(nil), route.Constraints...),
 		CanonicalTask:   executionObjectRefFromCanonicalTask(task),
@@ -231,11 +222,7 @@ func buildExecuteDecision(task integration.CanonicalTask, issue *integration.Tra
 		ExecutionPlan: &ExecutionPlan{
 			TaskNumber:      issue.Number,
 			TaskTitle:       issue.Title,
-			Repository:      strings.TrimSpace(issue.Repository),
 			Action:          route.Action,
-			Step:            route.Step,
-			Profile:         route.Profile,
-			Prompt:          prompt,
 			ExpectedResult:  route.ExpectedResult,
 			Constraints:     append([]string(nil), route.Constraints...),
 			Route:           routeRef,
@@ -261,25 +248,12 @@ func decisionFromConsideration(result ConsiderationResult) Decision {
 	return decision
 }
 
-func executionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Invocation {
+func executionActionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.ActionInvocation {
 	if plan == nil {
-		return execution.Invocation{}
+		return execution.ActionInvocation{}
 	}
 
-	return execution.Invocation{
-		Task:       fmt.Sprintf("task-%d", plan.TaskNumber),
-		Action:     plan.Action,
-		Assignment: plan.Assignment,
-		Profile:    plan.Profile,
-		Repository: execution.RepositorySpec{URL: plan.Repository},
-		Workplace: execution.WorkplaceSpec{
-			Name: fmt.Sprintf("task-%d", plan.TaskNumber),
-		},
-		Launch: execution.LaunchSpec{
-			StructuredInput:  plan.StructuredInput,
-			StructuredOutput: true,
-		},
-	}
+	return execution.ActionInvocation{Assignment: plan.Assignment}
 }
 
 func canonicalTaskFromIssue(issue *integration.TrackerIssue) integration.CanonicalTask {

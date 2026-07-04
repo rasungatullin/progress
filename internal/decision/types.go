@@ -71,11 +71,7 @@ type DecisionFailure struct {
 type ExecutionPlan struct {
 	TaskNumber      int
 	TaskTitle       string
-	Repository      string
 	Action          string
-	Step            string
-	Profile         string
-	Prompt          string
 	ExpectedResult  string
 	Constraints     []string
 	Route           ProcessingRoute

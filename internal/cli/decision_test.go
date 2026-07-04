@@ -48,7 +48,7 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 					Code:    "issue_context_ready",
 					Message: "Issue-backed decision context is ready for direct execution handoff.",
 				}},
-				ExecutionPlan: &decision.ExecutionPlan{Profile: "default"},
+				ExecutionPlan: &decision.ExecutionPlan{Action: "implement"},
 			},
 			ExecutionResult: &execution.ExecutionResult{
 				Status: "completed",
@@ -77,7 +77,6 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 		"route-check=default-route:passed\n",
 		"decision-type=execute\n",
 		"decision-reason=issue_context_ready:Issue-backed decision context is ready for direct execution handoff.\n",
-		"execution-profile=default\n",
 		"execution-result-status=completed\n",
 		"execution-action=implement\n",
 		"execution-operation=resolve-action:completed\n",
@@ -159,7 +158,7 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 				Ready: true,
 				Decision: &decision.Decision{
 					Type:          decision.DecisionType(decision.DecisionTypeExecute),
-					ExecutionPlan: &decision.ExecutionPlan{Profile: "default"},
+					ExecutionPlan: &decision.ExecutionPlan{Action: "implement"},
 				},
 				Execution: &execution.LaunchResult{
 					Status:  "failed",

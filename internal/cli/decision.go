@@ -117,9 +117,6 @@ func printDecisionStartResult(cmd *cobra.Command, result decision.StartResult) {
 				cmd.Printf("decision-reason=%s\n", message)
 			}
 		}
-		if result.Decision.ExecutionPlan != nil && result.Decision.ExecutionPlan.Profile != "" {
-			cmd.Printf("execution-profile=%s\n", result.Decision.ExecutionPlan.Profile)
-		}
 	}
 	if result.ExecutionResult != nil {
 		if result.ExecutionResult.Status != "" {

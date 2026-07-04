@@ -11,12 +11,12 @@ import (
 )
 
 type operationExecution struct {
-	in            Invocation
+	in            invocation
 	assignment    *ExecutionAssignment
 	action        Action
-	profile       Profile
-	allocation    Allocation
-	workplace     Workplace
+	profile       profile
+	allocation    allocation
+	workplace     workplace
 	result        LaunchResult
 	historyRoot   string
 	historyHandle history.Handle
@@ -81,11 +81,11 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 }
 
 func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *operationExecution, name string) error {
-	profile, err := e.service.ResolveProfile(ctx, state.in)
+	profile, err := e.service.resolveProfile(ctx, state.in)
 	if err != nil {
 		state.result = failedStartResult(err)
 		state.tracker.fail(name, "Исполнительный профиль не определён.", err, "profile_not_found", false, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, Profile{}, Allocation{}, Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, model.Profile{}, model.Allocation{}, model.Workplace{}, state.result, err)
 		return err
 	}
 
@@ -96,16 +96,16 @@ func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *ope
 
 func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *operationExecution, name string) error {
 	if !state.action.RequiresSynthesis {
-		state.allocation = Allocation{Resource: "not-required", Source: "action-without-synthesis"}
+		state.allocation = allocation{Resource: "not-required", Source: "action-without-synthesis"}
 		state.tracker.skip(name, "Ресурсное снабжение не требуется для действия без синтеза.")
 		return nil
 	}
 
-	allocation, err := e.service.AllocateResources(ctx, state.in, state.profile)
+	allocation, err := e.service.allocateResources(ctx, state.in, state.profile)
 	if err != nil {
 		state.result = failedStartResult(err)
 		state.tracker.fail(name, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, Allocation{}, Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, model.Allocation{}, model.Workplace{}, state.result, err)
 		return err
 	}
 
@@ -116,16 +116,16 @@ func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *
 
 func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *operationExecution, name string) error {
 	if !state.action.RequiresWorkplace {
-		state.workplace = Workplace{Name: strings.TrimSpace(state.in.Launch.Directory), Ready: true}
+		state.workplace = workplace{Name: strings.TrimSpace(state.in.Launch.Directory), Ready: true}
 		state.tracker.skip(name, "Рабочее место не требуется для разрешённого действия.")
 		return nil
 	}
 
-	workplace, err := e.service.PrepareWorkplace(ctx, state.in, state.profile, state.allocation)
+	workplace, err := e.service.prepareWorkplace(ctx, state.in, state.profile, state.allocation)
 	if err != nil {
 		state.result = failedStartResult(err)
 		state.tracker.fail(name, "Исполнительное рабочее место не подготовлено.", err, "workplace_not_prepared", true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, model.Workplace{}, state.result, err)
 		return err
 	}
 
@@ -163,7 +163,7 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	launchInvocation := state.in
 	launchInvocation.Launch.CommitPush = false
 	launchProfile := state.profile
-	result, err := e.service.Launch(launchCtx, launchInvocation, launchProfile, state.allocation, state.workplace)
+	result, err := e.service.launch(launchCtx, launchInvocation, launchProfile, state.allocation, state.workplace)
 	state.result = result
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, result, err)
 	if err != nil {
