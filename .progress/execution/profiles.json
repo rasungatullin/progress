@@ -3,7 +3,6 @@
     "mode": "manual",
     "model-binding": "default",
     "allow-model-fallback": false,
-    "commit-push": false,
     "structured-output": true,
     "structured-output-required": true,
     "structured-output-fields": [
@@ -20,11 +19,10 @@
   },
   "profiles": {
     "default": {
-      "description": "Базовый профиль исполнения через binding по умолчанию",
-      "commit-push": true
+      "description": "Базовый профиль исполнения через binding по умолчанию"
     },
     "coder": {
-      "description": "Профиль кодера с binding для реализации и обязательным commit/push",
+      "description": "Профиль инженерного синтеза с binding для реализации",
       "model-binding": "coder",
       "structured-output": true,
       "structured-output-fields": [
@@ -33,11 +31,10 @@
         "remarks",
         "commands",
         "conclusion"
-      ],
-      "commit-push": true
+      ]
     },
     "review": {
-      "description": "Профиль ревью без автоматического commit/push",
+      "description": "Профиль ревизии без изменения файлов",
       "model-binding": "review",
       "prompt-additions": [
         "Ты выполняешь code review. Не изменяй код и не коммить изменения.",
@@ -57,11 +54,10 @@
         "questions",
         "follow_up_actions",
         "conclusion"
-      ],
-      "commit-push": false
+      ]
     },
     "task-description-assessor": {
-      "description": "Профиль оценки достаточности описания задачи без автоматического commit/push",
+      "description": "Профиль оценки достаточности описания задачи",
       "model-binding": "default",
       "prompt-additions": [
         "Ты выполняешь оценку достаточности описания задачи для дальнейшей реализации.",
@@ -78,8 +74,7 @@
         "summary",
         "follow_up_actions",
         "conclusion"
-      ],
-      "commit-push": false
+      ]
     }
   }
 }

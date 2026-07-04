@@ -21,8 +21,7 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 			"prompt-additions": ["Default context.", "Always verify the result."],
 			"structured-output": true,
 			"structured-output-required": false,
-			"structured-output-fields": ["remarks", "commands", "remarks"],
-			"commit-push": false
+			"structured-output-fields": ["remarks", "commands", "remarks"]
 		},
 		"profiles": {
 			"default": {
@@ -34,8 +33,7 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 				"allow-model-fallback": false,
 				"prompt-additions": ["Implement the requested change."],
 				"structured-output-required": true,
-				"structured-output-fields": ["commit_message", "changes"],
-				"commit-push": true
+				"structured-output-fields": ["commit_message", "changes"]
 			},
 			"review": {
 				"description": "Review profile",
@@ -55,9 +53,6 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	if defaultProfile.Mode != "manual" || defaultProfile.ModelBinding != "default" || !defaultProfile.AllowModelFallback {
 		t.Fatalf("unexpected default binding config: %#v", defaultProfile)
 	}
-	if defaultProfile.CommitPush {
-		t.Fatal("default profile commit-push must inherit false")
-	}
 	if !defaultProfile.StructuredOutput || defaultProfile.StructuredOutputRequired {
 		t.Fatalf("unexpected default structured output flags: %#v", defaultProfile)
 	}
@@ -75,7 +70,7 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	if coderProfile.ModelBinding != "coder" || coderProfile.AllowModelFallback {
 		t.Fatalf("unexpected coder binding config: %#v", coderProfile)
 	}
-	if !coderProfile.CommitPush || !coderProfile.StructuredOutput || !coderProfile.StructuredOutputRequired {
+	if !coderProfile.StructuredOutput || !coderProfile.StructuredOutputRequired {
 		t.Fatalf("unexpected coder structured flags: %#v", coderProfile)
 	}
 	if !equalStrings(coderProfile.StructuredOutputFields, []string{"commit_message", "changes"}) {

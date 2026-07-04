@@ -413,6 +413,110 @@ func TestServiceExecuteSkipsResourcesWorkplaceAndLaunchWhenActionDoesNotNeedSynt
 	}
 }
 
+func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
+	t.Parallel()
+
+	expectedErr := errors.New("profile resolver must not be called")
+	service := &Service{
+		logger: log.Default(),
+		actions: &stubActionResolver{action: model.Action{
+			Name:              "diagnostic",
+			Class:             ActionClassService,
+			RequiresWorkplace: false,
+			RequiresSynthesis: false,
+			Operations: []model.OperationSpec{
+				builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
+				builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
+			},
+		}},
+		profiles: &stubProfileResolver{err: expectedErr},
+	}
+
+	result, err := service.Execute(context.Background(), Invocation{
+		Action: "diagnostic",
+		Launch: LaunchSpec{
+			Directory:       t.TempDir(),
+			StructuredInput: &StructuredInput{Task: "Проверить маршрут."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute custom action: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if len(result.Operations) != 2 {
+		t.Fatalf("operation list must come from resolved action: %#v", result.Operations)
+	}
+	if result.Operations[0].Name != OperationKindResolveAction || result.Operations[1].Name != OperationKindFinalize {
+		t.Fatalf("unexpected operation order: %#v", result.Operations)
+	}
+}
+
+func TestActionResolutionDoesNotInferActionFromProfile(t *testing.T) {
+	t.Parallel()
+
+	action, err := NewActionCatalog().ResolveAction(context.Background(), Invocation{Profile: "review"})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	if action.Class != ActionClassEngineeringSynthesis {
+		t.Fatalf("profile must not select action class: %#v", action)
+	}
+	if action.Profile != "review" {
+		t.Fatalf("profile may still select technical profile: %#v", action)
+	}
+}
+
+func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	launcher := &stubLauncher{
+		result:        model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}},
+		commitSummary: "git=committed+pushed branch=task-97",
+	}
+	service := &Service{
+		logger:     log.Default(),
+		actions:    NewActionCatalog(),
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		launcher:   launcher,
+	}
+
+	result, err := service.Execute(context.Background(), Invocation{
+		Action:  "implement-commit",
+		Profile: "coder",
+		Workplace: WorkplaceSpec{
+			Name: "task-97",
+		},
+		Launch: LaunchSpec{
+			Directory:       root,
+			StructuredInput: &StructuredInput{Task: "Ship it."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute commit action: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if !launcher.commitCalled {
+		t.Fatal("commit-push operation must call launcher commit stage")
+	}
+	if launcher.invocation.Launch.CommitPush {
+		t.Fatalf("launch synthesis must not receive hidden commit-push flag: %#v", launcher.invocation.Launch)
+	}
+	commitOperation := findOperationResult(result.Operations, OperationKindCommitPush)
+	if commitOperation == nil || commitOperation.Status != OperationStatusCompleted || commitOperation.Summary != "git=committed+pushed branch=task-97" {
+		t.Fatalf("unexpected commit operation: %#v", commitOperation)
+	}
+	if !strings.Contains(result.Summary, "git=committed+pushed branch=task-97") {
+		t.Fatalf("result summary must include commit operation summary: %q", result.Summary)
+	}
+}
+
 func TestServiceStartEnrichesRunningHistoryRowBeforeLaunch(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -749,14 +853,19 @@ func TestServiceResumePreservesRawStructuredOutputInHistory(t *testing.T) {
 }
 
 type stubLauncher struct {
-	invocation   model.Invocation
-	result       model.LaunchResult
-	err          error
-	beforeReturn func()
+	invocation    model.Invocation
+	profile       model.Profile
+	result        model.LaunchResult
+	err           error
+	beforeReturn  func()
+	commitCalled  bool
+	commitSummary string
+	commitErr     error
 }
 
-func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, _ model.Profile, _ model.Allocation, _ model.Workplace) (model.LaunchResult, error) {
+func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, profile model.Profile, _ model.Allocation, _ model.Workplace) (model.LaunchResult, error) {
 	s.invocation = in
+	s.profile = profile
 	if s.beforeReturn != nil {
 		s.beforeReturn()
 	}
@@ -764,6 +873,26 @@ func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, _ model.Pr
 		return model.LaunchResult{Status: "completed"}, nil
 	}
 	return s.result, s.err
+}
+
+func (s *stubLauncher) CommitAndPush(context.Context, model.Invocation, model.Workplace, *model.StructuredOutput) (string, error) {
+	s.commitCalled = true
+	if s.commitErr != nil {
+		return "", s.commitErr
+	}
+	return s.commitSummary, nil
+}
+
+type stubActionResolver struct {
+	action model.Action
+	err    error
+}
+
+func (s *stubActionResolver) ResolveAction(context.Context, model.Invocation) (model.Action, error) {
+	if s.err != nil {
+		return model.Action{}, s.err
+	}
+	return s.action, nil
 }
 
 type stubProfileResolver struct {

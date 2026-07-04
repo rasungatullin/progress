@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/rasungatullin/progress/internal/configuration"
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
@@ -24,11 +22,8 @@ type launchFlags struct {
 	directory                string
 	name                     string
 	repo                     string
+	action                   string
 	profile                  string
-	executionProfile         string
-	reviewProfile            string
-	maxExecutions            int
-	cycle                    string
 	inputFile                string
 	task                     string
 	constraints              []string
@@ -100,8 +95,6 @@ func newExecutionCommand() *cobra.Command {
 
 	cmd.AddCommand(
 		newExecutionStartCommand(),
-		newExecutionReviewCycleCommand(),
-		newExecutionCycleCommand(),
 		newExecutionResumeCommand(),
 		newExecutionDispatcherCommand(),
 		newExecutionProfileCommand(),
@@ -180,71 +173,6 @@ func newExecutionStartCommand() *cobra.Command {
 	return cmd
 }
 
-func newExecutionReviewCycleCommand() *cobra.Command {
-	flags := newReviewCycleFlags()
-
-	cmd := &cobra.Command{
-		Use:   "review-cycle",
-		Short: "Цикл исполнения с автоматическим ревью",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			service := newExecutionService(cmd)
-			in, err := invocationFromReviewCycleFlags(flags)
-			if err != nil {
-				return err
-			}
-
-			result, err := execution.RunReviewCycle(context.Background(), service, in, flags.reviewProfile, flags.maxExecutions)
-			if err != nil {
-				printLaunchResultOnError(cmd, result)
-				return err
-			}
-
-			printLaunchResult(cmd, result)
-			return nil
-		},
-	}
-
-	bindReviewCycleFlags(cmd, flags)
-	return cmd
-}
-
-func newExecutionCycleCommand() *cobra.Command {
-	flags := newStartFlags()
-
-	cmd := &cobra.Command{
-		Use:   "cycle",
-		Short: "Цикл исполнения по конфигурации",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			service := newExecutionService(cmd)
-			in, err := invocationFromStructuredFlags(flags)
-			if err != nil {
-				return err
-			}
-
-			repoRoot, err := executionCycleRepositoryRoot()
-			if err != nil {
-				return err
-			}
-			cycleConfig, err := configuration.LoadExecutionCycleConfig(repoRoot, nil)
-			if err != nil {
-				return err
-			}
-
-			result, err := execution.RunExecutionCycle(context.Background(), service, cycleConfig, flags.cycle, in)
-			if err != nil {
-				printLaunchResultOnError(cmd, result)
-				return err
-			}
-
-			printLaunchResult(cmd, result)
-			return nil
-		},
-	}
-
-	bindCycleFlags(cmd, flags)
-	return cmd
-}
-
 func newExecutionResumeCommand() *cobra.Command {
 	flags := &resumeFlags{}
 
@@ -274,18 +202,25 @@ func newExecutionResumeCommand() *cobra.Command {
 }
 
 func newExecutionDispatcherCommand() *cobra.Command {
-	return &cobra.Command{
+	flags := &launchFlags{action: execution.ActionClassEngineeringSynthesis, profile: "default"}
+	cmd := &cobra.Command{
 		Use:   "dispatcher",
 		Short: "Диагностика маршрута диспетчера исполнения",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newExecutionService(cmd)
-			stages := service.Dispatch(context.Background(), execution.Invocation{})
+			stages := service.Dispatch(context.Background(), execution.Invocation{
+				Action:  strings.TrimSpace(flags.action),
+				Profile: strings.TrimSpace(flags.profile),
+			})
 			for _, stage := range stages {
 				cmd.Println(stage)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&flags.action, "action", flags.action, "Действие контура исполнения")
+	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Исполнительный профиль")
+	return cmd
 }
 
 func newExecutionProfileCommand() *cobra.Command {
@@ -301,7 +236,7 @@ func newExecutionProfileCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("profile=%s\ndescription=%s\nmode=%s\nmodel-binding=%s\nallow-model-fallback=%t\nprompt-additions=%s\nstructured-output=%t\nstructured-output-required=%t\nstructured-output-fields=%s\ncommit-push=%t\n", profile.Name, profile.Description, profile.Mode, profile.ModelBinding, profile.AllowModelFallback, strings.Join(profile.PromptAdditions, " | "), profile.StructuredOutput, profile.StructuredOutputRequired, strings.Join(profile.StructuredOutputFields, ","), profile.CommitPush)
+			cmd.Printf("profile=%s\ndescription=%s\nmode=%s\nmodel-binding=%s\nallow-model-fallback=%t\nprompt-additions=%s\nstructured-output=%t\nstructured-output-required=%t\nstructured-output-fields=%s\n", profile.Name, profile.Description, profile.Mode, profile.ModelBinding, profile.AllowModelFallback, strings.Join(profile.PromptAdditions, " | "), profile.StructuredOutput, profile.StructuredOutputRequired, strings.Join(profile.StructuredOutputFields, ","))
 			return nil
 		},
 	}
@@ -414,13 +349,7 @@ func newLaunchFlags() *launchFlags {
 func newStartFlags() *launchFlags {
 	return &launchFlags{
 		profile: "default",
-	}
-}
-
-func newReviewCycleFlags() *launchFlags {
-	return &launchFlags{
-		executionProfile: "default",
-		maxExecutions:    execution.DefaultReviewCycleMaxExecutions,
+		action:  execution.ActionClassEngineeringSynthesis,
 	}
 }
 
@@ -441,6 +370,7 @@ func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
 	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
+	cmd.Flags().StringVar(&flags.action, "action", flags.action, "Действие контура исполнения")
 	cmd.Flags().StringVar(&flags.profile, "profile", flags.profile, "Тип исполнительного профиля")
 	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
 	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
@@ -448,28 +378,6 @@ func bindStartFlags(cmd *cobra.Command, flags *launchFlags) {
 	bindStructuredInputFlags(cmd, flags)
 	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
 	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
-}
-
-func bindReviewCycleFlags(cmd *cobra.Command, flags *launchFlags) {
-	cmd.Flags().StringVar(&flags.directory, "dir", "", "Рабочий каталог для запуска runner")
-	cmd.Flags().StringVar(&flags.name, "name", "", "Имя нового рабочего места в .progress/workplaces")
-	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub для подготовки рабочего места: owner/name или clone URL")
-	cmd.Flags().StringVar(&flags.executionProfile, "execution-profile", flags.executionProfile, "Профиль исполнения")
-	cmd.Flags().StringVar(&flags.reviewProfile, "review-profile", "", "Профиль ревью")
-	cmd.Flags().IntVar(&flags.maxExecutions, "max-executions", flags.maxExecutions, "Максимальное число запусков исполнения")
-	cmd.Flags().StringVar(&flags.runner, "runner", flags.runner, "Исполнительный runner")
-	cmd.Flags().StringVar(&flags.model, "model", flags.model, "Идентификатор модели")
-	cmd.Flags().StringVar(&flags.modelBinding, "model-binding", flags.modelBinding, "Семантический binding runner+model")
-	bindStructuredInputFlags(cmd, flags)
-	cmd.Flags().BoolVar(&flags.structuredOutput, "structured-output", false, "Автоматически добавить инструкцию на structured output")
-	cmd.Flags().BoolVar(&flags.structuredOutputRequired, "structured-output-required", false, "Считать отсутствие или невалидность structured output ошибкой")
-	_ = cmd.MarkFlagRequired("review-profile")
-}
-
-func bindCycleFlags(cmd *cobra.Command, flags *launchFlags) {
-	bindStartFlags(cmd, flags)
-	cmd.Flags().StringVar(&flags.cycle, "cycle", "", "Имя цикла")
-	_ = cmd.MarkFlagRequired("cycle")
 }
 
 func bindResumeFlags(cmd *cobra.Command, flags *resumeFlags) {
@@ -535,17 +443,9 @@ func invocationFromStructuredFlags(flags *launchFlags) (execution.Invocation, er
 	}
 
 	invocation := invocationFromLaunchFlags(flags)
+	invocation.Action = strings.TrimSpace(flags.action)
 	invocation.Launch.Prompt = ""
 	invocation.Launch.StructuredInput = input
-	return invocation, nil
-}
-
-func invocationFromReviewCycleFlags(flags *launchFlags) (execution.Invocation, error) {
-	invocation, err := invocationFromStructuredFlags(flags)
-	if err != nil {
-		return execution.Invocation{}, err
-	}
-	invocation.Profile = flags.executionProfile
 	return invocation, nil
 }
 
@@ -664,19 +564,6 @@ func appendStructuredJSONObjects[T any](values []string, flagName string, target
 	}
 
 	return nil
-}
-
-func executionCycleRepositoryRoot() (string, error) {
-	output, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
-	if err != nil {
-		cwd, cwdErr := os.Getwd()
-		if cwdErr != nil {
-			return "", fmt.Errorf("resolve git repository root for execution cycle: %w", err)
-		}
-		return cwd, nil
-	}
-
-	return strings.TrimSpace(string(output)), nil
 }
 
 func decodeStrictJSON(content []byte, target any) error {

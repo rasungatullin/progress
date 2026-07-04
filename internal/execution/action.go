@@ -24,6 +24,7 @@ const (
 	OperationKindBuildDirective    = "build-directive"
 	OperationKindLaunchSynthesis   = "launch-synthesis"
 	OperationKindParseResult       = "parse-result"
+	OperationKindCommitPush        = "commit-push"
 	OperationKindFinalize          = "finalize"
 
 	OperationStatusPending   = "pending"
@@ -46,6 +47,7 @@ type ActionCatalog struct {
 func NewActionCatalog() *ActionCatalog {
 	actions := map[string]model.Action{
 		ActionClassEngineeringSynthesis: newActionTemplate(ActionClassEngineeringSynthesis, ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза в нормализованной форме."),
+		"engineering-synthesis-commit":  newActionTemplateWithOperations("engineering-synthesis-commit", ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза, создать коммит и отправить ветку.", actionOperationsWithCommitPush()),
 		ActionClassReview:               newActionTemplate(ActionClassReview, ActionClassReview, "review", true, true, "Провести ревизию результата и вернуть заключение ревизии."),
 		ActionClassTaskPreparation:      newActionTemplate(ActionClassTaskPreparation, ActionClassTaskPreparation, "task-description-assessor", true, true, "Подготовить или оценить постановку задачи."),
 		ActionClassIntegrationChange:    newActionTemplate(ActionClassIntegrationChange, ActionClassIntegrationChange, "default", false, false, "Выполнить интеграционное изменение через опубликованную операцию."),
@@ -58,9 +60,11 @@ func NewActionCatalog() *ActionCatalog {
 		"prepare-task":                ActionClassTaskPreparation,
 		"task-description-assessment": ActionClassTaskPreparation,
 		"code":                        ActionClassEngineeringSynthesis,
+		"code-commit":                 "engineering-synthesis-commit",
 		"coder":                       ActionClassEngineeringSynthesis,
 		"coding":                      ActionClassEngineeringSynthesis,
 		"implement":                   ActionClassEngineeringSynthesis,
+		"implement-commit":            "engineering-synthesis-commit",
 		"implementation":              ActionClassEngineeringSynthesis,
 		"pull-request":                ActionClassIntegrationChange,
 		"comment":                     ActionClassIntegrationChange,
@@ -79,9 +83,12 @@ func (c *ActionCatalog) ResolveAction(ctx context.Context, in Invocation) (Actio
 	}
 
 	name := actionNameFromInvocation(in)
-	profileName := profileNameFromInvocation(in)
 	if name == "" {
-		name = defaultActionNameForProfile(profileName)
+		name = defaultActionName()
+	}
+	profileName := strings.TrimSpace(in.Profile)
+	if in.Assignment != nil && strings.TrimSpace(in.Assignment.Profile) != "" {
+		profileName = strings.TrimSpace(in.Assignment.Profile)
 	}
 	if profileName == "" {
 		profileName = "default"
@@ -124,7 +131,7 @@ func assignmentFromInvocation(in model.Invocation) *model.ExecutionAssignment {
 			assignment.Profile = strings.TrimSpace(in.Profile)
 		}
 		if strings.TrimSpace(assignment.Action) == "" {
-			assignment.Action = defaultActionNameForProfile(assignment.Profile)
+			assignment.Action = defaultActionName()
 		}
 		if len(assignment.Constraints) == 0 && assignment.StructuredInput != nil {
 			assignment.Constraints = append([]string(nil), assignment.StructuredInput.Constraints...)
@@ -139,7 +146,7 @@ func assignmentFromInvocation(in model.Invocation) *model.ExecutionAssignment {
 		StructuredInput: in.Launch.StructuredInput,
 	}
 	if assignment.Action == "" {
-		assignment.Action = defaultActionNameForProfile(assignment.Profile)
+		assignment.Action = defaultActionName()
 	}
 	if assignment.StructuredInput != nil {
 		assignment.Constraints = append([]string(nil), assignment.StructuredInput.Constraints...)
@@ -247,6 +254,10 @@ func executionResultFromLaunch(assignment *model.ExecutionAssignment, action mod
 }
 
 func newActionTemplate(name, class, profile string, requiresWorkplace, requiresSynthesis bool, expectedResult string) model.Action {
+	return newActionTemplateWithOperations(name, class, profile, requiresWorkplace, requiresSynthesis, expectedResult, defaultActionOperations())
+}
+
+func newActionTemplateWithOperations(name, class, profile string, requiresWorkplace, requiresSynthesis bool, expectedResult string, operations []model.OperationSpec) model.Action {
 	return model.Action{
 		Name:              name,
 		Class:             model.ActionClass(class),
@@ -254,7 +265,7 @@ func newActionTemplate(name, class, profile string, requiresWorkplace, requiresS
 		ExpectedResult:    expectedResult,
 		RequiresWorkplace: requiresWorkplace,
 		RequiresSynthesis: requiresSynthesis,
-		Operations:        defaultActionOperations(),
+		Operations:        append([]model.OperationSpec(nil), operations...),
 	}
 }
 
@@ -270,6 +281,24 @@ func defaultActionOperations() []model.OperationSpec {
 		builtinOperation(OperationKindParseResult, "Разбор результата", true),
 		builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
 	}
+}
+
+func actionOperationsWithCommitPush() []model.OperationSpec {
+	operations := defaultActionOperations()
+	for index, operation := range operations {
+		if operation.Name != OperationKindFinalize {
+			continue
+		}
+
+		commitOperation := builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true)
+		withCommit := make([]model.OperationSpec, 0, len(operations)+1)
+		withCommit = append(withCommit, operations[:index]...)
+		withCommit = append(withCommit, commitOperation)
+		withCommit = append(withCommit, operations[index:]...)
+		return withCommit
+	}
+
+	return append(operations, builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true))
 }
 
 func builtinOperation(kind string, title string, required bool) model.OperationSpec {
@@ -289,22 +318,8 @@ func actionNameFromInvocation(in model.Invocation) string {
 	return strings.TrimSpace(in.Action)
 }
 
-func profileNameFromInvocation(in model.Invocation) string {
-	if in.Assignment != nil && strings.TrimSpace(in.Assignment.Profile) != "" {
-		return strings.TrimSpace(in.Assignment.Profile)
-	}
-	return strings.TrimSpace(in.Profile)
-}
-
-func defaultActionNameForProfile(profileName string) string {
-	switch strings.ToLower(strings.TrimSpace(profileName)) {
-	case "review":
-		return ActionClassReview
-	case "task-description-assessor":
-		return ActionClassTaskPreparation
-	default:
-		return ActionClassEngineeringSynthesis
-	}
+func defaultActionName() string {
+	return ActionClassEngineeringSynthesis
 }
 
 func cloneAction(action model.Action) model.Action {
