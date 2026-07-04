@@ -1,0 +1,206 @@
+package methodology
+
+import (
+	"context"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/rasungatullin/progress/internal/configuration"
+)
+
+func TestLoadCatalogMergesGlobalAndLocalLayersWithLocalPriority(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/methodology/catalog.json":
+			return []byte(`{
+				"routes": [
+					{"name": "default", "title": "Глобальный маршрут", "action": "implement", "profile": "global"},
+					{"name": "review", "action": "review", "profile": "review"}
+				],
+				"actions": [
+					{"name": "implement", "class": "engineering-synthesis", "profile": "global"},
+					{"name": "review", "class": "review", "profile": "review"}
+				],
+				"instructions": [
+					{"name": "default-directive", "profile": "global", "body": "Глобальная инструкция."}
+				],
+				"entities": [
+					{"kind": "decision-rule", "name": "description-assessment", "target_contour": "decision", "payload": {"label": "description-assessment"}}
+				]
+			}`), nil
+		case "/repo/.progress/methodology/catalog.json":
+			return []byte(`{
+				"routes": [
+					{"name": "default", "title": "Локальный маршрут", "action": "implement", "profile": "local"}
+				],
+				"actions": [
+					{"name": "implement", "class": "engineering-synthesis", "profile": "local"}
+				],
+				"instructions": [
+					{"name": "default-directive", "profile": "local", "body": "Локальная инструкция."}
+				],
+				"entities": [
+					{"kind": "decision-rule", "name": "description-assessment", "target_contour": "decision", "payload": {"label": "local"}}
+				]
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	snapshot, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+
+	if len(snapshot.Catalog.Routes) != 2 {
+		t.Fatalf("unexpected routes: %#v", snapshot.Catalog.Routes)
+	}
+	if snapshot.Catalog.Routes[0].Name != "default" || snapshot.Catalog.Routes[0].Profile != "local" {
+		t.Fatalf("expected local route override, got: %#v", snapshot.Catalog.Routes[0])
+	}
+	if snapshot.Catalog.Actions[0].Profile != "local" {
+		t.Fatalf("expected local action override, got: %#v", snapshot.Catalog.Actions[0])
+	}
+	if snapshot.Catalog.Instructions[0].Profile != "local" {
+		t.Fatalf("expected local instruction override, got: %#v", snapshot.Catalog.Instructions[0])
+	}
+	if snapshot.Catalog.Entities[0].TargetContour != "decision" || string(snapshot.Catalog.Entities[0].Payload) != `{"label":"local"}` {
+		t.Fatalf("expected local entity override, got: %#v", snapshot.Catalog.Entities[0])
+	}
+	if snapshot.Sources.Routes["default"] != configuration.ConfigFileSourceLocal {
+		t.Fatalf("expected local route source, got: %q", snapshot.Sources.Routes["default"])
+	}
+	if snapshot.Sources.Routes["review"] != configuration.ConfigFileSourceGlobal {
+		t.Fatalf("expected global review route source, got: %q", snapshot.Sources.Routes["review"])
+	}
+}
+
+func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewService(nil)
+
+	result, err := service.Upsert(context.Background(), CatalogWriteRequest{
+		RepoRoot: root,
+		Scope:    CatalogWriteScopeLocal,
+		Element: ElementUpsert{Action: &Action{
+			Name:        "implement",
+			Class:       "engineering-synthesis",
+			Profile:     "coder",
+			Operations:  []string{"prepare-data", "launch-synthesis"},
+			Description: "Выполнение инженерного изменения.",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("upsert action: %v", err)
+	}
+
+	if result.Path != filepath.Join(root, ".progress", "methodology", "catalog.json") {
+		t.Fatalf("unexpected write path: %q", result.Path)
+	}
+	content, err := os.ReadFile(result.Path)
+	if err != nil {
+		t.Fatalf("read written catalog: %v", err)
+	}
+	if !containsAll(string(content), `"actions"`, `"implement"`, `"engineering-synthesis"`) {
+		t.Fatalf("written catalog does not include action: %s", string(content))
+	}
+}
+
+func TestServiceResolveLoadsStoredCatalog(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "methodology")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir catalog dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "catalog.json"), []byte(`{
+		"routes": [{"name": "default", "action": "implement", "profile": "coder"}],
+		"actions": [{"name": "implement", "class": "engineering-synthesis", "profile": "coder"}],
+		"instructions": [{"name": "coder-directive", "profile": "coder", "body": "Сформировать изменение."}]
+	}`), 0o600); err != nil {
+		t.Fatalf("write catalog: %v", err)
+	}
+
+	result, err := NewService(nil).Resolve(context.Background(), SelectionRequest{RepoRoot: root})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	if result.Route.Name != "default" || result.Action.Name != "implement" {
+		t.Fatalf("unexpected selection: %#v", result)
+	}
+	if result.Instruction.Name != "coder-directive" {
+		t.Fatalf("expected instruction selection, got: %#v", result.Instruction)
+	}
+	if result.RouteSource != configuration.ConfigFileSourceLocal {
+		t.Fatalf("expected local route source, got: %q", result.RouteSource)
+	}
+}
+
+func TestListCatalogElementsFiltersGenericEntities(t *testing.T) {
+	t.Parallel()
+
+	snapshot := mergeCatalogLayers([]CatalogLayer{{
+		Source: configuration.ConfigFileSourceLocal,
+		Path:   "/repo/.progress/methodology/catalog.json",
+		Catalog: Catalog{Entities: []Entity{
+			{Kind: "decision-rule", Name: "description-assessment", TargetContour: "decision"},
+			{Kind: "ui-panel", Name: "methodology", TargetContour: "user-interface"},
+		}},
+	}})
+
+	elements := ListCatalogElements(snapshot, ElementFilter{Kind: "decision-rule", TargetContour: "decision"})
+	if len(elements) != 1 {
+		t.Fatalf("expected one decision rule, got: %#v", elements)
+	}
+	if elements[0].Kind != ElementKindEntity || elements[0].EntityKind != "decision-rule" || elements[0].Name != "description-assessment" {
+		t.Fatalf("unexpected entity element: %#v", elements[0])
+	}
+}
+
+func TestLoadCatalogUsesLocalLayerWhenGlobalHomeMissing(t *testing.T) {
+	originalResolveUserHome := resolveUserHome
+	resolveUserHome = func() (string, error) {
+		return "", errors.New("home not available")
+	}
+	t.Cleanup(func() {
+		resolveUserHome = originalResolveUserHome
+	})
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"routes": [{"name": "default", "action": "implement"}],
+				"actions": [{"name": "implement"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	snapshot, err := LoadCatalogWithHome("/repo", "", readFile)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	if snapshot.Sources.Routes["default"] != configuration.ConfigFileSourceLocal {
+		t.Fatalf("expected local route source, got: %q", snapshot.Sources.Routes["default"])
+	}
+}
+
+func containsAll(value string, fragments ...string) bool {
+	for _, fragment := range fragments {
+		if !strings.Contains(value, fragment) {
+			return false
+		}
+	}
+	return true
+}

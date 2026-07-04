@@ -5,53 +5,38 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strings"
+
+	"github.com/rasungatullin/progress/internal/configuration"
 )
 
-type Catalog struct {
-	Routes       []Route
-	Actions      []Action
-	Instructions []Instruction
-}
-
-type Route struct {
-	Name        string
-	Title       string
-	Action      string
-	Profile     string
-	Description string
-	Checks      []string
-}
-
-type Action struct {
-	Name        string
-	Class       string
-	Profile     string
-	Operations  []string
-	Description string
-}
-
-type Instruction struct {
-	Name    string
-	Profile string
-	Body    string
-}
-
 type SelectionRequest struct {
-	Route   string
-	Action  string
-	Profile string
+	RepoRoot   string `json:"repo_root,omitempty"`
+	ConfigHome string `json:"config_home,omitempty"`
+	Route      string `json:"route,omitempty"`
+	Action     string `json:"action,omitempty"`
+	Profile    string `json:"profile,omitempty"`
 }
 
 type SelectionResult struct {
-	Route       Route
-	Action      Action
-	Instruction Instruction
-	Diagnostics []string
+	Route             Route                          `json:"route"`
+	Action            Action                         `json:"action"`
+	Instruction       Instruction                    `json:"instruction,omitempty"`
+	Diagnostics       []string                       `json:"diagnostics,omitempty"`
+	RouteSource       configuration.ConfigFileSource `json:"route_source,omitempty"`
+	ActionSource      configuration.ConfigFileSource `json:"action_source,omitempty"`
+	InstructionSource configuration.ConfigFileSource `json:"instruction_source,omitempty"`
+	GlobalCatalogPath string                         `json:"global_catalog_path,omitempty"`
+	LocalCatalogPath  string                         `json:"local_catalog_path,omitempty"`
 }
 
 type Service struct {
-	logger *log.Logger
+	logger          *log.Logger
+	readFile        ReadFileFunc
+	writeFile       WriteFileFunc
+	mkdirAll        MkdirAllFunc
+	resolveRepoRoot func(context.Context) (string, error)
 }
 
 func NewService(logger *log.Logger) *Service {
@@ -59,7 +44,108 @@ func NewService(logger *log.Logger) *Service {
 		logger = log.New(io.Discard, "", 0)
 	}
 
-	return &Service{logger: logger}
+	return &Service{
+		logger:          logger,
+		readFile:        os.ReadFile,
+		writeFile:       os.WriteFile,
+		mkdirAll:        os.MkdirAll,
+		resolveRepoRoot: resolveGitRepoRoot,
+	}
+}
+
+func (s *Service) Load(ctx context.Context, request CatalogRequest) (CatalogSnapshot, error) {
+	if s == nil {
+		s = NewService(nil)
+	}
+
+	repoRoot := strings.TrimSpace(request.RepoRoot)
+	if repoRoot == "" && s.resolveRepoRoot != nil {
+		if resolved, err := s.resolveRepoRoot(ctx); err == nil {
+			repoRoot = strings.TrimSpace(resolved)
+		}
+	}
+
+	return LoadCatalogWithHome(repoRoot, request.ConfigHome, s.readFile)
+}
+
+func (s *Service) List(ctx context.Context, request ElementRequest) ([]ListedElement, error) {
+	snapshot, err := s.Load(ctx, CatalogRequest{RepoRoot: request.RepoRoot, ConfigHome: request.ConfigHome})
+	if err != nil {
+		return nil, err
+	}
+
+	return ListCatalogElements(snapshot, ElementFilter{
+		Kind:          request.Kind,
+		EntityKind:    request.EntityKind,
+		TargetContour: request.TargetContour,
+	}), nil
+}
+
+func (s *Service) Get(ctx context.Context, request ElementRequest) (ListedElement, error) {
+	snapshot, err := s.Load(ctx, CatalogRequest{RepoRoot: request.RepoRoot, ConfigHome: request.ConfigHome})
+	if err != nil {
+		return ListedElement{}, err
+	}
+
+	return GetCatalogElement(snapshot, request.Kind, request.Name, request.EntityKind)
+}
+
+func (s *Service) Save(ctx context.Context, request CatalogWriteRequest) (CatalogWriteResult, error) {
+	if s == nil {
+		s = NewService(nil)
+	}
+	if request.Catalog == nil {
+		return CatalogWriteResult{}, fmt.Errorf("каталог методик должен быть задан")
+	}
+
+	repoRoot, err := s.repoRootForWrite(ctx, request.RepoRoot, request.Scope)
+	if err != nil {
+		return CatalogWriteResult{}, err
+	}
+
+	return SaveCatalogWithHome(repoRoot, request.ConfigHome, request.Scope, *request.Catalog, s.readFile, s.writeFile, s.mkdirAll)
+}
+
+func (s *Service) Upsert(ctx context.Context, request CatalogWriteRequest) (CatalogWriteResult, error) {
+	if s == nil {
+		s = NewService(nil)
+	}
+
+	repoRoot, err := s.repoRootForWrite(ctx, request.RepoRoot, request.Scope)
+	if err != nil {
+		return CatalogWriteResult{}, err
+	}
+
+	return UpsertCatalogElementWithHome(repoRoot, request.ConfigHome, request.Scope, request.Element, s.readFile, s.writeFile, s.mkdirAll)
+}
+
+func (s *Service) Resolve(ctx context.Context, request SelectionRequest) (SelectionResult, error) {
+	snapshot, err := s.Load(ctx, CatalogRequest{RepoRoot: request.RepoRoot, ConfigHome: request.ConfigHome})
+	if err != nil {
+		return SelectionResult{}, err
+	}
+
+	result, err := s.Select(ctx, snapshot.Catalog, request)
+	if err != nil {
+		return SelectionResult{}, err
+	}
+	result.RouteSource = snapshot.Sources.Routes[result.Route.Name]
+	result.ActionSource = snapshot.Sources.Actions[result.Action.Name]
+	if result.Instruction.Name != "" {
+		result.InstructionSource = snapshot.Sources.Instructions[result.Instruction.Name]
+	}
+	result.GlobalCatalogPath = snapshot.GlobalCatalogPath
+	result.LocalCatalogPath = snapshot.LocalCatalogPath
+	if result.RouteSource != "" {
+		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("route-source=%s", result.RouteSource))
+	}
+	if result.ActionSource != "" {
+		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("action-source=%s", result.ActionSource))
+	}
+	if result.InstructionSource != "" {
+		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("instruction-source=%s", result.InstructionSource))
+	}
+	return result, nil
 }
 
 func (s *Service) Select(ctx context.Context, catalog Catalog, request SelectionRequest) (SelectionResult, error) {
@@ -69,6 +155,7 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 		s = NewService(nil)
 	}
 
+	catalog = normalizeCatalog(catalog)
 	route, err := selectRoute(catalog.Routes, request.Route)
 	if err != nil {
 		return SelectionResult{}, err
@@ -81,7 +168,7 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 	}
 
 	profile := firstNonEmpty(request.Profile, action.Profile, route.Profile)
-	instruction := selectInstruction(catalog.Instructions, profile)
+	instruction := selectInstruction(catalog.Instructions, action.Name, profile)
 	result := SelectionResult{
 		Route:       route,
 		Action:      action,
@@ -102,10 +189,33 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 	return result, nil
 }
 
+func (s *Service) repoRootForWrite(ctx context.Context, repoRoot string, scope configuration.ConfigFileSource) (string, error) {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if scope == "" {
+		scope = CatalogWriteScopeLocal
+	}
+	if scope != CatalogWriteScopeLocal || repoRoot != "" {
+		return repoRoot, nil
+	}
+	if s.resolveRepoRoot == nil {
+		return "", fmt.Errorf("repo root is required for local methodology catalog")
+	}
+
+	resolved, err := s.resolveRepoRoot(ctx)
+	if err != nil {
+		return "", fmt.Errorf("resolve git repository root for methodology catalog: %w", err)
+	}
+	resolved = strings.TrimSpace(resolved)
+	if resolved == "" {
+		return "", fmt.Errorf("repo root is required for local methodology catalog")
+	}
+	return resolved, nil
+}
+
 func selectRoute(routes []Route, name string) (Route, error) {
-	name = strings.TrimSpace(name)
+	name = normalizeName(name)
 	for _, route := range routes {
-		route.Name = strings.TrimSpace(route.Name)
+		route = normalizeRoute(route)
 		if route.Name == "" {
 			continue
 		}
@@ -120,12 +230,12 @@ func selectRoute(routes []Route, name string) (Route, error) {
 }
 
 func selectAction(actions []Action, name string) (Action, error) {
-	name = strings.TrimSpace(name)
+	name = normalizeName(name)
 	if name == "" {
 		return Action{}, fmt.Errorf("действие методики должно быть задано")
 	}
 	for _, action := range actions {
-		action.Name = strings.TrimSpace(action.Name)
+		action = normalizeAction(action)
 		if action.Name == name {
 			return action, nil
 		}
@@ -133,10 +243,19 @@ func selectAction(actions []Action, name string) (Action, error) {
 	return Action{}, fmt.Errorf("действие методики %q не найдено", name)
 }
 
-func selectInstruction(instructions []Instruction, profile string) Instruction {
+func selectInstruction(instructions []Instruction, actionName string, profile string) Instruction {
+	actionName = normalizeName(actionName)
 	profile = strings.TrimSpace(profile)
+
 	for _, instruction := range instructions {
-		if strings.TrimSpace(instruction.Profile) == profile {
+		instruction = normalizeInstruction(instruction)
+		if instruction.Action == actionName && instruction.Profile == profile {
+			return instruction
+		}
+	}
+	for _, instruction := range instructions {
+		instruction = normalizeInstruction(instruction)
+		if instruction.Action == "" && instruction.Profile == profile {
 			return instruction
 		}
 	}
