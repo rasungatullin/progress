@@ -1,6 +1,8 @@
 package execution
 
 import (
+	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -27,75 +29,86 @@ const (
 	OperationStatusPending   = "pending"
 	OperationStatusCompleted = "completed"
 	OperationStatusFailed    = "failed"
+	OperationStatusSkipped   = "skipped"
+
+	OperationOriginBuiltin = "builtin"
 )
 
-func resolveAction(in model.Invocation) model.Action {
-	name := strings.TrimSpace(in.Action)
-	if in.Assignment != nil && strings.TrimSpace(in.Assignment.Action) != "" {
-		name = strings.TrimSpace(in.Assignment.Action)
+type ActionResolver interface {
+	ResolveAction(context.Context, Invocation) (Action, error)
+}
+
+type ActionCatalog struct {
+	actions map[string]model.Action
+	aliases map[string]string
+}
+
+func NewActionCatalog() *ActionCatalog {
+	actions := map[string]model.Action{
+		ActionClassEngineeringSynthesis: newActionTemplate(ActionClassEngineeringSynthesis, ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза в нормализованной форме."),
+		ActionClassReview:               newActionTemplate(ActionClassReview, ActionClassReview, "review", true, true, "Провести ревизию результата и вернуть заключение ревизии."),
+		ActionClassTaskPreparation:      newActionTemplate(ActionClassTaskPreparation, ActionClassTaskPreparation, "task-description-assessor", true, true, "Подготовить или оценить постановку задачи."),
+		ActionClassIntegrationChange:    newActionTemplate(ActionClassIntegrationChange, ActionClassIntegrationChange, "default", false, false, "Выполнить интеграционное изменение через опубликованную операцию."),
+		ActionClassService:              newActionTemplate(ActionClassService, ActionClassService, "default", true, false, "Выполнить служебное действие без содержательного синтеза."),
 	}
-	if name == "" {
-		name = "engineering-synthesis"
+	aliases := map[string]string{
+		"assess":                      ActionClassTaskPreparation,
+		"assess-description":          ActionClassTaskPreparation,
+		"description-assessment":      ActionClassTaskPreparation,
+		"prepare-task":                ActionClassTaskPreparation,
+		"task-description-assessment": ActionClassTaskPreparation,
+		"code":                        ActionClassEngineeringSynthesis,
+		"coder":                       ActionClassEngineeringSynthesis,
+		"coding":                      ActionClassEngineeringSynthesis,
+		"implement":                   ActionClassEngineeringSynthesis,
+		"implementation":              ActionClassEngineeringSynthesis,
+		"pull-request":                ActionClassIntegrationChange,
+		"comment":                     ActionClassIntegrationChange,
+		"integration":                 ActionClassIntegrationChange,
+		"diagnostic":                  ActionClassService,
+		"diagnostics":                 ActionClassService,
 	}
 
-	profileName := strings.TrimSpace(in.Profile)
-	if in.Assignment != nil && strings.TrimSpace(in.Assignment.Profile) != "" {
-		profileName = strings.TrimSpace(in.Assignment.Profile)
+	return &ActionCatalog{actions: actions, aliases: aliases}
+}
+
+func (c *ActionCatalog) ResolveAction(ctx context.Context, in Invocation) (Action, error) {
+	_ = ctx
+	if c == nil {
+		c = NewActionCatalog()
+	}
+
+	name := actionNameFromInvocation(in)
+	profileName := profileNameFromInvocation(in)
+	if name == "" {
+		name = defaultActionNameForProfile(profileName)
 	}
 	if profileName == "" {
 		profileName = "default"
 	}
 
-	expectedResult := "Получить результат выполнения действия в нормализованной форме."
+	canonicalName := strings.ToLower(strings.TrimSpace(name))
+	if alias := strings.TrimSpace(c.aliases[canonicalName]); alias != "" {
+		canonicalName = alias
+	}
+	template, ok := c.actions[canonicalName]
+	if !ok {
+		return model.Action{}, fmt.Errorf("действие %q не найдено", name)
+	}
+
+	action := cloneAction(template)
+	action.Name = name
+	if strings.TrimSpace(action.Profile) == "" || strings.TrimSpace(in.Profile) != "" || in.Assignment != nil && strings.TrimSpace(in.Assignment.Profile) != "" {
+		action.Profile = profileName
+	}
 	if in.Assignment != nil && strings.TrimSpace(in.Assignment.ExpectedResult) != "" {
-		expectedResult = strings.TrimSpace(in.Assignment.ExpectedResult)
+		action.ExpectedResult = strings.TrimSpace(in.Assignment.ExpectedResult)
+	}
+	if strings.TrimSpace(action.ExpectedResult) == "" {
+		action.ExpectedResult = "Получить результат выполнения действия в нормализованной форме."
 	}
 
-	return model.Action{
-		Name:              name,
-		Class:             classifyAction(name, profileName),
-		Profile:           profileName,
-		ExpectedResult:    expectedResult,
-		RequiresWorkplace: actionRequiresWorkplace(name, profileName),
-		RequiresSynthesis: actionRequiresSynthesis(name, profileName),
-		Operations: []model.OperationSpec{
-			{Name: OperationKindResolveAction, Kind: OperationKindResolveAction, Title: "Разрешение действия"},
-			{Name: OperationKindPrepareData, Kind: OperationKindPrepareData, Title: "Подготовка данных"},
-			{Name: OperationKindResolveProfile, Kind: OperationKindResolveProfile, Title: "Выбор исполнительного профиля"},
-			{Name: OperationKindAllocateResources, Kind: OperationKindAllocateResources, Title: "Ресурсное снабжение"},
-			{Name: OperationKindPrepareWorkplace, Kind: OperationKindPrepareWorkplace, Title: "Подготовка рабочего места"},
-			{Name: OperationKindBuildDirective, Kind: OperationKindBuildDirective, Title: "Сборка исполнительной директивы"},
-			{Name: OperationKindLaunchSynthesis, Kind: OperationKindLaunchSynthesis, Title: "Запуск синтеза"},
-			{Name: OperationKindParseResult, Kind: OperationKindParseResult, Title: "Разбор результата"},
-			{Name: OperationKindFinalize, Kind: OperationKindFinalize, Title: "Завершающая фиксация"},
-		},
-	}
-}
-
-func classifyAction(actionName, profileName string) model.ActionClass {
-	value := strings.ToLower(strings.TrimSpace(actionName + " " + profileName))
-	switch {
-	case strings.Contains(value, "review"):
-		return model.ActionClass(ActionClassReview)
-	case strings.Contains(value, "assess") || strings.Contains(value, "description") || strings.Contains(value, "describe"):
-		return model.ActionClass(ActionClassTaskPreparation)
-	case strings.Contains(value, "integration") || strings.Contains(value, "comment") || strings.Contains(value, "merge") || strings.Contains(value, "pull-request"):
-		return model.ActionClass(ActionClassIntegrationChange)
-	case strings.Contains(value, "service") || strings.Contains(value, "diagnostic"):
-		return model.ActionClass(ActionClassService)
-	default:
-		return model.ActionClass(ActionClassEngineeringSynthesis)
-	}
-}
-
-func actionRequiresWorkplace(actionName, profileName string) bool {
-	class := classifyAction(actionName, profileName)
-	return class != model.ActionClass(ActionClassIntegrationChange)
-}
-
-func actionRequiresSynthesis(actionName, profileName string) bool {
-	class := classifyAction(actionName, profileName)
-	return class != model.ActionClass(ActionClassIntegrationChange) && class != model.ActionClass(ActionClassService)
+	return action, nil
 }
 
 func assignmentFromInvocation(in model.Invocation) *model.ExecutionAssignment {
@@ -110,6 +123,9 @@ func assignmentFromInvocation(in model.Invocation) *model.ExecutionAssignment {
 		if strings.TrimSpace(assignment.Profile) == "" {
 			assignment.Profile = strings.TrimSpace(in.Profile)
 		}
+		if strings.TrimSpace(assignment.Action) == "" {
+			assignment.Action = defaultActionNameForProfile(assignment.Profile)
+		}
 		if len(assignment.Constraints) == 0 && assignment.StructuredInput != nil {
 			assignment.Constraints = append([]string(nil), assignment.StructuredInput.Constraints...)
 		}
@@ -123,10 +139,7 @@ func assignmentFromInvocation(in model.Invocation) *model.ExecutionAssignment {
 		StructuredInput: in.Launch.StructuredInput,
 	}
 	if assignment.Action == "" {
-		assignment.Action = "engineering-synthesis"
-	}
-	if assignment.Profile == "" {
-		assignment.Profile = "default"
+		assignment.Action = defaultActionNameForProfile(assignment.Profile)
 	}
 	if assignment.StructuredInput != nil {
 		assignment.Constraints = append([]string(nil), assignment.StructuredInput.Constraints...)
@@ -145,10 +158,12 @@ func newOperationTracker(action model.Action) *operationTracker {
 	index := make(map[string]int, len(action.Operations))
 	for _, operation := range action.Operations {
 		result := model.OperationResult{
-			Name:   operation.Name,
-			Kind:   operation.Kind,
-			Title:  operation.Title,
-			Status: model.OperationStatus(OperationStatusPending),
+			Name:     operation.Name,
+			Kind:     operation.Kind,
+			Title:    operation.Title,
+			Origin:   operation.Origin,
+			Required: operation.Required,
+			Status:   model.OperationStatus(OperationStatusPending),
 		}
 		index[operation.Name] = len(results)
 		results = append(results, result)
@@ -165,6 +180,10 @@ func (t *operationTracker) completeIO(name string, input string, output string, 
 	t.set(name, model.OperationStatus(OperationStatusCompleted), input, output, summary, nil)
 }
 
+func (t *operationTracker) skip(name string, summary string) {
+	t.set(name, model.OperationStatus(OperationStatusSkipped), "", "", summary, nil)
+}
+
 func (t *operationTracker) fail(name string, summary string, err error, code string, retryable bool, manualIntervention bool) {
 	t.set(name, model.OperationStatus(OperationStatusFailed), "", "", summary, executionFailure(code, err, retryable, manualIntervention))
 }
@@ -174,7 +193,7 @@ func (t *operationTracker) set(name string, status model.OperationStatus, input 
 	if !ok {
 		index = len(t.results)
 		t.index[name] = index
-		t.results = append(t.results, model.OperationResult{Name: name})
+		t.results = append(t.results, model.OperationResult{Name: name, Origin: OperationOriginBuiltin, Required: true})
 	}
 
 	t.results[index].Status = status
@@ -210,10 +229,6 @@ func executionResultFromLaunch(assignment *model.ExecutionAssignment, action mod
 			status = "completed"
 		}
 	}
-	if err != nil && result.StructuredOutput != nil {
-		status = "partial"
-	}
-
 	executionResult := model.ExecutionResult{
 		Status:          status,
 		Summary:         strings.TrimSpace(result.Summary),
@@ -225,10 +240,96 @@ func executionResultFromLaunch(assignment *model.ExecutionAssignment, action mod
 		Launch:          &result,
 	}
 	if err != nil {
-		executionResult.Failure = executionFailure("execution_failed", err, false, true)
+		executionResult.Failure = executionFailure(executionFailureCode(operations), err, false, true)
 	}
 
 	return executionResult
+}
+
+func newActionTemplate(name, class, profile string, requiresWorkplace, requiresSynthesis bool, expectedResult string) model.Action {
+	return model.Action{
+		Name:              name,
+		Class:             model.ActionClass(class),
+		Profile:           profile,
+		ExpectedResult:    expectedResult,
+		RequiresWorkplace: requiresWorkplace,
+		RequiresSynthesis: requiresSynthesis,
+		Operations:        defaultActionOperations(),
+	}
+}
+
+func defaultActionOperations() []model.OperationSpec {
+	return []model.OperationSpec{
+		builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
+		builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
+		builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
+		builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
+		builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
+		builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
+		builtinOperation(OperationKindLaunchSynthesis, "Запуск синтеза", true),
+		builtinOperation(OperationKindParseResult, "Разбор результата", true),
+		builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
+	}
+}
+
+func builtinOperation(kind string, title string, required bool) model.OperationSpec {
+	return model.OperationSpec{
+		Name:     kind,
+		Kind:     model.OperationKind(kind),
+		Title:    title,
+		Origin:   OperationOriginBuiltin,
+		Required: required,
+	}
+}
+
+func actionNameFromInvocation(in model.Invocation) string {
+	if in.Assignment != nil && strings.TrimSpace(in.Assignment.Action) != "" {
+		return strings.TrimSpace(in.Assignment.Action)
+	}
+	return strings.TrimSpace(in.Action)
+}
+
+func profileNameFromInvocation(in model.Invocation) string {
+	if in.Assignment != nil && strings.TrimSpace(in.Assignment.Profile) != "" {
+		return strings.TrimSpace(in.Assignment.Profile)
+	}
+	return strings.TrimSpace(in.Profile)
+}
+
+func defaultActionNameForProfile(profileName string) string {
+	switch strings.ToLower(strings.TrimSpace(profileName)) {
+	case "review":
+		return ActionClassReview
+	case "task-description-assessor":
+		return ActionClassTaskPreparation
+	default:
+		return ActionClassEngineeringSynthesis
+	}
+}
+
+func cloneAction(action model.Action) model.Action {
+	cloned := action
+	cloned.Operations = append([]model.OperationSpec(nil), action.Operations...)
+	return cloned
+}
+
+func actionResolutionFailureOperations(err error) []model.OperationResult {
+	tracker := newOperationTracker(model.Action{
+		Operations: []model.OperationSpec{
+			builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
+		},
+	})
+	tracker.fail(OperationKindResolveAction, "Действие не найдено на нулевом этапе исполнения.", err, "action_not_found", false, true)
+	return tracker.snapshot()
+}
+
+func executionFailureCode(operations []model.OperationResult) string {
+	for _, operation := range operations {
+		if operation.Failure != nil && strings.TrimSpace(operation.Failure.Code) != "" {
+			return operation.Failure.Code
+		}
+	}
+	return "execution_failed"
 }
 
 func cloneAssignment(assignment *model.ExecutionAssignment) *model.ExecutionAssignment {

@@ -251,7 +251,7 @@ func TestServiceExecuteReturnsDiagnosedOperationFailure(t *testing.T) {
 	if result.Status != "failed" || result.Launch == nil || result.Launch.Status != "failed" {
 		t.Fatalf("unexpected execution result: %#v", result)
 	}
-	if result.Failure == nil || result.Failure.Code != "execution_failed" {
+	if result.Failure == nil || result.Failure.Code != "profile_not_found" {
 		t.Fatalf("unexpected failure: %#v", result.Failure)
 	}
 	if len(result.Operations) < 2 {
@@ -271,7 +271,48 @@ func TestServiceExecuteReturnsDiagnosedOperationFailure(t *testing.T) {
 	}
 }
 
-func TestServiceExecuteReturnsPartialResultWhenFinalOperationFails(t *testing.T) {
+func TestServiceExecuteReturnsActionFailureAtZeroStage(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := &Service{
+		logger: log.Default(),
+	}
+
+	result, err := service.Execute(context.Background(), Invocation{
+		Task:    "task-94",
+		Action:  "unknown-action",
+		Profile: "default",
+		Launch: LaunchSpec{
+			Directory: root,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected unknown action error")
+	}
+	if result.Status != "failed" || result.Launch == nil || result.Launch.Status != "failed" {
+		t.Fatalf("unexpected execution result: %#v", result)
+	}
+	if result.Failure == nil || result.Failure.Code != "action_not_found" {
+		t.Fatalf("unexpected failure: %#v", result.Failure)
+	}
+	if len(result.Operations) != 1 || result.Operations[0].Name != OperationKindResolveAction || result.Operations[0].Status != OperationStatusFailed {
+		t.Fatalf("expected only failed action resolution operation: %#v", result.Operations)
+	}
+	if result.Operations[0].Failure == nil || result.Operations[0].Failure.Code != "action_not_found" {
+		t.Fatalf("unexpected action operation failure: %#v", result.Operations[0])
+	}
+
+	runs, historyErr := history.List(context.Background(), root, history.ListFilter{Limit: 10, Status: "failed"})
+	if historyErr != nil {
+		t.Fatalf("list history: %v", historyErr)
+	}
+	if len(runs) != 1 || runs[0].Error == "" {
+		t.Fatalf("action failure must be recorded in history: %#v", runs)
+	}
+}
+
+func TestServiceExecuteReturnsFailedResultWhenFinalOperationFails(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -310,14 +351,17 @@ func TestServiceExecuteReturnsPartialResultWhenFinalOperationFails(t *testing.T)
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected final operation error, got %v", err)
 	}
-	if result.Status != "partial" {
-		t.Fatalf("expected partial result, got %#v", result)
+	if result.Status != "failed" {
+		t.Fatalf("expected failed result, got %#v", result)
 	}
 	if len(result.Artifacts) == 0 || result.Artifacts[0].Type != "runner-output" {
-		t.Fatalf("partial result must keep artifacts: %#v", result.Artifacts)
+		t.Fatalf("failed result must keep artifacts: %#v", result.Artifacts)
 	}
 	if len(result.DiagnosticLinks) == 0 {
-		t.Fatalf("partial result must keep diagnostic links: %#v", result.DiagnosticLinks)
+		t.Fatalf("failed result must keep diagnostic links: %#v", result.DiagnosticLinks)
+	}
+	if result.Launch == nil || result.Launch.StructuredOutput == nil || result.Launch.StructuredOutput.Summary != "Синтез выполнен." {
+		t.Fatalf("failed result must keep structured output for diagnostics: %#v", result.Launch)
 	}
 	finalOperation := result.Operations[len(result.Operations)-1]
 	if finalOperation.Name != OperationKindFinalize || finalOperation.Status != OperationStatusFailed {
@@ -325,6 +369,47 @@ func TestServiceExecuteReturnsPartialResultWhenFinalOperationFails(t *testing.T)
 	}
 	if finalOperation.Failure == nil || finalOperation.Failure.Code != "final_operation_failed" {
 		t.Fatalf("unexpected finalize failure: %#v", finalOperation)
+	}
+}
+
+func TestServiceExecuteSkipsResourcesWorkplaceAndLaunchWhenActionDoesNotNeedSynthesis(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := &Service{
+		logger:     log.Default(),
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "default", Mode: "manual"}},
+		resources:  &stubResourceProvider{err: errors.New("resources must not be called")},
+		workplaces: &stubWorkplaceManager{err: errors.New("workplace must not be called")},
+		launcher:   &stubLauncher{err: errors.New("launcher must not be called")},
+	}
+
+	result, err := service.Execute(context.Background(), Invocation{
+		Task:    "task-95",
+		Action:  "integration-change",
+		Profile: "default",
+		Launch: LaunchSpec{
+			Directory:       root,
+			StructuredInput: &StructuredInput{IntegrationActions: []StructuredAction{{Type: "github", Title: "Опубликовать комментарий"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute integration action: %v", err)
+	}
+	if result.Status != "completed" || result.Action.RequiresWorkplace || result.Action.RequiresSynthesis {
+		t.Fatalf("unexpected execution result: %#v", result)
+	}
+	if result.Action.Class != ActionClassIntegrationChange {
+		t.Fatalf("unexpected action class: %#v", result.Action)
+	}
+	for _, operationName := range []string{OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult} {
+		operation := findOperationResult(result.Operations, operationName)
+		if operation == nil || operation.Status != OperationStatusSkipped {
+			t.Fatalf("operation %s must be skipped: %#v", operationName, result.Operations)
+		}
+	}
+	if result.Launch == nil || result.Launch.Status != "completed" || !strings.Contains(result.Launch.Summary, "synthesis=not-required") {
+		t.Fatalf("unexpected launch summary: %#v", result.Launch)
 	}
 }
 
@@ -715,4 +800,14 @@ func (s *stubWorkplaceManager) Prepare(context.Context, model.Invocation, model.
 		return model.Workplace{}, s.err
 	}
 	return s.workplace, nil
+}
+
+func findOperationResult(operations []OperationResult, name string) *OperationResult {
+	for index := range operations {
+		if operations[index].Name == name {
+			return &operations[index]
+		}
+	}
+
+	return nil
 }

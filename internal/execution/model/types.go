@@ -290,20 +290,24 @@ type Action struct {
 }
 
 type OperationSpec struct {
-	Name  string        `json:"name,omitempty"`
-	Kind  OperationKind `json:"kind,omitempty"`
-	Title string        `json:"title,omitempty"`
+	Name     string        `json:"name,omitempty"`
+	Kind     OperationKind `json:"kind,omitempty"`
+	Title    string        `json:"title,omitempty"`
+	Origin   string        `json:"origin,omitempty"`
+	Required bool          `json:"required,omitempty"`
 }
 
 type OperationResult struct {
-	Name    string          `json:"name,omitempty"`
-	Kind    OperationKind   `json:"kind,omitempty"`
-	Title   string          `json:"title,omitempty"`
-	Input   string          `json:"input,omitempty"`
-	Output  string          `json:"output,omitempty"`
-	Status  OperationStatus `json:"status,omitempty"`
-	Summary string          `json:"summary,omitempty"`
-	Failure *Failure        `json:"failure,omitempty"`
+	Name     string          `json:"name,omitempty"`
+	Kind     OperationKind   `json:"kind,omitempty"`
+	Title    string          `json:"title,omitempty"`
+	Origin   string          `json:"origin,omitempty"`
+	Required bool            `json:"required,omitempty"`
+	Input    string          `json:"input,omitempty"`
+	Output   string          `json:"output,omitempty"`
+	Status   OperationStatus `json:"status,omitempty"`
+	Summary  string          `json:"summary,omitempty"`
+	Failure  *Failure        `json:"failure,omitempty"`
 }
 
 type Artifact struct {
