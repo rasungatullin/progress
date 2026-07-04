@@ -112,9 +112,12 @@ func TestServiceRejectsUnsupportedOperation(t *testing.T) {
 
 	service := NewService()
 	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "search"})
-	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
+	assertGitHubErrorCode(t, err, ErrorCodeUnsupportedOperation)
 	if response.Resource != "issue" {
 		t.Fatalf("unexpected resource: %q", response.Resource)
+	}
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindUnsupportedOperation {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
 	}
 }
 

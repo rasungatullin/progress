@@ -384,3 +384,22 @@ func TestLoadIntegrationConfigRejectsUnsupportedDatabaseDriver(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLoadIntegrationConfigRejectsUnknownGitHubTransport(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{"systems":{"github":{"type":"github","transport":"socket"}}}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if err.Error() != "invalid integration config after merge of 1 layers: system \"github\" uses unknown GitHub transport \"socket\"" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

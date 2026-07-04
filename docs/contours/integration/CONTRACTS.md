@@ -248,7 +248,18 @@ type PullRequestComment struct {
 
 В текущем срезе среды исполнения GitHub issue comments нормализуются в общий `TrackerComment`: `Repository` и `Number` задают исходную issue, `Author` хранит нормализованного пользователя, `URL` берётся из `html_url`, а `CreatedAt`/`UpdatedAt` сохраняются как строки из ответа GitHub.
 
-## 6. Интерфейс контура
+## 6. Транспорт внешнего обращения
+
+Выбор способа обращения к внешней системе относится к настройке интегрируемой системы, а не к публичному запросу вызывающего контура. Для GitHub-системы поле `IntegrationSystemConfig.Transport` принимает значения:
+
+- `cli` — вызов через `gh`;
+- `api` — прямой вызов GitHub REST API и GraphQL API.
+
+Если поле не задано, используется `cli`, чтобы сохранить совместимость существующих установок. В режиме `api` GitHub-адаптер использует `token` или `token_env`, а `base_url` задаёт базовый адрес API. Если `base_url` не указан, применяется `https://api.github.com`.
+
+Независимо от выбранного транспорта адаптер возвращает тот же `Response`: канонические объекты `CanonicalTask`, `TaskComment`, `Repository`, `MergeRequest`, `ReviewRemark`, `OperationResult` и `Failure` не должны раскрывать вызывающему контуру, был ли внешний вызов выполнен через `gh` или напрямую через HTTP API. Диагностика маршрута может включать транспорт как служебный признак, например `transport=api`.
+
+## 7. Интерфейс контура
 
 Контур публикует универсальный интерфейс диспетчеризации и выполнения канонического запроса.
 
@@ -457,11 +468,13 @@ type Failure struct {
 Минимальные `Failure.Kind`:
 
 - `auth-required`;
+- `permission-denied`;
 - `not-found`;
 - `invalid-request`;
 - `temporary-unavailable`;
+- `rate-limited`;
 - `timeout`;
-- `unsupported-action`;
+- `unsupported-operation`;
 - `internal-integration-error`.
 
 ## 11. Поведение контура

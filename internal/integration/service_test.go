@@ -170,6 +170,24 @@ func (s mapPrivateStore) Delete(_ context.Context, name string) error {
 	return nil
 }
 
+func TestDispatchReportsConfiguredTransport(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github", Transport: "api"},
+		},
+	})
+
+	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !contains(route.Diagnostics, "transport=api") {
+		t.Fatalf("expected transport diagnostic, got %#v", route.Diagnostics)
+	}
+}
+
 func TestExecuteReturnsDisabledSystemError(t *testing.T) {
 	t.Parallel()
 
