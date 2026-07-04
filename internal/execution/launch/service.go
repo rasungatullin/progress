@@ -134,10 +134,8 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		return result, err
 	}
 
-	commitPush := in.Launch.CommitPush || profile.CommitPush
-
 	gitSummary := "git=disabled"
-	if commitPush {
+	if in.Launch.CommitPush {
 		result, err := s.commitAndPush(ctx, in, workplace, structuredOutput)
 		if err != nil {
 			launchResult := model.LaunchResult{
@@ -822,6 +820,14 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 	return gitResult{status: "committed+pushed", branch: branch}, nil
 }
 
+func (s *Service) CommitAndPush(ctx context.Context, in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
+	result, err := s.commitAndPush(ctx, in, workplace, output)
+	if err != nil {
+		return "", err
+	}
+	return result.summary(), nil
+}
+
 func (s *Service) isGitRepository(ctx context.Context, dir string) bool {
 	output, err := s.runGitOutput(ctx, dir, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
@@ -1357,7 +1363,7 @@ func buildStructuredOutputCanonicalExample(fields []string) string {
 		case "conclusion":
 			parts = append(parts, `,"conclusion":{"status":"ok","summary":"Ready for review"}`)
 		case "extensions":
-			parts = append(parts, `,"extensions":{"custom":{"owner":"review-cycle"}}`)
+			parts = append(parts, `,"extensions":{"custom":{"owner":"structured-output-test"}}`)
 		}
 	}
 	parts = append(parts, "}")

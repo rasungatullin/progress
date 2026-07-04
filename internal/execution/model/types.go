@@ -166,7 +166,6 @@ type Profile struct {
 	StructuredOutput         bool     `json:"structured_output,omitempty"`
 	StructuredOutputRequired bool     `json:"structured_output_required,omitempty"`
 	StructuredOutputFields   []string `json:"structured_output_fields,omitempty"`
-	CommitPush               bool     `json:"commit_push,omitempty"`
 }
 
 type ProfileConfigFile struct {
@@ -182,7 +181,6 @@ type ProfileOptions struct {
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`
-	CommitPush               *bool     `json:"commit-push"`
 }
 
 type ProfileConfig struct {
@@ -194,7 +192,6 @@ type ProfileConfig struct {
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`
-	CommitPush               *bool     `json:"commit-push"`
 }
 
 type Allocation struct {
@@ -220,39 +217,6 @@ type ResourceConfigFile struct {
 type ResourceBindingConfig struct {
 	Runner string `json:"runner"`
 	Model  string `json:"model"`
-}
-
-type CycleConfig struct {
-	Cycles map[string]CycleDefinition `json:"cycles"`
-}
-
-type CycleDefinition struct {
-	StartStep string      `json:"start_step"`
-	Steps     []CycleStep `json:"steps"`
-	Limits    CycleLimits `json:"limits"`
-}
-
-type CycleStep struct {
-	Name           string              `json:"name"`
-	Profile        string              `json:"profile"`
-	InputTransform CycleInputTransform `json:"input_transform"`
-	Transitions    []CycleTransition   `json:"transitions"`
-}
-
-type CycleTransition struct {
-	To      string   `json:"to,omitempty"`
-	Finish  string   `json:"finish,omitempty"`
-	In      []string `json:"in"`
-	NotIn   []string `json:"not_in"`
-	Missing bool     `json:"missing"`
-}
-
-type CycleInputTransform struct {
-	TaskOnRepeat string `json:"task_on_repeat"`
-}
-
-type CycleLimits struct {
-	MaxExecutions int `json:"max_executions"`
 }
 
 type ResourceDefaultsConfig struct {

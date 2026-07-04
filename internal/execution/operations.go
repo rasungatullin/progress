@@ -1,0 +1,283 @@
+package execution
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/rasungatullin/progress/internal/execution/history"
+	"github.com/rasungatullin/progress/internal/execution/launch"
+	"github.com/rasungatullin/progress/internal/execution/model"
+)
+
+type operationExecution struct {
+	in            Invocation
+	assignment    *ExecutionAssignment
+	action        Action
+	profile       Profile
+	allocation    Allocation
+	workplace     Workplace
+	result        LaunchResult
+	historyRoot   string
+	historyHandle history.Handle
+	tracker       *operationTracker
+}
+
+type builtinOperationExecutor struct {
+	service *Service
+}
+
+type commitPusher interface {
+	CommitAndPush(context.Context, model.Invocation, model.Workplace, *model.StructuredOutput) (string, error)
+}
+
+func (s *Service) runActionOperations(ctx context.Context, state *operationExecution) error {
+	executor := builtinOperationExecutor{service: s}
+	for _, operation := range state.action.Operations {
+		if err := executor.Execute(ctx, state, operation); err != nil {
+			return err
+		}
+	}
+
+	if strings.TrimSpace(state.result.Status) == "" {
+		state.result = LaunchResult{
+			Status:  "completed",
+			Summary: fmt.Sprintf("action=%s class=%s operations=completed", state.action.Name, state.action.Class),
+		}
+		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
+	}
+
+	return nil
+}
+
+func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationExecution, operation OperationSpec) error {
+	name := operationResultName(operation)
+	switch operationKind(operation) {
+	case OperationKindResolveAction:
+		state.tracker.complete(name, fmt.Sprintf("action=%s class=%s", state.action.Name, state.action.Class))
+		return nil
+	case OperationKindPrepareData:
+		state.tracker.completeIO(name, assignmentSummary(state.assignment), structuredInputSummary(state.assignment.StructuredInput), "Данные задания подготовлены для выполнения.")
+		return nil
+	case OperationKindResolveProfile:
+		return e.resolveProfile(ctx, state, name)
+	case OperationKindAllocateResources:
+		return e.allocateResources(ctx, state, name)
+	case OperationKindPrepareWorkplace:
+		return e.prepareWorkplace(ctx, state, name)
+	case OperationKindBuildDirective:
+		return e.buildDirective(ctx, state, name)
+	case OperationKindLaunchSynthesis:
+		return e.launchSynthesis(ctx, state, name)
+	case OperationKindParseResult:
+		return e.parseResult(state, name)
+	case OperationKindCommitPush:
+		return e.commitPush(ctx, state, name)
+	case OperationKindFinalize:
+		return e.finalize(ctx, state, name)
+	default:
+		return e.unsupported(ctx, state, operation, name)
+	}
+}
+
+func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *operationExecution, name string) error {
+	profile, err := e.service.ResolveProfile(ctx, state.in)
+	if err != nil {
+		state.result = failedStartResult(err)
+		state.tracker.fail(name, "Исполнительный профиль не определён.", err, "profile_not_found", false, true)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, Profile{}, Allocation{}, Workplace{}, state.result, err)
+		return err
+	}
+
+	state.profile = profile
+	state.tracker.complete(name, fmt.Sprintf("profile=%s mode=%s", profile.Name, profile.Mode))
+	return nil
+}
+
+func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *operationExecution, name string) error {
+	if !state.action.RequiresSynthesis {
+		state.allocation = Allocation{Resource: "not-required", Source: "action-without-synthesis"}
+		state.tracker.skip(name, "Ресурсное снабжение не требуется для действия без синтеза.")
+		return nil
+	}
+
+	allocation, err := e.service.AllocateResources(ctx, state.in, state.profile)
+	if err != nil {
+		state.result = failedStartResult(err)
+		state.tracker.fail(name, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, Allocation{}, Workplace{}, state.result, err)
+		return err
+	}
+
+	state.allocation = allocation
+	state.tracker.complete(name, fmt.Sprintf("resource=%s runner=%s model=%s", allocation.Resource, allocation.Runner, allocation.Model))
+	return nil
+}
+
+func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *operationExecution, name string) error {
+	if !state.action.RequiresWorkplace {
+		state.workplace = Workplace{Name: strings.TrimSpace(state.in.Launch.Directory), Ready: true}
+		state.tracker.skip(name, "Рабочее место не требуется для разрешённого действия.")
+		return nil
+	}
+
+	workplace, err := e.service.PrepareWorkplace(ctx, state.in, state.profile, state.allocation)
+	if err != nil {
+		state.result = failedStartResult(err)
+		state.tracker.fail(name, "Исполнительное рабочее место не подготовлено.", err, "workplace_not_prepared", true, true)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, Workplace{}, state.result, err)
+		return err
+	}
+
+	state.workplace = workplace
+	if strings.TrimSpace(state.in.Launch.Directory) == "" {
+		state.in.Launch.Directory = workplace.Name
+	}
+	state.tracker.complete(name, fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
+	return nil
+}
+
+func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *operationExecution, name string) error {
+	if !state.action.RequiresSynthesis {
+		state.tracker.skip(name, "Исполнительная директива не требуется для действия без синтеза.")
+		return nil
+	}
+
+	state.in.Launch.Runner = state.allocation.Runner
+	state.in.Launch.Model = state.allocation.Model
+	if strings.TrimSpace(state.in.Launch.ModelBinding) == "" {
+		state.in.Launch.ModelBinding = state.allocation.ModelBinding
+	}
+	state.tracker.completeIO(name, structuredInputSummary(state.in.Launch.StructuredInput), fmt.Sprintf("runner=%s model=%s", state.in.Launch.Runner, state.in.Launch.Model), "Исполнительная директива подготовлена к запуску.")
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, LaunchResult{Status: "running"}, nil)
+	return nil
+}
+
+func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, name string) error {
+	if !state.action.RequiresSynthesis {
+		state.tracker.skip(name, "Запуск синтеза не требуется для разрешённого действия.")
+		return nil
+	}
+
+	launchCtx := launch.WithHistoryHandle(ctx, state.historyHandle)
+	launchInvocation := state.in
+	launchInvocation.Launch.CommitPush = false
+	launchProfile := state.profile
+	result, err := e.service.Launch(launchCtx, launchInvocation, launchProfile, state.allocation, state.workplace)
+	state.result = result
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, result, err)
+	if err != nil {
+		if result.StructuredOutput != nil {
+			state.tracker.complete(name, fmt.Sprintf("status=%s", result.Status))
+			state.tracker.completeIO(OperationKindParseResult, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат синтеза получен и нормализован.")
+			state.tracker.fail(OperationKindFinalize, "Завершающая операция после синтеза не выполнена.", err, "final_operation_failed", true, true)
+			return err
+		}
+
+		state.tracker.fail(name, "Запуск синтеза завершился отказом.", err, "synthesis_failed", true, true)
+		state.tracker.fail(OperationKindParseResult, "Результат выполнения не приведён к нормализованной форме.", err, "result_not_parsed", false, true)
+		return err
+	}
+
+	state.tracker.complete(name, fmt.Sprintf("status=%s", result.Status))
+	return nil
+}
+
+func (e builtinOperationExecutor) parseResult(state *operationExecution, name string) error {
+	if !state.action.RequiresSynthesis {
+		state.tracker.skip(name, "Разбор результата синтеза не требуется.")
+		return nil
+	}
+
+	state.tracker.completeIO(name, resultSummary(state.result), structuredOutputSummary(state.result.StructuredOutput), "Результат выполнения нормализован.")
+	return nil
+}
+
+func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operationExecution, name string) error {
+	if !state.action.RequiresSynthesis {
+		state.tracker.skip(name, "Создание коммита не требуется для действия без синтеза.")
+		return nil
+	}
+
+	pusher, ok := e.service.launcher.(commitPusher)
+	if !ok {
+		err := fmt.Errorf("commit-push operation is unsupported by launcher")
+		state.result.Status = "failed"
+		if strings.TrimSpace(state.result.Summary) == "" {
+			state.result.Summary = err.Error()
+		}
+		state.tracker.fail(name, "Операция commit-push не поддержана модулем запуска.", err, "commit_push_unsupported", false, true)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
+		return err
+	}
+
+	summary, err := pusher.CommitAndPush(ctx, state.in, state.workplace, state.result.StructuredOutput)
+	if err != nil {
+		state.result.Status = "failed"
+		if strings.TrimSpace(state.result.Summary) == "" {
+			state.result.Summary = strings.TrimSpace(err.Error())
+		}
+		state.tracker.fail(name, "Создание коммита или отправка ветки не выполнены.", err, "commit_push_failed", true, true)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
+		return err
+	}
+
+	state.result.Summary = joinExecutionSummaries(state.result.Summary, summary)
+	state.tracker.complete(name, summary)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
+	return nil
+}
+
+func (e builtinOperationExecutor) finalize(ctx context.Context, state *operationExecution, name string) error {
+	if !state.action.RequiresSynthesis {
+		state.result = LaunchResult{
+			Status:  "completed",
+			Summary: fmt.Sprintf("action=%s class=%s synthesis=not-required", state.action.Name, state.action.Class),
+		}
+		state.tracker.complete(name, finalizeSummary(state.result))
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
+		return nil
+	}
+
+	state.tracker.complete(name, finalizeSummary(state.result))
+	return nil
+}
+
+func joinExecutionSummaries(values ...string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		parts = append(parts, value)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (e builtinOperationExecutor) unsupported(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	if !operation.Required {
+		state.tracker.skip(name, "Операция не поддержана текущей реализацией и не является обязательной.")
+		return nil
+	}
+
+	err := fmt.Errorf("operation %q is unsupported", name)
+	state.result = failedStartResult(err)
+	state.tracker.fail(name, "Операция не поддержана текущей реализацией.", err, "operation_unsupported", false, true)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
+	return err
+}
+
+func operationKind(operation OperationSpec) OperationKind {
+	if operation.Kind != "" {
+		return operation.Kind
+	}
+	return model.OperationKind(operationResultName(operation))
+}
+
+func operationResultName(operation OperationSpec) string {
+	if strings.TrimSpace(operation.Name) != "" {
+		return strings.TrimSpace(operation.Name)
+	}
+	return strings.TrimSpace(string(operation.Kind))
+}

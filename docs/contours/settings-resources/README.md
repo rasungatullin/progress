@@ -50,7 +50,7 @@
 
 Начальный каркас расположен в пакете `internal/configuration`.
 
-Пакет уже содержит загрузчики `LoadIntegrationConfig`, `LoadExecutionResourceConfig` и `LoadExecutionCycleConfig`. В рамках контура добавлен сервис `Service.Snapshot`, который собирает нормализованный снимок доступных настроек и ресурсов.
+Пакет уже содержит загрузчики `LoadIntegrationConfig` и `LoadExecutionResourceConfig`. В рамках контура добавлен сервис `Service.Snapshot`, который собирает нормализованный снимок доступных настроек и ресурсов.
 
 ## 5. Дополнительная документация
 

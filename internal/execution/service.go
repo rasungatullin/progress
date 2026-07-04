@@ -140,90 +140,19 @@ func (s *Service) Execute(ctx context.Context, in Invocation) (ExecutionResult, 
 		in.Profile = strings.TrimSpace(action.Profile)
 		assignment.Profile = in.Profile
 	}
-	operations := newOperationTracker(action)
-	operations.complete(OperationKindResolveAction, fmt.Sprintf("action=%s class=%s", action.Name, action.Class))
-	operations.completeIO(OperationKindPrepareData, assignmentSummary(assignment), structuredInputSummary(assignment.StructuredInput), "Данные задания подготовлены для выполнения.")
 
 	s.logger.Printf("Контур исполнения принят к пуску: задача=%q", in.Task)
 
-	profile, err := s.ResolveProfile(ctx, in)
-	if err != nil {
-		result := failedStartResult(err)
-		s.updateStartHistory(ctx, historyRoot, historyHandle, in, Profile{}, Allocation{}, Workplace{}, result, err)
-		operations.fail(OperationKindResolveProfile, "Исполнительный профиль не определён.", err, "profile_not_found", false, true)
-		return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
+	state := &operationExecution{
+		in:            in,
+		assignment:    assignment,
+		action:        action,
+		historyRoot:   historyRoot,
+		historyHandle: historyHandle,
+		tracker:       newOperationTracker(action),
 	}
-	operations.complete(OperationKindResolveProfile, fmt.Sprintf("profile=%s mode=%s", profile.Name, profile.Mode))
-
-	allocation := Allocation{Resource: "not-required", Source: "action-without-synthesis"}
-	if action.RequiresSynthesis {
-		allocation, err = s.AllocateResources(ctx, in, profile)
-		if err != nil {
-			result := failedStartResult(err)
-			s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, Allocation{}, Workplace{}, result, err)
-			operations.fail(OperationKindAllocateResources, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
-			return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
-		}
-		operations.complete(OperationKindAllocateResources, fmt.Sprintf("resource=%s runner=%s model=%s", allocation.Resource, allocation.Runner, allocation.Model))
-	} else {
-		operations.skip(OperationKindAllocateResources, "Ресурсное снабжение не требуется для действия без синтеза.")
-	}
-
-	workplace := Workplace{Name: strings.TrimSpace(in.Launch.Directory), Ready: !action.RequiresWorkplace}
-	if action.RequiresWorkplace {
-		workplace, err = s.PrepareWorkplace(ctx, in, profile, allocation)
-		if err != nil {
-			result := failedStartResult(err)
-			s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, Workplace{}, result, err)
-			operations.fail(OperationKindPrepareWorkplace, "Исполнительное рабочее место не подготовлено.", err, "workplace_not_prepared", true, true)
-			return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
-		}
-		operations.complete(OperationKindPrepareWorkplace, fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
-	} else {
-		operations.skip(OperationKindPrepareWorkplace, "Рабочее место не требуется для разрешённого действия.")
-	}
-
-	if strings.TrimSpace(in.Launch.Directory) == "" {
-		in.Launch.Directory = workplace.Name
-	}
-	if !action.RequiresSynthesis {
-		operations.skip(OperationKindBuildDirective, "Исполнительная директива не требуется для действия без синтеза.")
-		operations.skip(OperationKindLaunchSynthesis, "Запуск синтеза не требуется для разрешённого действия.")
-		operations.skip(OperationKindParseResult, "Разбор результата синтеза не требуется.")
-		result := LaunchResult{
-			Status:  "completed",
-			Summary: fmt.Sprintf("action=%s class=%s synthesis=not-required", action.Name, action.Class),
-		}
-		operations.complete(OperationKindFinalize, finalizeSummary(result))
-		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, workplace, result, nil)
-		return executionResultFromLaunch(assignment, action, operations.snapshot(), result, nil), nil
-	}
-	in.Launch.Runner = allocation.Runner
-	in.Launch.Model = allocation.Model
-	if strings.TrimSpace(in.Launch.ModelBinding) == "" {
-		in.Launch.ModelBinding = allocation.ModelBinding
-	}
-	operations.completeIO(OperationKindBuildDirective, structuredInputSummary(in.Launch.StructuredInput), fmt.Sprintf("runner=%s model=%s", in.Launch.Runner, in.Launch.Model), "Исполнительная директива подготовлена к запуску.")
-	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, workplace, LaunchResult{Status: "running"}, nil)
-
-	launchCtx := launch.WithHistoryHandle(ctx, historyHandle)
-	result, err := s.Launch(launchCtx, in, profile, allocation, workplace)
-	s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile, allocation, workplace, result, err)
-	if err != nil {
-		if result.StructuredOutput != nil {
-			operations.complete(OperationKindLaunchSynthesis, fmt.Sprintf("status=%s", result.Status))
-			operations.completeIO(OperationKindParseResult, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат синтеза получен и нормализован.")
-			operations.fail(OperationKindFinalize, "Завершающая операция после синтеза не выполнена.", err, "final_operation_failed", true, true)
-			return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
-		}
-		operations.fail(OperationKindLaunchSynthesis, "Запуск синтеза завершился отказом.", err, "synthesis_failed", true, true)
-		operations.fail(OperationKindParseResult, "Результат выполнения не приведён к нормализованной форме.", err, "result_not_parsed", false, true)
-		return executionResultFromLaunch(assignment, action, operations.snapshot(), result, err), err
-	}
-	operations.complete(OperationKindLaunchSynthesis, fmt.Sprintf("status=%s", result.Status))
-	operations.completeIO(OperationKindParseResult, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат выполнения нормализован.")
-	operations.complete(OperationKindFinalize, finalizeSummary(result))
-	return executionResultFromLaunch(assignment, action, operations.snapshot(), result, nil), nil
+	err = s.runActionOperations(ctx, state)
+	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), state.result, err), err
 }
 
 func (s *Service) Dispatch(ctx context.Context, in Invocation) []string {
@@ -259,7 +188,7 @@ func (s *Service) Resume(ctx context.Context, req ResumeRequest) (LaunchResult, 
 }
 
 func (s *Service) LaunchDirect(ctx context.Context, in Invocation) (LaunchResult, error) {
-	profile := Profile{Name: "direct-launch", Mode: "manual", CommitPush: false}
+	profile := Profile{Name: "direct-launch", Mode: "manual"}
 	allocation := Allocation{
 		Resource:     "external-launch",
 		Reserved:     true,
