@@ -181,9 +181,8 @@ func TestServiceExecuteOperationClosesHistoryForEarlyOperation(t *testing.T) {
 }
 
 func TestServiceExecuteReturnsActionAndOperationResults(t *testing.T) {
-	t.Parallel()
-
 	root := t.TempDir()
+	withWorkingDirectory(t, root)
 	service := &Service{
 		logger:     log.Default(),
 		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
@@ -244,8 +243,8 @@ func TestServiceExecuteReturnsActionAndOperationResults(t *testing.T) {
 }
 
 func TestServiceExecuteReturnsDiagnosedOperationFailure(t *testing.T) {
-	t.Parallel()
-
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
 	expectedErr := errors.New("profile unavailable")
 	service := &Service{
 		logger:   log.Default(),
@@ -325,9 +324,8 @@ func TestServiceExecuteReturnsActionFailureAtZeroStage(t *testing.T) {
 }
 
 func TestServiceExecuteReturnsFailedResultWhenFinalOperationFails(t *testing.T) {
-	t.Parallel()
-
 	root := t.TempDir()
+	withWorkingDirectory(t, root)
 	expectedErr := errors.New("commit push failed")
 	service := &Service{
 		logger:     log.Default(),
@@ -380,8 +378,8 @@ func TestServiceExecuteReturnsFailedResultWhenFinalOperationFails(t *testing.T) 
 }
 
 func TestServiceExecuteSkipsResourcesWorkplaceAndLaunchWhenActionDoesNotNeedSynthesis(t *testing.T) {
-	t.Parallel()
-
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
 	service := &Service{
 		logger:     log.Default(),
 		profiles:   &stubProfileResolver{profile: model.Profile{Name: "default", Mode: "manual"}},
@@ -418,8 +416,8 @@ func TestServiceExecuteSkipsResourcesWorkplaceAndLaunchWhenActionDoesNotNeedSynt
 }
 
 func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
-	t.Parallel()
-
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
 	expectedErr := errors.New("profile resolver must not be called")
 	service := &Service{
 		logger: log.Default(),
@@ -472,9 +470,8 @@ func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 }
 
 func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
-	t.Parallel()
-
 	root := t.TempDir()
+	withWorkingDirectory(t, root)
 	launcher := &stubLauncher{
 		result:        model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}},
 		commitSummary: "git=committed+pushed branch=task-97",
