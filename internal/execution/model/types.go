@@ -137,13 +137,21 @@ type ObjectRef struct {
 
 type ExecutionAssignment struct {
 	Action          string             `json:"action,omitempty"`
-	Profile         string             `json:"profile,omitempty"`
 	ExpectedResult  string             `json:"expected_result,omitempty"`
 	Constraints     []string           `json:"constraints,omitempty"`
 	CanonicalTask   *ObjectRef         `json:"canonical_task,omitempty"`
 	RelatedObjects  []ObjectRef        `json:"related_objects,omitempty"`
 	Reasons         []AssignmentReason `json:"reasons,omitempty"`
 	StructuredInput *StructuredInput   `json:"structured_input,omitempty"`
+}
+
+type ActionInvocation struct {
+	Assignment *ExecutionAssignment `json:"assignment,omitempty"`
+}
+
+type OperationInvocation struct {
+	Operation  string               `json:"operation,omitempty"`
+	Assignment *ExecutionAssignment `json:"assignment,omitempty"`
 }
 
 type Invocation struct {

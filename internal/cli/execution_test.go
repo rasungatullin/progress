@@ -11,85 +11,29 @@ import (
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution"
-	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/spf13/cobra"
 )
 
-func TestBindLaunchFlagsAndInvocation(t *testing.T) {
+func TestBindActionFlagsAndInvocation(t *testing.T) {
 	t.Parallel()
 
-	flags := newLaunchFlags()
-	cmd := &cobra.Command{Use: "launch"}
-	bindLaunchFlags(cmd, flags)
+	flags := newActionFlags()
+	cmd := &cobra.Command{Use: "action"}
+	bindActionFlags(cmd, flags)
 
-	err := cmd.ParseFlags([]string{
-		"--dir", "/tmp/work",
-		"--runner", "codex",
-		"--model", "openai/gpt-5.4",
-		"--model-binding", "coder",
-		"--prompt", "ship it",
-		"--structured-output",
-		"--structured-output-required",
-		"--commit-push",
-	})
-	if err != nil {
+	if err := cmd.ParseFlags([]string{"--action", "review", "--task", "Провести ревизию"}); err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
 
-	invocation := invocationFromLaunchFlags(flags)
-	if invocation.Launch.Directory != "/tmp/work" {
-		t.Fatalf("unexpected directory: %q", invocation.Launch.Directory)
-	}
-	if invocation.Launch.Runner != "codex" {
-		t.Fatalf("unexpected runner: %q", invocation.Launch.Runner)
-	}
-	if invocation.Launch.ModelBinding != "coder" {
-		t.Fatalf("unexpected model-binding: %q", invocation.Launch.ModelBinding)
-	}
-	if !invocation.Launch.CommitPush {
-		t.Fatal("expected commit-push to be enabled")
-	}
-	if invocation.Launch.Prompt != "ship it" {
-		t.Fatalf("unexpected prompt: %q", invocation.Launch.Prompt)
-	}
-	if !invocation.Launch.StructuredOutput {
-		t.Fatal("expected structured-output to be enabled")
-	}
-	if !invocation.Launch.StructuredOutputRequired {
-		t.Fatal("expected structured-output-required to be enabled")
-	}
-}
-
-func TestBindStartFlagsAndInvocationIncludesRepo(t *testing.T) {
-	t.Parallel()
-
-	flags := newStartFlags()
-	cmd := &cobra.Command{Use: "start"}
-	bindStartFlags(cmd, flags)
-
-	err := cmd.ParseFlags([]string{"--name", "task-49", "--repo", "https://github.com/owner/name", "--action", "review", "--task", "ship it"})
+	request, err := actionInvocationFromFlags(flags)
 	if err != nil {
-		t.Fatalf("parse flags: %v", err)
+		t.Fatalf("build action invocation: %v", err)
 	}
-
-	invocation, err := invocationFromStructuredFlags(flags)
-	if err != nil {
-		t.Fatalf("build invocation: %v", err)
+	if request.Assignment == nil || request.Assignment.Action != "review" {
+		t.Fatalf("unexpected assignment: %#v", request.Assignment)
 	}
-	if invocation.Workplace.Name != "task-49" {
-		t.Fatalf("unexpected workplace: %q", invocation.Workplace.Name)
-	}
-	if invocation.Repository.URL != "https://github.com/owner/name" {
-		t.Fatalf("unexpected repository: %q", invocation.Repository.URL)
-	}
-	if invocation.Action != "review" {
-		t.Fatalf("unexpected action: %q", invocation.Action)
-	}
-	if invocation.Launch.ModelBinding != "" {
-		t.Fatalf("start invocation must not set model-binding implicitly: %#v", invocation.Launch)
-	}
-	if invocation.Launch.StructuredInput == nil || invocation.Launch.StructuredInput.Task != "ship it" {
-		t.Fatalf("unexpected structured input: %#v", invocation.Launch.StructuredInput)
+	if request.Assignment.StructuredInput == nil || request.Assignment.StructuredInput.Task != "Провести ревизию" {
+		t.Fatalf("unexpected structured input: %#v", request.Assignment.StructuredInput)
 	}
 }
 
@@ -101,9 +45,9 @@ func TestStructuredInputFlagsOverrideInputFile(t *testing.T) {
 		t.Fatalf("write input file: %v", err)
 	}
 
-	flags := newStartFlags()
-	cmd := &cobra.Command{Use: "start"}
-	bindStartFlags(cmd, flags)
+	flags := newActionFlags()
+	cmd := &cobra.Command{Use: "action"}
+	bindActionFlags(cmd, flags)
 
 	err := cmd.ParseFlags([]string{
 		"--input-file", inputFile,
@@ -116,11 +60,11 @@ func TestStructuredInputFlagsOverrideInputFile(t *testing.T) {
 		t.Fatalf("parse flags: %v", err)
 	}
 
-	invocation, err := invocationFromStructuredFlags(flags)
+	request, err := actionInvocationFromFlags(flags)
 	if err != nil {
 		t.Fatalf("build invocation: %v", err)
 	}
-	input := invocation.Launch.StructuredInput
+	input := request.Assignment.StructuredInput
 	if input == nil {
 		t.Fatal("expected structured input")
 	}
@@ -141,7 +85,7 @@ func TestStructuredInputFlagsOverrideInputFile(t *testing.T) {
 	}
 }
 
-func TestExecutionStartRejectsEmptyStructuredInputBeforeServiceStart(t *testing.T) {
+func TestExecutionActionAllowsActionOnlyInvocation(t *testing.T) {
 	t.Parallel()
 
 	cmd := NewRootCommand()
@@ -149,27 +93,37 @@ func TestExecutionStartRejectsEmptyStructuredInputBeforeServiceStart(t *testing.
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "start", "--dir", "/tmp/work", "--profile", "default"})
+	cmd.SetArgs([]string{"execution", "action"})
 
 	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
 		return executionCommandServiceStub{
-			start: func(context.Context, execution.Invocation) (execution.LaunchResult, error) {
-				t.Fatal("service start must not be called for empty structured input")
-				return execution.LaunchResult{}, nil
+			executeAction: func(_ context.Context, req execution.ActionInvocation) (execution.ExecutionResult, error) {
+				if req.Assignment == nil || req.Assignment.Action != execution.ActionClassEngineeringSynthesis {
+					t.Fatalf("unexpected action request: %#v", req)
+				}
+				if req.Assignment.StructuredInput != nil {
+					t.Fatalf("structured input must be absent when no structured flags are passed: %#v", req.Assignment.StructuredInput)
+				}
+				return execution.ExecutionResult{
+					Status: "completed",
+					Launch: &execution.LaunchResult{
+						Status:  "completed",
+						Summary: "action completed",
+					},
+				}, nil
 			},
 		}
 	})
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected empty structured input error")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute action command: %v", err)
 	}
-	if !strings.Contains(err.Error(), "structured input must include at least one non-empty field") {
-		t.Fatalf("unexpected error: %v", err)
+	if !strings.Contains(stdout.String(), "state=completed\n") {
+		t.Fatalf("output must include completed state: %q", stdout.String())
 	}
 }
 
-func TestExecutionStartHelpDoesNotIncludeReviewCycleFlags(t *testing.T) {
+func TestExecutionActionCommandCallsService(t *testing.T) {
 	t.Parallel()
 
 	cmd := NewRootCommand()
@@ -177,519 +131,129 @@ func TestExecutionStartHelpDoesNotIncludeReviewCycleFlags(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "start", "--help"})
+	cmd.SetArgs([]string{"execution", "action", "--action", "review", "--task", "Провести ревизию"})
+
+	var captured execution.ActionInvocation
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			executeAction: func(_ context.Context, req execution.ActionInvocation) (execution.ExecutionResult, error) {
+				captured = req
+				return execution.ExecutionResult{
+					Status: "completed",
+					Launch: &execution.LaunchResult{
+						Status:  "completed",
+						Summary: "action=review completed",
+					},
+				}, nil
+			},
+		}
+	})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute start help: %v", err)
+		t.Fatalf("execute action command: %v", err)
+	}
+	if captured.Assignment == nil || captured.Assignment.Action != "review" {
+		t.Fatalf("unexpected action request: %#v", captured)
+	}
+	if strings.Contains(stdout.String(), "profile=") {
+		t.Fatalf("action output must not include profile override diagnostics: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "state=completed\n") {
+		t.Fatalf("output must include completed state: %q", stdout.String())
+	}
+}
+
+func TestExecutionActionHelpDoesNotIncludeRemovedFlags(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "action", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute action help: %v", err)
 	}
 
 	help := stdout.String()
 	if !strings.Contains(help, "--action") {
-		t.Fatalf("start help must include action flag, got %q", help)
+		t.Fatalf("action help must include action flag, got %q", help)
 	}
-	for _, fragment := range []string{"--review-profile", "--max-executions", "--prompt"} {
+	for _, fragment := range []string{"--profile", "--name", "--dir", "--repo", "--runner", "--model", "--model-binding", "--prompt", "--structured-output", "--structured-output-required"} {
 		if strings.Contains(help, fragment) {
-			t.Fatalf("start help must not include %q, got %q", fragment, help)
+			t.Fatalf("action help must not include removed flag %q, got %q", fragment, help)
 		}
 	}
 }
 
-func TestExecutionDispatcherAcceptsActionFlag(t *testing.T) {
+func TestExecutionActionRejectsRemovedDirFlag(t *testing.T) {
 	t.Parallel()
 
 	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "dispatcher", "--action", "review", "--profile", "review"})
-
-	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
-		return executionCommandServiceStub{
-			dispatch: func(_ context.Context, in execution.Invocation) []string {
-				if in.Action != "review" || in.Profile != "review" {
-					t.Fatalf("unexpected dispatcher invocation: %#v", in)
-				}
-				return []string{execution.OperationKindResolveAction, execution.OperationKindFinalize}
-			},
-		}
-	})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute dispatcher: %v", err)
-	}
-	output := stdout.String()
-	if !strings.Contains(output, "resolve-action\n") || !strings.Contains(output, "finalize\n") {
-		t.Fatalf("unexpected dispatcher output: %q", output)
-	}
-}
-
-func TestResumeRequestFromFlagsRejectsConflictingMessageSources(t *testing.T) {
-	t.Parallel()
-
-	_, err := resumeRequestFromFlags(&resumeFlags{run: "42", message: "inline", messageFile: "/tmp/message.txt"})
-	if err == nil {
-		t.Fatal("expected conflict error")
-	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestResumeRequestFromFlagsRejectsEmptyMessage(t *testing.T) {
-	t.Parallel()
-
-	_, err := resumeRequestFromFlags(&resumeFlags{run: "42", message: "   "})
-	if err == nil {
-		t.Fatal("expected empty message error")
-	}
-	if !strings.Contains(err.Error(), "resume message must be non-empty") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestExecutionResumeCommandCallsService(t *testing.T) {
-	t.Parallel()
-
-	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "resume", "--run", "42", "--message", "Continue with the new limit", "--profile", "coder", "--structured-output", "--dry-run"})
-
-	var captured execution.ResumeRequest
-	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
-		return executionCommandServiceStub{
-			resume: func(_ context.Context, req execution.ResumeRequest) (execution.LaunchResult, error) {
-				captured = req
-				return execution.LaunchResult{Status: "dry-run", Summary: "resume plan"}, nil
-			},
-		}
-	})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute resume command: %v", err)
-	}
-	if captured.Run != "42" || captured.Message != "Continue with the new limit" || captured.MessageSource != "message" || captured.Profile != "coder" || !captured.StructuredOutput || !captured.DryRun {
-		t.Fatalf("unexpected resume request: %#v", captured)
-	}
-	if !strings.Contains(stdout.String(), "state=dry-run\n") {
-		t.Fatalf("output must include dry-run state: %q", stdout.String())
-	}
-}
-
-func TestExecutionResourcesCommandSupportsModelBindingAndPrintsAllocation(t *testing.T) {
-	t.Parallel()
-
-	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "resources", "--profile", "coder", "--model-binding", "review"})
-
-	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
-		return executionCommandServiceStub{
-			resolveProfile: func(_ context.Context, in execution.Invocation) (execution.Profile, error) {
-				if in.Profile != "coder" || in.Launch.ModelBinding != "review" {
-					t.Fatalf("unexpected profile invocation: %#v", in)
-				}
-				return execution.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}, nil
-			},
-			allocateResource: func(_ context.Context, in execution.Invocation, profile execution.Profile) (execution.Allocation, error) {
-				if profile.ModelBinding != "coder" {
-					t.Fatalf("unexpected profile: %#v", profile)
-				}
-				if in.Launch.ModelBinding != "review" {
-					t.Fatalf("unexpected launch binding: %#v", in.Launch)
-				}
-				return execution.Allocation{
-					Resource:      "binding:review",
-					Reserved:      true,
-					Runner:        "opencode",
-					Model:         "openai/gpt-5.5",
-					ModelBinding:  "review",
-					BindingSource: "local",
-					Source:        "explicit-model-binding",
-					FallbackUsed:  false,
-				}, nil
-			},
-		}
-	})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute resources command: %v", err)
-	}
-
-	output := stdout.String()
-	for _, fragment := range []string{
-		"resource=binding:review\n",
-		"reserved=true\n",
-		"runner=opencode\n",
-		"model=openai/gpt-5.5\n",
-		"model-binding=review\n",
-		"source=explicit-model-binding\n",
-		"binding-source=local\n",
-		"global-config=\n",
-		"local-config=\n",
-		"fallback-used=false\n",
-	} {
-		if !strings.Contains(output, fragment) {
-			t.Fatalf("resources output must include %q, got %q", fragment, output)
-		}
-	}
-}
-
-func TestExecutionRunsCommandPrintsJSONHistory(t *testing.T) {
-	root := t.TempDir()
-	previousDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("chdir temp root: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(previousDir)
-	})
-
-	if err := history.Store(context.Background(), root, history.Run{
-		CreatedAt:       "2026-06-10T10:00:00Z",
-		Status:          "failed",
-		Summary:         "boom",
-		Name:            "task-54",
-		ProfileName:     "default",
-		Runner:          "opencode",
-		Model:           "openai/gpt-5.4",
-		RunnerSessionID: "session-54",
-		LaunchDirectory: root,
-		Error:           "boom",
-	}); err != nil {
-		t.Fatalf("store history: %v", err)
-	}
-
-	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "runs", "--json", "--status", "failed", "--name", "task-54"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute runs command: %v", err)
-	}
-	output := stdout.String()
-
-	var runs []history.ListedRun
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &runs); err != nil {
-		t.Fatalf("decode runs json: %v", err)
-	}
-	if len(runs) != 1 {
-		t.Fatalf("expected 1 run, got %d", len(runs))
-	}
-	if runs[0].Status != "failed" || runs[0].Name != "task-54" || runs[0].Error != "boom" || runs[0].RunnerSessionID != "session-54" {
-		t.Fatalf("unexpected runs json: %q", output)
-	}
-}
-
-func TestExecutionRunsCommandOmitsRunnerSessionIDWhenEmpty(t *testing.T) {
-	root := t.TempDir()
-	previousDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("chdir temp root: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(previousDir)
-	})
-
-	if err := history.Store(context.Background(), root, history.Run{
-		CreatedAt:       "2026-06-10T10:00:00Z",
-		Status:          "failed",
-		Summary:         "boom",
-		Name:            "task-55",
-		ProfileName:     "default",
-		Runner:          "opencode",
-		Model:           "openai/gpt-5.4",
-		LaunchDirectory: root,
-		Error:           "boom",
-	}); err != nil {
-		t.Fatalf("store history: %v", err)
-	}
-
-	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "runs", "--json", "--status", "failed", "--name", "task-55"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute runs command: %v", err)
-	}
-
-	var raw []map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout.String())), &raw); err != nil {
-		t.Fatalf("decode runs json: %v", err)
-	}
-	if len(raw) != 1 {
-		t.Fatalf("expected 1 run, got %d", len(raw))
-	}
-	if _, ok := raw[0]["runner_session_id"]; ok {
-		t.Fatalf("runner_session_id must be omitted when empty: %#v", raw[0])
-	}
-}
-
-func TestBindWorkplaceFlagsAndInvocationIncludesRepo(t *testing.T) {
-	t.Parallel()
-
-	flags := &launchFlags{}
-	cmd := &cobra.Command{Use: "workplace"}
-	bindWorkplaceFlags(cmd, flags)
-
-	err := cmd.ParseFlags([]string{"--name", "task-49", "--repo", "git@github.com:owner/name.git"})
-	if err != nil {
-		t.Fatalf("parse flags: %v", err)
-	}
-
-	invocation := invocationFromWorkplaceFlags(flags)
-	if invocation.Workplace.Name != "task-49" {
-		t.Fatalf("unexpected workplace: %q", invocation.Workplace.Name)
-	}
-	if invocation.Repository.URL != "git@github.com:owner/name.git" {
-		t.Fatalf("unexpected repository: %q", invocation.Repository.URL)
-	}
-}
-
-func TestExecutionWorkplaceCommandPrintsRepositoryDiagnostics(t *testing.T) {
-	t.Parallel()
-
-	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "workplace", "--name", "task-49", "--repo", "owner/name"})
-
-	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
-		return executionCommandServiceStub{
-			prepareWorkplace: func(context.Context, execution.Invocation, execution.Profile, execution.Allocation) (execution.Workplace, error) {
-				return execution.Workplace{
-					Name:           "/tmp/workplaces/github-owner-name/task-49",
-					RepositoryURL:  "https://github.com/owner/name.git",
-					RepositoryRoot: "/tmp/repositories/github-owner-name",
-					Ready:          true,
-				}, nil
-			},
-		}
-	})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute workplace command: %v", err)
-	}
-
-	output := stdout.String()
-	if !strings.Contains(output, "repository=https://github.com/owner/name.git\n") {
-		t.Fatalf("output must include repository: %q", output)
-	}
-	if !strings.Contains(output, "repository-root=/tmp/repositories/github-owner-name\n") {
-		t.Fatalf("output must include repository root: %q", output)
-	}
-	if !strings.Contains(output, "workplace=/tmp/workplaces/github-owner-name/task-49\nready=true\n") {
-		t.Fatalf("output must include workplace details: %q", output)
-	}
-}
-
-func TestNewLaunchFlagsDefaults(t *testing.T) {
-	t.Parallel()
-
-	flags := newLaunchFlags()
-	if flags.commitPush {
-		t.Fatal("commit-push must be disabled by default")
-	}
-
-	cmd := &cobra.Command{Use: "launch"}
-	bindLaunchFlags(cmd, flags)
-	if err := cmd.ParseFlags([]string{"--dir", "/tmp/work", "--prompt", "task"}); err != nil {
-		t.Fatalf("parse default flags: %v", err)
-	}
-
-	invocation := invocationFromLaunchFlags(flags)
-	if invocation.Launch.CommitPush {
-		t.Fatal("commit-push must stay disabled by default")
-	}
-	if invocation.Launch.StructuredOutput {
-		t.Fatal("structured-output must be disabled by default")
-	}
-	if invocation.Launch.StructuredOutputRequired {
-		t.Fatal("structured-output-required must be disabled by default")
-	}
-}
-
-func TestExecutionLaunchHelpIncludesStructuredFlags(t *testing.T) {
-	t.Parallel()
-
-	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "launch", "--help"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute launch help: %v", err)
-	}
-
-	help := stdout.String()
-	for _, fragment := range []string{
-		"--structured-output",
-		"--structured-output-required",
-		"Автоматически добавить инструкцию на structured output",
-	} {
-		if !strings.Contains(help, fragment) {
-			t.Fatalf("launch help must include %q, got %q", fragment, help)
-		}
-	}
-	for _, fragment := range []string{"--structured-protocol", "--structured-mode"} {
-		if strings.Contains(help, fragment) {
-			t.Fatalf("launch help must not include removed flag %q, got %q", fragment, help)
-		}
-	}
-	if strings.Contains(help, "--commit-message") {
-		t.Fatalf("launch help must not include removed flag %q, got %q", "--commit-message", help)
-	}
-}
-
-func TestExecutionProfileCommandPrintsResolvedProfile(t *testing.T) {
-	t.Parallel()
-
-	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "profile", "--profile", "default"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute profile command: %v", err)
-	}
-
-	output := stdout.String()
-	if !strings.Contains(output, "description=Базовый профиль исполнения через binding по умолчанию\n") {
-		t.Fatalf("profile output must include description, got %q", output)
-	}
-	if !strings.Contains(output, "mode=manual\n") {
-		t.Fatalf("profile output must include resolved mode, got %q", output)
-	}
-	if !strings.Contains(output, "model-binding=default\n") {
-		t.Fatalf("profile output must include resolved model-binding, got %q", output)
-	}
-	if !strings.Contains(output, "allow-model-fallback=false\n") {
-		t.Fatalf("profile output must include allow-model-fallback, got %q", output)
-	}
-	if !strings.Contains(output, "prompt-additions=\n") {
-		t.Fatalf("profile output must include prompt-additions field, got %q", output)
-	}
-	if !strings.Contains(output, "structured-output=true\n") {
-		t.Fatalf("profile output must include structured-output flag, got %q", output)
-	}
-	if !strings.Contains(output, "structured-output-required=true\n") {
-		t.Fatalf("profile output must include structured-output-required flag, got %q", output)
-	}
-	if !strings.Contains(output, "structured-output-fields=summary,commit_message,remarks,questions,follow_up_actions,changes,commands,conclusion,extensions\n") {
-		t.Fatalf("profile output must include structured-output-fields, got %q", output)
-	}
-	if strings.Contains(output, "commit-push=") {
-		t.Fatalf("profile output must not include commit-push, got %q", output)
-	}
-}
-
-func TestExecutionLaunchCommandPrintsSummaryOnStructuredOutputError(t *testing.T) {
-	t.Parallel()
-
-	cmd := NewRootCommand()
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "launch", "--dir", "/tmp/work", "--prompt", "ship it"})
-
-	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
-		return executionCommandServiceStub{
-			launchDirect: func(context.Context, execution.Invocation) (execution.LaunchResult, error) {
-				return execution.LaunchResult{
-					Status:  "failed",
-					Summary: "Applied the requested changes.\n<progress-structured-output>\n{\"remarks\":[{}]}\n</progress-structured-output>",
-				}, errors.New("structured output is required but payload does not match structured output schema: structured output remarks[0] must include at least one non-empty field")
-			},
-		}
-	})
+	cmd.SetArgs([]string{"execution", "action", "--dir", "/tmp/work", "--task", "Ship it"})
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected launch error")
+		t.Fatal("expected unknown dir flag error")
 	}
-	if !strings.Contains(err.Error(), "structured output is required") {
-		t.Fatalf("unexpected command error: %v", err)
-	}
-
-	output := stdout.String()
-	if !strings.Contains(output, "state=failed\n") {
-		t.Fatalf("output must include failed state: %q", output)
-	}
-	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nApplied the requested changes.\n<progress-structured-output>") {
-		t.Fatalf("output must include summary even on error: %q", output)
-	}
-	if strings.Contains(output, "structured-output:\n") {
-		t.Fatalf("output must not print structured section for invalid payload: %q", output)
+	if !strings.Contains(err.Error(), "unknown flag: --dir") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestPrintLaunchResultWithoutStructuredOutput(t *testing.T) {
+func TestExecutionOperationCommandCallsService(t *testing.T) {
 	t.Parallel()
 
-	cmd := &cobra.Command{Use: "launch"}
+	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"execution", "operation", "resolve-action", "--action", "review"})
 
-	printLaunchResult(cmd, execution.LaunchResult{
-		Status:        "completed",
-		Summary:       "profile=default git=disabled\nApplied the requested changes.",
-		RawOutputPath: "/tmp/progress/raw.log",
-		RunRecordPath: "/tmp/progress/execution.json",
+	var captured execution.OperationInvocation
+	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
+		return executionCommandServiceStub{
+			executeOperation: func(_ context.Context, req execution.OperationInvocation) (execution.OperationResult, error) {
+				captured = req
+				return execution.OperationResult{
+					Name:    "resolve-action",
+					Status:  "completed",
+					Summary: "action=review class=review",
+				}, nil
+			},
+		}
 	})
 
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute operation command: %v", err)
+	}
+	if captured.Operation != "resolve-action" || captured.Assignment == nil || captured.Assignment.Action != "review" {
+		t.Fatalf("unexpected operation request: %#v", captured)
+	}
+	if captured.Assignment.StructuredInput != nil {
+		t.Fatalf("operation request must not require structured input: %#v", captured.Assignment.StructuredInput)
+	}
 	output := stdout.String()
-	if !strings.Contains(output, "state=completed\n") {
-		t.Fatalf("output must include state: %q", output)
-	}
-	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nprofile=default git=disabled\nApplied the requested changes.\nPROGRESS_SUMMARY\n") {
-		t.Fatalf("output must include summary: %q", output)
-	}
-	if !strings.Contains(output, "raw-output-path=/tmp/progress/raw.log\n") {
-		t.Fatalf("output must include raw output path: %q", output)
-	}
-	if !strings.Contains(output, "run-record-path=/tmp/progress/execution.json\n") {
-		t.Fatalf("output must include run record path: %q", output)
-	}
-	if strings.Contains(output, "structured-output:\n") {
-		t.Fatalf("output must omit structured section when values are absent: %q", output)
+	for _, fragment := range []string{"operation=resolve-action\n", "status=completed\n", "summary=action=review class=review\n"} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("operation output must include %q, got %q", fragment, output)
+		}
 	}
 }
 
 func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 	t.Parallel()
 
-	cmd := &cobra.Command{Use: "launch"}
+	cmd := &cobra.Command{Use: "action"}
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 
 	printLaunchResult(cmd, execution.LaunchResult{
 		Status:  "completed",
-		Summary: "profile=default git=disabled\nApplied the requested changes.",
+		Summary: "Applied the requested changes.",
 		StructuredOutput: &execution.StructuredOutput{
 			Summary:       "Re-check after fixes.",
 			CommitMessage: "Ship review fixes",
@@ -700,60 +264,36 @@ func TestPrintLaunchResultWithStructuredOutput(t *testing.T) {
 				Title:    "Rollback plan",
 				Body:     "Confirmed in deploy docs.",
 			}},
-			Questions: []execution.StructuredQuestion{{
-				ID:    "question-1",
-				Title: "Integration coverage",
-				Body:  "Is the new test enough?",
-			}},
-			FollowUpActions: []execution.StructuredAction{{
-				ID:     "action-1",
-				Status: "pending",
-				Type:   "test",
-				Title:  "Run smoke suite",
-			}},
-			Changes: []execution.StructuredChange{{Summary: "Updated release checklist."}},
-			Commands: []execution.StructuredCommand{{
-				Name: "open-pr",
-				Args: []string{"--draft"},
-			}},
-			Conclusion: &execution.StructuredConclusion{Status: "ok", Summary: "Ready for merge"},
+			Questions:       []execution.StructuredQuestion{{ID: "question-1", Title: "Integration coverage", Body: "Is the new test enough?"}},
+			FollowUpActions: []execution.StructuredAction{{ID: "action-1", Status: "pending", Type: "test", Title: "Run smoke suite"}},
+			Changes:         []execution.StructuredChange{{Summary: "Updated release checklist."}},
+			Commands:        []execution.StructuredCommand{{Name: "open-pr", Args: []string{"--draft"}}},
+			Conclusion:      &execution.StructuredConclusion{Status: "ok", Summary: "Ready for merge"},
 		},
 	})
 
 	output := stdout.String()
-	if !strings.Contains(output, "summary<<PROGRESS_SUMMARY\nprofile=default git=disabled\nApplied the requested changes.\nPROGRESS_SUMMARY\nstructured-output:\n") {
-		t.Fatalf("output must separate summary from structured section: %q", output)
-	}
-	if !strings.Contains(output, "summary-field=Re-check after fixes.\n") {
-		t.Fatalf("output must include structured summary: %q", output)
-	}
-	if !strings.Contains(output, "commit-message=Ship review fixes\n") {
-		t.Fatalf("output must include structured commit message: %q", output)
-	}
-	if !strings.Contains(output, `remark={"id":"remark-1","status":"resolved","severity":"critical","title":"Rollback plan","body":"Confirmed in deploy docs."}`+"\n") {
-		t.Fatalf("output must include serialized remark: %q", output)
-	}
-	if !strings.Contains(output, `question={"id":"question-1","title":"Integration coverage","body":"Is the new test enough?"}`+"\n") {
-		t.Fatalf("output must include serialized question: %q", output)
-	}
-	if !strings.Contains(output, `follow-up-action={"id":"action-1","status":"pending","type":"test","title":"Run smoke suite"}`+"\n") {
-		t.Fatalf("output must include follow-up action: %q", output)
-	}
-	if !strings.Contains(output, `change={"summary":"Updated release checklist."}`+"\n") {
-		t.Fatalf("output must include change: %q", output)
-	}
-	if !strings.Contains(output, `command={"name":"open-pr","args":["--draft"]}`+"\n") {
-		t.Fatalf("output must include command: %q", output)
-	}
-	if !strings.Contains(output, `conclusion={"status":"ok","summary":"Ready for merge"}`+"\n") {
-		t.Fatalf("output must include conclusion: %q", output)
+	for _, fragment := range []string{
+		"summary<<PROGRESS_SUMMARY\nApplied the requested changes.\nPROGRESS_SUMMARY\nstructured-output:\n",
+		"summary-field=Re-check after fixes.\n",
+		"commit-message=Ship review fixes\n",
+		`remark={"id":"remark-1","status":"resolved","severity":"critical","title":"Rollback plan","body":"Confirmed in deploy docs."}` + "\n",
+		`question={"id":"question-1","title":"Integration coverage","body":"Is the new test enough?"}` + "\n",
+		`follow-up-action={"id":"action-1","status":"pending","type":"test","title":"Run smoke suite"}` + "\n",
+		`change={"summary":"Updated release checklist."}` + "\n",
+		`command={"name":"open-pr","args":["--draft"]}` + "\n",
+		`conclusion={"status":"ok","summary":"Ready for merge"}` + "\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output must include %q, got %q", fragment, output)
+		}
 	}
 }
 
 func TestPrintLaunchResultPreservesExtensionPayload(t *testing.T) {
 	t.Parallel()
 
-	cmd := &cobra.Command{Use: "launch"}
+	cmd := &cobra.Command{Use: "action"}
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 
@@ -774,19 +314,10 @@ func TestPrintLaunchResultPreservesExtensionPayload(t *testing.T) {
 	}
 }
 
-func containsStructuredContext(values []execution.StructuredContext, title, body string) bool {
-	for _, value := range values {
-		if value.Title == title && value.Body == body {
-			return true
-		}
-	}
-	return false
-}
-
 func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
 	t.Parallel()
 
-	cmd := &cobra.Command{Use: "launch"}
+	cmd := &cobra.Command{Use: "action"}
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 
@@ -807,80 +338,74 @@ func TestPrintLaunchResultPreservesMultilineSummaryBoundary(t *testing.T) {
 	}
 }
 
-func TestPrintLaunchResultIncludesRawOutputPath(t *testing.T) {
+func TestPrintLaunchResultWithoutStructuredOutput(t *testing.T) {
 	t.Parallel()
 
-	cmd := &cobra.Command{Use: "launch"}
+	cmd := &cobra.Command{Use: "action"}
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 
 	printLaunchResult(cmd, execution.LaunchResult{
 		Status:        "completed",
 		Summary:       "Compact summary.",
-		RawOutputPath: "/tmp/progress/.progress/runner-output/execution-123.log",
+		RawOutputPath: "/tmp/progress/raw.log",
+		RunRecordPath: "/tmp/progress/execution.json",
 	})
 
 	output := stdout.String()
-	if !strings.Contains(output, "raw-output-path=/tmp/progress/.progress/runner-output/execution-123.log\n") {
-		t.Fatalf("output must include raw output path: %q", output)
+	for _, fragment := range []string{
+		"state=completed\n",
+		"summary<<PROGRESS_SUMMARY\nCompact summary.\nPROGRESS_SUMMARY\n",
+		"raw-output-path=/tmp/progress/raw.log\n",
+		"run-record-path=/tmp/progress/execution.json\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output must include %q, got %q", fragment, output)
+		}
+	}
+	if strings.Contains(output, "structured-output:\n") {
+		t.Fatalf("output must omit structured section when values are absent: %q", output)
+	}
+}
+
+func TestDecodeStrictJSONRejectsTrailingTokens(t *testing.T) {
+	t.Parallel()
+
+	var payload map[string]string
+	err := decodeStrictJSON([]byte(`{"a":"b"} {"c":"d"}`), &payload)
+	if err == nil {
+		t.Fatal("expected trailing token error")
+	}
+}
+
+func TestStructuredExtensionEntriesSkipEmptyPayloads(t *testing.T) {
+	t.Parallel()
+
+	entries := extensionsAsEntries(execution.StructuredExtensions{
+		"":      json.RawMessage(`{"skip":true}`),
+		"empty": nil,
+		"keep":  json.RawMessage(`{"ok":true}`),
+	})
+	if len(entries) != 1 || entries[0].Name != "keep" || string(entries[0].Value) != `{"ok":true}` {
+		t.Fatalf("unexpected extension entries: %#v", entries)
 	}
 }
 
 type executionCommandServiceStub struct {
-	start            func(context.Context, execution.Invocation) (execution.LaunchResult, error)
-	dispatch         func(context.Context, execution.Invocation) []string
-	resolveProfile   func(context.Context, execution.Invocation) (execution.Profile, error)
-	allocateResource func(context.Context, execution.Invocation, execution.Profile) (execution.Allocation, error)
-	prepareWorkplace func(context.Context, execution.Invocation, execution.Profile, execution.Allocation) (execution.Workplace, error)
-	launchDirect     func(context.Context, execution.Invocation) (execution.LaunchResult, error)
-	resume           func(context.Context, execution.ResumeRequest) (execution.LaunchResult, error)
+	executeAction    func(context.Context, execution.ActionInvocation) (execution.ExecutionResult, error)
+	executeOperation func(context.Context, execution.OperationInvocation) (execution.OperationResult, error)
 }
 
-func (s executionCommandServiceStub) Start(ctx context.Context, in execution.Invocation) (execution.LaunchResult, error) {
-	if s.start == nil {
-		return execution.LaunchResult{}, errors.New("unexpected Start call")
+func (s executionCommandServiceStub) ExecuteAction(ctx context.Context, req execution.ActionInvocation) (execution.ExecutionResult, error) {
+	if s.executeAction == nil {
+		return execution.ExecutionResult{}, errors.New("unexpected ExecuteAction call")
 	}
-	return s.start(ctx, in)
+	return s.executeAction(ctx, req)
 }
 
-func (s executionCommandServiceStub) Dispatch(ctx context.Context, in execution.Invocation) []string {
-	if s.dispatch == nil {
-		return nil
+func (s executionCommandServiceStub) ExecuteOperation(ctx context.Context, req execution.OperationInvocation) (execution.OperationResult, error) {
+	if s.executeOperation == nil {
+		return execution.OperationResult{}, errors.New("unexpected ExecuteOperation call")
 	}
-	return s.dispatch(ctx, in)
-}
-
-func (s executionCommandServiceStub) ResolveProfile(ctx context.Context, in execution.Invocation) (execution.Profile, error) {
-	if s.resolveProfile == nil {
-		return execution.Profile{}, errors.New("unexpected ResolveProfile call")
-	}
-	return s.resolveProfile(ctx, in)
-}
-
-func (s executionCommandServiceStub) AllocateResources(ctx context.Context, in execution.Invocation, profile execution.Profile) (execution.Allocation, error) {
-	if s.allocateResource == nil {
-		return execution.Allocation{}, errors.New("unexpected AllocateResources call")
-	}
-	return s.allocateResource(ctx, in, profile)
-}
-
-func (s executionCommandServiceStub) PrepareWorkplace(ctx context.Context, in execution.Invocation, profile execution.Profile, allocation execution.Allocation) (execution.Workplace, error) {
-	if s.prepareWorkplace == nil {
-		return execution.Workplace{}, errors.New("unexpected PrepareWorkplace call")
-	}
-	return s.prepareWorkplace(ctx, in, profile, allocation)
-}
-
-func (s executionCommandServiceStub) LaunchDirect(ctx context.Context, in execution.Invocation) (execution.LaunchResult, error) {
-	if s.launchDirect == nil {
-		return execution.LaunchResult{}, errors.New("unexpected LaunchDirect call")
-	}
-	return s.launchDirect(ctx, in)
-}
-
-func (s executionCommandServiceStub) Resume(ctx context.Context, req execution.ResumeRequest) (execution.LaunchResult, error) {
-	if s.resume == nil {
-		return execution.LaunchResult{}, errors.New("unexpected Resume call")
-	}
-	return s.resume(ctx, req)
+	return s.executeOperation(ctx, req)
 }

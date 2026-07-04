@@ -1,14 +1,12 @@
 {
   "defaults": {
-    "step": "implement",
-    "profile": "default",
+    "action": "implement",
     "reason_code": "issue_context_ready",
     "reason_message": "Контекст задачи готов к передаче в контур исполнения."
   },
   "routes": [
     {
-      "step": "assess-description",
-      "profile": "task-description-assessor",
+      "action": "task-description-assessment",
       "has_labels": [
         "description-assessment"
       ],

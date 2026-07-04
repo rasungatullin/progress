@@ -22,9 +22,7 @@ type workflowRouteConfig struct {
 	Name            string   `json:"name"`
 	Title           string   `json:"title"`
 	Description     string   `json:"description"`
-	Step            string   `json:"step"`
 	Action          string   `json:"action"`
-	Profile         string   `json:"profile"`
 	HasFeatures     []string `json:"has_features"`
 	MissingFeatures []string `json:"missing_features"`
 	HasLabels       []string `json:"has_labels"`
@@ -36,9 +34,7 @@ type workflowRouteConfig struct {
 }
 
 type selectedWorkflowRoute struct {
-	Step           string
 	Action         string
-	Profile        string
 	ExpectedResult string
 	Constraints    []string
 	ReasonCode     string
@@ -55,8 +51,6 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 
 	selected := selectedWorkflowRoute{
 		Action:         strings.TrimSpace(config.Defaults.Action),
-		Step:           strings.TrimSpace(config.Defaults.Step),
-		Profile:        strings.TrimSpace(config.Defaults.Profile),
 		ExpectedResult: strings.TrimSpace(config.Defaults.ExpectedResult),
 		Constraints:    normalizeRouteConstraints(config.Defaults.Constraints),
 		ReasonCode:     strings.TrimSpace(config.Defaults.ReasonCode),
@@ -83,15 +77,13 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 
 		selected = selectedWorkflowRoute{
 			Action:         strings.TrimSpace(route.Action),
-			Step:           strings.TrimSpace(route.Step),
-			Profile:        strings.TrimSpace(route.Profile),
 			ExpectedResult: strings.TrimSpace(route.ExpectedResult),
 			Constraints:    normalizeRouteConstraints(route.Constraints),
 			ReasonCode:     strings.TrimSpace(route.ReasonCode),
 			ReasonMessage:  strings.TrimSpace(route.ReasonMessage),
 			Route: ProcessingRoute{
 				Name:        firstNonEmpty(strings.TrimSpace(route.Name), fmt.Sprintf("route-%d", index+1)),
-				Title:       firstNonEmpty(strings.TrimSpace(route.Title), strings.TrimSpace(route.Step)),
+				Title:       firstNonEmpty(strings.TrimSpace(route.Title), strings.TrimSpace(route.Action)),
 				Description: strings.TrimSpace(route.Description),
 			},
 			Checks: []RouteCheckResult{check},
@@ -139,11 +131,8 @@ func (s *Service) loadWorkflowConfig(ctx context.Context) (workflowConfigFile, e
 }
 
 func validateWorkflowConfig(config workflowConfigFile) error {
-	if strings.TrimSpace(config.Defaults.Step) == "" {
-		return fmt.Errorf("defaults.step must be non-empty")
-	}
-	if strings.TrimSpace(config.Defaults.Profile) == "" {
-		return fmt.Errorf("defaults.profile must be non-empty")
+	if strings.TrimSpace(config.Defaults.Action) == "" {
+		return fmt.Errorf("defaults.action must be non-empty")
 	}
 	if strings.TrimSpace(config.Defaults.ReasonCode) == "" {
 		return fmt.Errorf("defaults.reason_code must be non-empty")
@@ -153,11 +142,8 @@ func validateWorkflowConfig(config workflowConfigFile) error {
 	}
 
 	for index, route := range config.Routes {
-		if strings.TrimSpace(route.Step) == "" {
-			return fmt.Errorf("routes[%d].step must be non-empty", index)
-		}
-		if strings.TrimSpace(route.Profile) == "" {
-			return fmt.Errorf("routes[%d].profile must be non-empty", index)
+		if strings.TrimSpace(route.Action) == "" {
+			return fmt.Errorf("routes[%d].action must be non-empty", index)
 		}
 		if len(normalizeLabels(route.HasLabels)) == 0 && len(normalizeLabels(route.MissingLabels)) == 0 {
 			if len(normalizeFeatures(route.HasFeatures)) == 0 && len(normalizeFeatures(route.MissingFeatures)) == 0 {
