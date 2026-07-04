@@ -133,15 +133,19 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 }
 
 func selectedEnvironment(in model.Invocation, allocation model.Allocation) (string, string) {
-	if environment := strings.TrimSpace(in.Workplace.Environment); environment != "" {
-		return environment, environmentTypeFromName(environment)
+	requestedEnvironment := strings.TrimSpace(in.Workplace.Environment)
+	allocatedEnvironment := strings.TrimSpace(allocation.Environment)
+	allocatedEnvironmentType := strings.TrimSpace(allocation.EnvironmentType)
+	if requestedEnvironment != "" {
+		if allocatedEnvironmentType != "" && (allocatedEnvironment == "" || allocatedEnvironment == requestedEnvironment) {
+			return requestedEnvironment, allocatedEnvironmentType
+		}
+		return requestedEnvironment, environmentTypeFromName(requestedEnvironment)
 	}
-	environment := strings.TrimSpace(allocation.Environment)
-	environmentType := strings.TrimSpace(allocation.EnvironmentType)
-	if environmentType == "" {
-		environmentType = environmentTypeFromName(environment)
+	if allocatedEnvironmentType == "" {
+		allocatedEnvironmentType = environmentTypeFromName(allocatedEnvironment)
 	}
-	return environment, environmentType
+	return allocatedEnvironment, allocatedEnvironmentType
 }
 
 func environmentTypeFromName(environment string) string {
