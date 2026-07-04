@@ -541,7 +541,7 @@ func printMethodologyElement(cmd *cobra.Command, element methodology.ListedEleme
 }
 
 func printMethodologySelection(cmd *cobra.Command, result methodology.SelectionResult) {
-	cmd.Printf("route=%s\nroute-source=%s\naction=%s\naction-source=%s\nprofile=%s\n", result.Route.Name, result.RouteSource, result.Action.Name, result.ActionSource, firstNonEmptyMethodologyValue(result.Action.Profile, result.Route.Profile))
+	cmd.Printf("route=%s\nroute-source=%s\naction=%s\naction-source=%s\nprofile=%s\n", result.Route.Name, result.RouteSource, result.Action.Name, result.ActionSource, result.Profile)
 	if result.Instruction.Name != "" {
 		cmd.Printf("instruction=%s\ninstruction-source=%s\n", result.Instruction.Name, result.InstructionSource)
 	}
@@ -583,13 +583,3 @@ func methodologyElementPayload(element methodology.ListedElement) []byte {
 }
 
 const methodologyJSONDelimiter = "PROGRESS_METHODOLOGY_JSON"
-
-func firstNonEmptyMethodologyValue(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}

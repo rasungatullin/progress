@@ -68,6 +68,22 @@ func TestMethodologyCLIAddsListsAndSelectsLocalCatalog(t *testing.T) {
 		}
 	}
 
+	overrideOutput, err := executeMethodologyCommand(t,
+		"methodology", "--repo-root", root, "--config-home", configHome,
+		"select", "--route", "default", "--profile", "review",
+	)
+	if err != nil {
+		t.Fatalf("select catalog with profile override: %v\n%s", err, overrideOutput)
+	}
+	for _, fragment := range []string{
+		"profile=review\n",
+		"diagnostic=profile=review\n",
+	} {
+		if !strings.Contains(overrideOutput, fragment) {
+			t.Fatalf("select override output must include %q, got %q", fragment, overrideOutput)
+		}
+	}
+
 	if _, err := os.Stat(filepath.Join(root, ".progress", "methodology", "catalog.json")); err != nil {
 		t.Fatalf("expected local methodology catalog: %v", err)
 	}

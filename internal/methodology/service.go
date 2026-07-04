@@ -22,6 +22,7 @@ type SelectionRequest struct {
 type SelectionResult struct {
 	Route             Route                          `json:"route"`
 	Action            Action                         `json:"action"`
+	Profile           string                         `json:"profile,omitempty"`
 	Instruction       Instruction                    `json:"instruction,omitempty"`
 	Diagnostics       []string                       `json:"diagnostics,omitempty"`
 	RouteSource       configuration.ConfigFileSource `json:"route_source,omitempty"`
@@ -172,6 +173,7 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 	result := SelectionResult{
 		Route:       route,
 		Action:      action,
+		Profile:     profile,
 		Instruction: instruction,
 		Diagnostics: []string{
 			fmt.Sprintf("route=%s", route.Name),
