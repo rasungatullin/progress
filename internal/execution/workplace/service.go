@@ -44,6 +44,9 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 		if environmentType != configuration.EnvironmentTypeLocal {
 			return model.Workplace{}, fmt.Errorf("execution directory can be used only with local environment")
 		}
+		if strings.TrimSpace(in.Repository.URL) != "" {
+			return model.Workplace{}, fmt.Errorf("local environment cannot use repository url: %s", in.Repository.URL)
+		}
 
 		return model.Workplace{Name: in.Launch.Directory, Environment: environment, EnvironmentType: environmentType, Ready: true}, nil
 	}
@@ -58,6 +61,9 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 		environment = environmentType
 	}
 	if environmentType == configuration.EnvironmentTypeLocal {
+		if strings.TrimSpace(in.Repository.URL) != "" {
+			return model.Workplace{}, fmt.Errorf("local environment cannot use repository url: %s", in.Repository.URL)
+		}
 		hostRepoRoot, err := s.resolveRepoRoot(ctx)
 		if err != nil {
 			return model.Workplace{}, err

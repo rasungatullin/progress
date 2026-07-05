@@ -418,16 +418,18 @@ func normalizeExecutionResourceConfig(config model.ResourceConfigFile, addDefaul
 	normalized.Resources = normalizeResources(normalized.Resources)
 	normalized.Bindings = normalizeBindings(normalized.Bindings)
 
-	if addDefaultEnvironments && len(normalized.Environments) == 0 {
-		normalized.Environments = map[string]model.EnvironmentConfig{
-			defaultLocalEnvironmentName: {
+	if addDefaultEnvironments {
+		if _, ok := normalized.Environments[defaultLocalEnvironmentName]; !ok {
+			normalized.Environments[defaultLocalEnvironmentName] = model.EnvironmentConfig{
 				Type:    EnvironmentTypeLocal,
 				Enabled: true,
-			},
-			defaultWorktreeEnvironmentName: {
+			}
+		}
+		if _, ok := normalized.Environments[defaultWorktreeEnvironmentName]; !ok {
+			normalized.Environments[defaultWorktreeEnvironmentName] = model.EnvironmentConfig{
 				Type:    EnvironmentTypeWorktree,
 				Enabled: true,
-			},
+			}
 		}
 	}
 

@@ -135,6 +135,50 @@ func TestLoadExecutionResourceConfigSupportsEnvironmentToolAndResourceSections(t
 	}
 }
 
+func TestLoadExecutionResourceConfigKeepsDefaultEnvironmentsWithCustomEnvironment(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/execution/resources.json":
+			return []byte(`{
+				"defaults": {"model-binding": "default", "environment": "worktree"},
+				"environments": {
+					"isolated-tree": {"type": "worktree", "enabled": true}
+				},
+				"tools": {
+					"opencode": {"type": "agentic-system", "enabled": true}
+				},
+				"resources": {
+					"qwen": {"type": "model", "enabled": true, "tools": ["opencode"]}
+				},
+				"bindings": {
+					"default": {"tool": "opencode", "resource": "qwen", "environment": "worktree"}
+				}
+			}`), nil
+		case "/repo/.progress/execution/resources.json":
+			return nil, fs.ErrNotExist
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load resources config: %v", err)
+	}
+
+	if config.Config.Environments["local"].Type != EnvironmentTypeLocal {
+		t.Fatalf("default local environment must be present: %#v", config.Config.Environments)
+	}
+	if config.Config.Environments["worktree"].Type != EnvironmentTypeWorktree {
+		t.Fatalf("default worktree environment must be present: %#v", config.Config.Environments)
+	}
+	if config.Config.Environments["isolated-tree"].Type != EnvironmentTypeWorktree {
+		t.Fatalf("custom environment must be preserved: %#v", config.Config.Environments["isolated-tree"])
+	}
+}
+
 func TestLoadExecutionResourceConfigLetsLocalLayerDisableGlobalResource(t *testing.T) {
 	t.Parallel()
 

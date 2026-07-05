@@ -122,6 +122,27 @@ func TestPrepareUsesAllocationEnvironmentTypeForExplicitEnvironmentName(t *testi
 	assertGitCalls(t, gitCalls, []gitCall{})
 }
 
+func TestPrepareRejectsLocalEnvironmentWithRepositoryURL(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	service, gitCalls := newStubService(t, hostRepoRoot, nil)
+
+	_, err := service.Prepare(context.Background(), model.Invocation{
+		Repository: model.RepositorySpec{URL: "owner/name"},
+	}, model.Profile{}, model.Allocation{
+		Environment:     "same-process",
+		EnvironmentType: "local",
+	})
+	if err == nil {
+		t.Fatal("expected local repository url error")
+	}
+	if !strings.Contains(err.Error(), "local environment cannot use repository url") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{})
+}
+
 func TestPrepareFetchesExternalRepositoryWhenCacheExists(t *testing.T) {
 	t.Parallel()
 
