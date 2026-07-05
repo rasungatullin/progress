@@ -300,7 +300,7 @@ func newMethodologyAddActionCommand(parent *methodologyFlags) *cobra.Command {
 
 			ctx := context.Background()
 			service := methodology.NewService(nil)
-			action := methodologyActionFromFlags(ctx, cmd, service, flags)
+			action := methodologyActionFromFlags(ctx, cmd, service, flags, scope)
 			result, err := service.Upsert(ctx, methodology.CatalogWriteRequest{
 				RepoRoot:   flags.repoRoot,
 				ConfigHome: flags.configHome,
@@ -565,8 +565,8 @@ func printMethodologyWriteResult(cmd *cobra.Command, result methodology.CatalogW
 	cmd.Printf("scope=%s\npath=%s\nroutes=%d\nactions=%d\ninstructions=%d\nentities=%d\n", result.Scope, result.Path, len(result.Catalog.Routes), len(result.Catalog.Actions), len(result.Catalog.Instructions), len(result.Catalog.Entities))
 }
 
-func methodologyActionFromFlags(ctx context.Context, cmd *cobra.Command, service *methodology.Service, flags methodologyFlags) methodology.Action {
-	action := existingMethodologyAction(ctx, service, flags.repoRoot, flags.configHome, flags.name)
+func methodologyActionFromFlags(ctx context.Context, cmd *cobra.Command, service *methodology.Service, flags methodologyFlags, scope configuration.ConfigFileSource) methodology.Action {
+	action := existingMethodologyAction(ctx, service, flags.repoRoot, flags.configHome, scope, flags.name)
 	action.Name = flags.name
 	if cmd.Flags().Changed("class") {
 		action.Class = flags.class
@@ -586,7 +586,7 @@ func methodologyActionFromFlags(ctx context.Context, cmd *cobra.Command, service
 	return action
 }
 
-func existingMethodologyAction(ctx context.Context, service *methodology.Service, repoRoot string, configHome string, name string) methodology.Action {
+func existingMethodologyAction(ctx context.Context, service *methodology.Service, repoRoot string, configHome string, scope configuration.ConfigFileSource, name string) methodology.Action {
 	if service == nil {
 		service = methodology.NewService(nil)
 	}
@@ -595,12 +595,30 @@ func existingMethodologyAction(ctx context.Context, service *methodology.Service
 		return methodology.Action{}
 	}
 	name = strings.TrimSpace(name)
-	for _, action := range snapshot.Catalog.Actions {
-		if strings.EqualFold(strings.TrimSpace(action.Name), name) {
+	for _, layer := range snapshot.Layers {
+		if layer.Source != scope {
+			continue
+		}
+		if action, ok := findMethodologyActionByExactName(layer.Catalog.Actions, name); ok {
 			return cloneMethodologyAction(action)
 		}
 	}
+	if scope != methodology.CatalogWriteScopeLocal {
+		return methodology.Action{}
+	}
+	if action, ok := findMethodologyActionByExactName(snapshot.Catalog.Actions, name); ok {
+		return cloneMethodologyAction(action)
+	}
 	return methodology.Action{}
+}
+
+func findMethodologyActionByExactName(actions []methodology.Action, name string) (methodology.Action, bool) {
+	for _, action := range actions {
+		if strings.EqualFold(strings.TrimSpace(action.Name), name) {
+			return action, true
+		}
+	}
+	return methodology.Action{}, false
 }
 
 func cloneMethodologyAction(action methodology.Action) methodology.Action {

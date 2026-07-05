@@ -143,6 +143,71 @@ func TestMethodologyCLIUpdateActionPreservesConfiguredFields(t *testing.T) {
 	}
 }
 
+func TestMethodologyCLIUpdateGlobalActionIgnoresLocalOverride(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configHome := t.TempDir()
+	globalDir := filepath.Join(configHome, "methodology")
+	localDir := filepath.Join(root, ".progress", "methodology")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("create global catalog dir: %v", err)
+	}
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatalf("create local catalog dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, "catalog.json")
+	if err := os.WriteFile(globalPath, []byte(`{
+		"actions": [{
+			"name": "engineering-synthesis",
+			"aliases": ["implement"],
+			"operations": [{"name": "prepare-data", "kind": "prepare-data"}],
+			"description": "Глобальное описание."
+		}]
+	}`), 0o600); err != nil {
+		t.Fatalf("write global catalog: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "catalog.json"), []byte(`{
+		"actions": [{
+			"name": "engineering-synthesis",
+			"aliases": ["local-implement"],
+			"operations": [{"name": "local-operation", "kind": "prepare-data"}],
+			"description": "Локальное описание."
+		}]
+	}`), 0o600); err != nil {
+		t.Fatalf("write local catalog: %v", err)
+	}
+
+	if output, err := executeMethodologyCommand(t,
+		"methodology", "--repo-root", root, "--config-home", configHome,
+		"add", "action",
+		"--scope", "global",
+		"--name", "engineering-synthesis",
+		"--description", "Новое глобальное описание.",
+	); err != nil {
+		t.Fatalf("update global action: %v\n%s", err, output)
+	}
+
+	content, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatalf("read global catalog: %v", err)
+	}
+	for _, fragment := range []string{
+		`"implement"`,
+		`"prepare-data"`,
+		`"description": "Новое глобальное описание."`,
+	} {
+		if !strings.Contains(string(content), fragment) {
+			t.Fatalf("global catalog must include %q, got %s", fragment, string(content))
+		}
+	}
+	for _, fragment := range []string{`"local-implement"`, `"local-operation"`} {
+		if strings.Contains(string(content), fragment) {
+			t.Fatalf("global catalog must not inherit local fragment %q: %s", fragment, string(content))
+		}
+	}
+}
+
 func TestMethodologyCLIAddsGenericEntityForTargetContour(t *testing.T) {
 	t.Parallel()
 
