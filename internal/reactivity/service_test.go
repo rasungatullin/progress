@@ -133,7 +133,7 @@ func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) 
 	if len(executions.requests) != 2 {
 		t.Fatalf("expected two executions, got %d", len(executions.requests))
 	}
-	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы|remove:Ожидает экспертизы|add:Экспертиза пройдена" {
+	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы|add:Экспертиза пройдена|remove:Ожидает экспертизы" {
 		t.Fatalf("unexpected label operations: %s", got)
 	}
 	mergeRequestSearches := 0
@@ -208,7 +208,7 @@ func TestServiceRunTaskActionSkipsDecisionAndMarksRework(t *testing.T) {
 	if len(result.Cycles) != 1 || result.Cycles[0].ReviewPassed == nil || *result.Cycles[0].ReviewPassed {
 		t.Fatalf("review must be marked as failed: %#v", result.Cycles)
 	}
-	if got := strings.Join(integrations.labels, "|"); got != "remove:Ожидает экспертизы|add:Требует доработки" {
+	if got := strings.Join(integrations.labels, "|"); got != "add:Требует доработки|remove:Ожидает экспертизы" {
 		t.Fatalf("unexpected label operations: %s", got)
 	}
 }
@@ -261,7 +261,7 @@ func TestServiceProcessTaskReviewWithoutConclusionMarksRework(t *testing.T) {
 	if result.Cycles[0].ReviewPassed == nil || *result.Cycles[0].ReviewPassed {
 		t.Fatalf("review must be marked as failed: %#v", result.Cycles[0].ReviewPassed)
 	}
-	if got := strings.Join(integrations.labels, "|"); got != "remove:Ожидает экспертизы|add:Требует доработки" {
+	if got := strings.Join(integrations.labels, "|"); got != "add:Требует доработки|remove:Ожидает экспертизы" {
 		t.Fatalf("unexpected label operations: %s", got)
 	}
 }

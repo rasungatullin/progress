@@ -254,15 +254,6 @@ func (s *Service) applyTaskLabelsAfterAction(ctx context.Context, issue *integra
 	add, remove, reviewPassed := labelTransitionForAction(action, result)
 	changes := make([]LabelChange, 0, 2)
 
-	remove = labelsPresent(issue.Labels, remove)
-	if len(remove) != 0 {
-		if err := s.changeTaskLabels(ctx, issue, "remove", remove); err != nil {
-			return changes, reviewPassed, err
-		}
-		issue.Labels = removeLabels(issue.Labels, remove)
-		changes = append(changes, LabelChange{Operation: "remove", Labels: remove})
-	}
-
 	add = labelsMissing(issue.Labels, add)
 	if len(add) != 0 {
 		if err := s.changeTaskLabels(ctx, issue, "add", add); err != nil {
@@ -270,6 +261,15 @@ func (s *Service) applyTaskLabelsAfterAction(ctx context.Context, issue *integra
 		}
 		issue.Labels = append(issue.Labels, add...)
 		changes = append(changes, LabelChange{Operation: "add", Labels: add})
+	}
+
+	remove = labelsPresent(issue.Labels, remove)
+	if len(remove) != 0 {
+		if err := s.changeTaskLabels(ctx, issue, "remove", remove); err != nil {
+			return changes, reviewPassed, err
+		}
+		issue.Labels = removeLabels(issue.Labels, remove)
+		changes = append(changes, LabelChange{Operation: "remove", Labels: remove})
 	}
 
 	return changes, reviewPassed, nil
