@@ -64,7 +64,7 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Consideration.Status != ConsiderationStatusExecution {
 		t.Fatalf("unexpected consideration status: %q", result.Consideration.Status)
 	}
-	if result.Consideration.Route.Name != "default" {
+	if result.Consideration.Route.Name != "task-processing-start" {
 		t.Fatalf("unexpected consideration route: %#v", result.Consideration.Route)
 	}
 	if result.Decision.Type != DecisionType(DecisionTypeExecute) {
@@ -79,7 +79,7 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Decision.ExecutionPlan == nil {
 		t.Fatal("expected execution plan")
 	}
-	if result.Decision.ExecutionPlan.Action != "implement" {
+	if result.Decision.ExecutionPlan.Action != execution.ActionStartImplementationPR {
 		t.Fatalf("unexpected execution action: %q", result.Decision.ExecutionPlan.Action)
 	}
 	if result.Decision.ExecutionPlan.StructuredInput == nil || !strings.Contains(result.Decision.ExecutionPlan.StructuredInput.Task, "Task #123: Implement decision start") {
@@ -100,7 +100,7 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if executionStub.request.Assignment == nil {
 		t.Fatal("expected execution assignment")
 	}
-	if executionStub.request.Assignment.Action != "implement" {
+	if executionStub.request.Assignment.Action != execution.ActionStartImplementationPR {
 		t.Fatalf("unexpected execution assignment: %#v", executionStub.request.Assignment)
 	}
 	if executionStub.request.Assignment.CanonicalTask == nil || executionStub.request.Assignment.CanonicalTask.Number != 123 || executionStub.request.Assignment.CanonicalTask.Repository != "owner/name" {
@@ -201,6 +201,94 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 	}
 	if result.ExecutionPlan.StructuredInput == nil || len(result.ExecutionPlan.StructuredInput.Constraints) != 1 {
 		t.Fatalf("expected constraints in structured input: %#v", result.ExecutionPlan.StructuredInput)
+	}
+}
+
+func TestServiceConsiderCompletesWhenReviewPassed(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     123,
+			Title:      "Completed task",
+			Labels:     []string{"Экспертиза пройдена"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.Status != ConsiderationStatusCompleted {
+		t.Fatalf("unexpected status: %q", result.Status)
+	}
+	if result.ExecutionPlan != nil {
+		t.Fatalf("completed route must not produce execution plan: %#v", result.ExecutionPlan)
+	}
+	decision := decisionFromConsideration(result)
+	if decision.Type != DecisionType(DecisionTypeNone) {
+		t.Fatalf("unexpected decision type: %q", decision.Type)
+	}
+}
+
+func TestServiceConsiderRequiresMergeRequestForReview(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     123,
+			Title:      "Review task",
+			Labels:     []string{"Ожидает экспертизы"},
+		},
+	}})
+	if err == nil {
+		t.Fatal("expected missing merge request error")
+	}
+	if result.Status != ConsiderationStatusManualIntervention {
+		t.Fatalf("unexpected status: %q", result.Status)
+	}
+	if result.Failure == nil || result.Failure.Code != "merge_request_missing" {
+		t.Fatalf("unexpected failure: %#v", result.Failure)
+	}
+}
+
+func TestServiceConsiderPassesMergeRequestToReviewAssignment(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     123,
+			Title:      "Review task",
+			Labels:     []string{"Ожидает экспертизы"},
+		},
+		MergeRequest: &integration.MergeRequest{
+			System:     "github",
+			Repository: "owner/name",
+			Number:     17,
+			Title:      "Review task",
+			BaseRef:    "main",
+			HeadRef:    "123",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionReviewPullRequest {
+		t.Fatalf("expected review execution plan, got %#v", result.ExecutionPlan)
+	}
+	if result.ExecutionPlan.Assignment == nil || len(result.ExecutionPlan.Assignment.RelatedObjects) != 1 {
+		t.Fatalf("expected merge request related object: %#v", result.ExecutionPlan.Assignment)
+	}
+	object := result.ExecutionPlan.Assignment.RelatedObjects[0]
+	if object.Number != 17 || object.Attributes["head_ref"] != "123" || object.Attributes["base_ref"] != "main" {
+		t.Fatalf("unexpected merge request related object: %#v", object)
 	}
 }
 

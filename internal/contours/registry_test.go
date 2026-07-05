@@ -37,17 +37,19 @@ func TestDefaultRegistryContainsBaseCycle(t *testing.T) {
 	}
 
 	expected := map[string][2]string{
-		"reactivity-to-integration-restore-request": {Reactivity, Integration},
-		"integration-to-decision-canonical-context": {Integration, Decision},
-		"decision-to-execution-assignment":          {Decision, Execution},
-		"execution-to-decision-result":              {Execution, Decision},
-		"execution-to-integration-operation":        {Execution, Integration},
-		"decision-to-execution-queue-item":          {Decision, ExecutionQueue},
-		"execution-queue-to-execution-assignment":   {ExecutionQueue, Execution},
-		"reactivity-to-observability-events":        {Reactivity, Observability},
-		"integration-to-observability-events":       {Integration, Observability},
-		"decision-to-observability-events":          {Decision, Observability},
-		"execution-to-observability-events":         {Execution, Observability},
+		"reactivity-to-integration-restore-request":    {Reactivity, Integration},
+		"reactivity-to-decision-consideration-context": {Reactivity, Decision},
+		"reactivity-to-execution-dispatch":             {Reactivity, Execution},
+		"integration-to-decision-canonical-context":    {Integration, Decision},
+		"decision-to-execution-assignment":             {Decision, Execution},
+		"execution-to-decision-result":                 {Execution, Decision},
+		"execution-to-integration-operation":           {Execution, Integration},
+		"decision-to-execution-queue-item":             {Decision, ExecutionQueue},
+		"execution-queue-to-execution-assignment":      {ExecutionQueue, Execution},
+		"reactivity-to-observability-events":           {Reactivity, Observability},
+		"integration-to-observability-events":          {Integration, Observability},
+		"decision-to-observability-events":             {Decision, Observability},
+		"execution-to-observability-events":            {Execution, Observability},
 	}
 	for id, pair := range expected {
 		contract, ok := contracts[id]

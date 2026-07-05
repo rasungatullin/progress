@@ -7,6 +7,11 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/rasungatullin/progress/internal/decision"
+	"github.com/rasungatullin/progress/internal/execution"
+	"github.com/rasungatullin/progress/internal/integration"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 const (
@@ -56,8 +61,11 @@ type Result struct {
 }
 
 type Service struct {
-	logger *log.Logger
-	now    func() time.Time
+	logger      *log.Logger
+	now         func() time.Time
+	integration integrationExecutor
+	decision    decisionConsiderer
+	execution   executionStarter
 }
 
 func NewService(logger *log.Logger) *Service {
@@ -65,8 +73,37 @@ func NewService(logger *log.Logger) *Service {
 		logger = log.New(io.Discard, "", 0)
 	}
 
-	return &Service{logger: logger, now: time.Now}
+	return &Service{
+		logger:      logger,
+		now:         time.Now,
+		integration: integration.NewConfiguredService(logger),
+		decision:    decision.NewService(logger),
+		execution:   execution.NewService(logger),
+	}
 }
+
+type integrationExecutor interface {
+	Execute(context.Context, integration.Request) (integration.Response, error)
+}
+
+type decisionConsiderer interface {
+	Consider(context.Context, decision.ConsiderationInput) (decision.ConsiderationResult, error)
+}
+
+type executionStarter interface {
+	ExecuteAction(context.Context, execution.ActionInvocation) (execution.ExecutionResult, error)
+}
+
+const (
+	LabelAwaitingReview = "Ожидает экспертизы"
+	LabelNeedsRework    = "Требует доработки"
+	LabelReviewPassed   = "Экспертиза пройдена"
+
+	defaultMaxProcessingCycles = 20
+
+	integrationTypeTracker    = integrationmodel.IntegrationTypeTracker
+	integrationTypeRepository = integrationmodel.IntegrationTypeRepository
+)
 
 func (s *Service) Normalize(ctx context.Context, event Event, process Process) (Result, error) {
 	_ = ctx

@@ -26,6 +26,7 @@ type methodologyFlags struct {
 	title           string
 	description     string
 	action          string
+	outcome         string
 	profile         string
 	class           string
 	step            string
@@ -241,6 +242,7 @@ func newMethodologyAddRouteCommand(parent *methodologyFlags) *cobra.Command {
 					Name:            flags.name,
 					Title:           flags.title,
 					Action:          flags.action,
+					Outcome:         flags.outcome,
 					Profile:         flags.profile,
 					Description:     flags.description,
 					Checks:          flags.checks,
@@ -266,6 +268,7 @@ func newMethodologyAddRouteCommand(parent *methodologyFlags) *cobra.Command {
 	cmd.Flags().StringVar(&flags.name, "name", "", "Имя маршрута")
 	cmd.Flags().StringVar(&flags.title, "title", "", "Документационное название маршрута")
 	cmd.Flags().StringVar(&flags.action, "action", "", "Имя действия маршрута")
+	cmd.Flags().StringVar(&flags.outcome, "outcome", "", "Исход маршрута без запуска действия")
 	cmd.Flags().StringVar(&flags.profile, "profile", "", "Рекомендуемый исполнительный профиль")
 	cmd.Flags().StringVar(&flags.description, "description", "", "Описание маршрута")
 	cmd.Flags().StringArrayVar(&flags.checks, "check", nil, "Имя проверки маршрута, флаг можно повторять")
@@ -279,7 +282,6 @@ func newMethodologyAddRouteCommand(parent *methodologyFlags) *cobra.Command {
 	cmd.Flags().StringVar(&flags.reasonCode, "reason-code", "", "Код основания выбора")
 	cmd.Flags().StringVar(&flags.reasonMessage, "reason-message", "", "Описание основания выбора")
 	_ = cmd.MarkFlagRequired("name")
-	_ = cmd.MarkFlagRequired("action")
 	return cmd
 }
 
@@ -507,9 +509,9 @@ func singleLine(value string) string {
 
 func printMethodologyElementsTable(cmd *cobra.Command, elements []methodology.ListedElement) {
 	writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "KIND\tNAME\tSOURCE\tPROFILE\tACTION\tENTITY_KIND\tTARGET_CONTOUR\tTITLE")
+	fmt.Fprintln(writer, "KIND\tNAME\tSOURCE\tPROFILE\tACTION\tOUTCOME\tENTITY_KIND\tTARGET_CONTOUR\tTITLE")
 	for _, element := range elements {
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", element.Kind, element.Name, element.Source, element.Profile, element.Action, element.EntityKind, element.TargetContour, singleLine(element.Title))
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", element.Kind, element.Name, element.Source, element.Profile, element.Action, element.Outcome, element.EntityKind, element.TargetContour, singleLine(element.Title))
 	}
 	_ = writer.Flush()
 }
@@ -528,6 +530,9 @@ func printMethodologyElement(cmd *cobra.Command, element methodology.ListedEleme
 	if element.Action != "" {
 		cmd.Printf("action=%s\n", element.Action)
 	}
+	if element.Outcome != "" {
+		cmd.Printf("outcome=%s\n", element.Outcome)
+	}
 	if element.Class != "" {
 		cmd.Printf("class=%s\n", element.Class)
 	}
@@ -545,7 +550,7 @@ func printMethodologyElement(cmd *cobra.Command, element methodology.ListedEleme
 }
 
 func printMethodologySelection(cmd *cobra.Command, result methodology.SelectionResult) {
-	cmd.Printf("route=%s\nroute-source=%s\naction=%s\naction-source=%s\nprofile=%s\n", result.Route.Name, result.RouteSource, result.Action.Name, result.ActionSource, result.Profile)
+	cmd.Printf("route=%s\nroute-source=%s\naction=%s\naction-source=%s\noutcome=%s\nprofile=%s\n", result.Route.Name, result.RouteSource, result.Action.Name, result.ActionSource, result.Route.Outcome, result.Profile)
 	if result.Instruction.Name != "" {
 		cmd.Printf("instruction=%s\ninstruction-source=%s\n", result.Instruction.Name, result.InstructionSource)
 	}

@@ -126,10 +126,23 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 		return result, err
 	}
 
-	decision := buildExecuteDecision(result.Context.Task, input.Context.Issue, route)
-	result.Status = ConsiderationStatusExecution
 	result.Route = route.Route
 	result.Checks = route.Checks
+	if strings.TrimSpace(route.Outcome) != "" && strings.TrimSpace(route.Action) == "" {
+		result.Status = ConsiderationStatusCompleted
+		result.Reasons = []DecisionReason{decisionReasonFromRoute(route, "route_completed", "Маршрут обработки завершён; следующая операция не требуется.")}
+		return result, nil
+	}
+	if requiresMergeRequest(route.Action) && input.Context.MergeRequest == nil {
+		err := fmt.Errorf("merge request is required for action %q", route.Action)
+		result.Status = ConsiderationStatusManualIntervention
+		result.Failure = decisionFailure("merge_request_missing", err, false, true)
+		result.Reasons = []DecisionReason{decisionReasonFromRoute(route, "merge_request_required", "Для выбранного действия требуется связанный запрос на слияние.")}
+		return result, err
+	}
+
+	decision := buildExecuteDecision(result.Context, route)
+	result.Status = ConsiderationStatusExecution
 	result.Reasons = append([]DecisionReason(nil), decision.Reasons...)
 	result.ExecutionPlan = decision.ExecutionPlan
 	return result, nil
@@ -174,7 +187,9 @@ func (s *Service) resolveCurrentRepository(ctx context.Context) (string, error) 
 	return normalized, nil
 }
 
-func buildExecuteDecision(task integration.CanonicalTask, issue *integration.TrackerIssue, route selectedWorkflowRoute) Decision {
+func buildExecuteDecision(context DecisionContext, route selectedWorkflowRoute) Decision {
+	task := context.Task
+	issue := context.Issue
 	prompt := buildExecutionTask(issue)
 	if strings.TrimSpace(route.Action) == "" {
 		route.Action = "implement"
@@ -209,6 +224,7 @@ func buildExecuteDecision(task integration.CanonicalTask, issue *integration.Tra
 		ExpectedResult:  route.ExpectedResult,
 		Constraints:     append([]string(nil), route.Constraints...),
 		CanonicalTask:   executionObjectRefFromCanonicalTask(task),
+		RelatedObjects:  executionRelatedObjectsFromDecisionContext(context),
 		Reasons:         executionReasonsFromDecisionReasons(reasons),
 		StructuredInput: structuredInput,
 	}
@@ -244,6 +260,8 @@ func decisionFromConsideration(result ConsiderationResult) Decision {
 	}
 	if result.ExecutionPlan != nil {
 		decision.Type = DecisionType(DecisionTypeExecute)
+	} else if result.Status == ConsiderationStatusCompleted {
+		decision.Type = DecisionType(DecisionTypeNone)
 	}
 	return decision
 }
@@ -268,6 +286,9 @@ func canonicalTaskFromIssue(issue *integration.TrackerIssue) integration.Canonic
 	if repository := strings.TrimSpace(issue.Repository); repository != "" {
 		attributes["repository"] = repository
 	}
+	if body := strings.TrimSpace(issue.Body); body != "" {
+		attributes["body"] = body
+	}
 
 	return integration.CanonicalTask{
 		System:     strings.TrimSpace(issue.System),
@@ -280,6 +301,53 @@ func canonicalTaskFromIssue(issue *integration.TrackerIssue) integration.Canonic
 		Traits:     normalizeFeatures(issue.Labels),
 		Attributes: attributes,
 	}
+}
+
+func decisionReasonFromRoute(route selectedWorkflowRoute, defaultCode string, defaultMessage string) DecisionReason {
+	return DecisionReason{
+		Code:    firstNonEmpty(strings.TrimSpace(route.ReasonCode), defaultCode),
+		Message: firstNonEmpty(strings.TrimSpace(route.ReasonMessage), defaultMessage),
+	}
+}
+
+func requiresMergeRequest(action string) bool {
+	switch strings.TrimSpace(action) {
+	case execution.ActionReviewPullRequest, execution.ActionApplyReviewComments:
+		return true
+	default:
+		return false
+	}
+}
+
+func executionRelatedObjectsFromDecisionContext(context DecisionContext) []execution.ObjectRef {
+	if context.MergeRequest == nil {
+		return nil
+	}
+
+	mergeRequest := context.MergeRequest
+	attributes := map[string]string{}
+	if value := strings.TrimSpace(mergeRequest.BaseRef); value != "" {
+		attributes["base_ref"] = value
+	}
+	if value := strings.TrimSpace(mergeRequest.HeadRef); value != "" {
+		attributes["head_ref"] = value
+	}
+	if value := strings.TrimSpace(mergeRequest.Body); value != "" {
+		attributes["body"] = value
+	}
+	if len(attributes) == 0 {
+		attributes = nil
+	}
+
+	return []execution.ObjectRef{{
+		Type:       "merge-request",
+		System:     strings.TrimSpace(mergeRequest.System),
+		Repository: strings.TrimSpace(mergeRequest.Repository),
+		Number:     mergeRequest.Number,
+		Title:      strings.TrimSpace(mergeRequest.Title),
+		URL:        strings.TrimSpace(mergeRequest.URL),
+		Attributes: attributes,
+	}}
 }
 
 func executionObjectRefFromCanonicalTask(task integration.CanonicalTask) *execution.ObjectRef {
