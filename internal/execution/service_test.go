@@ -586,6 +586,107 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 	}
 }
 
+func TestServiceExecuteStartImplementationUsesPullRequestBaseForWorkplace(t *testing.T) {
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
+	launcher := &stubLauncher{
+		result: model.LaunchResult{
+			Status:           "completed",
+			StructuredOutput: &model.StructuredOutput{Summary: "Реализация выполнена.", CommitMessage: "Исправить маршрут."},
+		},
+		commitSummary: "git=committed+pushed branch=112",
+	}
+	integrations := &stubIntegrationExecutor{
+		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			if req.Operation != "create" || req.Base != "release" || req.Head != "112" {
+				t.Fatalf("unexpected integration request: %#v", req)
+			}
+			return integration.Response{
+				PullRequestStatus: &integration.PullRequestStatus{Repository: req.Repository, Number: 18, State: "OPEN", URL: "https://github.com/owner/name/pull/18"},
+				OperationResult:   &integration.OperationResult{Status: "ok", ExternalID: "18", URL: "https://github.com/owner/name/pull/18"},
+			}, nil
+		},
+	}
+	workplaces := &stubWorkplaceManager{workplace: model.Workplace{Name: root, RepositoryRoot: root, Ready: true}}
+	service := &Service{
+		logger:       log.Default(),
+		actions:      newActionCatalog(),
+		profiles:     &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
+		workplaces:   workplaces,
+		launcher:     launcher,
+		integrations: integrations,
+	}
+
+	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
+		Assignment: &ExecutionAssignment{
+			Action:        ActionStartImplementationPR,
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112, Title: "Поддержать действие"},
+			RelatedObjects: []ObjectRef{{
+				Type:       "merge-request",
+				Repository: "owner/name",
+				Attributes: map[string]string{
+					"base_ref": "release",
+					"head_ref": "112",
+				},
+			}},
+			StructuredInput: &StructuredInput{Task: "Выполнить реализацию."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute implementation action: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if workplaces.invocation.Workplace.Name != "112" || workplaces.invocation.Workplace.BaseRef != "release" {
+		t.Fatalf("pull request refs must be synchronized with workplace: %#v", workplaces.invocation.Workplace)
+	}
+	if len(integrations.calls) != 1 {
+		t.Fatalf("expected one integration request, got %#v", integrations.calls)
+	}
+}
+
+func TestServiceExecuteStartImplementationRejectsMismatchedHeadBranch(t *testing.T) {
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
+	service := &Service{
+		logger:     log.Default(),
+		actions:    newActionCatalog(),
+		profiles:   &stubProfileResolver{err: errors.New("profile must not be resolved")},
+		workplaces: &stubWorkplaceManager{err: errors.New("workplace must not be prepared")},
+	}
+
+	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
+		Assignment: &ExecutionAssignment{
+			Action:        ActionStartImplementationPR,
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112, Title: "Поддержать действие"},
+			RelatedObjects: []ObjectRef{{
+				Type:       "merge-request",
+				Repository: "owner/name",
+				Attributes: map[string]string{
+					"base_ref": "release",
+					"head_ref": "feature-x",
+				},
+			}},
+			StructuredInput: &StructuredInput{Task: "Выполнить реализацию."},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected mismatched head branch error")
+	}
+	if !strings.Contains(err.Error(), `head branch "feature-x" does not match workplace branch "112"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	operation := findOperationResult(result.Operations, OperationKindPrepareData)
+	if operation == nil || operation.Status != OperationStatusFailed || operation.Failure == nil || operation.Failure.Code != "pull_request_branch_mismatch" {
+		t.Fatalf("prepare data must keep branch mismatch diagnostics: %#v", result.Operations)
+	}
+}
+
 func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
@@ -983,11 +1084,13 @@ func (s *stubResourceProvider) Allocate(context.Context, model.Invocation, model
 }
 
 type stubWorkplaceManager struct {
-	workplace model.Workplace
-	err       error
+	workplace  model.Workplace
+	invocation model.Invocation
+	err        error
 }
 
-func (s *stubWorkplaceManager) Prepare(context.Context, model.Invocation, model.Profile, model.Allocation) (model.Workplace, error) {
+func (s *stubWorkplaceManager) Prepare(_ context.Context, in model.Invocation, _ model.Profile, _ model.Allocation) (model.Workplace, error) {
+	s.invocation = in
 	if s.err != nil {
 		return model.Workplace{}, s.err
 	}

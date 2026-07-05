@@ -39,6 +39,32 @@ func TestPrepareUsesCurrentRepositoryWhenRepoIsOmitted(t *testing.T) {
 	})
 }
 
+func TestPrepareUsesRequestedBaseBranch(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	service, gitCalls := newStubService(t, hostRepoRoot, nil)
+
+	workplace, err := service.Prepare(context.Background(), model.Invocation{
+		Workplace: model.WorkplaceSpec{
+			Name:    "task-49",
+			BaseRef: "release",
+		},
+	}, model.Profile{}, model.Allocation{})
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+
+	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "task-49")
+	if workplace.Name != expectedDir {
+		t.Fatalf("unexpected workplace path: %q", workplace.Name)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{
+		{dir: hostRepoRoot, args: []string{"fetch", "origin", "release"}},
+		{dir: hostRepoRoot, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "origin/release"}},
+	})
+}
+
 func TestPrepareUsesRemoteTaskBranchWhenPresent(t *testing.T) {
 	t.Parallel()
 

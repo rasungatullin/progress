@@ -115,6 +115,7 @@ type ResumeSpec struct {
 type WorkplaceSpec struct {
 	Name        string `json:"name,omitempty"`
 	Environment string `json:"environment,omitempty"`
+	BaseRef     string `json:"base_ref,omitempty"`
 }
 
 type RepositorySpec struct {

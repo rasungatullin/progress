@@ -105,9 +105,12 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 		}
 	}
 
-	baseBranch, err := s.resolveOriginDefaultBranch(ctx, repoRoot)
-	if err != nil {
-		return model.Workplace{}, err
+	baseBranch := strings.TrimSpace(in.Workplace.BaseRef)
+	if baseBranch == "" {
+		baseBranch, err = s.resolveOriginDefaultBranch(ctx, repoRoot)
+		if err != nil {
+			return model.Workplace{}, err
+		}
 	}
 
 	targetDir := filepath.Join(repoRoot, ".progress", "workplaces", name)

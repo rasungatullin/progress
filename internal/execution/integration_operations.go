@@ -438,6 +438,9 @@ func applyPullRequestToState(state *operationExecution, pr integration.MergeRequ
 	if strings.TrimSpace(state.in.Repository.URL) == "" {
 		state.in.Repository.URL = strings.TrimSpace(pr.Repository)
 	}
+	if strings.TrimSpace(state.in.Workplace.BaseRef) == "" {
+		state.in.Workplace.BaseRef = strings.TrimSpace(pr.BaseRef)
+	}
 	branchName := workplaceBranchNameFromState(state)
 	if branchName != "" && shouldReplaceWorkplaceName(state.in.Workplace.Name, state.assignment.Action) {
 		state.in.Workplace.Name = branchName
