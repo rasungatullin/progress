@@ -207,8 +207,7 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 		return nil
 	}
 
-	bodies := reviewResponseCommentBodies(responses)
-	count, err := e.publishPullRequestComments(ctx, state, ref, bodies)
+	count, err := e.publishReviewResponseComments(ctx, state, ref, responses)
 	if err != nil {
 		return e.failIntegrationOperation(ctx, state, name, "Ответы на замечания не записаны.", err, "review_responses_publish_failed")
 	}
@@ -248,6 +247,45 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 			Body:            body,
 			Text:            body,
 		})
+		if err != nil {
+			return count, err
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, state *operationExecution, ref pullRequestRef, responses []StructuredResponse) (int, error) {
+	executor, err := e.integrationExecutor()
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, response := range responses {
+		body := reviewResponseCommentBody(response)
+		if body == "" {
+			continue
+		}
+		threadID := reviewThreadIDForResponse(state.reviewRemarks, response)
+		request := integration.Request{
+			IntegrationType: integrationmodel.IntegrationTypeRepository,
+			Resource:        "comment",
+			ObjectType:      "comment",
+			Operation:       "create",
+			Repository:      ref.Repository,
+			RepoProvided:    strings.TrimSpace(ref.Repository) != "",
+			Number:          ref.Number,
+			Body:            body,
+			Text:            body,
+		}
+		if threadID != "" {
+			request.Operation = "reply"
+			request.ThreadID = threadID
+			request.ExternalID = threadID
+		}
+		_, err := executor.Execute(ctx, request)
 		if err != nil {
 			return count, err
 		}
@@ -706,18 +744,21 @@ func reviewResponsesFromOutput(output *StructuredOutput) []StructuredResponse {
 func reviewResponseCommentBodies(responses []StructuredResponse) []string {
 	bodies := make([]string, 0, len(responses))
 	for _, response := range responses {
-		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
-			"## Ответ на замечание ревизии",
-			formatNamedLine("Замечание", response.RemarkID),
-			formatNamedLine("Состояние", response.Status),
-			response.Summary,
-			response.Body,
-		}), "\n\n"))
-		if body != "" {
+		if body := reviewResponseCommentBody(response); body != "" {
 			bodies = append(bodies, body)
 		}
 	}
 	return bodies
+}
+
+func reviewResponseCommentBody(response StructuredResponse) string {
+	return strings.TrimSpace(strings.Join(nonEmptyParts([]string{
+		"## Ответ на замечание ревизии",
+		formatNamedLine("Замечание", response.RemarkID),
+		formatNamedLine("Состояние", response.Status),
+		response.Summary,
+		response.Body,
+	}), "\n\n"))
 }
 
 func isResolvedReviewResponse(response StructuredResponse) bool {

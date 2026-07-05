@@ -24,6 +24,7 @@ type ghRunner interface {
 	RunPRCreate(context.Context, string, PRCreateRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreads(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRCommentCreate(context.Context, string, int, PRCommentCreateRequest) (CommandResult, resolvedConfig, error)
+	RunPRReviewThreadReply(context.Context, PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadResolve(context.Context, string) (CommandResult, resolvedConfig, error)
 }
 
@@ -150,6 +151,14 @@ type ghPRReviewThreadResolveResponse struct {
 	} `json:"data"`
 }
 
+type ghPRReviewThreadReplyResponse struct {
+	Data struct {
+		AddPullRequestReviewThreadReply struct {
+			Comment ghPRReviewComment `json:"comment"`
+		} `json:"addPullRequestReviewThreadReply"`
+	} `json:"data"`
+}
+
 func NewService() *Service {
 	return &Service{runner: NewRunner()}
 }
@@ -193,8 +202,12 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executePRCreate(ctx, response, req)
 	case isPullRequestRequest(req) && req.Operation == "comments":
 		return s.executePRComments(ctx, response, req)
+	case isPullRequestCommentRequest(req) && req.Operation == "list":
+		return s.executePRComments(ctx, response, req)
 	case isPullRequestCommentRequest(req) && req.Operation == "create":
 		return s.executePRCommentCreate(ctx, response, req)
+	case isPullRequestCommentRequest(req) && req.Operation == "reply":
+		return s.executePRCommentReply(ctx, response, req)
 	case isPullRequestCommentRequest(req) && req.Operation == "resolve":
 		return s.executePRCommentResolve(ctx, response, req)
 	default:
@@ -491,6 +504,45 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		Method:     methodFromConfig(config),
 		Endpoint:   "pr comment create",
 		Message:    fmt.Sprintf("GitHub pull request comment created for %s#%d", repository, number),
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executePRCommentReply(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	replyRequest, err := normalizePRReviewThreadReplyRequest(PRReviewThreadReplyRequest{ThreadID: firstNonEmpty(req.ThreadID, req.ExternalID), Body: firstNonEmpty(req.Text, req.Body)})
+	if err != nil {
+		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comment reply request rejected before invoking gh")
+	}
+
+	result, config, err := s.runner.RunPRReviewThreadReply(ctx, replyRequest)
+	if err != nil {
+		return responseWithGitHubFailure(response, result, err, "gh pull request review thread reply failed before returning a payload")
+	}
+	if result.ExitCode != 0 {
+		return responseWithGitHubExitFailure(response, result, "", 0, "gh pull request review thread reply exited with a non-zero code")
+	}
+
+	var raw ghPRReviewThreadReplyResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub GraphQL JSON response: %v", err), Result: result, Err: err}, "gh pull request review thread reply returned malformed JSON")
+	}
+	remark := reviewRemarkFromThreadReply(replyRequest.ThreadID, raw.Data.AddPullRequestReviewThreadReply.Comment)
+	if remark.ExternalID == "" && remark.URL == "" {
+		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: "unexpected GitHub response: missing pull request review thread reply identifier", Result: result}, "gh pull request review thread reply returned an incomplete payload")
+	}
+
+	response.ReviewRemarks = []model.ReviewRemark{remark}
+	response.OperationResult = &model.OperationResult{
+		System:     "github",
+		ObjectType: "review-remark",
+		Operation:  "reply",
+		Status:     model.ResponseStatusOK,
+		ExternalID: firstNonEmpty(remark.ExternalID, remark.URL),
+		URL:        remark.URL,
+		Method:     methodFromConfig(config),
+		Endpoint:   "addPullRequestReviewThreadReply",
+		Message:    fmt.Sprintf("GitHub pull request review thread reply created: %s", replyRequest.ThreadID),
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
@@ -1439,6 +1491,26 @@ func reviewRemarksFromThreads(repository string, number int, threads []ghPRRevie
 	return remarks
 }
 
+func reviewRemarkFromThreadReply(threadID string, comment ghPRReviewComment) model.ReviewRemark {
+	author := model.User{System: "github"}
+	if comment.Author != nil {
+		author = userFromTrackerUser(normalizeTrackerUser(*comment.Author))
+	}
+	return model.ReviewRemark{
+		System:     "github",
+		ExternalID: strings.TrimSpace(comment.ID),
+		Author:     author,
+		State:      "reply",
+		Body:       strings.TrimSpace(comment.Body),
+		Path:       strings.TrimSpace(comment.Path),
+		Line:       comment.Line,
+		ReplyToID:  strings.TrimSpace(threadID),
+		URL:        strings.TrimSpace(comment.URL),
+		CreatedAt:  strings.TrimSpace(comment.CreatedAt),
+		UpdatedAt:  strings.TrimSpace(comment.UpdatedAt),
+	}
+}
+
 func responseWithGitHubFailure(response model.Response, result CommandResult, err error, diagnostic string) (model.Response, error) {
 	response.Status = model.ResponseStatusFailed
 	var ghErr *Error
@@ -2021,7 +2093,7 @@ func isIssueLabelRequest(req model.ProviderRequest) bool {
 
 func isPullRequestCommentRequest(req model.ProviderRequest) bool {
 	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
-	return object == "comment" && req.IntegrationType == model.IntegrationTypeRepository
+	return (object == "comment" || object == "review-remark" || object == "merge-request-comment") && req.IntegrationType == model.IntegrationTypeRepository
 }
 
 func isPullRequestRequest(req model.ProviderRequest) bool {

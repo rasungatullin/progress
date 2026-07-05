@@ -601,6 +601,42 @@ func (r *Runner) RunPRReviewThreadResolve(ctx context.Context, threadID string) 
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + mutation, "-f", "threadId=" + threadID})
 }
 
+func (r *Runner) RunPRReviewThreadReply(ctx context.Context, request PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error) {
+	request, err := normalizePRReviewThreadReplyRequest(request)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	mutation := `mutation($threadId: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) {
+    comment {
+      id
+      body
+      url
+      path
+      line
+      author {
+        login
+        url
+      }
+      createdAt
+      updatedAt
+    }
+  }
+}`
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + mutation, "-f", "threadId=" + request.ThreadID, "-f", "body=" + request.Body})
+}
+
 type PRCreateRequest struct {
 	Base  string
 	Head  string
@@ -621,6 +657,11 @@ type PRCommentCreateRequest struct {
 	Path string
 	Line int
 	Side string
+}
+
+type PRReviewThreadReplyRequest struct {
+	ThreadID string
+	Body     string
 }
 
 type ghPullRequestNodeResponse struct {
@@ -760,6 +801,18 @@ func normalizePRCommentCreateRequest(request PRCommentCreateRequest) (PRCommentC
 		return PRCommentCreateRequest{}, fmt.Errorf("GitHub pull request inline comment side must be LEFT or RIGHT")
 	}
 
+	return request, nil
+}
+
+func normalizePRReviewThreadReplyRequest(request PRReviewThreadReplyRequest) (PRReviewThreadReplyRequest, error) {
+	request.ThreadID = strings.TrimSpace(request.ThreadID)
+	request.Body = strings.TrimSpace(request.Body)
+	if request.ThreadID == "" {
+		return PRReviewThreadReplyRequest{}, fmt.Errorf("GitHub pull request review thread id is required")
+	}
+	if request.Body == "" {
+		return PRReviewThreadReplyRequest{}, fmt.Errorf("GitHub pull request review thread reply body is required")
+	}
 	return request, nil
 }
 

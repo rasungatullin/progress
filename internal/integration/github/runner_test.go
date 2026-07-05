@@ -693,6 +693,39 @@ func TestRunnerRunPRReviewThreadResolveBuildsGraphQLCommand(t *testing.T) {
 	}
 }
 
+func TestRunnerRunPRReviewThreadReplyBuildsGraphQLCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		if len(args) < 6 || args[0] != "api" || args[1] != "graphql" {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		joined := fmt.Sprint(args)
+		if !strings.Contains(joined, "addPullRequestReviewThreadReply") || !strings.Contains(joined, "threadId=thread-1") || !strings.Contains(joined, "body=Reply body") {
+			t.Fatalf("unexpected graphql args: %#v", args)
+		}
+		return commandRunner{stdout: `{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"comment-1","body":"Reply body","url":"https://github.com/owner/name/pull/42#discussion_r1"}}}}`}
+	}
+
+	result, config, err := runner.RunPRReviewThreadReply(context.Background(), PRReviewThreadReplyRequest{ThreadID: "thread-1", Body: "Reply body"})
+	if err != nil {
+		t.Fatalf("run pr review thread reply: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
 func TestRunnerRunPRCreateBuildsCommand(t *testing.T) {
 	t.Parallel()
 

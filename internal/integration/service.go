@@ -740,8 +740,8 @@ func expectedResult(integrationType string, objectType string, resource string, 
 				return "integration-operation-result"
 			}
 			return "canonical-merge-request"
-		case "comment", "review":
-			if operation == "create" || operation == "resolve" {
+		case "comment", "review", "review-remark", "merge-request-comment":
+			if operation == "create" || operation == "resolve" || operation == "reply" {
 				return "integration-operation-result"
 			}
 			return "review-remark[]"
