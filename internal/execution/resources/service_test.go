@@ -142,6 +142,76 @@ func TestAllocateUsesExplicitRunnerAndModelWithoutBinding(t *testing.T) {
 	}
 }
 
+func TestAllocateRejectsDisabledResource(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"tools": {"opencode": {"type": "agentic-system", "enabled": true}},
+		"resources": {"qwen": {"type": "model", "enabled": false, "tools": ["opencode"]}},
+		"bindings": {"default": {"tool": "opencode", "resource": "qwen"}}
+	}`)
+
+	_, err := service.Allocate(context.Background(), model.Invocation{}, model.Profile{
+		ModelBinding: "default",
+	})
+	if err == nil {
+		t.Fatal("expected disabled model error")
+	}
+	if !strings.Contains(err.Error(), "execution model is disabled: qwen") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAllocateRejectsExplicitRunnerModelWhenResourceDoesNotAllowTool(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"tools": {
+			"opencode": {"type": "agentic-system", "enabled": true},
+			"codex": {"type": "agentic-system", "enabled": true}
+		},
+		"resources": {"qwen": {"type": "model", "enabled": true, "tools": ["opencode"]}},
+		"bindings": {"default": {"tool": "opencode", "resource": "qwen"}}
+	}`)
+
+	_, err := service.Allocate(context.Background(), model.Invocation{
+		Launch: model.LaunchSpec{Runner: "codex", Model: "qwen"},
+	}, model.Profile{ModelBinding: "default"})
+	if err == nil {
+		t.Fatal("expected tool restriction error")
+	}
+	if !strings.Contains(err.Error(), "execution model qwen is not available for runner codex") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAllocateReturnsConfiguredEnvironment(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default", "environment": "same-process"},
+		"environments": {
+			"same-process": {"type": "local", "enabled": true},
+			"isolated-tree": {"type": "worktree", "enabled": true}
+		},
+		"tools": {"opencode": {"type": "agentic-system", "enabled": true}},
+		"resources": {"qwen": {"type": "model", "enabled": true, "tools": ["opencode"]}},
+		"bindings": {"default": {"tool": "opencode", "resource": "qwen", "environment": "isolated-tree"}}
+	}`)
+
+	allocation, err := service.Allocate(context.Background(), model.Invocation{}, model.Profile{
+		ModelBinding: "default",
+	})
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if allocation.Environment != "isolated-tree" || allocation.EnvironmentType != "worktree" {
+		t.Fatalf("unexpected environment: %#v", allocation)
+	}
+}
+
 func TestAllocateUsesProfileBinding(t *testing.T) {
 	t.Parallel()
 

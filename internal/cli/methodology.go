@@ -501,6 +501,10 @@ func printMethodologyJSON(cmd *cobra.Command, value any) error {
 	return nil
 }
 
+func singleLine(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
 func printMethodologyElementsTable(cmd *cobra.Command, elements []methodology.ListedElement) {
 	writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	fmt.Fprintln(writer, "KIND\tNAME\tSOURCE\tPROFILE\tACTION\tENTITY_KIND\tTARGET_CONTOUR\tTITLE")

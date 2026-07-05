@@ -71,6 +71,78 @@ func TestPrepareClonesExternalRepositoryWhenCacheIsMissing(t *testing.T) {
 	})
 }
 
+func TestPrepareUsesLocalEnvironmentFromAllocation(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	service, gitCalls := newStubService(t, hostRepoRoot, nil)
+
+	workplace, err := service.Prepare(context.Background(), model.Invocation{}, model.Profile{}, model.Allocation{
+		Environment:     "same-process",
+		EnvironmentType: "local",
+	})
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+
+	if workplace.Name != hostRepoRoot || workplace.RepositoryRoot != hostRepoRoot {
+		t.Fatalf("unexpected local workplace: %#v", workplace)
+	}
+	if workplace.Environment != "same-process" || workplace.EnvironmentType != "local" {
+		t.Fatalf("unexpected environment: %#v", workplace)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{})
+}
+
+func TestPrepareUsesAllocationEnvironmentTypeForExplicitEnvironmentName(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	service, gitCalls := newStubService(t, hostRepoRoot, nil)
+
+	workplace, err := service.Prepare(context.Background(), model.Invocation{
+		Workplace: model.WorkplaceSpec{
+			Name:        "task-49",
+			Environment: "same-process",
+		},
+	}, model.Profile{}, model.Allocation{
+		Environment:     "same-process",
+		EnvironmentType: "local",
+	})
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+
+	if workplace.Name != hostRepoRoot || workplace.RepositoryRoot != hostRepoRoot {
+		t.Fatalf("unexpected local workplace: %#v", workplace)
+	}
+	if workplace.Environment != "same-process" || workplace.EnvironmentType != "local" {
+		t.Fatalf("unexpected environment: %#v", workplace)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{})
+}
+
+func TestPrepareRejectsLocalEnvironmentWithRepositoryURL(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	service, gitCalls := newStubService(t, hostRepoRoot, nil)
+
+	_, err := service.Prepare(context.Background(), model.Invocation{
+		Repository: model.RepositorySpec{URL: "owner/name"},
+	}, model.Profile{}, model.Allocation{
+		Environment:     "same-process",
+		EnvironmentType: "local",
+	})
+	if err == nil {
+		t.Fatal("expected local repository url error")
+	}
+	if !strings.Contains(err.Error(), "local environment cannot use repository url") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{})
+}
+
 func TestPrepareFetchesExternalRepositoryWhenCacheExists(t *testing.T) {
 	t.Parallel()
 

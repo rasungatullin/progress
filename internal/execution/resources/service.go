@@ -24,10 +24,13 @@ type Service struct {
 }
 
 type resourceConfig struct {
-	Config           model.ResourceConfigFile
-	BindingSources   map[string]configuration.ConfigFileSource
-	GlobalConfigPath string
-	LocalConfigPath  string
+	Config             model.ResourceConfigFile
+	EnvironmentSources map[string]configuration.ConfigFileSource
+	ToolSources        map[string]configuration.ConfigFileSource
+	ResourceSources    map[string]configuration.ConfigFileSource
+	BindingSources     map[string]configuration.ConfigFileSource
+	GlobalConfigPath   string
+	LocalConfigPath    string
 }
 
 func NewService() *Service {
@@ -44,7 +47,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 	}
 
 	if binding := strings.TrimSpace(in.Launch.ModelBinding); binding != "" {
-		allocation, err := resolveBinding(config, binding, allocationSourceExplicitBinding)
+		allocation, err := resolveBinding(config, binding, allocationSourceExplicitBinding, in)
 		if err != nil {
 			return model.Allocation{}, err
 		}
@@ -59,17 +62,26 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		if runner == "" || modelName == "" {
 			return model.Allocation{}, fmt.Errorf("launch runner and model must be provided together when no model-binding is used")
 		}
-		if !containsName(config.Config.Runners, runner) {
+		if _, ok := config.Config.Tools[runner]; !ok {
 			return model.Allocation{}, fmt.Errorf("unknown execution runner: %s", runner)
 		}
-		if !containsName(config.Config.Models, modelName) {
+		if _, ok := config.Config.Resources[modelName]; !ok {
 			return model.Allocation{}, fmt.Errorf("unknown execution model: %s", modelName)
+		}
+		if err := ensureToolResourceAvailable(config, runner, modelName); err != nil {
+			return model.Allocation{}, err
+		}
+		environment, environmentType, err := resolveAllocationEnvironment(config, in, "")
+		if err != nil {
+			return model.Allocation{}, err
 		}
 		return model.Allocation{
 			Resource:         "runner-model:" + runner + ":" + modelName,
 			Reserved:         true,
 			Runner:           runner,
 			Model:            modelName,
+			Environment:      environment,
+			EnvironmentType:  environmentType,
 			Source:           allocationSourceExplicitRunnerModel,
 			GlobalConfigPath: config.GlobalConfigPath,
 			LocalConfigPath:  config.LocalConfigPath,
@@ -79,7 +91,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 
 	profileBinding := strings.TrimSpace(profile.ModelBinding)
 	if profileBinding != "" {
-		allocation, err := resolveBinding(config, profileBinding, allocationSourceProfileBinding)
+		allocation, err := resolveBinding(config, profileBinding, allocationSourceProfileBinding, in)
 		if err == nil {
 			allocation.GlobalConfigPath = config.GlobalConfigPath
 			allocation.LocalConfigPath = config.LocalConfigPath
@@ -89,7 +101,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			return model.Allocation{}, err
 		}
 
-		fallback, fallbackErr := resolveDefaultBinding(config)
+		fallback, fallbackErr := resolveDefaultBinding(config, in)
 		if fallbackErr != nil {
 			return model.Allocation{}, fallbackErr
 		}
@@ -104,7 +116,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		return model.Allocation{}, fmt.Errorf("execution model-binding is required when allow-model-fallback is false")
 	}
 
-	allocation, err := resolveDefaultBinding(config)
+	allocation, err := resolveDefaultBinding(config, in)
 	if err != nil {
 		return model.Allocation{}, err
 	}
@@ -127,10 +139,13 @@ func (s *Service) loadConfig(ctx context.Context) (resourceConfig, error) {
 	}
 
 	return resourceConfig{
-		Config:           loaded.Config,
-		BindingSources:   loaded.BindingSources,
-		GlobalConfigPath: getLayerPath(loaded.Layers, configuration.ConfigFileSourceGlobal),
-		LocalConfigPath:  getLayerPath(loaded.Layers, configuration.ConfigFileSourceLocal),
+		Config:             loaded.Config,
+		EnvironmentSources: loaded.EnvironmentSources,
+		ToolSources:        loaded.ToolSources,
+		ResourceSources:    loaded.ResourceSources,
+		BindingSources:     loaded.BindingSources,
+		GlobalConfigPath:   getLayerPath(loaded.Layers, configuration.ConfigFileSourceGlobal),
+		LocalConfigPath:    getLayerPath(loaded.Layers, configuration.ConfigFileSourceLocal),
 	}, nil
 }
 
@@ -143,20 +158,31 @@ func getLayerPath(layers []configuration.ExecutionResourceLayer, source configur
 	return ""
 }
 
-func resolveBinding(config resourceConfig, bindingName string, source string) (model.Allocation, error) {
+func resolveBinding(config resourceConfig, bindingName string, source string, in model.Invocation) (model.Allocation, error) {
 	binding, ok := config.Config.Bindings[bindingName]
 	if !ok {
 		return model.Allocation{}, fmt.Errorf("unknown execution model-binding: %s", bindingName)
 	}
+	tool := bindingTool(binding)
+	resource := bindingResource(binding)
+	if err := ensureToolResourceAvailable(config, tool, resource); err != nil {
+		return model.Allocation{}, err
+	}
+	environment, environmentType, err := resolveAllocationEnvironment(config, in, binding.Environment)
+	if err != nil {
+		return model.Allocation{}, err
+	}
 
 	allocation := model.Allocation{
-		Resource:     "binding:" + bindingName,
-		Reserved:     true,
-		Runner:       binding.Runner,
-		Model:        binding.Model,
-		ModelBinding: bindingName,
-		Source:       source,
-		FallbackUsed: false,
+		Resource:        "binding:" + bindingName,
+		Reserved:        true,
+		Runner:          tool,
+		Model:           resource,
+		ModelBinding:    bindingName,
+		Environment:     environment,
+		EnvironmentType: environmentType,
+		Source:          source,
+		FallbackUsed:    false,
 	}
 	if config.BindingSources != nil {
 		allocation.BindingSource = string(config.BindingSources[bindingName])
@@ -164,17 +190,89 @@ func resolveBinding(config resourceConfig, bindingName string, source string) (m
 	return allocation, nil
 }
 
-func resolveDefaultBinding(config resourceConfig) (model.Allocation, error) {
+func resolveDefaultBinding(config resourceConfig, in model.Invocation) (model.Allocation, error) {
 	bindingName := strings.TrimSpace(config.Config.Defaults.ModelBinding)
 	if bindingName == "" {
 		return model.Allocation{}, fmt.Errorf("defaults.model-binding is required for fallback but is not configured")
 	}
-	return resolveBinding(config, bindingName, allocationSourceDefaultBinding)
+	return resolveBinding(config, bindingName, allocationSourceDefaultBinding, in)
 }
 
-func containsName(values []string, expected string) bool {
-	for _, value := range values {
-		if strings.TrimSpace(value) == expected {
+func ensureToolResourceAvailable(config resourceConfig, toolName string, resourceName string) error {
+	tool, ok := config.Config.Tools[toolName]
+	if !ok {
+		return fmt.Errorf("unknown execution runner: %s", toolName)
+	}
+	if !tool.Enabled {
+		return fmt.Errorf("execution tool is disabled: %s", toolName)
+	}
+
+	resource, ok := config.Config.Resources[resourceName]
+	if !ok {
+		return fmt.Errorf("unknown execution model: %s", resourceName)
+	}
+	if !resource.Enabled {
+		return fmt.Errorf("execution model is disabled: %s", resourceName)
+	}
+	if !resourceAllowsTool(resource, toolName) {
+		return fmt.Errorf("execution model %s is not available for runner %s", resourceName, toolName)
+	}
+
+	return nil
+}
+
+func resolveAllocationEnvironment(config resourceConfig, in model.Invocation, bindingEnvironment string) (string, string, error) {
+	for _, candidate := range []string{
+		strings.TrimSpace(in.Workplace.Environment),
+		strings.TrimSpace(bindingEnvironment),
+		strings.TrimSpace(config.Config.Defaults.Environment),
+		inferredEnvironment(in),
+		configuration.EnvironmentTypeLocal,
+	} {
+		if candidate == "" {
+			continue
+		}
+		environment, ok := config.Config.Environments[candidate]
+		if !ok {
+			return "", "", fmt.Errorf("unknown execution environment: %s", candidate)
+		}
+		if !environment.Enabled {
+			return "", "", fmt.Errorf("execution environment is disabled: %s", candidate)
+		}
+		return candidate, strings.TrimSpace(environment.Type), nil
+	}
+
+	return "", "", fmt.Errorf("execution environment is not configured")
+}
+
+func inferredEnvironment(in model.Invocation) string {
+	if strings.TrimSpace(in.Workplace.Name) != "" || strings.TrimSpace(in.Repository.URL) != "" {
+		return configuration.EnvironmentTypeWorktree
+	}
+	return configuration.EnvironmentTypeLocal
+}
+
+func bindingTool(binding model.ResourceBindingConfig) string {
+	if tool := strings.TrimSpace(binding.Tool); tool != "" {
+		return tool
+	}
+	return strings.TrimSpace(binding.Runner)
+}
+
+func bindingResource(binding model.ResourceBindingConfig) string {
+	if resource := strings.TrimSpace(binding.Resource); resource != "" {
+		return resource
+	}
+	return strings.TrimSpace(binding.Model)
+}
+
+func resourceAllowsTool(resource model.ResourceConfig, tool string) bool {
+	tool = strings.TrimSpace(tool)
+	if len(resource.Tools) == 0 {
+		return true
+	}
+	for _, allowed := range resource.Tools {
+		if strings.TrimSpace(allowed) == tool {
 			return true
 		}
 	}
