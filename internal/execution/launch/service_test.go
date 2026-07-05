@@ -331,6 +331,65 @@ func TestLaunchCommitPushFailureKeepsRunnerSessionID(t *testing.T) {
 	}
 }
 
+func TestLaunchCommitPushRebindsMismatchedUpstream(t *testing.T) {
+	t.Parallel()
+
+	worktree := tempDir(t)
+	invocation := validInvocation(t, true)
+	invocation.Launch.Directory = worktree
+	workplace := model.Workplace{Name: worktree, Ready: true}
+
+	var pushArgs []string
+	service := NewService()
+	service.runRunner = func(context.Context, model.Invocation) (string, error) {
+		return strings.Join([]string{
+			"runner output",
+			structuredOutputStart,
+			`{"summary":"Done.","commit_message":"Ship result"}`,
+			structuredOutputEnd,
+		}, "\n"), nil
+	}
+	statusCalls := 0
+	service.runGitOutput = func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse --is-inside-work-tree":
+			return "true\n", nil
+		case "rev-parse --show-toplevel":
+			return worktree + "\n", nil
+		case "branch --show-current":
+			return "feature/test\n", nil
+		case "status --porcelain -z -uall":
+			statusCalls++
+			if statusCalls == 1 {
+				return " M file.txt\x00", nil
+			}
+			return "M  file.txt\x00", nil
+		case "add -A -- file.txt":
+			return "", nil
+		case "commit -m Ship result":
+			return "[feature/test abc123] Ship result\n", nil
+		case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+			return "origin/main\n", nil
+		case "push -u origin feature/test":
+			pushArgs = append([]string(nil), args...)
+			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}
+
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), workplace)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if !strings.Contains(result.Summary, "git=committed+pushed branch=feature/test") {
+		t.Fatalf("unexpected summary: %q", result.Summary)
+	}
+	if !reflect.DeepEqual(pushArgs, []string{"push", "-u", "origin", "feature/test"}) {
+		t.Fatalf("push must rebind mismatched upstream: %#v", pushArgs)
+	}
+}
+
 func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 	t.Parallel()
 
@@ -878,7 +937,7 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 			return strings.Join([]string{
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"summary":"Main result.","commit_message":"Document deploy checklist","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
+				`{"summary":"Main result.","commit_message":"Document deploy checklist","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps."}],"review_responses":[{"remark_id":"remark-1","status":"resolved","summary":"Rollback steps documented."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -919,6 +978,9 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 	}
 	if len(result.StructuredOutput.Remarks) != 1 || result.StructuredOutput.Remarks[0].Body != "Document rollback steps." {
 		t.Fatalf("unexpected remarks: %#v", result.StructuredOutput.Remarks)
+	}
+	if len(result.StructuredOutput.ReviewResponses) != 1 || result.StructuredOutput.ReviewResponses[0].RemarkID != "remark-1" {
+		t.Fatalf("unexpected review responses: %#v", result.StructuredOutput.ReviewResponses)
 	}
 	if len(result.StructuredOutput.Commands) != 1 || result.StructuredOutput.Commands[0].Name != "open-pr" {
 		t.Fatalf("unexpected commands: %#v", result.StructuredOutput.Commands)

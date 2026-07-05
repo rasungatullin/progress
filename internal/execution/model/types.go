@@ -35,6 +35,7 @@ type StructuredOutput struct {
 	Summary         string                `json:"summary,omitempty"`
 	CommitMessage   string                `json:"commit_message,omitempty"`
 	Remarks         []StructuredRemark    `json:"remarks,omitempty"`
+	ReviewResponses []StructuredResponse  `json:"review_responses,omitempty"`
 	Questions       []StructuredQuestion  `json:"questions,omitempty"`
 	FollowUpActions []StructuredAction    `json:"follow_up_actions,omitempty"`
 	Changes         []StructuredChange    `json:"changes,omitempty"`
@@ -114,6 +115,8 @@ type ResumeSpec struct {
 type WorkplaceSpec struct {
 	Name        string `json:"name,omitempty"`
 	Environment string `json:"environment,omitempty"`
+	BaseRef     string `json:"base_ref,omitempty"`
+	HeadRef     string `json:"head_ref,omitempty"`
 }
 
 type RepositorySpec struct {

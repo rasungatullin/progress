@@ -200,6 +200,7 @@ func normalizeStructuredOutputFields(fields []string) ([]string, error) {
 		"summary":           {},
 		"commit_message":    {},
 		"remarks":           {},
+		"review_responses":  {},
 		"questions":         {},
 		"follow_up_actions": {},
 		"changes":           {},

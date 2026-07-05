@@ -8,6 +8,7 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
+	"github.com/rasungatullin/progress/internal/integration"
 )
 
 type operationExecution struct {
@@ -18,6 +19,8 @@ type operationExecution struct {
 	allocation    allocation
 	workplace     workplace
 	result        LaunchResult
+	pullRequest   *integration.MergeRequest
+	reviewRemarks []integration.ReviewRemark
 	historyRoot   string
 	historyHandle history.Handle
 	tracker       *operationTracker
@@ -57,8 +60,11 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 		state.tracker.complete(name, fmt.Sprintf("action=%s class=%s", state.action.Name, state.action.Class))
 		return nil
 	case OperationKindPrepareData:
-		state.tracker.completeIO(name, assignmentSummary(state.assignment), structuredInputSummary(state.assignment.StructuredInput), "Данные задания подготовлены для выполнения.")
-		return nil
+		return e.prepareData(ctx, state, name)
+	case OperationKindLoadPullRequest:
+		return e.loadPullRequest(ctx, state, name)
+	case OperationKindLoadReviewRemarks:
+		return e.loadReviewRemarks(ctx, state, name, operation.Required)
 	case OperationKindResolveProfile:
 		return e.resolveProfile(ctx, state, name)
 	case OperationKindAllocateResources:
@@ -73,11 +79,68 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 		return e.parseResult(state, name)
 	case OperationKindCommitPush:
 		return e.commitPush(ctx, state, name)
+	case OperationKindPublishMergeRequest:
+		return e.publishMergeRequest(ctx, state, name)
+	case OperationKindPublishReviewRemarks:
+		return e.publishReviewRemarks(ctx, state, name)
+	case OperationKindPublishReviewResponses:
+		return e.publishReviewResponses(ctx, state, name)
 	case OperationKindFinalize:
 		return e.finalize(ctx, state, name)
 	default:
 		return e.unsupported(ctx, state, operation, name)
 	}
+}
+
+func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operationExecution, name string) error {
+	if err := syncPullRequestRefsWithWorkplace(state); err != nil {
+		state.result = failedStartResult(err)
+		state.tracker.fail(name, "Данные задания не согласованы с веткой рабочего места.", err, "pull_request_branch_mismatch", true, true)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, model.Profile{}, model.Allocation{}, model.Workplace{}, state.result, err)
+		return err
+	}
+
+	state.tracker.completeIO(name, assignmentSummary(state.assignment), structuredInputSummary(state.assignment.StructuredInput), "Данные задания подготовлены для выполнения.")
+	return nil
+}
+
+func syncPullRequestRefsWithWorkplace(state *operationExecution) error {
+	if state == nil {
+		return nil
+	}
+
+	ref := pullRequestRefFromAssignment(state.assignment)
+	if base := strings.TrimSpace(ref.Base); base != "" && strings.TrimSpace(state.in.Workplace.BaseRef) == "" {
+		state.in.Workplace.BaseRef = base
+	}
+	if head := strings.TrimSpace(ref.Head); head != "" && strings.TrimSpace(state.in.Workplace.HeadRef) == "" {
+		state.in.Workplace.HeadRef = head
+	}
+	if state.action.Name != ActionStartImplementationPR {
+		return nil
+	}
+
+	head := explicitPullRequestHeadFromAssignment(state.assignment)
+	workplaceName := strings.TrimSpace(state.in.Workplace.Name)
+	if head != "" && workplaceName != "" && head != workplaceName {
+		return fmt.Errorf("head branch %q does not match workplace branch %q for %s", head, workplaceName, ActionStartImplementationPR)
+	}
+	return nil
+}
+
+func explicitPullRequestHeadFromAssignment(assignment *ExecutionAssignment) string {
+	if assignment == nil {
+		return ""
+	}
+	for _, object := range assignment.RelatedObjects {
+		if !isPullRequestObject(object.Type) || object.Attributes == nil {
+			continue
+		}
+		if head := firstNonEmptyTrimmed(object.Attributes["head_ref"], object.Attributes["head"]); head != "" {
+			return head
+		}
+	}
+	return ""
 }
 
 func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *operationExecution, name string) error {

@@ -130,11 +130,11 @@ func TestResolveProfileReviewPresetFromRepositoryConfig(t *testing.T) {
 	}
 	joined := strings.Join(profile.PromptAdditions, "\n")
 	for _, expected := range []string{
-		"Ты выполняешь code review.",
+		"Ты выполняешь ревизию изменения.",
 		"Не изменяй код",
-		"bugs, behavioral regressions, missing tests",
-		"предыдущих review comments",
-		"conclusion status=ok/approve",
+		"дефекты, поведенческие регрессии, отсутствующие проверки",
+		"предыдущие замечания",
+		"conclusion.status=ok",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("review prompt-additions must include %q, got %q", expected, joined)
@@ -150,7 +150,7 @@ func TestResolveProfileAllowsSummaryInStructuredOutputFields(t *testing.T) {
 		"profiles": {
 			"default": {
 				"description": "Cloud profile",
-				"structured-output-fields": ["summary"]
+				"structured-output-fields": ["summary", "review_responses"]
 			}
 		}
 	}`)
@@ -159,7 +159,7 @@ func TestResolveProfileAllowsSummaryInStructuredOutputFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve profile: %v", err)
 	}
-	if !equalStrings(profile.StructuredOutputFields, []string{"summary"}) {
+	if !equalStrings(profile.StructuredOutputFields, []string{"summary", "review_responses"}) {
 		t.Fatalf("unexpected structured-output-fields: %#v", profile.StructuredOutputFields)
 	}
 }

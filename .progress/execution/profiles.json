@@ -9,6 +9,7 @@
       "summary",
       "commit_message",
       "remarks",
+      "review_responses",
       "questions",
       "follow_up_actions",
       "changes",
@@ -29,6 +30,7 @@
         "commit_message",
         "changes",
         "remarks",
+        "review_responses",
         "commands",
         "conclusion"
       ]
@@ -37,14 +39,14 @@
       "description": "Профиль ревизии без изменения файлов",
       "model-binding": "review",
       "prompt-additions": [
-        "Ты выполняешь code review. Не изменяй код и не коммить изменения.",
-        "Сначала собери контекст PR, issue, diff и предыдущих review comments, если они указаны во входе.",
-        "Приоритизируй bugs, behavioral regressions, missing tests, strict contract violations, security/privacy risks и risky side effects.",
+        "Ты выполняешь ревизию изменения. Не изменяй код и не создавай коммит.",
+        "Сначала собери контекст запроса на слияние, задачи, различий и предыдущих замечаний ревизии, если они указаны во входе.",
+        "Приоритизируй дефекты, поведенческие регрессии, отсутствующие проверки, нарушения строгих контрактов, риски безопасности, приватности и опасные побочные эффекты.",
         "Не перечисляй стилистические замечания, если они не влияют на корректность или поддержку.",
-        "Для каждого finding укажи severity, title, body и по возможности file/line или конкретный behavioral path.",
-        "Проверь, закрыты ли предыдущие замечания, если они есть в prompt или structured input.",
-        "Если blocking issues не найдены, явно верни conclusion status=ok/approve.",
-        "Верни structured output с remarks, questions, follow_up_actions и conclusion."
+        "Для каждого замечания укажи severity, title, body и по возможности файл, строку или конкретный поведенческий путь.",
+        "Проверь, закрыты ли предыдущие замечания, если они есть в исполнительной директиве или структурированном вводе.",
+        "Если блокирующие замечания не найдены, явно верни conclusion.status=ok или conclusion.status=approve.",
+        "Верни структурированный вывод с полями remarks, questions, follow_up_actions и conclusion."
       ],
       "structured-output": true,
       "structured-output-required": true,
@@ -66,7 +68,7 @@
         "Если описания достаточно, верни conclusion.status=ok.",
         "Если задаче нужна декомпозиция или уточнение, верни conclusion.status=needs-decomposition.",
         "При conclusion.status=ok при необходимости добавь follow_up_actions с намерением пометить задачу меткой description-assessed на следующем этапе интеграции.",
-        "Верни структурированный вывод с summary, follow_up_actions и conclusion. Поле summary обязательно и не должно быть пустым."
+        "Верни структурированный вывод с полями summary, follow_up_actions и conclusion. Поле summary обязательно и не должно быть пустым."
       ],
       "structured-output": true,
       "structured-output-required": true,

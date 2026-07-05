@@ -11,6 +11,54 @@
       "reason_message": "Контекст задачи готов к передаче в контур исполнения."
     },
     {
+      "name": "start-implementation-pr",
+      "title": "Начало реализации с запросом на слияние",
+      "description": "Маршрут ручного запуска реализации задачи с отправкой ветки и открытием запроса на слияние.",
+      "action": "start-implementation-pr",
+      "profile": "coder",
+      "step": "start-implementation-pr",
+      "expected_result": "Выполнить реализацию задачи, отправить ветку с именем по номеру задачи и открыть запрос на слияние.",
+      "constraints": [
+        "Работать в отдельном исполнительном рабочем месте.",
+        "Имя ветки должно совпадать с номером задачи.",
+        "Запрос на слияние открывать через контур интеграции."
+      ],
+      "reason_code": "manual_start_implementation_pr",
+      "reason_message": "Задача вручную направлена на реализацию и открытие запроса на слияние."
+    },
+    {
+      "name": "review-pull-request",
+      "title": "Ревизия открытого запроса на слияние",
+      "description": "Маршрут ручной ревизии открытого запроса на слияние с записью замечаний во внешнюю систему.",
+      "action": "review-pull-request",
+      "profile": "review",
+      "step": "review-pull-request",
+      "expected_result": "Проверить открытый запрос на слияние и записать замечания ревизии.",
+      "constraints": [
+        "Работать в отдельном исполнительном рабочем месте.",
+        "Не изменять код в ходе ревизии.",
+        "Замечания и заключение записывать через контур интеграции."
+      ],
+      "reason_code": "manual_review_pull_request",
+      "reason_message": "Запрос на слияние вручную направлен на ревизию."
+    },
+    {
+      "name": "apply-review-comments",
+      "title": "Доработка по замечаниям ревизии",
+      "description": "Маршрут ручного получения замечаний ревизии, исправления результата и записи ответов на замечания.",
+      "action": "apply-review-comments",
+      "profile": "coder",
+      "step": "apply-review-comments",
+      "expected_result": "Получить замечания к запросу на слияние, исправить их, отправить ветку и записать ответы на замечания.",
+      "constraints": [
+        "Работать в отдельном исполнительном рабочем месте.",
+        "Сохранять имя ветки по номеру задачи.",
+        "Ответы на замечания записывать через контур интеграции."
+      ],
+      "reason_code": "manual_apply_review_comments",
+      "reason_message": "Запрос на слияние вручную направлен на доработку по замечаниям ревизии."
+    },
+    {
       "name": "description-assessment",
       "title": "Оценка описания задачи",
       "description": "Маршрут проверки достаточности описания задачи перед инженерным изменением.",
@@ -37,6 +85,7 @@
       "class": "engineering-synthesis",
       "profile": "default",
       "operations": [
+        "resolve-action",
         "prepare-data",
         "resolve-profile",
         "allocate-resources",
@@ -50,10 +99,74 @@
       "expected_result": "Выполнить выбранное действие и вернуть диагностируемый результат."
     },
     {
+      "name": "start-implementation-pr",
+      "class": "engineering-synthesis",
+      "profile": "coder",
+      "operations": [
+        "resolve-action",
+        "prepare-data",
+        "resolve-profile",
+        "allocate-resources",
+        "prepare-workplace",
+        "build-directive",
+        "launch-synthesis",
+        "parse-result",
+        "commit-push",
+        "publish-merge-request",
+        "finalize"
+      ],
+      "description": "Реализация задачи с отправкой ветки и открытием запроса на слияние.",
+      "expected_result": "Изменение реализовано, ветка отправлена, запрос на слияние открыт."
+    },
+    {
+      "name": "review-pull-request",
+      "class": "review",
+      "profile": "review",
+      "operations": [
+        "resolve-action",
+        "prepare-data",
+        "load-pull-request",
+        "load-review-remarks",
+        "resolve-profile",
+        "allocate-resources",
+        "prepare-workplace",
+        "build-directive",
+        "launch-synthesis",
+        "parse-result",
+        "publish-review-remarks",
+        "finalize"
+      ],
+      "description": "Ревизия открытого запроса на слияние с записью замечаний.",
+      "expected_result": "Замечания ревизии или заключение записаны во внешнюю систему."
+    },
+    {
+      "name": "apply-review-comments",
+      "class": "engineering-synthesis",
+      "profile": "coder",
+      "operations": [
+        "resolve-action",
+        "prepare-data",
+        "load-pull-request",
+        "load-review-remarks",
+        "resolve-profile",
+        "allocate-resources",
+        "prepare-workplace",
+        "build-directive",
+        "launch-synthesis",
+        "parse-result",
+        "commit-push",
+        "publish-review-responses",
+        "finalize"
+      ],
+      "description": "Доработка результата по замечаниям ревизии с записью ответов.",
+      "expected_result": "Замечания исправлены, ветка отправлена, ответы на замечания записаны."
+    },
+    {
       "name": "task-description-assessment",
       "class": "task-preparation",
       "profile": "task-description-assessor",
       "operations": [
+        "resolve-action",
         "prepare-data",
         "resolve-profile",
         "allocate-resources",
@@ -75,6 +188,30 @@
       "body": "Сформировать результат выполнения задачи в нормализованной форме с указанием выполненных изменений, проверок и дальнейших действий."
     },
     {
+      "name": "start-implementation-pr-directive",
+      "profile": "coder",
+      "action": "start-implementation-pr",
+      "target_contour": "execution",
+      "title": "Реализация задачи с запросом на слияние",
+      "body": "Выполнить задачу в подготовленном рабочем месте. Сохранять имя ветки по номеру задачи. Вернуть структурированный вывод с summary, commit_message, changes, commands и conclusion. Открытие запроса на слияние выполняется отдельной операцией контура исполнения через контур интеграции."
+    },
+    {
+      "name": "review-pull-request-directive",
+      "profile": "review",
+      "action": "review-pull-request",
+      "target_contour": "execution",
+      "title": "Ревизия запроса на слияние",
+      "body": "Проверить открытый запрос на слияние относительно базовой ветки. Не изменять файлы. Вернуть структурированный вывод с remarks и conclusion. Запись замечаний выполняется отдельной операцией контура исполнения через контур интеграции."
+    },
+    {
+      "name": "apply-review-comments-directive",
+      "profile": "coder",
+      "action": "apply-review-comments",
+      "target_contour": "execution",
+      "title": "Доработка по замечаниям ревизии",
+      "body": "Исправить полученные замечания ревизии в подготовленном рабочем месте. Сохранять корректные уже выполненные изменения. Вернуть структурированный вывод с commit_message, changes, review_responses и conclusion. Запись ответов выполняется отдельной операцией контура исполнения через контур интеграции."
+    },
+    {
       "name": "task-description-assessment-directive",
       "profile": "task-description-assessor",
       "action": "task-description-assessment",
@@ -94,6 +231,22 @@
         "has_label": "description-assessment",
         "missing_label": "description-assessed",
         "route": "description-assessment"
+      }
+    },
+    {
+      "kind": "manual-action",
+      "name": "engineering-cycle",
+      "target_contour": "execution",
+      "title": "Ручные действия инженерного цикла",
+      "description": "Набор ручных действий для реализации задачи, ревизии запроса на слияние и доработки по замечаниям.",
+      "payload": {
+        "routes": [
+          "start-implementation-pr",
+          "review-pull-request",
+          "apply-review-comments"
+        ],
+        "branch_name": "task_number",
+        "workplace": "worktree"
       }
     }
   ]
