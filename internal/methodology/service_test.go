@@ -71,6 +71,24 @@ func TestServiceSelectsDefaultRouteWhenRouteNameIsEmpty(t *testing.T) {
 	}
 }
 
+func TestServiceSelectsExactActionNameBeforeAlias(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewService(nil).Select(context.Background(), Catalog{
+		Routes: []Route{{Name: "default", Action: "implement"}},
+		Actions: []Action{
+			{Name: "engineering-synthesis", Aliases: []string{"implement"}, Profile: "global"},
+			{Name: "implement", Profile: "local"},
+		},
+	}, SelectionRequest{})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if result.Action.Name != "implement" || result.Action.Profile != "local" {
+		t.Fatalf("exact action name must win over earlier alias: %#v", result.Action)
+	}
+}
+
 func TestServiceSelectReportsMissingAction(t *testing.T) {
 	t.Parallel()
 

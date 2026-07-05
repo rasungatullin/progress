@@ -261,6 +261,9 @@ func selectAction(actions []Action, name string) (Action, error) {
 		if action.Name == name {
 			return action, nil
 		}
+	}
+	for _, action := range actions {
+		action = normalizeAction(action)
 		for _, alias := range action.Aliases {
 			if alias == name {
 				return action, nil

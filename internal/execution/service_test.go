@@ -471,6 +471,38 @@ func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	}
 }
 
+func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{
+			{
+				Name:              ActionClassEngineeringSynthesis,
+				Class:             ActionClassEngineeringSynthesis,
+				Profile:           "global",
+				Aliases:           []string{"implement"},
+				RequiresWorkplace: boolRef(true),
+				RequiresSynthesis: boolRef(true),
+				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+			},
+			{
+				Name:              "implement",
+				Class:             ActionClassService,
+				Profile:           "local",
+				RequiresWorkplace: boolRef(false),
+				RequiresSynthesis: boolRef(false),
+				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+			},
+		},
+	}, invocation{Action: "implement"})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	if action.Name != "implement" || action.Profile != "local" || action.Class != ActionClassService {
+		t.Fatalf("exact action name must win over earlier alias: %#v", action)
+	}
+}
+
 func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
