@@ -639,7 +639,7 @@ func TestServiceExecuteStartImplementationUsesPullRequestBaseForWorkplace(t *tes
 	if result.Status != "completed" {
 		t.Fatalf("unexpected result: %#v", result)
 	}
-	if workplaces.invocation.Workplace.Name != "112" || workplaces.invocation.Workplace.BaseRef != "release" {
+	if workplaces.invocation.Workplace.Name != "112" || workplaces.invocation.Workplace.BaseRef != "release" || workplaces.invocation.Workplace.HeadRef != "112" {
 		t.Fatalf("pull request refs must be synchronized with workplace: %#v", workplaces.invocation.Workplace)
 	}
 	if len(integrations.calls) != 1 {
@@ -709,7 +709,7 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
 			switch req.Operation {
 			case "get":
-				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.Number, State: "OPEN", BaseRef: "main", HeadRef: "112"}}, nil
+				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.Number, State: "OPEN", BaseRef: "main", HeadRef: "feature/review"}}, nil
 			case "comments":
 				return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
 					Repository:         req.Repository,
@@ -729,12 +729,13 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 			}
 		},
 	}
+	workplaces := &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}}
 	service := &Service{
 		logger:       log.Default(),
 		actions:      newActionCatalog(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "review", Mode: "manual", ModelBinding: "review"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:review", Reserved: true, Runner: "codex", Model: "openai/gpt-5.5", ModelBinding: "review"}},
-		workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		workplaces:   workplaces,
 		launcher:     launcher,
 		integrations: integrations,
 	}
@@ -756,6 +757,9 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	}
 	if len(launcher.invocation.Launch.StructuredInput.ReviewRemarks) != 1 || launcher.invocation.Launch.StructuredInput.ReviewRemarks[0].ID != "previous-comment" {
 		t.Fatalf("existing review remarks must be passed into review synthesis: %#v", launcher.invocation.Launch.StructuredInput)
+	}
+	if workplaces.invocation.Workplace.Name != "feature-review" || workplaces.invocation.Workplace.HeadRef != "feature/review" || workplaces.invocation.Workplace.BaseRef != "main" {
+		t.Fatalf("review action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
 	}
 	if len(integrations.calls) != 3 {
 		t.Fatalf("expected get, comments and create integration calls, got %#v", integrations.calls)
@@ -856,13 +860,13 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 				}},
 			},
 		},
-		commitSummary: "git=committed+pushed branch=112",
+		commitSummary: "git=committed+pushed branch=feature/fixes",
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
 			switch req.Operation {
 			case "get":
-				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.Number, State: "OPEN", BaseRef: "main", HeadRef: "112"}}, nil
+				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.Number, State: "OPEN", BaseRef: "main", HeadRef: "feature/fixes"}}, nil
 			case "comments":
 				return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
 					Repository:         req.Repository,
@@ -884,12 +888,13 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 			}
 		},
 	}
+	workplaces := &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}}
 	service := &Service{
 		logger:       log.Default(),
 		actions:      newActionCatalog(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
-		workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		workplaces:   workplaces,
 		launcher:     launcher,
 		integrations: integrations,
 	}
@@ -914,6 +919,9 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 	}
 	if !launcher.commitCalled {
 		t.Fatal("review rework action must push fixes before publishing responses")
+	}
+	if workplaces.invocation.Workplace.Name != "feature-fixes" || workplaces.invocation.Workplace.HeadRef != "feature/fixes" || workplaces.invocation.Workplace.BaseRef != "main" {
+		t.Fatalf("review rework action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
 	}
 	if len(integrations.calls) != 4 {
 		t.Fatalf("expected get, comments, create and resolve integration calls, got %#v", integrations.calls)

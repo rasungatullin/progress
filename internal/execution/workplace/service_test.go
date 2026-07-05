@@ -65,6 +65,36 @@ func TestPrepareUsesRequestedBaseBranch(t *testing.T) {
 	})
 }
 
+func TestPrepareUsesRequestedHeadBranch(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	responses := map[gitOutputKey]string{
+		{dir: hostRepoRoot, args: keyArgs("rev-parse", "--verify", "--quiet", "refs/remotes/origin/feature/foo")}: "abc123\n",
+	}
+	service, gitCalls := newStubService(t, hostRepoRoot, responses)
+
+	workplace, err := service.Prepare(context.Background(), model.Invocation{
+		Workplace: model.WorkplaceSpec{
+			Name:    "feature-foo",
+			BaseRef: "main",
+			HeadRef: "feature/foo",
+		},
+	}, model.Profile{}, model.Allocation{})
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+
+	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "feature-foo")
+	if workplace.Name != expectedDir {
+		t.Fatalf("unexpected workplace path: %q", workplace.Name)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{
+		{dir: hostRepoRoot, args: []string{"fetch", "origin", "main"}},
+		{dir: hostRepoRoot, args: []string{"worktree", "add", "-b", "feature/foo", expectedDir, "origin/feature/foo"}},
+	})
+}
+
 func TestPrepareUsesRemoteTaskBranchWhenPresent(t *testing.T) {
 	t.Parallel()
 

@@ -116,6 +116,7 @@ type WorkplaceSpec struct {
 	Name        string `json:"name,omitempty"`
 	Environment string `json:"environment,omitempty"`
 	BaseRef     string `json:"base_ref,omitempty"`
+	HeadRef     string `json:"head_ref,omitempty"`
 }
 
 type RepositorySpec struct {

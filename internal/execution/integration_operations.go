@@ -378,7 +378,7 @@ func pullRequestRefFromAssignment(assignment *ExecutionAssignment) pullRequestRe
 		}
 		if object.Attributes != nil {
 			ref.Base = firstNonEmptyTrimmed(ref.Base, object.Attributes["base_ref"], object.Attributes["base"])
-			ref.Head = firstNonEmptyTrimmed(ref.Head, object.Attributes["head_ref"], object.Attributes["head"])
+			ref.Head = firstNonEmptyTrimmed(object.Attributes["head_ref"], object.Attributes["head"], ref.Head)
 			ref.Body = firstNonEmptyTrimmed(ref.Body, object.Attributes["body"])
 			ref.Draft = ref.Draft || strings.EqualFold(strings.TrimSpace(object.Attributes["draft"]), "true")
 		}
@@ -441,9 +441,12 @@ func applyPullRequestToState(state *operationExecution, pr integration.MergeRequ
 	if strings.TrimSpace(state.in.Workplace.BaseRef) == "" {
 		state.in.Workplace.BaseRef = strings.TrimSpace(pr.BaseRef)
 	}
-	branchName := workplaceBranchNameFromState(state)
-	if branchName != "" && shouldReplaceWorkplaceName(state.in.Workplace.Name, state.assignment.Action) {
-		state.in.Workplace.Name = branchName
+	if strings.TrimSpace(pr.HeadRef) != "" {
+		state.in.Workplace.HeadRef = strings.TrimSpace(pr.HeadRef)
+	}
+	workplaceName := workplaceNameFromState(state)
+	if workplaceName != "" {
+		state.in.Workplace.Name = workplaceName
 	}
 }
 
@@ -481,26 +484,30 @@ func numericBranch(value string) (int, bool) {
 	return number, err == nil && number > 0
 }
 
-func workplaceBranchNameFromState(state *operationExecution) string {
+func workplaceNameFromState(state *operationExecution) string {
+	return workplaceNameFromRef(workplaceHeadRefFromState(state))
+}
+
+func workplaceHeadRefFromState(state *operationExecution) string {
 	if state == nil || state.assignment == nil {
 		return ""
+	}
+	ref := pullRequestRefFromAssignment(state.assignment)
+	if strings.TrimSpace(ref.Head) != "" {
+		return strings.TrimSpace(ref.Head)
 	}
 	if state.assignment.CanonicalTask != nil && state.assignment.CanonicalTask.Number > 0 {
 		return strconv.Itoa(state.assignment.CanonicalTask.Number)
 	}
-	ref := pullRequestRefFromAssignment(state.assignment)
-	if number, ok := numericBranch(ref.Head); ok {
-		return strconv.Itoa(number)
-	}
 	return ""
 }
 
-func shouldReplaceWorkplaceName(current string, action string) bool {
-	current = strings.TrimSpace(current)
-	if current == "" {
-		return true
+func workplaceNameFromRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
 	}
-	return current == stableIdentifier(action)
+	return stableIdentifier(ref)
 }
 
 func ensureExecutionStructuredInput(state *operationExecution) *StructuredInput {

@@ -113,6 +113,9 @@ func syncPullRequestRefsWithWorkplace(state *operationExecution) error {
 	if base := strings.TrimSpace(ref.Base); base != "" && strings.TrimSpace(state.in.Workplace.BaseRef) == "" {
 		state.in.Workplace.BaseRef = base
 	}
+	if head := strings.TrimSpace(ref.Head); head != "" && strings.TrimSpace(state.in.Workplace.HeadRef) == "" {
+		state.in.Workplace.HeadRef = head
+	}
 	if state.action.Name != ActionStartImplementationPR {
 		return nil
 	}

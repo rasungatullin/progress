@@ -79,6 +79,10 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 	if err := validateWorkplaceName(name); err != nil {
 		return model.Workplace{}, err
 	}
+	branchName := strings.TrimSpace(in.Workplace.HeadRef)
+	if branchName == "" {
+		branchName = name
+	}
 
 	hostRepoRoot, err := s.resolveRepoRoot(ctx)
 	if err != nil {
@@ -126,7 +130,7 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 			return model.Workplace{}, fmt.Errorf("workplace path is not a folder: %s", targetDir)
 		}
 
-		if err := s.validateExistingWorkplace(ctx, targetDir, name, repoRoot); err != nil {
+		if err := s.validateExistingWorkplace(ctx, targetDir, branchName, repoRoot); err != nil {
 			return model.Workplace{}, err
 		}
 
@@ -138,16 +142,16 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 	if err := s.runGit(ctx, repoRoot, "fetch", "origin", baseBranch); err != nil {
 		return model.Workplace{}, fmt.Errorf("fetch origin/%s: %w", baseBranch, err)
 	}
-	s.fetchRemoteBranch(ctx, repoRoot, name)
+	s.fetchRemoteBranch(ctx, repoRoot, branchName)
 
-	addArgs := []string{"worktree", "add", "-b", name, targetDir, "origin/" + baseBranch}
-	if s.localBranchExists(ctx, repoRoot, name) {
-		addArgs = []string{"worktree", "add", targetDir, name}
-	} else if s.remoteBranchExists(ctx, repoRoot, name) {
-		addArgs = []string{"worktree", "add", "-b", name, targetDir, "origin/" + name}
+	addArgs := []string{"worktree", "add", "-b", branchName, targetDir, "origin/" + baseBranch}
+	if s.localBranchExists(ctx, repoRoot, branchName) {
+		addArgs = []string{"worktree", "add", targetDir, branchName}
+	} else if s.remoteBranchExists(ctx, repoRoot, branchName) {
+		addArgs = []string{"worktree", "add", "-b", branchName, targetDir, "origin/" + branchName}
 	}
 	if err := s.runGit(ctx, repoRoot, addArgs...); err != nil {
-		return model.Workplace{}, fmt.Errorf("create git worktree %q: %w", name, err)
+		return model.Workplace{}, fmt.Errorf("create git worktree %q: %w", branchName, err)
 	}
 
 	return model.Workplace{Name: targetDir, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
