@@ -98,20 +98,38 @@ func TestConfigUsesPrivateValuesDetectsGitHubAppPrivateKey(t *testing.T) {
 	}
 }
 
-func TestConfigUsesPrivateValuesSkipsGitHubAppPrivateKeyWhenTokenIsConfigured(t *testing.T) {
-	t.Parallel()
+func TestConfigUsesPrivateValuesSkipsGitHubAppPrivateKeyWhenTokenEnvHasValue(t *testing.T) {
+	t.Setenv("PROGRESS_TEST_GITHUB_TOKEN", "direct-token")
 
 	config := model.IntegrationConfigFile{
 		Systems: map[string]model.IntegrationSystemConfig{
 			"github-app": {
 				Type:                       "github",
-				TokenEnv:                   "GITHUB_TOKEN",
+				TokenEnv:                   "PROGRESS_TEST_GITHUB_TOKEN",
 				GitHubAppPrivateKeyPrivate: "progress_synthesis_pem",
 			},
 		},
 	}
 
 	if configUsesPrivateValues(config) {
-		t.Fatal("token_env must not require GitHub App private key store")
+		t.Fatal("filled token_env must not require GitHub App private key store")
+	}
+}
+
+func TestConfigUsesPrivateValuesDetectsGitHubAppPrivateKeyWhenTokenEnvIsEmpty(t *testing.T) {
+	t.Setenv("PROGRESS_TEST_EMPTY_GITHUB_TOKEN", "")
+
+	config := model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github-app": {
+				Type:                       "github",
+				TokenEnv:                   "PROGRESS_TEST_EMPTY_GITHUB_TOKEN",
+				GitHubAppPrivateKeyPrivate: "progress_synthesis_pem",
+			},
+		},
+	}
+
+	if !configUsesPrivateValues(config) {
+		t.Fatal("empty token_env must still require GitHub App private key store")
 	}
 }

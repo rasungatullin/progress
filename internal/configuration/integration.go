@@ -568,6 +568,9 @@ func validateGitHubAppConfig(system integrationmodel.IntegrationSystemConfig, sy
 	if !hasGitHubAppConfig(system) || hasDirectGitHubTokenConfig(system) {
 		return nil
 	}
+	if !strings.EqualFold(strings.TrimSpace(system.Transport), "api") {
+		return fmt.Errorf("system %q uses GitHub App auth without transport=api", normalizeSystemName(systemName))
+	}
 	if strings.TrimSpace(system.GitHubAppID) == "" && strings.TrimSpace(system.GitHubAppClientID) == "" {
 		return fmt.Errorf("system %q uses GitHub App auth without github_app_id or github_app_client_id", normalizeSystemName(systemName))
 	}

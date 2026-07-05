@@ -271,6 +271,46 @@ func TestLoadIntegrationConfigRejectsIncompleteGitHubAppSettings(t *testing.T) {
 	}
 }
 
+func TestLoadIntegrationConfigRejectsGitHubAppWithoutAPITransport(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"omitted": "",
+		"cli":     `"transport": "cli",`,
+	}
+
+	for name, transportField := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			readFile := func(path string) ([]byte, error) {
+				if path == "/repo/.progress/integration/systems.json" {
+					return []byte(`{
+						"systems": {
+							"github-app": {
+								"type": "github",
+								` + transportField + `
+								"github_app_id": "4221694",
+								"github_app_installation_id": "144549701",
+								"github_app_private_key_path": "/keys/app.pem"
+							}
+						}
+					}`), nil
+				}
+				return nil, fs.ErrNotExist
+			}
+
+			_, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+			if err == nil {
+				t.Fatal("expected invalid config error")
+			}
+			if err.Error() != `invalid integration config after merge of 1 layers: system "github-app" uses GitHub App auth without transport=api` {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestLoadIntegrationConfigAllowsTokenToOverrideIncompleteGitHubAppSettings(t *testing.T) {
 	t.Parallel()
 

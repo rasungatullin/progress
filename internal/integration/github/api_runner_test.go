@@ -143,6 +143,43 @@ func TestAPITransportUsesTokenEnv(t *testing.T) {
 	}
 }
 
+func TestAPITransportDirectTokenIgnoresGitHubAppRefreshInterval(t *testing.T) {
+	t.Parallel()
+
+	var seenAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/repos/owner/name/issues/123" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"number":   123,
+			"title":    "API issue",
+			"state":    "open",
+			"html_url": "https://github.com/owner/name/issues/123",
+		})
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                     server.URL,
+			Token:                       "direct-secret",
+			Repository:                  "owner/name",
+			GitHubAppInstallationID:     "144549701",
+			GitHubAppTokenRefreshBefore: "soon",
+		},
+		client: server.Client(),
+	}
+
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("execute issue get through direct token: %v", err)
+	}
+	if seenAuth != "Bearer direct-secret" {
+		t.Fatalf("unexpected auth header: %q", seenAuth)
+	}
+}
+
 func TestAPITransportUsesGitHubAppInstallationToken(t *testing.T) {
 	t.Parallel()
 

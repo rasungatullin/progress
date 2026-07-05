@@ -572,15 +572,12 @@ func (r *APIRunner) resolveBaseConfig() (apiConfig, error) {
 		baseURL = defaultAPIBaseURL
 	}
 	refreshBefore := defaultGitHubAppTokenRefreshBefore
-	if value := strings.TrimSpace(r.systemConfig.GitHubAppTokenRefreshBefore); value != "" {
-		parsed, err := time.ParseDuration(value)
+	if token == "" {
+		var err error
+		refreshBefore, err = parseGitHubAppTokenRefreshBefore(r.systemConfig.GitHubAppTokenRefreshBefore)
 		if err != nil {
-			return apiConfig{BaseURL: baseURL, Timeout: timeout}, fmt.Errorf("parse GitHub App token refresh interval: %w", err)
+			return apiConfig{BaseURL: baseURL, Timeout: timeout}, err
 		}
-		if parsed <= 0 {
-			return apiConfig{BaseURL: baseURL, Timeout: timeout}, fmt.Errorf("GitHub App token refresh interval must be positive")
-		}
-		refreshBefore = parsed
 	}
 	return apiConfig{
 		BaseURL:                 baseURL,
@@ -593,6 +590,21 @@ func (r *APIRunner) resolveBaseConfig() (apiConfig, error) {
 		GitHubAppPrivateKey:     strings.TrimSpace(r.systemConfig.GitHubAppPrivateKey),
 		TokenRefreshBefore:      refreshBefore,
 	}, nil
+}
+
+func parseGitHubAppTokenRefreshBefore(raw string) (time.Duration, error) {
+	refreshBefore := defaultGitHubAppTokenRefreshBefore
+	if value := strings.TrimSpace(raw); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			return 0, fmt.Errorf("parse GitHub App token refresh interval: %w", err)
+		}
+		if parsed <= 0 {
+			return 0, fmt.Errorf("GitHub App token refresh interval must be positive")
+		}
+		refreshBefore = parsed
+	}
+	return refreshBefore, nil
 }
 
 func (r *APIRunner) installationAccessToken(ctx context.Context, config apiConfig) (githubAppInstallationToken, CommandResult, error) {

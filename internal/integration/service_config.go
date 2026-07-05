@@ -71,7 +71,7 @@ func configUsesPrivateValues(config model.IntegrationConfigFile) bool {
 		if strings.TrimSpace(system.TokenPrivate) != "" {
 			return true
 		}
-		if strings.TrimSpace(system.Token) == "" && strings.TrimSpace(system.TokenEnv) == "" && strings.TrimSpace(system.GitHubAppPrivateKeyPrivate) != "" {
+		if strings.TrimSpace(system.Token) == "" && resolvedTokenEnvValue(system) == "" && strings.TrimSpace(system.GitHubAppPrivateKeyPrivate) != "" {
 			return true
 		}
 	}
