@@ -65,7 +65,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindLoadPullRequest:
 		return e.loadPullRequest(ctx, state, name)
 	case OperationKindLoadReviewRemarks:
-		return e.loadReviewRemarks(ctx, state, name)
+		return e.loadReviewRemarks(ctx, state, name, operation.Required)
 	case OperationKindResolveProfile:
 		return e.resolveProfile(ctx, state, name)
 	case OperationKindAllocateResources:

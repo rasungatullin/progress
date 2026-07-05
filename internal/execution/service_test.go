@@ -544,9 +544,15 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 		actions:      newActionCatalog(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
-		workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: root, RepositoryRoot: root, Ready: true}},
 		launcher:     launcher,
 		integrations: integrations,
+		runGitOutput: func(_ context.Context, dir string, args ...string) (string, error) {
+			if dir != root || strings.Join(args, " ") != "symbolic-ref refs/remotes/origin/HEAD" {
+				return "", errors.New("unexpected git command")
+			}
+			return "refs/remotes/origin/develop\n", nil
+		},
 	}
 
 	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
@@ -568,7 +574,7 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 		t.Fatalf("expected one integration request, got %#v", integrations.calls)
 	}
 	request := integrations.calls[0]
-	if request.Repository != "owner/name" || request.Base != "main" || request.Head != "112" || request.Title == "" {
+	if request.Repository != "owner/name" || request.Base != "develop" || request.Head != "112" || request.Title == "" {
 		t.Fatalf("unexpected pull request publication request: %#v", request)
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishMergeRequest)
@@ -659,6 +665,77 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	operation := findOperationResult(result.Operations, OperationKindPublishReviewRemarks)
 	if operation == nil || operation.Status != OperationStatusCompleted {
 		t.Fatalf("review remark operation must be completed: %#v", result.Operations)
+	}
+}
+
+func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *testing.T) {
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
+	launcher := &stubLauncher{
+		result: model.LaunchResult{
+			Status: "completed",
+			StructuredOutput: &model.StructuredOutput{
+				Summary: "Ревизия выполнена.",
+				Conclusion: &model.StructuredConclusion{
+					Status:  "approve",
+					Summary: "Замечаний не найдено.",
+				},
+			},
+		},
+	}
+	integrations := &stubIntegrationExecutor{
+		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			switch req.Operation {
+			case "get":
+				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.Number, State: "OPEN", BaseRef: "main", HeadRef: "112"}}, nil
+			case "comments":
+				return integration.Response{}, errors.New("temporary comments outage")
+			case "create":
+				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", URL: "https://github.com/owner/name/pull/17#issuecomment-2"}}, nil
+			default:
+				t.Fatalf("unexpected integration request: %#v", req)
+				return integration.Response{}, nil
+			}
+		},
+	}
+	service := &Service{
+		logger:       log.Default(),
+		actions:      newActionCatalog(),
+		profiles:     &stubProfileResolver{profile: model.Profile{Name: "review", Mode: "manual", ModelBinding: "review"}},
+		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:review", Reserved: true, Runner: "codex", Model: "openai/gpt-5.5", ModelBinding: "review"}},
+		workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		launcher:     launcher,
+		integrations: integrations,
+	}
+
+	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
+		Assignment: &ExecutionAssignment{
+			Action:        ActionReviewPullRequest,
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112},
+			RelatedObjects: []ObjectRef{{
+				Type:       "merge-request",
+				Repository: "owner/name",
+				Number:     17,
+			}},
+			StructuredInput: &StructuredInput{Task: "Провести ревизию запроса на слияние."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("review action must continue after optional remarks failure: %v", err)
+	}
+	remarksOperation := findOperationResult(result.Operations, OperationKindLoadReviewRemarks)
+	if remarksOperation == nil || remarksOperation.Status != OperationStatusSkipped {
+		t.Fatalf("optional remarks operation must be skipped: %#v", result.Operations)
+	}
+	if !strings.Contains(remarksOperation.Summary, "temporary comments outage") {
+		t.Fatalf("skipped operation must keep diagnostics: %#v", remarksOperation)
+	}
+	if launcher.invocation.Launch.StructuredInput == nil || len(launcher.invocation.Launch.StructuredInput.ReviewRemarks) != 0 {
+		t.Fatalf("review synthesis must proceed without loaded remarks: %#v", launcher.invocation.Launch.StructuredInput)
+	}
+	operation := findOperationResult(result.Operations, OperationKindPublishReviewRemarks)
+	if operation == nil || operation.Status != OperationStatusCompleted {
+		t.Fatalf("review publication must still complete: %#v", result.Operations)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -81,6 +82,7 @@ type Service struct {
 	workplaces   workplaceManager
 	launcher     launcher
 	integrations integrationExecutor
+	runGitOutput func(context.Context, string, ...string) (string, error)
 }
 
 func NewService(logger *log.Logger) *Service {
@@ -99,6 +101,7 @@ func NewService(logger *log.Logger) *Service {
 		workplaces:   workplaces,
 		launcher:     launcher,
 		integrations: integrations,
+		runGitOutput: runGitOutput,
 	}
 }
 
@@ -308,6 +311,19 @@ func stableIdentifier(value string) string {
 		}
 	}
 	return strings.Trim(builder.String(), "-")
+}
+
+func runGitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w\n%s", err, strings.TrimSpace(string(output)))
+	}
+
+	return string(output), nil
 }
 
 func actionContainsOperation(action Action, name string) bool {

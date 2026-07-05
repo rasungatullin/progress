@@ -55,15 +55,15 @@ func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *op
 	return nil
 }
 
-func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *operationExecution, name string) error {
+func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *operationExecution, name string, required bool) error {
 	ref := pullRequestRefFromState(state)
 	if ref.Number <= 0 {
-		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
+		return e.failOrSkipIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required", required)
 	}
 
 	executor, err := e.integrationExecutor()
 	if err != nil {
-		return e.failIntegrationOperation(ctx, state, name, "Контур интеграции недоступен.", err, "integration_unavailable")
+		return e.failOrSkipIntegrationOperation(ctx, state, name, "Контур интеграции недоступен.", err, "integration_unavailable", required)
 	}
 
 	response, err := executor.Execute(ctx, integration.Request{
@@ -76,7 +76,7 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 		Number:          ref.Number,
 	})
 	if err != nil {
-		return e.failIntegrationOperation(ctx, state, name, "Замечания ревизии не получены.", err, "review_remarks_load_failed")
+		return e.failOrSkipIntegrationOperation(ctx, state, name, "Замечания ревизии не получены.", err, "review_remarks_load_failed", required)
 	}
 
 	state.reviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
@@ -103,7 +103,11 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 		return e.failIntegrationOperation(ctx, state, name, "Ветка запроса на слияние не задана.", fmt.Errorf("head branch is required for pull request creation"), "pull_request_head_required")
 	}
 	if strings.TrimSpace(ref.Base) == "" {
-		ref.Base = "main"
+		base, err := e.defaultMergeRequestBase(ctx, state)
+		if err != nil {
+			return e.failIntegrationOperation(ctx, state, name, "Базовая ветка запроса на слияние не определена.", err, "pull_request_base_required")
+		}
+		ref.Base = base
 	}
 	if strings.TrimSpace(ref.Title) == "" {
 		ref.Title = pullRequestTitle(state)
@@ -139,6 +143,32 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	state.tracker.completeIO(name, fmt.Sprintf("repository=%s base=%s head=%s", ref.Repository, ref.Base, ref.Head), summary, "Запрос на слияние зафиксирован через контур интеграции.")
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
 	return nil
+}
+
+func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, state *operationExecution) (string, error) {
+	repoRoot := ""
+	if state != nil {
+		repoRoot = strings.TrimSpace(state.workplace.RepositoryRoot)
+		if repoRoot == "" {
+			repoRoot = strings.TrimSpace(state.workplace.Name)
+		}
+	}
+	if repoRoot == "" {
+		return "", fmt.Errorf("base branch is required because prepared repository is not available")
+	}
+	gitOutput := runGitOutput
+	if e.service != nil && e.service.runGitOutput != nil {
+		gitOutput = e.service.runGitOutput
+	}
+	output, err := gitOutput(ctx, repoRoot, "symbolic-ref", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve default branch for pull request base: %w", err)
+	}
+	base := strings.TrimPrefix(strings.TrimSpace(output), "refs/remotes/origin/")
+	if strings.TrimSpace(base) == "" || base == strings.TrimSpace(output) {
+		return "", fmt.Errorf("resolve default branch for pull request base: unexpected origin HEAD %q", strings.TrimSpace(output))
+	}
+	return base, nil
 }
 
 func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, state *operationExecution, name string) error {
@@ -281,6 +311,16 @@ func (e builtinOperationExecutor) failIntegrationOperation(ctx context.Context, 
 	state.tracker.fail(name, summary, err, code, true, true)
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
 	return err
+}
+
+func (e builtinOperationExecutor) failOrSkipIntegrationOperation(ctx context.Context, state *operationExecution, name string, summary string, err error, code string, required bool) error {
+	if required {
+		return e.failIntegrationOperation(ctx, state, name, summary, err, code)
+	}
+
+	state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
+	return nil
 }
 
 func pullRequestRefFromState(state *operationExecution) pullRequestRef {
