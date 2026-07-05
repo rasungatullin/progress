@@ -136,6 +136,19 @@ func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) 
 	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы|remove:Ожидает экспертизы|add:Экспертиза пройдена" {
 		t.Fatalf("unexpected label operations: %s", got)
 	}
+	mergeRequestSearches := 0
+	for _, request := range integrations.requests {
+		if request.IntegrationType != integrationmodel.IntegrationTypeRepository || request.Operation != "search" {
+			continue
+		}
+		mergeRequestSearches++
+		if request.Query != "head:123" {
+			t.Fatalf("merge-request search must be constrained by head ref: %#v", request)
+		}
+	}
+	if mergeRequestSearches == 0 {
+		t.Fatal("expected merge-request search request")
+	}
 	if result.FinalIssue == nil || !containsLabel(result.FinalIssue.Labels, LabelReviewPassed) {
 		t.Fatalf("final issue must include passed label: %#v", result.FinalIssue)
 	}
@@ -213,7 +226,7 @@ func TestServiceProcessTaskReviewWithoutConclusionMarksRework(t *testing.T) {
 		{
 			Status: "completed",
 			Launch: &execution.LaunchResult{
-				Status: "completed",
+				Status:           "completed",
 				StructuredOutput: &execution.StructuredOutput{Summary: "Reviewed"},
 			},
 		},
@@ -240,7 +253,7 @@ func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 	if !reviewExecutionPassed(&execution.ExecutionResult{
 		Status: "completed",
 		Launch: &execution.LaunchResult{
-			Status: "completed",
+			Status:           "completed",
 			StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "ok"}},
 		},
 	}) {
@@ -250,7 +263,7 @@ func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 	if reviewExecutionPassed(&execution.ExecutionResult{
 		Status: "completed",
 		Launch: &execution.LaunchResult{
-			Status: "completed",
+			Status:           "completed",
 			StructuredOutput: &execution.StructuredOutput{Summary: "Reviewed"},
 		},
 	}) {
@@ -260,7 +273,7 @@ func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 	if reviewExecutionPassed(&execution.ExecutionResult{
 		Status: "completed",
 		Launch: &execution.LaunchResult{
-			Status: "completed",
+			Status:           "completed",
 			StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "needs-work"}},
 		},
 	}) {
@@ -273,7 +286,7 @@ func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 			Status: "completed",
 			StructuredOutput: &execution.StructuredOutput{
 				Conclusion: &execution.StructuredConclusion{Status: "approve"},
-				Remarks: []execution.StructuredRemark{{ID: "remark-1", Status: "resolved", Title: "Замечание"}},
+				Remarks:    []execution.StructuredRemark{{ID: "remark-1", Status: "resolved", Title: "Замечание"}},
 			},
 		},
 	}) {
@@ -286,7 +299,7 @@ func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 			Status: "completed",
 			StructuredOutput: &execution.StructuredOutput{
 				Conclusion: &execution.StructuredConclusion{Status: "approve"},
-				Remarks: []execution.StructuredRemark{{ID: "remark-2", Status: "unresolved", Title: "Замечание"}},
+				Remarks:    []execution.StructuredRemark{{ID: "remark-2", Status: "unresolved", Title: "Замечание"}},
 			},
 		},
 	}) {
@@ -314,8 +327,9 @@ func processingConsideration(action string) decision.ConsiderationResult {
 }
 
 type processingIntegrationStub struct {
-	issue  integration.TrackerIssue
-	labels []string
+	issue    integration.TrackerIssue
+	labels   []string
+	requests []integration.Request
 }
 
 func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
@@ -332,6 +346,7 @@ func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
 }
 
 func (s *processingIntegrationStub) Execute(_ context.Context, request integration.Request) (integration.Response, error) {
+	s.requests = append(s.requests, request)
 	switch {
 	case request.IntegrationType == integrationmodel.IntegrationTypeTracker && request.Operation == "get":
 		issue := s.issue

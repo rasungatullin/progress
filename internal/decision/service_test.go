@@ -104,6 +104,9 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if integrationStub.requests[1].IntegrationType != integrationmodel.IntegrationTypeRepository || integrationStub.requests[1].Resource != "merge-request" || integrationStub.requests[1].Operation != "search" {
 		t.Fatalf("unexpected merge-request request: %#v", integrationStub.requests[1])
 	}
+	if integrationStub.requests[1].Query != "head:123" {
+		t.Fatalf("merge-request search must be constrained by head ref: %#v", integrationStub.requests[1])
+	}
 	if executionStub.request.Assignment == nil {
 		t.Fatal("expected execution assignment")
 	}
@@ -181,6 +184,9 @@ func TestServiceStartRecoversMergeRequestForReviewRoute(t *testing.T) {
 	}
 	if len(integrationStub.requests) != 2 {
 		t.Fatalf("unexpected number of integration requests: %d", len(integrationStub.requests))
+	}
+	if integrationStub.requests[1].Query != "head:201" {
+		t.Fatalf("merge-request search must be constrained by head ref: %#v", integrationStub.requests[1])
 	}
 }
 

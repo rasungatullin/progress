@@ -221,6 +221,7 @@ func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.T
 		return nil, nil
 	}
 
+	head := strconv.Itoa(issue.Number)
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType: integrationTypeRepository,
 		Resource:        "merge-request",
@@ -228,6 +229,7 @@ func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.T
 		Operation:       "search",
 		Repository:      issue.Repository,
 		RepoProvided:    true,
+		Query:           "head:" + head,
 		State:           "open",
 		Limit:           100,
 	})
@@ -235,7 +237,6 @@ func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.T
 		return nil, err
 	}
 
-	head := strconv.Itoa(issue.Number)
 	for _, mergeRequest := range response.MergeRequests {
 		if strings.TrimSpace(mergeRequest.HeadRef) != head {
 			continue
