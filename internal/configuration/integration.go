@@ -306,6 +306,11 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 		merged.Token = ""
 		merged.TokenPrivate = ""
 	}
+	if hasGitHubAppAuthConfig(override) && !hasDirectGitHubTokenSource(override) {
+		merged.Token = ""
+		merged.TokenPrivate = ""
+		merged.TokenEnv = ""
+	}
 	if value := strings.TrimSpace(override.GitHubAppID); value != "" {
 		merged.GitHubAppID = value
 	}
@@ -601,7 +606,25 @@ func hasGitHubAppConfig(system integrationmodel.IntegrationSystemConfig) bool {
 		strings.TrimSpace(system.GitHubAppTokenRefreshBefore) != ""
 }
 
+func hasGitHubAppAuthConfig(system integrationmodel.IntegrationSystemConfig) bool {
+	return strings.TrimSpace(system.GitHubAppID) != "" ||
+		strings.TrimSpace(system.GitHubAppClientID) != "" ||
+		strings.TrimSpace(system.GitHubAppInstallationID) != "" ||
+		strings.TrimSpace(system.GitHubAppPrivateKeyPath) != "" ||
+		strings.TrimSpace(system.GitHubAppPrivateKeyPrivate) != ""
+}
+
 func hasDirectGitHubTokenConfig(system integrationmodel.IntegrationSystemConfig) bool {
+	if strings.TrimSpace(system.Token) != "" || strings.TrimSpace(system.TokenPrivate) != "" {
+		return true
+	}
+	if tokenEnv := strings.TrimSpace(system.TokenEnv); tokenEnv != "" {
+		return strings.TrimSpace(os.Getenv(tokenEnv)) != ""
+	}
+	return false
+}
+
+func hasDirectGitHubTokenSource(system integrationmodel.IntegrationSystemConfig) bool {
 	return strings.TrimSpace(system.Token) != "" || strings.TrimSpace(system.TokenPrivate) != "" || strings.TrimSpace(system.TokenEnv) != ""
 }
 

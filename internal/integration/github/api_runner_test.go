@@ -319,6 +319,62 @@ func TestGitHubAppInstallationTokenCacheRefreshesBeforeExpiry(t *testing.T) {
 	}
 }
 
+func TestGitHubAppInstallationTokenUsesValidCacheWhenRefreshFails(t *testing.T) {
+	t.Parallel()
+
+	keyPEM := testRSAPrivateKeyPEM(t)
+	baseTime := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	currentTime := baseTime
+	tokenRequests := 0
+	var seenAuth []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/42/access_tokens":
+			tokenRequests++
+			if tokenRequests > 1 {
+				http.Error(w, `{"message":"temporary failure"}`, http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"token":      "installation-secret-1",
+				"expires_at": baseTime.Add(time.Hour).Format(time.RFC3339),
+			})
+		case "/repos/owner/name/issues/123":
+			seenAuth = append(seenAuth, r.Header.Get("Authorization"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 123, "title": "cached", "state": "open"})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                 server.URL,
+			Repository:              "owner/name",
+			GitHubAppClientID:       "Iv1.client",
+			GitHubAppInstallationID: "42",
+			GitHubAppPrivateKey:     string(keyPEM),
+		},
+		client: server.Client(),
+		now:    func() time.Time { return currentTime },
+	}
+
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("first issue get: %v", err)
+	}
+	currentTime = baseTime.Add(56 * time.Minute)
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("second issue get with valid cache after refresh failure: %v", err)
+	}
+	if tokenRequests != 2 {
+		t.Fatalf("expected refresh attempt after cache entered refresh window, got token requests: %d", tokenRequests)
+	}
+	if len(seenAuth) != 2 || seenAuth[0] != "Bearer installation-secret-1" || seenAuth[1] != "Bearer installation-secret-1" {
+		t.Fatalf("unexpected auth headers: %#v", seenAuth)
+	}
+}
+
 func TestGitHubAppAuthRequiresCompleteSettings(t *testing.T) {
 	t.Parallel()
 

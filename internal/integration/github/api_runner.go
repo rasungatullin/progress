@@ -613,9 +613,7 @@ func (r *APIRunner) installationAccessToken(ctx context.Context, config apiConfi
 	defer r.tokenMu.Unlock()
 
 	if r.cachedToken != nil && strings.TrimSpace(r.cachedToken.Token) != "" && now.Add(config.TokenRefreshBefore).Before(r.cachedToken.ExpiresAt) {
-		result := CommandResult{Command: "http", Path: config.BaseURL, Args: []string{http.MethodPost, "app/installations/" + config.GitHubAppInstallationID + "/access_tokens"}, ExitCode: 0}
-		result.Stdout = mustJSON(map[string]string{"expires_at": r.cachedToken.ExpiresAt.Format(time.RFC3339), "source": "cache"})
-		return *r.cachedToken, result, nil
+		return *r.cachedToken, cachedInstallationTokenResult(config, *r.cachedToken, "cache"), nil
 	}
 
 	if strings.TrimSpace(config.GitHubAppIssuer) == "" {
@@ -636,14 +634,23 @@ func (r *APIRunner) installationAccessToken(ctx context.Context, config apiConfi
 
 	result, response, err := r.createInstallationAccessToken(ctx, config, jwt)
 	if err != nil {
+		if r.cachedToken != nil && strings.TrimSpace(r.cachedToken.Token) != "" && now.Before(r.cachedToken.ExpiresAt) {
+			return *r.cachedToken, cachedInstallationTokenResult(config, *r.cachedToken, "cache_after_refresh_error"), nil
+		}
 		return githubAppInstallationToken{}, result, err
 	}
 	expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(response.ExpiresAt))
 	if err != nil {
+		if r.cachedToken != nil && strings.TrimSpace(r.cachedToken.Token) != "" && now.Before(r.cachedToken.ExpiresAt) {
+			return *r.cachedToken, cachedInstallationTokenResult(config, *r.cachedToken, "cache_after_refresh_error"), nil
+		}
 		result.ExitCode = -1
 		return githubAppInstallationToken{}, result, &Error{Code: ErrorCodeInternalIntegration, Message: fmt.Sprintf("decode GitHub App installation token expiry: %v", err), Err: err, Result: result}
 	}
 	if strings.TrimSpace(response.Token) == "" {
+		if r.cachedToken != nil && strings.TrimSpace(r.cachedToken.Token) != "" && now.Before(r.cachedToken.ExpiresAt) {
+			return *r.cachedToken, cachedInstallationTokenResult(config, *r.cachedToken, "cache_after_refresh_error"), nil
+		}
 		result.ExitCode = -1
 		return githubAppInstallationToken{}, result, &Error{Code: ErrorCodeInternalIntegration, Message: "GitHub App installation token response does not contain token", Result: result}
 	}
@@ -656,6 +663,12 @@ func (r *APIRunner) installationAccessToken(ctx context.Context, config apiConfi
 		"permissions":          response.Permissions,
 	})
 	return token, result, nil
+}
+
+func cachedInstallationTokenResult(config apiConfig, token githubAppInstallationToken, source string) CommandResult {
+	result := CommandResult{Command: "http", Path: config.BaseURL, Args: []string{http.MethodPost, "app/installations/" + config.GitHubAppInstallationID + "/access_tokens"}, ExitCode: 0}
+	result.Stdout = mustJSON(map[string]string{"expires_at": token.ExpiresAt.Format(time.RFC3339), "source": source})
+	return result
 }
 
 func (r *APIRunner) createInstallationAccessToken(ctx context.Context, config apiConfig, jwt string) (CommandResult, githubAppInstallationTokenResponse, error) {
