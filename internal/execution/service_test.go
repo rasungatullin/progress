@@ -379,6 +379,68 @@ func TestServiceExecuteReturnsFailedResultWhenFinalOperationFails(t *testing.T) 
 	}
 }
 
+func TestServiceExecuteLaunchFailureUsesCatalogOperationNames(t *testing.T) {
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
+	expectedErr := errors.New("final stage failed")
+	service := &Service{
+		logger: log.Default(),
+		actions: &stubActionResolver{action: model.Action{
+			Name:              "custom-synthesis",
+			Class:             ActionClassEngineeringSynthesis,
+			Profile:           "coder",
+			RequiresWorkplace: true,
+			RequiresSynthesis: true,
+			Operations: []model.OperationSpec{
+				builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
+				builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
+				builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
+				builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
+				builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
+				builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
+				builtinOperation(OperationKindLaunchSynthesis, "Запуск синтеза", true),
+				{Name: "normalize-output", Kind: OperationKindParseResult, Title: "Разбор результата", Origin: OperationOriginBuiltin, Required: true},
+				{Name: "finish-run", Kind: OperationKindFinalize, Title: "Завершающая фиксация", Origin: OperationOriginBuiltin, Required: true},
+			},
+		}},
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		launcher: &stubLauncher{
+			result: model.LaunchResult{
+				Status: "failed",
+				StructuredOutput: &model.StructuredOutput{
+					Summary: "Синтез выполнен.",
+				},
+			},
+			err: expectedErr,
+		},
+	}
+
+	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
+		Assignment: &ExecutionAssignment{
+			Action:          "custom-synthesis",
+			CanonicalTask:   &ObjectRef{Type: "task", Number: 94},
+			StructuredInput: &StructuredInput{Task: "Ship it."},
+		},
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected launch error, got %v", err)
+	}
+	if operation := findOperationResult(result.Operations, "normalize-output"); operation == nil || operation.Status != OperationStatusCompleted {
+		t.Fatalf("custom parse operation must be completed: %#v", result.Operations)
+	}
+	if operation := findOperationResult(result.Operations, "finish-run"); operation == nil || operation.Status != OperationStatusFailed {
+		t.Fatalf("custom finalize operation must be failed: %#v", result.Operations)
+	}
+	if operation := findOperationResult(result.Operations, OperationKindParseResult); operation != nil {
+		t.Fatalf("synthetic parse-result operation must not be added: %#v", operation)
+	}
+	if operation := findOperationResult(result.Operations, OperationKindFinalize); operation != nil {
+		t.Fatalf("synthetic finalize operation must not be added: %#v", operation)
+	}
+}
+
 func TestServiceExecuteSkipsResourcesWorkplaceAndLaunchWhenActionDoesNotNeedSynthesis(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
