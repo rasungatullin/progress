@@ -138,10 +138,10 @@ func SaveCatalogWithHome(repoRoot, configHome string, scope configuration.Config
 		return CatalogWriteResult{}, err
 	}
 
-	catalog = normalizeCatalog(catalog)
 	if err := validateCatalog(catalog); err != nil {
 		return CatalogWriteResult{}, fmt.Errorf("invalid methodology catalog: %w", err)
 	}
+	catalog = normalizeCatalog(catalog)
 	if err := writeCatalog(path, catalog, writeFile, mkdirAll); err != nil {
 		return CatalogWriteResult{}, err
 	}
@@ -204,6 +204,7 @@ func readCatalogLayer(path string, source configuration.ConfigFileSource, readFi
 	if err := validateCatalog(catalog); err != nil {
 		return CatalogLayer{}, fmt.Errorf("invalid methodology catalog %s: %w", path, err)
 	}
+	catalog = normalizeCatalog(catalog)
 
 	return CatalogLayer{Source: source, Path: path, Catalog: catalog}, nil
 }
@@ -224,7 +225,7 @@ func readOptionalCatalog(path string, readFile ReadFileFunc) (Catalog, error) {
 	if err := validateCatalog(catalog); err != nil {
 		return Catalog{}, fmt.Errorf("invalid methodology catalog %s: %w", path, err)
 	}
-	return catalog, nil
+	return normalizeCatalog(catalog), nil
 }
 
 func decodeCatalog(content []byte) (Catalog, error) {
@@ -232,7 +233,7 @@ func decodeCatalog(content []byte) (Catalog, error) {
 	if err := json.Unmarshal(content, &catalog); err != nil {
 		return Catalog{}, err
 	}
-	return normalizeCatalog(catalog), nil
+	return catalog, nil
 }
 
 func writeCatalog(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) error {

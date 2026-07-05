@@ -82,6 +82,60 @@ func TestLoadCatalogMergesGlobalAndLocalLayersWithLocalPriority(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsDuplicateRoutesInsideSingleLayer(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"routes": [
+					{"name": "default", "action": "implement"},
+					{"name": "DEFAULT", "action": "review"}
+				],
+				"actions": [
+					{"name": "implement"},
+					{"name": "review"}
+				]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected duplicate route error")
+	}
+	if !strings.Contains(err.Error(), `routes contains duplicate name "default"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSaveCatalogRejectsDuplicateRoutesBeforeNormalization(t *testing.T) {
+	t.Parallel()
+
+	_, err := SaveCatalogWithHome("/repo", "/config-home", CatalogWriteScopeLocal, Catalog{
+		Routes: []Route{
+			{Name: "default", Action: "implement"},
+			{Name: "DEFAULT", Action: "review"},
+		},
+		Actions: []Action{
+			{Name: "implement"},
+			{Name: "review"},
+		},
+	}, nil, func(string, []byte, fs.FileMode) error {
+		t.Fatal("save must not write invalid catalog")
+		return nil
+	}, func(string, fs.FileMode) error {
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected duplicate route error")
+	}
+	if !strings.Contains(err.Error(), `routes contains duplicate name "default"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 	t.Parallel()
 
