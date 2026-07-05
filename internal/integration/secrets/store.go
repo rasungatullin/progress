@@ -9,13 +9,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rasungatullin/progress/internal/integration/model"
 )
 
 const (
-	defaultServiceName = "progress"
-	defaultFilePath    = "integration/private-values.json"
+	defaultServiceName      = "progress"
+	defaultFilePath         = "integration/private-values.json"
+	fileStoreLockPollPeriod = 10 * time.Millisecond
+	fileStoreLockStaleAfter = 30 * time.Second
 )
 
 var (
@@ -125,33 +128,107 @@ func (s fileStore) Get(_ context.Context, name string) (string, error) {
 	return value, nil
 }
 
-func (s fileStore) Set(_ context.Context, name string, value string) error {
+func (s fileStore) Set(ctx context.Context, name string, value string) error {
 	name, err := normalizeName(name)
 	if err != nil {
 		return err
 	}
+	return s.update(ctx, func(values map[string]string) error {
+		values[name] = value
+		return nil
+	})
+}
+
+func (s fileStore) Delete(ctx context.Context, name string) error {
+	name, err := normalizeName(name)
+	if err != nil {
+		return err
+	}
+	return s.update(ctx, func(values map[string]string) error {
+		if _, ok := values[name]; !ok {
+			return ErrNotFound
+		}
+		delete(values, name)
+		return nil
+	})
+}
+
+func (s fileStore) update(ctx context.Context, mutate func(map[string]string) error) error {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	values, err := s.read()
 	if err != nil {
 		return err
 	}
-	values[name] = value
+	if err := mutate(values); err != nil {
+		return err
+	}
 	return s.write(values)
 }
 
-func (s fileStore) Delete(_ context.Context, name string) error {
-	name, err := normalizeName(name)
+func (s fileStore) lock(ctx context.Context) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("create private file store directory %s: %w", dir, err)
+	}
+
+	lockDir := s.path + ".lock"
+	for {
+		if err := os.Mkdir(lockDir, 0o700); err == nil {
+			return func() {
+				_ = os.Remove(lockDir)
+			}, nil
+		} else if !os.IsExist(err) {
+			return nil, fmt.Errorf("lock private file store %s: %w", s.path, err)
+		}
+		removed, err := removeStaleFileStoreLock(lockDir, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("lock private file store %s: %w", s.path, err)
+		}
+		if removed {
+			continue
+		}
+
+		timer := time.NewTimer(fileStoreLockPollPeriod)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, fmt.Errorf("lock private file store %s: %w", s.path, ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func removeStaleFileStoreLock(lockDir string, now time.Time) (bool, error) {
+	info, err := os.Stat(lockDir)
 	if err != nil {
-		return err
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
 	}
-	values, err := s.read()
-	if err != nil {
-		return err
+	if !info.IsDir() {
+		return false, fmt.Errorf("%s is not a directory", lockDir)
 	}
-	if _, ok := values[name]; !ok {
-		return ErrNotFound
+	if now.Sub(info.ModTime()) < fileStoreLockStaleAfter {
+		return false, nil
 	}
-	delete(values, name)
-	return s.write(values)
+	if err := os.Remove(lockDir); err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (s fileStore) read() (map[string]string, error) {
