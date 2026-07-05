@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	configcontour "github.com/rasungatullin/progress/internal/configuration"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
@@ -72,6 +73,21 @@ func TestConfigurationResourcesCLIHonorsGlobalScope(t *testing.T) {
 	}
 }
 
+func TestConfigurationResourcesCLIRejectsCustomEnvironmentWithoutType(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	_, _, err := runConfigurationCommandWithError(t, "configuration", "resources", "--repo-root", root, "environment", "set", "isolated-tree")
+	if err == nil {
+		t.Fatal("expected custom environment type error")
+	}
+	if !strings.Contains(err.Error(), `environment type is required for custom environment "isolated-tree"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	runConfigurationCommand(t, "configuration", "resources", "--repo-root", root, "environment", "set", "worktree")
+}
+
 func TestConfigurationResourcesCLIPreservesTypesOnPartialUpdate(t *testing.T) {
 	t.Parallel()
 
@@ -105,7 +121,42 @@ func TestConfigurationResourcesCLIPreservesTypesOnPartialUpdate(t *testing.T) {
 	}
 }
 
+func TestConfigurationResourcesCLIPreservesGlobalResourceToolsOnLocalPartialUpdate(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configHome := t.TempDir()
+	runConfigurationCommand(t, "configuration", "resources", "--scope", "global", "--config-home", configHome, "tool", "set", "opencode")
+	runConfigurationCommand(t, "configuration", "resources", "--scope", "global", "--config-home", configHome, "resource", "set", "qwen", "--tool", "opencode")
+	runConfigurationCommand(t, "configuration", "resources", "--scope", "global", "--config-home", configHome, "binding", "set", "default", "--tool", "opencode", "--resource", "qwen")
+	runConfigurationCommand(t, "configuration", "resources", "--scope", "global", "--config-home", configHome, "defaults", "set", "--model-binding", "default")
+
+	runConfigurationCommand(t, "configuration", "resources", "--repo-root", root, "--config-home", configHome, "resource", "set", "qwen", "--enabled")
+
+	loaded, err := configcontour.LoadExecutionResourceConfigWithHome(root, configHome, os.ReadFile)
+	if err != nil {
+		t.Fatalf("load merged config: %v", err)
+	}
+	resource := loaded.Config.Resources["qwen"]
+	if len(resource.Tools) != 1 || resource.Tools[0] != "opencode" {
+		t.Fatalf("local partial update must preserve global resource tools: %#v", resource)
+	}
+	if loaded.ResourceSources["qwen"] != configcontour.ConfigFileSourceLocal {
+		t.Fatalf("expected local resource override, got: %q", loaded.ResourceSources["qwen"])
+	}
+}
+
 func runConfigurationCommand(t *testing.T, args ...string) string {
+	t.Helper()
+
+	stdout, stderr, err := runConfigurationCommandWithError(t, args...)
+	if err != nil {
+		t.Fatalf("execute %v: %v\nstderr=%s", args, err, stderr)
+	}
+	return stdout
+}
+
+func runConfigurationCommandWithError(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 
 	cmd := NewRootCommand()
@@ -114,8 +165,6 @@ func runConfigurationCommand(t *testing.T, args ...string) string {
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
 	cmd.SetArgs(args)
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute %v: %v\nstderr=%s", args, err, stderr.String())
-	}
-	return stdout.String()
+	err := cmd.Execute()
+	return stdout.String(), stderr.String(), err
 }

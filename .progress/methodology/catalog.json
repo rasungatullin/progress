@@ -1,0 +1,100 @@
+{
+  "routes": [
+    {
+      "name": "default",
+      "title": "Маршрут по умолчанию",
+      "description": "Базовый маршрут передачи задачи в контур исполнения.",
+      "action": "implement",
+      "profile": "default",
+      "step": "implement",
+      "reason_code": "issue_context_ready",
+      "reason_message": "Контекст задачи готов к передаче в контур исполнения."
+    },
+    {
+      "name": "description-assessment",
+      "title": "Оценка описания задачи",
+      "description": "Маршрут проверки достаточности описания задачи перед инженерным изменением.",
+      "action": "task-description-assessment",
+      "profile": "task-description-assessor",
+      "step": "assess-description",
+      "has_labels": [
+        "description-assessment"
+      ],
+      "missing_labels": [
+        "description-assessed"
+      ],
+      "expected_result": "Сформировать заключение о достаточности описания.",
+      "constraints": [
+        "Не менять код."
+      ],
+      "reason_code": "task_description_not_assessed",
+      "reason_message": "Описание задачи ещё не оценено; задача направлена на оценку декомпозиции."
+    }
+  ],
+  "actions": [
+    {
+      "name": "implement",
+      "class": "engineering-synthesis",
+      "profile": "default",
+      "operations": [
+        "prepare-data",
+        "resolve-profile",
+        "allocate-resources",
+        "prepare-workplace",
+        "build-directive",
+        "launch-synthesis",
+        "parse-result",
+        "finalize"
+      ],
+      "description": "Выполнение инженерного изменения по готовому контексту задачи.",
+      "expected_result": "Выполнить выбранное действие и вернуть диагностируемый результат."
+    },
+    {
+      "name": "task-description-assessment",
+      "class": "task-preparation",
+      "profile": "task-description-assessor",
+      "operations": [
+        "prepare-data",
+        "resolve-profile",
+        "allocate-resources",
+        "build-directive",
+        "launch-synthesis",
+        "parse-result"
+      ],
+      "description": "Оценка достаточности описания задачи без изменения кодовой базы.",
+      "expected_result": "Сформировать заключение о достаточности описания."
+    }
+  ],
+  "instructions": [
+    {
+      "name": "default-directive",
+      "profile": "default",
+      "action": "implement",
+      "target_contour": "execution",
+      "title": "Базовая исполнительная директива",
+      "body": "Сформировать результат выполнения задачи в нормализованной форме с указанием выполненных изменений, проверок и дальнейших действий."
+    },
+    {
+      "name": "task-description-assessment-directive",
+      "profile": "task-description-assessor",
+      "action": "task-description-assessment",
+      "target_contour": "execution",
+      "title": "Оценка описания задачи",
+      "body": "Проверить достаточность описания задачи для дальнейшего исполнения без изменения кодовой базы. Вернуть заключение и необходимые дальнейшие действия."
+    }
+  ],
+  "entities": [
+    {
+      "kind": "decision-rule",
+      "name": "description-assessment",
+      "target_contour": "decision",
+      "title": "Правило оценки описания задачи",
+      "description": "Расширяемая модель правила для контура принятия решения.",
+      "payload": {
+        "has_label": "description-assessment",
+        "missing_label": "description-assessed",
+        "route": "description-assessment"
+      }
+    }
+  ]
+}

@@ -99,23 +99,36 @@ func newConfigurationEnvironmentSetCommand(parentFlags *configurationResourceFla
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags = effectiveConfigurationResourceFlags(parentFlags, &flags)
+			parentConfig, hasParentConfig, err := loadExecutionResourceParentLayerForWrite(&flags)
+			if err != nil {
+				return err
+			}
 			path, err := mutateExecutionResourceLayer(cmd, &flags, func(config *model.ResourceConfigFile) error {
 				name := strings.TrimSpace(args[0])
 				if name == "" {
 					return fmt.Errorf("environment name must not be empty")
 				}
+				exists := mapHasKey(config.Environments, name)
 				environment := config.Environments[name]
-				if strings.TrimSpace(flags.typ) != "" {
+				if !exists && hasParentConfig {
+					if parentEnvironment, ok := parentConfig.Environments[name]; ok {
+						environment = parentEnvironment
+					}
+				}
+				if cmd.Flags().Changed("type") {
 					environment.Type = strings.TrimSpace(flags.typ)
 				}
 				if strings.TrimSpace(environment.Type) == "" {
-					environment.Type = name
+					environment.Type = configurationEnvironmentTypeFromName(name)
+				}
+				if strings.TrimSpace(environment.Type) == "" {
+					return fmt.Errorf("environment type is required for custom environment %q", name)
 				}
 				enabled, changed, err := configurationEnabledFromFlags(cmd, &flags)
 				if err != nil {
 					return err
 				}
-				if changed || !mapHasKey(config.Environments, name) {
+				if changed || !exists {
 					environment.Enabled = enabled
 				}
 				values, err := parseConfigurationKeyValues(flags.config)
@@ -160,6 +173,10 @@ func newConfigurationToolSetCommand(parentFlags *configurationResourceFlags) *co
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags = effectiveConfigurationResourceFlags(parentFlags, &flags)
+			parentConfig, hasParentConfig, err := loadExecutionResourceParentLayerForWrite(&flags)
+			if err != nil {
+				return err
+			}
 			path, err := mutateExecutionResourceLayer(cmd, &flags, func(config *model.ResourceConfigFile) error {
 				name := strings.TrimSpace(args[0])
 				if name == "" {
@@ -167,6 +184,11 @@ func newConfigurationToolSetCommand(parentFlags *configurationResourceFlags) *co
 				}
 				exists := mapHasKey(config.Tools, name)
 				tool := config.Tools[name]
+				if !exists && hasParentConfig {
+					if parentTool, ok := parentConfig.Tools[name]; ok {
+						tool = parentTool
+					}
+				}
 				if cmd.Flags().Changed("type") {
 					tool.Type = strings.TrimSpace(flags.typ)
 				}
@@ -222,6 +244,10 @@ func newConfigurationResourceSetCommand(parentFlags *configurationResourceFlags)
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags = effectiveConfigurationResourceFlags(parentFlags, &flags)
+			parentConfig, hasParentConfig, err := loadExecutionResourceParentLayerForWrite(&flags)
+			if err != nil {
+				return err
+			}
 			path, err := mutateExecutionResourceLayer(cmd, &flags, func(config *model.ResourceConfigFile) error {
 				name := strings.TrimSpace(args[0])
 				if name == "" {
@@ -229,6 +255,11 @@ func newConfigurationResourceSetCommand(parentFlags *configurationResourceFlags)
 				}
 				exists := mapHasKey(config.Resources, name)
 				resource := config.Resources[name]
+				if !exists && hasParentConfig {
+					if parentResource, ok := parentConfig.Resources[name]; ok {
+						resource = parentResource
+					}
+				}
 				if cmd.Flags().Changed("type") {
 					resource.Type = strings.TrimSpace(flags.typ)
 				}
@@ -464,6 +495,34 @@ func loadExecutionResourceLayerForWrite(path string) (model.ResourceConfigFile, 
 	return model.ResourceConfigFile{}, err
 }
 
+func loadExecutionResourceParentLayerForWrite(flags *configurationResourceFlags) (model.ResourceConfigFile, bool, error) {
+	source, err := configurationConfigSource(flags.scope)
+	if err != nil {
+		return model.ResourceConfigFile{}, false, err
+	}
+	if source != configcontour.ConfigFileSourceLocal {
+		return model.ResourceConfigFile{}, false, nil
+	}
+
+	repoRoot, err := configurationResourcesRepoRoot(flags)
+	if err != nil {
+		return model.ResourceConfigFile{}, false, err
+	}
+	path, err := configcontour.ExecutionResourceConfigPath(repoRoot, flags.configHome, configcontour.ConfigFileSourceGlobal)
+	if err != nil {
+		return model.ResourceConfigFile{}, false, nil
+	}
+
+	config, err := configcontour.LoadExecutionResourceConfigFile(path, os.ReadFile)
+	if err == nil {
+		return config, true, nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return model.ResourceConfigFile{}, false, nil
+	}
+	return model.ResourceConfigFile{}, false, err
+}
+
 func writeExecutionResourceLayer(path string, config model.ResourceConfigFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create execution resource config directory: %w", err)
@@ -557,6 +616,17 @@ func normalizedConfigurationScope(value string) string {
 		return string(configcontour.ConfigFileSourceLocal)
 	}
 	return value
+}
+
+func configurationEnvironmentTypeFromName(name string) string {
+	switch strings.TrimSpace(name) {
+	case configcontour.EnvironmentTypeLocal:
+		return configcontour.EnvironmentTypeLocal
+	case configcontour.EnvironmentTypeWorktree:
+		return configcontour.EnvironmentTypeWorktree
+	default:
+		return ""
+	}
 }
 
 func configurationOutputFormat(value string) (string, error) {

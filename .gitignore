@@ -67,3 +67,5 @@ debug/
 !.progress/execution/profiles.json
 !.progress/decision/
 !.progress/decision/workflows.json
+!.progress/methodology/
+!.progress/methodology/catalog.json

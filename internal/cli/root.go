@@ -23,6 +23,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(newDecisionCommand())
 	cmd.AddCommand(newIntegrationCommand())
 	cmd.AddCommand(newConfigurationCommand())
+	cmd.AddCommand(newMethodologyCommand())
 	cmd.AddCommand(newExecutionCommand())
 	cmd.AddCommand(newWebCommand())
 	cmd.AddCommand(newCompletionCommand(cmd))
