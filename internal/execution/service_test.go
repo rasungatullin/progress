@@ -816,6 +816,49 @@ func TestServiceExecuteStartImplementationUsesPullRequestBaseForWorkplace(t *tes
 	}
 }
 
+func TestServiceExecuteEngineeringSynthesisCommitDoesNotForceHeadRefWithoutMergeRequest(t *testing.T) {
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
+	launcher := &stubLauncher{
+		result: model.LaunchResult{
+			Status:           "completed",
+			StructuredOutput: &model.StructuredOutput{Summary: "Реализация выполнена.", CommitMessage: "Выполнить первичную реализацию."},
+		},
+		commitSummary: "git=committed+pushed branch=101",
+	}
+	service := &Service{
+		logger:     log.Default(),
+		actions:    newMethodologyActionResolver(),
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, RepositoryRoot: root, Ready: true}},
+		launcher:   launcher,
+	}
+
+	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
+		Assignment: &ExecutionAssignment{
+			Action:        "engineering-synthesis-commit",
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 101, Title: "Проверить первичную реализацию"},
+			StructuredInput: &StructuredInput{
+				Task: "Выполнить первичную реализацию.",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute engineering-synthesis-commit action: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	// Для первичного действия без MR контуру не нужно принудительно использовать HeadRef из номера задачи.
+	// Имя рабочего места должно оставаться совпадающим с номером задачи, а ветка создаётся по его имени.
+	// Это позволит создать новую рабочую ветку от базовой при отсутствии такой ветки в origin.
+	// Проверяем только синхронизацию рабочего места: отсутствие HeadRef означает fallback на имя рабочеого места.
+	if workplaces, ok := service.workplaces.(*stubWorkplaceManager); !ok || workplaces.invocation.Workplace.HeadRef != "" {
+		t.Fatalf("engineering-synthesis-commit must not prefill workplace head_ref: %#v", workplaces)
+	}
+}
+
 func TestServiceExecuteStartImplementationRejectsMismatchedHeadBranch(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
