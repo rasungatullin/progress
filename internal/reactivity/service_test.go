@@ -213,6 +213,25 @@ func TestServiceRunTaskActionSkipsDecisionAndMarksRework(t *testing.T) {
 	}
 }
 
+func TestServiceRunTaskActionReturnsMergeRequestSearchErrorForReviewAction(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.searchErr = errors.New("search unavailable")
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{err: errors.New("decision must not be called")}
+	service.execution = &processingExecutionStub{}
+
+	_, err := service.RunTaskAction(context.Background(), TaskActionInput{TaskNumber: 123, Action: execution.ActionReviewPullRequest})
+	if err == nil {
+		t.Fatal("expected merge request search error")
+	}
+	if !strings.Contains(err.Error(), "search unavailable") {
+		t.Fatalf("expected original search error, got: %v", err)
+	}
+}
+
 func TestServiceProcessTaskReviewWithoutConclusionMarksRework(t *testing.T) {
 	t.Parallel()
 
