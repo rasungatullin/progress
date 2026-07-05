@@ -266,6 +266,32 @@ func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 	}) {
 		t.Fatal("expected review to fail on negative conclusion status")
 	}
+
+	if !reviewExecutionPassed(&execution.ExecutionResult{
+		Status: "completed",
+		Launch: &execution.LaunchResult{
+			Status: "completed",
+			StructuredOutput: &execution.StructuredOutput{
+				Conclusion: &execution.StructuredConclusion{Status: "approve"},
+				Remarks: []execution.StructuredRemark{{ID: "remark-1", Status: "resolved", Title: "Замечание"}},
+			},
+		},
+	}) {
+		t.Fatal("expected review to pass with resolved remark")
+	}
+
+	if reviewExecutionPassed(&execution.ExecutionResult{
+		Status: "completed",
+		Launch: &execution.LaunchResult{
+			Status: "completed",
+			StructuredOutput: &execution.StructuredOutput{
+				Conclusion: &execution.StructuredConclusion{Status: "approve"},
+				Remarks: []execution.StructuredRemark{{ID: "remark-2", Status: "unresolved", Title: "Замечание"}},
+			},
+		},
+	}) {
+		t.Fatal("expected review to fail on unresolved remark")
+	}
 }
 
 func processingConsideration(action string) decision.ConsiderationResult {

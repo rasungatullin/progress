@@ -341,6 +341,9 @@ func executionStatusCompleted(status string) bool {
 
 func hasReviewRemarks(remarks []execution.StructuredRemark) bool {
 	for _, remark := range remarks {
+		if isResolvedReviewRemark(remark) {
+			continue
+		}
 		if strings.TrimSpace(remark.ID) != "" ||
 			strings.TrimSpace(remark.Status) != "" ||
 			strings.TrimSpace(remark.Severity) != "" ||
@@ -353,6 +356,16 @@ func hasReviewRemarks(remarks []execution.StructuredRemark) bool {
 		}
 	}
 	return false
+}
+
+func isResolvedReviewRemark(remark execution.StructuredRemark) bool {
+	status := strings.ToLower(strings.TrimSpace(remark.Status))
+	switch status {
+	case "resolved", "fixed", "done", "ok":
+		return true
+	default:
+		return false
+	}
 }
 
 func canonicalProcessingAction(action string) string {
