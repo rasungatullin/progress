@@ -89,6 +89,60 @@ func TestMethodologyCLIAddsListsAndSelectsLocalCatalog(t *testing.T) {
 	}
 }
 
+func TestMethodologyCLIUpdateActionPreservesConfiguredFields(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configHome := t.TempDir()
+	catalogDir := filepath.Join(root, ".progress", "methodology")
+	if err := os.MkdirAll(catalogDir, 0o755); err != nil {
+		t.Fatalf("create catalog dir: %v", err)
+	}
+	catalogPath := filepath.Join(catalogDir, "catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`{
+		"actions": [{
+			"name": "engineering-synthesis",
+			"class": "engineering-synthesis",
+			"profile": "default",
+			"aliases": ["implement"],
+			"requires_workplace": true,
+			"requires_synthesis": true,
+			"operations": [
+				{"name": "prepare-data", "kind": "prepare-data", "title": "Подготовка данных", "origin": "builtin", "required": true}
+			],
+			"description": "Старое описание."
+		}]
+	}`), 0o600); err != nil {
+		t.Fatalf("write catalog: %v", err)
+	}
+
+	if output, err := executeMethodologyCommand(t,
+		"methodology", "--repo-root", root, "--config-home", configHome,
+		"add", "action",
+		"--name", "engineering-synthesis",
+		"--description", "Новое описание.",
+	); err != nil {
+		t.Fatalf("update action: %v\n%s", err, output)
+	}
+
+	content, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+	for _, fragment := range []string{
+		`"aliases":`,
+		`"implement"`,
+		`"requires_workplace": true`,
+		`"requires_synthesis": true`,
+		`"title": "Подготовка данных"`,
+		`"description": "Новое описание."`,
+	} {
+		if !strings.Contains(string(content), fragment) {
+			t.Fatalf("updated catalog must include %q, got %s", fragment, string(content))
+		}
+	}
+}
+
 func TestMethodologyCLIAddsGenericEntityForTargetContour(t *testing.T) {
 	t.Parallel()
 

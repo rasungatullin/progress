@@ -503,6 +503,47 @@ func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
 	}
 }
 
+func TestActionResolutionRejectsDuplicateOperations(t *testing.T) {
+	t.Parallel()
+
+	_, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              "diagnostic",
+			Class:             ActionClassService,
+			RequiresWorkplace: boolRef(false),
+			RequiresSynthesis: boolRef(false),
+			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindResolveAction),
+		}},
+	}, invocation{Action: "diagnostic"})
+	if err == nil {
+		t.Fatal("expected duplicate operation error")
+	}
+	if !strings.Contains(err.Error(), `операция "resolve-action" задана повторно`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestActionResolutionMakesReviewRemarksRequiredForApplyReviewComments(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              ActionApplyReviewComments,
+			Class:             ActionClassEngineeringSynthesis,
+			RequiresWorkplace: boolRef(true),
+			RequiresSynthesis: boolRef(true),
+			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindLoadReviewRemarks, OperationKindFinalize),
+		}},
+	}, invocation{Action: ActionApplyReviewComments})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	operation := findOperationSpec(action, OperationKindLoadReviewRemarks)
+	if operation == nil || !operation.Required {
+		t.Fatalf("load-review-remarks must be required for apply-review-comments legacy operation: %#v", action.Operations)
+	}
+}
+
 func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)

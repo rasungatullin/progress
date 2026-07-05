@@ -158,6 +158,52 @@ func TestLoadCatalogRejectsAmbiguousActionAliases(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsInvalidActionOperations(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		actions   string
+		wantError string
+	}{
+		{
+			name: "empty operation",
+			actions: `[
+				{"name": "implement", "operations": [{}]}
+			]`,
+			wantError: `action "implement" operations[0] must define name or kind`,
+		},
+		{
+			name: "duplicate operation",
+			actions: `[
+				{"name": "implement", "operations": ["prepare-data", {"name": "PREPARE-DATA"}]}
+			]`,
+			wantError: `action "implement" operations contains duplicate name "prepare-data"`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			readFile := func(path string) ([]byte, error) {
+				if path == "/repo/.progress/methodology/catalog.json" {
+					return []byte(`{"actions": ` + tt.actions + `}`), nil
+				}
+				return nil, fs.ErrNotExist
+			}
+
+			_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+			if err == nil {
+				t.Fatal("expected operation validation error")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestSaveCatalogRejectsDuplicateRoutesBeforeNormalization(t *testing.T) {
 	t.Parallel()
 

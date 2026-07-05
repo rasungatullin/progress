@@ -180,11 +180,17 @@ func findMethodologyAction(actions []methodology.Action, name string) (*methodol
 
 func executionActionFromMethodology(action methodology.Action) (model.Action, error) {
 	operations := make([]model.OperationSpec, 0, len(action.Operations))
+	seenOperations := map[string]struct{}{}
 	for _, operation := range action.Operations {
-		spec, err := operationSpecFromMethodology(operation)
+		spec, err := operationSpecFromMethodology(action, operation)
 		if err != nil {
 			return model.Action{}, err
 		}
+		name := operationResultName(spec)
+		if _, ok := seenOperations[name]; ok {
+			return model.Action{}, fmt.Errorf("операция %q задана повторно", name)
+		}
+		seenOperations[name] = struct{}{}
 		operations = append(operations, spec)
 	}
 	if len(operations) == 0 {
@@ -202,7 +208,7 @@ func executionActionFromMethodology(action methodology.Action) (model.Action, er
 	}, nil
 }
 
-func operationSpecFromMethodology(operation methodology.ActionOperation) (model.OperationSpec, error) {
+func operationSpecFromMethodology(action methodology.Action, operation methodology.ActionOperation) (model.OperationSpec, error) {
 	name := strings.TrimSpace(operation.Name)
 	kind := strings.TrimSpace(operation.Kind)
 	if name == "" {
@@ -228,6 +234,9 @@ func operationSpecFromMethodology(operation methodology.ActionOperation) (model.
 	}
 	if origin := strings.TrimSpace(operation.Origin); origin != "" {
 		defaultSpec.Origin = origin
+	}
+	if operation.Required == nil && strings.TrimSpace(action.Name) == ActionApplyReviewComments && kind == OperationKindLoadReviewRemarks {
+		defaultSpec.Required = true
 	}
 	if operation.Required != nil {
 		defaultSpec.Required = *operation.Required

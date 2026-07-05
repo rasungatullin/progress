@@ -374,8 +374,10 @@ func validateCatalog(catalog Catalog) error {
 	}
 
 	seenActions := map[string]struct{}{}
-	for index, action := range catalog.Actions {
-		action = normalizeAction(action)
+	normalizedActions := make([]Action, 0, len(catalog.Actions))
+	for index, rawAction := range catalog.Actions {
+		action := normalizeAction(rawAction)
+		normalizedActions = append(normalizedActions, action)
 		if action.Name == "" {
 			return fmt.Errorf("actions[%d].name must be non-empty", index)
 		}
@@ -385,13 +387,18 @@ func validateCatalog(catalog Catalog) error {
 		seenActions[action.Name] = struct{}{}
 	}
 	seenActionAliases := map[string]string{}
-	for _, action := range catalog.Actions {
-		action = normalizeAction(action)
+	for actionIndex, action := range normalizedActions {
 		seenAliases := map[string]struct{}{}
-		for operationIndex, operation := range action.Operations {
+		seenOperations := map[string]struct{}{}
+		for operationIndex, operation := range catalog.Actions[actionIndex].Operations {
+			operation = normalizeActionOperation(operation)
 			if operation.Name == "" && operation.Kind == "" {
 				return fmt.Errorf("action %q operations[%d] must define name or kind", action.Name, operationIndex)
 			}
+			if _, ok := seenOperations[operation.Name]; ok {
+				return fmt.Errorf("action %q operations contains duplicate name %q", action.Name, operation.Name)
+			}
+			seenOperations[operation.Name] = struct{}{}
 		}
 		for _, alias := range action.Aliases {
 			if alias == action.Name {
@@ -516,16 +523,7 @@ func normalizeAction(action Action) Action {
 func normalizeActionOperations(operations []ActionOperation) []ActionOperation {
 	result := make([]ActionOperation, 0, len(operations))
 	for _, operation := range operations {
-		operation.Name = normalizeName(operation.Name)
-		operation.Kind = normalizeName(operation.Kind)
-		if operation.Name == "" {
-			operation.Name = operation.Kind
-		}
-		if operation.Kind == "" {
-			operation.Kind = operation.Name
-		}
-		operation.Title = strings.TrimSpace(operation.Title)
-		operation.Origin = strings.TrimSpace(operation.Origin)
+		operation = normalizeActionOperation(operation)
 		if operation.Name == "" && operation.Kind == "" {
 			continue
 		}
@@ -535,6 +533,20 @@ func normalizeActionOperations(operations []ActionOperation) []ActionOperation {
 		return nil
 	}
 	return result
+}
+
+func normalizeActionOperation(operation ActionOperation) ActionOperation {
+	operation.Name = normalizeName(operation.Name)
+	operation.Kind = normalizeName(operation.Kind)
+	if operation.Name == "" {
+		operation.Name = operation.Kind
+	}
+	if operation.Kind == "" {
+		operation.Kind = operation.Name
+	}
+	operation.Title = strings.TrimSpace(operation.Title)
+	operation.Origin = strings.TrimSpace(operation.Origin)
+	return operation
 }
 
 func normalizeInstruction(instruction Instruction) Instruction {
