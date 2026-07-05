@@ -82,6 +82,41 @@ func TestLoadCatalogMergesGlobalAndLocalLayersWithLocalPriority(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogKeepsLocalAliasPriorityOverGlobalAlias(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/methodology/catalog.json":
+			return []byte(`{
+				"actions": [
+					{"name": "engineering-synthesis", "aliases": ["implement"], "profile": "global"}
+				]
+			}`), nil
+		case "/repo/.progress/methodology/catalog.json":
+			return []byte(`{
+				"actions": [
+					{"name": "local-implementation", "aliases": ["implement"], "profile": "local"}
+				]
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	snapshot, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	action, err := selectAction(snapshot.Catalog.Actions, "implement")
+	if err != nil {
+		t.Fatalf("select action: %v", err)
+	}
+	if action.Name != "local-implementation" || action.Profile != "local" {
+		t.Fatalf("local alias must win over global alias: %#v", action)
+	}
+}
+
 func TestLoadCatalogRejectsDuplicateRoutesInsideSingleLayer(t *testing.T) {
 	t.Parallel()
 
@@ -260,6 +295,28 @@ func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 	}
 	if !containsAll(string(content), `"actions"`, `"implement"`, `"engineering-synthesis"`) {
 		t.Fatalf("written catalog does not include action: %s", string(content))
+	}
+}
+
+func TestServiceUpsertRejectsEmptyActionOperation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewService(nil)
+
+	_, err := service.Upsert(context.Background(), CatalogWriteRequest{
+		RepoRoot: root,
+		Scope:    CatalogWriteScopeLocal,
+		Element: ElementUpsert{Action: &Action{
+			Name:       "implement",
+			Operations: []ActionOperation{{}},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected empty operation error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[0] must define name or kind`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

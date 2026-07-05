@@ -565,6 +565,39 @@ func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
 	}
 }
 
+func TestActionResolutionPrefersLaterAlias(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{
+			{
+				Name:              ActionClassEngineeringSynthesis,
+				Class:             ActionClassEngineeringSynthesis,
+				Profile:           "global",
+				Aliases:           []string{"implement"},
+				RequiresWorkplace: boolRef(true),
+				RequiresSynthesis: boolRef(true),
+				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+			},
+			{
+				Name:              "local-implementation",
+				Class:             ActionClassService,
+				Profile:           "local",
+				Aliases:           []string{"implement"},
+				RequiresWorkplace: boolRef(false),
+				RequiresSynthesis: boolRef(false),
+				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+			},
+		},
+	}, invocation{Action: "implement"})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	if action.Name != "local-implementation" || action.Profile != "local" || action.Class != ActionClassService {
+		t.Fatalf("later alias must win over earlier alias: %#v", action)
+	}
+}
+
 func TestActionResolutionRejectsDuplicateOperations(t *testing.T) {
 	t.Parallel()
 

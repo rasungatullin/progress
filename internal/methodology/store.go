@@ -284,10 +284,11 @@ func applyElementUpsert(catalog Catalog, element ElementUpsert) (Catalog, error)
 		upsertRoute(&catalog, routeIndexes, route)
 	}
 	if element.Action != nil {
-		action := normalizeAction(*element.Action)
+		action := *element.Action
 		if err := validateCatalog(Catalog{Actions: []Action{action}}); err != nil {
 			return Catalog{}, err
 		}
+		action = normalizeAction(action)
 		upsertAction(&catalog, actionIndexes, action)
 	}
 	if element.Instruction != nil {

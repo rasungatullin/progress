@@ -167,7 +167,7 @@ func findMethodologyAction(actions []methodology.Action, name string) (*methodol
 			return action, true
 		}
 	}
-	for index := range actions {
+	for index := len(actions) - 1; index >= 0; index-- {
 		action := &actions[index]
 		for _, alias := range action.Aliases {
 			if strings.EqualFold(strings.TrimSpace(alias), name) {
