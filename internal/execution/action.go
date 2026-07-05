@@ -2,11 +2,15 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/execution/model"
+	"github.com/rasungatullin/progress/internal/methodology"
 )
 
 const (
@@ -48,79 +52,101 @@ type actionResolver interface {
 	ResolveAction(context.Context, invocation) (Action, error)
 }
 
-type actionCatalog struct {
-	actions map[string]model.Action
-	aliases map[string]string
+type methodologyActionResolver struct {
+	loadCatalog func(context.Context, methodology.CatalogRequest) (methodology.CatalogSnapshot, error)
+	getwd       func() (string, error)
+	stat        func(string) (os.FileInfo, error)
 }
 
-func newActionCatalog() *actionCatalog {
-	actions := map[string]model.Action{
-		ActionClassEngineeringSynthesis: newActionTemplate(ActionClassEngineeringSynthesis, ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза в нормализованной форме."),
-		"engineering-synthesis-commit":  newActionTemplateWithOperations("engineering-synthesis-commit", ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза, создать коммит и отправить ветку.", actionOperationsWithCommitPush()),
-		ActionStartImplementationPR:     newActionTemplateWithOperations(ActionStartImplementationPR, ActionClassEngineeringSynthesis, "coder", true, true, "Выполнить реализацию задачи, отправить ветку и открыть запрос на слияние.", startImplementationPROperations()),
-		ActionClassReview:               newActionTemplate(ActionClassReview, ActionClassReview, "review", true, true, "Провести ревизию результата и вернуть заключение ревизии."),
-		ActionReviewPullRequest:         newActionTemplateWithOperations(ActionReviewPullRequest, ActionClassReview, "review", true, true, "Проверить открытый запрос на слияние и записать замечания ревизии.", reviewPullRequestOperations()),
-		ActionApplyReviewComments:       newActionTemplateWithOperations(ActionApplyReviewComments, ActionClassEngineeringSynthesis, "coder", true, true, "Получить замечания ревизии, исправить их и записать ответы на замечания.", applyReviewCommentsOperations()),
-		ActionClassTaskPreparation:      newActionTemplate(ActionClassTaskPreparation, ActionClassTaskPreparation, "task-description-assessor", true, true, "Подготовить или оценить постановку задачи."),
-		ActionClassIntegrationChange:    newActionTemplate(ActionClassIntegrationChange, ActionClassIntegrationChange, "default", false, false, "Выполнить интеграционное изменение через опубликованную операцию."),
-		ActionClassService:              newActionTemplate(ActionClassService, ActionClassService, "default", true, false, "Выполнить служебное действие без содержательного синтеза."),
+func newMethodologyActionResolver() *methodologyActionResolver {
+	service := methodology.NewService(nil)
+	return &methodologyActionResolver{
+		loadCatalog: service.Load,
+		getwd:       os.Getwd,
+		stat:        os.Stat,
 	}
-	aliases := map[string]string{
-		"assess":                      ActionClassTaskPreparation,
-		"assess-description":          ActionClassTaskPreparation,
-		"description-assessment":      ActionClassTaskPreparation,
-		"prepare-task":                ActionClassTaskPreparation,
-		"task-description-assessment": ActionClassTaskPreparation,
-		"code":                        ActionClassEngineeringSynthesis,
-		"code-commit":                 "engineering-synthesis-commit",
-		"coder":                       ActionClassEngineeringSynthesis,
-		"coding":                      ActionClassEngineeringSynthesis,
-		"implement":                   ActionClassEngineeringSynthesis,
-		"implement-commit":            "engineering-synthesis-commit",
-		"implementation":              ActionClassEngineeringSynthesis,
-		"implement-pr":                ActionStartImplementationPR,
-		"implementation-pr":           ActionStartImplementationPR,
-		"open-pr":                     ActionStartImplementationPR,
-		"start-implementation":        ActionStartImplementationPR,
-		"start-implementation-pr":     ActionStartImplementationPR,
-		"pr-review":                   ActionReviewPullRequest,
-		"review-pr":                   ActionReviewPullRequest,
-		"review-pull-request":         ActionReviewPullRequest,
-		"address-review-comments":     ActionApplyReviewComments,
-		"apply-review-comments":       ActionApplyReviewComments,
-		"fix-review-comments":         ActionApplyReviewComments,
-		"reply-review-comments":       ActionApplyReviewComments,
-		"pull-request":                ActionClassIntegrationChange,
-		"comment":                     ActionClassIntegrationChange,
-		"integration":                 ActionClassIntegrationChange,
-		"diagnostic":                  ActionClassService,
-		"diagnostics":                 ActionClassService,
-	}
-
-	return &actionCatalog{actions: actions, aliases: aliases}
 }
 
-func (c *actionCatalog) ResolveAction(ctx context.Context, in invocation) (Action, error) {
-	_ = ctx
-	if c == nil {
-		c = newActionCatalog()
+func (r *methodologyActionResolver) ResolveAction(ctx context.Context, in invocation) (Action, error) {
+	if r == nil {
+		r = newMethodologyActionResolver()
+	}
+	if r.loadCatalog == nil {
+		service := methodology.NewService(nil)
+		r.loadCatalog = service.Load
 	}
 
+	repoRoot := r.resolveRepoRoot()
+	snapshot, err := r.loadCatalog(ctx, methodology.CatalogRequest{RepoRoot: repoRoot})
+	if err != nil {
+		return model.Action{}, actionResolutionError{code: "action_catalog_unavailable", err: err}
+	}
+	return resolveActionFromCatalog(snapshot.Catalog, in)
+}
+
+type actionResolutionError struct {
+	code string
+	err  error
+}
+
+func (e actionResolutionError) Error() string {
+	if e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e actionResolutionError) Unwrap() error {
+	return e.err
+}
+
+func (r *methodologyActionResolver) resolveRepoRoot() string {
+	if r == nil || r.getwd == nil {
+		return ""
+	}
+	wd, err := r.getwd()
+	if err != nil {
+		return ""
+	}
+	wd = strings.TrimSpace(wd)
+	if wd == "" {
+		return ""
+	}
+	for current := wd; current != ""; current = filepath.Dir(current) {
+		if r.catalogExists(filepath.Join(current, ".progress", "methodology", "catalog.json")) || r.catalogExists(filepath.Join(current, ".git")) {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+	}
+	return wd
+}
+
+func (r *methodologyActionResolver) catalogExists(path string) bool {
+	if r == nil || r.stat == nil {
+		return false
+	}
+	_, err := r.stat(path)
+	return err == nil
+}
+
+func resolveActionFromCatalog(catalog methodology.Catalog, in invocation) (Action, error) {
 	name := actionNameFromInvocation(in)
 	if name == "" {
 		name = defaultActionName()
 	}
 	canonicalName := strings.ToLower(strings.TrimSpace(name))
-	if alias := strings.TrimSpace(c.aliases[canonicalName]); alias != "" {
-		canonicalName = alias
-	}
-	template, ok := c.actions[canonicalName]
+	entry, ok := findMethodologyAction(catalog.Actions, canonicalName)
 	if !ok {
-		return model.Action{}, fmt.Errorf("действие %q не найдено", name)
+		return model.Action{}, actionResolutionError{code: "action_not_found", err: fmt.Errorf("действие %q не найдено в каталоге методик", name)}
 	}
 
-	action := cloneAction(template)
-	action.Name = name
+	action, err := executionActionFromMethodology(*entry)
+	if err != nil {
+		return model.Action{}, actionResolutionError{code: "action_invalid", err: fmt.Errorf("действие %q в каталоге методик невалидно: %w", entry.Name, err)}
+	}
 	if strings.TrimSpace(action.Profile) == "" {
 		action.Profile = "default"
 	}
@@ -132,6 +158,153 @@ func (c *actionCatalog) ResolveAction(ctx context.Context, in invocation) (Actio
 	}
 
 	return action, nil
+}
+
+func findMethodologyAction(actions []methodology.Action, name string) (*methodology.Action, bool) {
+	for index := range actions {
+		action := &actions[index]
+		if strings.EqualFold(strings.TrimSpace(action.Name), name) {
+			return action, true
+		}
+	}
+	for index := len(actions) - 1; index >= 0; index-- {
+		action := &actions[index]
+		for _, alias := range action.Aliases {
+			if strings.EqualFold(strings.TrimSpace(alias), name) {
+				return action, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func executionActionFromMethodology(action methodology.Action) (model.Action, error) {
+	operations := make([]model.OperationSpec, 0, len(action.Operations))
+	seenOperations := map[string]struct{}{}
+	for _, operation := range action.Operations {
+		spec, err := operationSpecFromMethodology(action, operation)
+		if err != nil {
+			return model.Action{}, err
+		}
+		name := operationResultName(spec)
+		if _, ok := seenOperations[name]; ok {
+			return model.Action{}, fmt.Errorf("операция %q задана повторно", name)
+		}
+		seenOperations[name] = struct{}{}
+		operations = append(operations, spec)
+	}
+	if len(operations) == 0 {
+		return model.Action{}, fmt.Errorf("не задан список операций")
+	}
+
+	return model.Action{
+		Name:              strings.TrimSpace(action.Name),
+		Class:             model.ActionClass(strings.TrimSpace(action.Class)),
+		Profile:           strings.TrimSpace(action.Profile),
+		ExpectedResult:    strings.TrimSpace(action.ExpectedResult),
+		RequiresWorkplace: actionRequiresWorkplace(action, operations),
+		RequiresSynthesis: actionRequiresSynthesis(action, operations),
+		Operations:        operations,
+	}, nil
+}
+
+func operationSpecFromMethodology(action methodology.Action, operation methodology.ActionOperation) (model.OperationSpec, error) {
+	name := strings.TrimSpace(operation.Name)
+	kind := strings.TrimSpace(operation.Kind)
+	if name == "" {
+		name = kind
+	}
+	if kind == "" {
+		kind = name
+	}
+	if name == "" || kind == "" {
+		return model.OperationSpec{}, fmt.Errorf("операция должна задавать name или kind")
+	}
+	defaultSpec := defaultOperationSpec(kind)
+	if strings.TrimSpace(defaultSpec.Name) == "" {
+		defaultSpec.Name = name
+		defaultSpec.Kind = model.OperationKind(kind)
+		defaultSpec.Origin = OperationOriginBuiltin
+		defaultSpec.Required = true
+	}
+	defaultSpec.Name = name
+	defaultSpec.Kind = model.OperationKind(kind)
+	if title := strings.TrimSpace(operation.Title); title != "" {
+		defaultSpec.Title = title
+	}
+	if origin := strings.TrimSpace(operation.Origin); origin != "" {
+		defaultSpec.Origin = origin
+	}
+	if operation.Required == nil && strings.TrimSpace(action.Name) == ActionApplyReviewComments && kind == OperationKindLoadReviewRemarks {
+		defaultSpec.Required = true
+	}
+	if operation.Required != nil {
+		defaultSpec.Required = *operation.Required
+	}
+	return defaultSpec, nil
+}
+
+func defaultOperationSpec(kind string) model.OperationSpec {
+	switch strings.TrimSpace(kind) {
+	case OperationKindResolveAction:
+		return builtinOperation(OperationKindResolveAction, "Разрешение действия", true)
+	case OperationKindPrepareData:
+		return builtinOperation(OperationKindPrepareData, "Подготовка данных", true)
+	case OperationKindLoadPullRequest:
+		return builtinOperation(OperationKindLoadPullRequest, "Получение запроса на слияние", true)
+	case OperationKindLoadReviewRemarks:
+		return builtinOperation(OperationKindLoadReviewRemarks, "Получение замечаний ревизии", false)
+	case OperationKindResolveProfile:
+		return builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true)
+	case OperationKindAllocateResources:
+		return builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true)
+	case OperationKindPrepareWorkplace:
+		return builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true)
+	case OperationKindBuildDirective:
+		return builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true)
+	case OperationKindLaunchSynthesis:
+		return builtinOperation(OperationKindLaunchSynthesis, "Запуск синтеза", true)
+	case OperationKindParseResult:
+		return builtinOperation(OperationKindParseResult, "Разбор результата", true)
+	case OperationKindCommitPush:
+		return builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true)
+	case OperationKindPublishMergeRequest:
+		return builtinOperation(OperationKindPublishMergeRequest, "Открытие запроса на слияние", true)
+	case OperationKindPublishReviewRemarks:
+		return builtinOperation(OperationKindPublishReviewRemarks, "Запись замечаний ревизии", true)
+	case OperationKindPublishReviewResponses:
+		return builtinOperation(OperationKindPublishReviewResponses, "Запись ответов на замечания", true)
+	case OperationKindFinalize:
+		return builtinOperation(OperationKindFinalize, "Завершающая фиксация", true)
+	default:
+		return model.OperationSpec{}
+	}
+}
+
+func actionRequiresWorkplace(action methodology.Action, operations []model.OperationSpec) bool {
+	if action.RequiresWorkplace != nil {
+		return *action.RequiresWorkplace
+	}
+	for _, operation := range operations {
+		switch operationKind(operation) {
+		case OperationKindPrepareWorkplace, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindPublishReviewRemarks, OperationKindPublishReviewResponses:
+			return true
+		}
+	}
+	return false
+}
+
+func actionRequiresSynthesis(action methodology.Action, operations []model.OperationSpec) bool {
+	if action.RequiresSynthesis != nil {
+		return *action.RequiresSynthesis
+	}
+	for _, operation := range operations {
+		switch operationKind(operation) {
+		case OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush:
+			return true
+		}
+	}
+	return false
 }
 
 func assignmentFromInvocation(in model.Invocation) *model.ExecutionAssignment {
@@ -265,101 +438,6 @@ func executionResultFromLaunch(assignment *model.ExecutionAssignment, action mod
 	return executionResult
 }
 
-func newActionTemplate(name, class, profile string, requiresWorkplace, requiresSynthesis bool, expectedResult string) model.Action {
-	return newActionTemplateWithOperations(name, class, profile, requiresWorkplace, requiresSynthesis, expectedResult, defaultActionOperations())
-}
-
-func newActionTemplateWithOperations(name, class, profile string, requiresWorkplace, requiresSynthesis bool, expectedResult string, operations []model.OperationSpec) model.Action {
-	return model.Action{
-		Name:              name,
-		Class:             model.ActionClass(class),
-		Profile:           profile,
-		ExpectedResult:    expectedResult,
-		RequiresWorkplace: requiresWorkplace,
-		RequiresSynthesis: requiresSynthesis,
-		Operations:        append([]model.OperationSpec(nil), operations...),
-	}
-}
-
-func defaultActionOperations() []model.OperationSpec {
-	return []model.OperationSpec{
-		builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
-		builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
-		builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
-		builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
-		builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
-		builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
-		builtinOperation(OperationKindLaunchSynthesis, "Запуск синтеза", true),
-		builtinOperation(OperationKindParseResult, "Разбор результата", true),
-		builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
-	}
-}
-
-func actionOperationsWithCommitPush() []model.OperationSpec {
-	operations := defaultActionOperations()
-	return insertBeforeFinalize(operations, builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true))
-}
-
-func startImplementationPROperations() []model.OperationSpec {
-	operations := defaultActionOperations()
-	return insertBeforeFinalize(operations,
-		builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true),
-		builtinOperation(OperationKindPublishMergeRequest, "Открытие запроса на слияние", true),
-	)
-}
-
-func reviewPullRequestOperations() []model.OperationSpec {
-	return []model.OperationSpec{
-		builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
-		builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
-		builtinOperation(OperationKindLoadPullRequest, "Получение запроса на слияние", true),
-		builtinOperation(OperationKindLoadReviewRemarks, "Получение замечаний ревизии", false),
-		builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
-		builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
-		builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
-		builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
-		builtinOperation(OperationKindLaunchSynthesis, "Запуск ревизии", true),
-		builtinOperation(OperationKindParseResult, "Разбор результата", true),
-		builtinOperation(OperationKindPublishReviewRemarks, "Запись замечаний ревизии", true),
-		builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
-	}
-}
-
-func applyReviewCommentsOperations() []model.OperationSpec {
-	operations := []model.OperationSpec{
-		builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
-		builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
-		builtinOperation(OperationKindLoadPullRequest, "Получение запроса на слияние", true),
-		builtinOperation(OperationKindLoadReviewRemarks, "Получение замечаний ревизии", true),
-		builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
-		builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
-		builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
-		builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
-		builtinOperation(OperationKindLaunchSynthesis, "Запуск доработки", true),
-		builtinOperation(OperationKindParseResult, "Разбор результата", true),
-		builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true),
-		builtinOperation(OperationKindPublishReviewResponses, "Запись ответов на замечания", true),
-		builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
-	}
-	return operations
-}
-
-func insertBeforeFinalize(operations []model.OperationSpec, additions ...model.OperationSpec) []model.OperationSpec {
-	for index, operation := range operations {
-		if operation.Name != OperationKindFinalize {
-			continue
-		}
-
-		withAdditions := make([]model.OperationSpec, 0, len(operations)+len(additions))
-		withAdditions = append(withAdditions, operations[:index]...)
-		withAdditions = append(withAdditions, additions...)
-		withAdditions = append(withAdditions, operations[index:]...)
-		return withAdditions
-	}
-
-	return append(operations, additions...)
-}
-
 func builtinOperation(kind string, title string, required bool) model.OperationSpec {
 	return model.OperationSpec{
 		Name:     kind,
@@ -393,7 +471,18 @@ func actionResolutionFailureOperations(err error) []model.OperationResult {
 			builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
 		},
 	})
-	tracker.fail(OperationKindResolveAction, "Действие не найдено на нулевом этапе исполнения.", err, "action_not_found", false, true)
+	code := "action_not_found"
+	summary := "Действие не найдено на нулевом этапе исполнения."
+	var resolutionErr actionResolutionError
+	if errors.As(err, &resolutionErr) {
+		if strings.TrimSpace(resolutionErr.code) != "" {
+			code = resolutionErr.code
+		}
+		if code != "action_not_found" {
+			summary = "Разрешение действия завершилось диагностируемым отказом."
+		}
+	}
+	tracker.fail(OperationKindResolveAction, summary, err, code, false, true)
 	return tracker.snapshot()
 }
 

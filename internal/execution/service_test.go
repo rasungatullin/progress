@@ -13,6 +13,7 @@ import (
 	launchservice "github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
 	"github.com/rasungatullin/progress/internal/integration"
+	"github.com/rasungatullin/progress/internal/methodology"
 )
 
 func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
@@ -210,7 +211,7 @@ func TestServiceExecuteReturnsActionAndOperationResults(t *testing.T) {
 	if result.Status != "completed" || result.Launch == nil || result.Launch.Status != "completed" {
 		t.Fatalf("unexpected execution result: %#v", result)
 	}
-	if result.Action.Name != "implement" || result.Action.Profile != "default" || !result.Action.RequiresSynthesis {
+	if result.Action.Name != ActionClassEngineeringSynthesis || result.Action.Profile != "default" || !result.Action.RequiresSynthesis {
 		t.Fatalf("unexpected action: %#v", result.Action)
 	}
 	if result.Assignment == nil || result.Assignment.CanonicalTask == nil || result.Assignment.CanonicalTask.Number != 91 {
@@ -378,6 +379,68 @@ func TestServiceExecuteReturnsFailedResultWhenFinalOperationFails(t *testing.T) 
 	}
 }
 
+func TestServiceExecuteLaunchFailureUsesCatalogOperationNames(t *testing.T) {
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
+	expectedErr := errors.New("final stage failed")
+	service := &Service{
+		logger: log.Default(),
+		actions: &stubActionResolver{action: model.Action{
+			Name:              "custom-synthesis",
+			Class:             ActionClassEngineeringSynthesis,
+			Profile:           "coder",
+			RequiresWorkplace: true,
+			RequiresSynthesis: true,
+			Operations: []model.OperationSpec{
+				builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
+				builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
+				builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
+				builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
+				builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
+				builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
+				builtinOperation(OperationKindLaunchSynthesis, "Запуск синтеза", true),
+				{Name: "normalize-output", Kind: OperationKindParseResult, Title: "Разбор результата", Origin: OperationOriginBuiltin, Required: true},
+				{Name: "finish-run", Kind: OperationKindFinalize, Title: "Завершающая фиксация", Origin: OperationOriginBuiltin, Required: true},
+			},
+		}},
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		launcher: &stubLauncher{
+			result: model.LaunchResult{
+				Status: "failed",
+				StructuredOutput: &model.StructuredOutput{
+					Summary: "Синтез выполнен.",
+				},
+			},
+			err: expectedErr,
+		},
+	}
+
+	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
+		Assignment: &ExecutionAssignment{
+			Action:          "custom-synthesis",
+			CanonicalTask:   &ObjectRef{Type: "task", Number: 94},
+			StructuredInput: &StructuredInput{Task: "Ship it."},
+		},
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected launch error, got %v", err)
+	}
+	if operation := findOperationResult(result.Operations, "normalize-output"); operation == nil || operation.Status != OperationStatusCompleted {
+		t.Fatalf("custom parse operation must be completed: %#v", result.Operations)
+	}
+	if operation := findOperationResult(result.Operations, "finish-run"); operation == nil || operation.Status != OperationStatusFailed {
+		t.Fatalf("custom finalize operation must be failed: %#v", result.Operations)
+	}
+	if operation := findOperationResult(result.Operations, OperationKindParseResult); operation != nil {
+		t.Fatalf("synthetic parse-result operation must not be added: %#v", operation)
+	}
+	if operation := findOperationResult(result.Operations, OperationKindFinalize); operation != nil {
+		t.Fatalf("synthetic finalize operation must not be added: %#v", operation)
+	}
+}
+
 func TestServiceExecuteSkipsResourcesWorkplaceAndLaunchWhenActionDoesNotNeedSynthesis(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
@@ -458,7 +521,7 @@ func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
-	action, err := newActionCatalog().ResolveAction(context.Background(), invocation{Action: "review"})
+	action, err := resolveActionFromCatalog(testExecutionMethodologyCatalog(), invocation{Action: "review"})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
@@ -467,6 +530,112 @@ func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	}
 	if action.Profile != "review" {
 		t.Fatalf("action template must select technical profile: %#v", action)
+	}
+}
+
+func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{
+			{
+				Name:              ActionClassEngineeringSynthesis,
+				Class:             ActionClassEngineeringSynthesis,
+				Profile:           "global",
+				Aliases:           []string{"implement"},
+				RequiresWorkplace: boolRef(true),
+				RequiresSynthesis: boolRef(true),
+				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+			},
+			{
+				Name:              "implement",
+				Class:             ActionClassService,
+				Profile:           "local",
+				RequiresWorkplace: boolRef(false),
+				RequiresSynthesis: boolRef(false),
+				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+			},
+		},
+	}, invocation{Action: "implement"})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	if action.Name != "implement" || action.Profile != "local" || action.Class != ActionClassService {
+		t.Fatalf("exact action name must win over earlier alias: %#v", action)
+	}
+}
+
+func TestActionResolutionPrefersLaterAlias(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{
+			{
+				Name:              ActionClassEngineeringSynthesis,
+				Class:             ActionClassEngineeringSynthesis,
+				Profile:           "global",
+				Aliases:           []string{"implement"},
+				RequiresWorkplace: boolRef(true),
+				RequiresSynthesis: boolRef(true),
+				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+			},
+			{
+				Name:              "local-implementation",
+				Class:             ActionClassService,
+				Profile:           "local",
+				Aliases:           []string{"implement"},
+				RequiresWorkplace: boolRef(false),
+				RequiresSynthesis: boolRef(false),
+				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+			},
+		},
+	}, invocation{Action: "implement"})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	if action.Name != "local-implementation" || action.Profile != "local" || action.Class != ActionClassService {
+		t.Fatalf("later alias must win over earlier alias: %#v", action)
+	}
+}
+
+func TestActionResolutionRejectsDuplicateOperations(t *testing.T) {
+	t.Parallel()
+
+	_, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              "diagnostic",
+			Class:             ActionClassService,
+			RequiresWorkplace: boolRef(false),
+			RequiresSynthesis: boolRef(false),
+			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindResolveAction),
+		}},
+	}, invocation{Action: "diagnostic"})
+	if err == nil {
+		t.Fatal("expected duplicate operation error")
+	}
+	if !strings.Contains(err.Error(), `операция "resolve-action" задана повторно`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestActionResolutionMakesReviewRemarksRequiredForApplyReviewComments(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              ActionApplyReviewComments,
+			Class:             ActionClassEngineeringSynthesis,
+			RequiresWorkplace: boolRef(true),
+			RequiresSynthesis: boolRef(true),
+			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindLoadReviewRemarks, OperationKindFinalize),
+		}},
+	}, invocation{Action: ActionApplyReviewComments})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	operation := findOperationSpec(action, OperationKindLoadReviewRemarks)
+	if operation == nil || !operation.Required {
+		t.Fatalf("load-review-remarks must be required for apply-review-comments legacy operation: %#v", action.Operations)
 	}
 }
 
@@ -479,7 +648,7 @@ func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 	}
 	service := &Service{
 		logger:     log.Default(),
-		actions:    newActionCatalog(),
+		actions:    newMethodologyActionResolver(),
 		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
 		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
 		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
@@ -541,7 +710,7 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 	}
 	service := &Service{
 		logger:       log.Default(),
-		actions:      newActionCatalog(),
+		actions:      newMethodologyActionResolver(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
 		workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: root, RepositoryRoot: root, Ready: true}},
@@ -610,7 +779,7 @@ func TestServiceExecuteStartImplementationUsesPullRequestBaseForWorkplace(t *tes
 	workplaces := &stubWorkplaceManager{workplace: model.Workplace{Name: root, RepositoryRoot: root, Ready: true}}
 	service := &Service{
 		logger:       log.Default(),
-		actions:      newActionCatalog(),
+		actions:      newMethodologyActionResolver(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
 		workplaces:   workplaces,
@@ -652,7 +821,7 @@ func TestServiceExecuteStartImplementationRejectsMismatchedHeadBranch(t *testing
 	withWorkingDirectory(t, root)
 	service := &Service{
 		logger:     log.Default(),
-		actions:    newActionCatalog(),
+		actions:    newMethodologyActionResolver(),
 		profiles:   &stubProfileResolver{err: errors.New("profile must not be resolved")},
 		workplaces: &stubWorkplaceManager{err: errors.New("workplace must not be prepared")},
 	}
@@ -732,7 +901,7 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	workplaces := &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}}
 	service := &Service{
 		logger:       log.Default(),
-		actions:      newActionCatalog(),
+		actions:      newMethodologyActionResolver(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "review", Mode: "manual", ModelBinding: "review"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:review", Reserved: true, Runner: "codex", Model: "openai/gpt-5.5", ModelBinding: "review"}},
 		workplaces:   workplaces,
@@ -805,7 +974,7 @@ func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *test
 	}
 	service := &Service{
 		logger:       log.Default(),
-		actions:      newActionCatalog(),
+		actions:      newMethodologyActionResolver(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "review", Mode: "manual", ModelBinding: "review"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:review", Reserved: true, Runner: "codex", Model: "openai/gpt-5.5", ModelBinding: "review"}},
 		workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
@@ -893,7 +1062,7 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 	workplaces := &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}}
 	service := &Service{
 		logger:       log.Default(),
-		actions:      newActionCatalog(),
+		actions:      newMethodologyActionResolver(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
 		workplaces:   workplaces,
@@ -943,6 +1112,7 @@ func TestServiceStartEnrichesRunningHistoryRowBeforeLaunch(t *testing.T) {
 		t.Fatalf("get cwd: %v", err)
 	}
 	historyRoot := t.TempDir()
+	writeTestMethodologyCatalog(t, historyRoot)
 	if err := os.Chdir(historyRoot); err != nil {
 		t.Fatalf("chdir history root: %v", err)
 	}
@@ -1109,6 +1279,7 @@ func (s *stubWorkplaceManager) Prepare(_ context.Context, in model.Invocation, _
 
 func withWorkingDirectory(t *testing.T, dir string) {
 	t.Helper()
+	writeTestMethodologyCatalog(t, dir)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -1123,3 +1294,192 @@ func withWorkingDirectory(t *testing.T, dir string) {
 		}
 	})
 }
+
+func writeTestMethodologyCatalog(t *testing.T, root string) {
+	t.Helper()
+	path := filepath.Join(root, ".progress", "methodology")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir methodology dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "catalog.json"), []byte(testExecutionMethodologyCatalogJSON), 0o600); err != nil {
+		t.Fatalf("write methodology catalog: %v", err)
+	}
+}
+
+func testExecutionMethodologyCatalog() methodology.Catalog {
+	return methodology.Catalog{
+		Actions: []methodology.Action{
+			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
+			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
+			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
+			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
+			{Name: ActionClassIntegrationChange, Class: ActionClassIntegrationChange, Profile: "default", RequiresWorkplace: boolRef(false), RequiresSynthesis: boolRef(false), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+		},
+	}
+}
+
+func testExecutionOperations(operations ...any) []methodology.ActionOperation {
+	result := make([]methodology.ActionOperation, 0, len(operations))
+	for _, value := range operations {
+		switch operation := value.(type) {
+		case string:
+			result = append(result, methodology.ActionOperation{Name: operation, Kind: operation, Origin: OperationOriginBuiltin, Required: boolRef(true)})
+		case methodology.ActionOperation:
+			result = append(result, operation)
+		}
+	}
+	return result
+}
+
+func optionalExecutionOperation(name string) methodology.ActionOperation {
+	return methodology.ActionOperation{Name: name, Kind: name, Origin: OperationOriginBuiltin, Required: boolRef(false)}
+}
+
+func boolRef(value bool) *bool {
+	return &value
+}
+
+const testExecutionMethodologyCatalogJSON = `{
+  "actions": [
+    {
+      "name": "engineering-synthesis",
+      "class": "engineering-synthesis",
+      "profile": "default",
+      "aliases": ["implement"],
+      "requires_workplace": true,
+      "requires_synthesis": true,
+      "operations": [
+        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+      ]
+    },
+    {
+      "name": "engineering-synthesis-commit",
+      "class": "engineering-synthesis",
+      "profile": "default",
+      "aliases": ["implement-commit"],
+      "requires_workplace": true,
+      "requires_synthesis": true,
+      "operations": [
+        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+      ]
+    },
+    {
+      "name": "start-implementation-pr",
+      "class": "engineering-synthesis",
+      "profile": "coder",
+      "requires_workplace": true,
+      "requires_synthesis": true,
+      "operations": [
+        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
+        {"name": "publish-merge-request", "kind": "publish-merge-request", "origin": "builtin", "required": true},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+      ]
+    },
+    {
+      "name": "review",
+      "class": "review",
+      "profile": "review",
+      "requires_workplace": true,
+      "requires_synthesis": true,
+      "operations": [
+        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+      ]
+    },
+    {
+      "name": "review-pull-request",
+      "class": "review",
+      "profile": "review",
+      "requires_workplace": true,
+      "requires_synthesis": true,
+      "operations": [
+        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true},
+        {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": false},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
+        {"name": "publish-review-remarks", "kind": "publish-review-remarks", "origin": "builtin", "required": true},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+      ]
+    },
+    {
+      "name": "apply-review-comments",
+      "class": "engineering-synthesis",
+      "profile": "coder",
+      "requires_workplace": true,
+      "requires_synthesis": true,
+      "operations": [
+        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true},
+        {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
+        {"name": "publish-review-responses", "kind": "publish-review-responses", "origin": "builtin", "required": true},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+      ]
+    },
+    {
+      "name": "integration-change",
+      "class": "integration-change",
+      "profile": "default",
+      "requires_workplace": false,
+      "requires_synthesis": false,
+      "operations": [
+        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+      ]
+    }
+  ]
+}`

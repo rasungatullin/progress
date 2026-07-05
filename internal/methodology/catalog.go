@@ -44,12 +44,47 @@ type Route struct {
 }
 
 type Action struct {
-	Name           string   `json:"name"`
-	Class          string   `json:"class,omitempty"`
-	Profile        string   `json:"profile,omitempty"`
-	Operations     []string `json:"operations,omitempty"`
-	Description    string   `json:"description,omitempty"`
-	ExpectedResult string   `json:"expected_result,omitempty"`
+	Name              string            `json:"name"`
+	Class             string            `json:"class,omitempty"`
+	Profile           string            `json:"profile,omitempty"`
+	Aliases           []string          `json:"aliases,omitempty"`
+	RequiresWorkplace *bool             `json:"requires_workplace,omitempty"`
+	RequiresSynthesis *bool             `json:"requires_synthesis,omitempty"`
+	Operations        []ActionOperation `json:"operations,omitempty"`
+	Description       string            `json:"description,omitempty"`
+	ExpectedResult    string            `json:"expected_result,omitempty"`
+}
+
+type ActionOperation struct {
+	Name     string `json:"name,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Origin   string `json:"origin,omitempty"`
+	Required *bool  `json:"required,omitempty"`
+}
+
+func (o *ActionOperation) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*o = ActionOperation{}
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var name string
+		if err := json.Unmarshal(trimmed, &name); err != nil {
+			return err
+		}
+		*o = ActionOperation{Name: name, Kind: name}
+		return nil
+	}
+
+	type rawActionOperation ActionOperation
+	var raw rawActionOperation
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return err
+	}
+	*o = ActionOperation(raw)
+	return nil
 }
 
 type Instruction struct {
@@ -339,8 +374,10 @@ func validateCatalog(catalog Catalog) error {
 	}
 
 	seenActions := map[string]struct{}{}
-	for index, action := range catalog.Actions {
-		action = normalizeAction(action)
+	normalizedActions := make([]Action, 0, len(catalog.Actions))
+	for index, rawAction := range catalog.Actions {
+		action := normalizeAction(rawAction)
+		normalizedActions = append(normalizedActions, action)
 		if action.Name == "" {
 			return fmt.Errorf("actions[%d].name must be non-empty", index)
 		}
@@ -348,6 +385,37 @@ func validateCatalog(catalog Catalog) error {
 			return fmt.Errorf("actions contains duplicate name %q", action.Name)
 		}
 		seenActions[action.Name] = struct{}{}
+	}
+	seenActionAliases := map[string]string{}
+	for actionIndex, action := range normalizedActions {
+		seenAliases := map[string]struct{}{}
+		seenOperations := map[string]struct{}{}
+		for operationIndex, operation := range catalog.Actions[actionIndex].Operations {
+			operation = normalizeActionOperation(operation)
+			if operation.Name == "" && operation.Kind == "" {
+				return fmt.Errorf("action %q operations[%d] must define name or kind", action.Name, operationIndex)
+			}
+			if _, ok := seenOperations[operation.Name]; ok {
+				return fmt.Errorf("action %q operations contains duplicate name %q", action.Name, operation.Name)
+			}
+			seenOperations[operation.Name] = struct{}{}
+		}
+		for _, alias := range action.Aliases {
+			if alias == action.Name {
+				return fmt.Errorf("action %q aliases must not repeat action name", action.Name)
+			}
+			if _, ok := seenAliases[alias]; ok {
+				return fmt.Errorf("action %q aliases contains duplicate name %q", action.Name, alias)
+			}
+			seenAliases[alias] = struct{}{}
+			if _, ok := seenActions[alias]; ok {
+				return fmt.Errorf("action %q alias %q conflicts with action name", action.Name, alias)
+			}
+			if owner, ok := seenActionAliases[alias]; ok {
+				return fmt.Errorf("action %q alias %q conflicts with action %q alias", action.Name, alias, owner)
+			}
+			seenActionAliases[alias] = action.Name
+		}
 	}
 
 	seenInstructions := map[string]struct{}{}
@@ -445,10 +513,40 @@ func normalizeAction(action Action) Action {
 	action.Name = normalizeName(action.Name)
 	action.Class = strings.TrimSpace(action.Class)
 	action.Profile = strings.TrimSpace(action.Profile)
-	action.Operations = normalizeStringList(action.Operations)
+	action.Aliases = normalizeNameList(action.Aliases)
+	action.Operations = normalizeActionOperations(action.Operations)
 	action.Description = strings.TrimSpace(action.Description)
 	action.ExpectedResult = strings.TrimSpace(action.ExpectedResult)
 	return action
+}
+
+func normalizeActionOperations(operations []ActionOperation) []ActionOperation {
+	result := make([]ActionOperation, 0, len(operations))
+	for _, operation := range operations {
+		operation = normalizeActionOperation(operation)
+		if operation.Name == "" && operation.Kind == "" {
+			continue
+		}
+		result = append(result, operation)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func normalizeActionOperation(operation ActionOperation) ActionOperation {
+	operation.Name = normalizeName(operation.Name)
+	operation.Kind = normalizeName(operation.Kind)
+	if operation.Name == "" {
+		operation.Name = operation.Kind
+	}
+	if operation.Kind == "" {
+		operation.Kind = operation.Name
+	}
+	operation.Title = strings.TrimSpace(operation.Title)
+	operation.Origin = strings.TrimSpace(operation.Origin)
+	return operation
 }
 
 func normalizeInstruction(instruction Instruction) Instruction {

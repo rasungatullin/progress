@@ -82,6 +82,41 @@ func TestLoadCatalogMergesGlobalAndLocalLayersWithLocalPriority(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogKeepsLocalAliasPriorityOverGlobalAlias(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/methodology/catalog.json":
+			return []byte(`{
+				"actions": [
+					{"name": "engineering-synthesis", "aliases": ["implement"], "profile": "global"}
+				]
+			}`), nil
+		case "/repo/.progress/methodology/catalog.json":
+			return []byte(`{
+				"actions": [
+					{"name": "local-implementation", "aliases": ["implement"], "profile": "local"}
+				]
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	snapshot, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	action, err := selectAction(snapshot.Catalog.Actions, "implement")
+	if err != nil {
+		t.Fatalf("select action: %v", err)
+	}
+	if action.Name != "local-implementation" || action.Profile != "local" {
+		t.Fatalf("local alias must win over global alias: %#v", action)
+	}
+}
+
 func TestLoadCatalogRejectsDuplicateRoutesInsideSingleLayer(t *testing.T) {
 	t.Parallel()
 
@@ -107,6 +142,100 @@ func TestLoadCatalogRejectsDuplicateRoutesInsideSingleLayer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `routes contains duplicate name "default"`) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsAmbiguousActionAliases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		actions   string
+		wantError string
+	}{
+		{
+			name: "alias conflicts with action name",
+			actions: `[
+				{"name": "engineering-synthesis", "aliases": ["review"]},
+				{"name": "review"}
+			]`,
+			wantError: `action "engineering-synthesis" alias "review" conflicts with action name`,
+		},
+		{
+			name: "alias conflicts with another alias",
+			actions: `[
+				{"name": "engineering-synthesis", "aliases": ["implement"]},
+				{"name": "task-preparation", "aliases": ["IMPLEMENT"]}
+			]`,
+			wantError: `action "task-preparation" alias "implement" conflicts with action "engineering-synthesis" alias`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			readFile := func(path string) ([]byte, error) {
+				if path == "/repo/.progress/methodology/catalog.json" {
+					return []byte(`{"actions": ` + tt.actions + `}`), nil
+				}
+				return nil, fs.ErrNotExist
+			}
+
+			_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+			if err == nil {
+				t.Fatal("expected alias conflict error")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadCatalogRejectsInvalidActionOperations(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		actions   string
+		wantError string
+	}{
+		{
+			name: "empty operation",
+			actions: `[
+				{"name": "implement", "operations": [{}]}
+			]`,
+			wantError: `action "implement" operations[0] must define name or kind`,
+		},
+		{
+			name: "duplicate operation",
+			actions: `[
+				{"name": "implement", "operations": ["prepare-data", {"name": "PREPARE-DATA"}]}
+			]`,
+			wantError: `action "implement" operations contains duplicate name "prepare-data"`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			readFile := func(path string) ([]byte, error) {
+				if path == "/repo/.progress/methodology/catalog.json" {
+					return []byte(`{"actions": ` + tt.actions + `}`), nil
+				}
+				return nil, fs.ErrNotExist
+			}
+
+			_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+			if err == nil {
+				t.Fatal("expected operation validation error")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
@@ -149,7 +278,7 @@ func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 			Name:        "implement",
 			Class:       "engineering-synthesis",
 			Profile:     "coder",
-			Operations:  []string{"prepare-data", "launch-synthesis"},
+			Operations:  []ActionOperation{{Name: "prepare-data", Kind: "prepare-data"}, {Name: "launch-synthesis", Kind: "launch-synthesis"}},
 			Description: "Выполнение инженерного изменения.",
 		}},
 	})
@@ -166,6 +295,28 @@ func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 	}
 	if !containsAll(string(content), `"actions"`, `"implement"`, `"engineering-synthesis"`) {
 		t.Fatalf("written catalog does not include action: %s", string(content))
+	}
+}
+
+func TestServiceUpsertRejectsEmptyActionOperation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewService(nil)
+
+	_, err := service.Upsert(context.Background(), CatalogWriteRequest{
+		RepoRoot: root,
+		Scope:    CatalogWriteScopeLocal,
+		Element: ElementUpsert{Action: &Action{
+			Name:       "implement",
+			Operations: []ActionOperation{{}},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected empty operation error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[0] must define name or kind`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

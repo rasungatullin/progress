@@ -86,7 +86,7 @@ type Service struct {
 }
 
 func NewService(logger *log.Logger) *Service {
-	actions := newActionCatalog()
+	actions := newMethodologyActionResolver()
 	profiles := profilepkg.NewService()
 	resources := resources.NewService()
 	workplaces := workplacepkg.NewService()
@@ -368,7 +368,7 @@ func firstFailedOperationResult(operations []OperationResult) *OperationResult {
 func (s *Service) resolveAction(ctx context.Context, in invocation) (Action, error) {
 	resolver := s.actions
 	if resolver == nil {
-		resolver = newActionCatalog()
+		resolver = newMethodologyActionResolver()
 	}
 
 	action, err := resolver.ResolveAction(ctx, in)

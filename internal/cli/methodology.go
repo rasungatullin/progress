@@ -298,18 +298,14 @@ func newMethodologyAddActionCommand(parent *methodologyFlags) *cobra.Command {
 				return err
 			}
 
-			result, err := methodology.NewService(nil).Upsert(context.Background(), methodology.CatalogWriteRequest{
+			ctx := context.Background()
+			service := methodology.NewService(nil)
+			action := methodologyActionFromFlags(ctx, cmd, service, flags, scope)
+			result, err := service.Upsert(ctx, methodology.CatalogWriteRequest{
 				RepoRoot:   flags.repoRoot,
 				ConfigHome: flags.configHome,
 				Scope:      scope,
-				Element: methodology.ElementUpsert{Action: &methodology.Action{
-					Name:           flags.name,
-					Class:          flags.class,
-					Profile:        flags.profile,
-					Operations:     flags.operations,
-					Description:    flags.description,
-					ExpectedResult: flags.expectedResult,
-				}},
+				Element:    methodology.ElementUpsert{Action: &action},
 			})
 			if err != nil {
 				return err
@@ -567,6 +563,81 @@ func printMethodologySelection(cmd *cobra.Command, result methodology.SelectionR
 
 func printMethodologyWriteResult(cmd *cobra.Command, result methodology.CatalogWriteResult) {
 	cmd.Printf("scope=%s\npath=%s\nroutes=%d\nactions=%d\ninstructions=%d\nentities=%d\n", result.Scope, result.Path, len(result.Catalog.Routes), len(result.Catalog.Actions), len(result.Catalog.Instructions), len(result.Catalog.Entities))
+}
+
+func methodologyActionFromFlags(ctx context.Context, cmd *cobra.Command, service *methodology.Service, flags methodologyFlags, scope configuration.ConfigFileSource) methodology.Action {
+	action := existingMethodologyAction(ctx, service, flags.repoRoot, flags.configHome, scope, flags.name)
+	action.Name = flags.name
+	if cmd.Flags().Changed("class") {
+		action.Class = flags.class
+	}
+	if cmd.Flags().Changed("profile") {
+		action.Profile = flags.profile
+	}
+	if cmd.Flags().Changed("operation") {
+		action.Operations = methodologyOperationsFromFlags(flags.operations)
+	}
+	if cmd.Flags().Changed("description") {
+		action.Description = flags.description
+	}
+	if cmd.Flags().Changed("expected-result") {
+		action.ExpectedResult = flags.expectedResult
+	}
+	return action
+}
+
+func existingMethodologyAction(ctx context.Context, service *methodology.Service, repoRoot string, configHome string, scope configuration.ConfigFileSource, name string) methodology.Action {
+	if service == nil {
+		service = methodology.NewService(nil)
+	}
+	snapshot, err := service.Load(ctx, methodology.CatalogRequest{RepoRoot: repoRoot, ConfigHome: configHome})
+	if err != nil {
+		return methodology.Action{}
+	}
+	name = strings.TrimSpace(name)
+	for _, layer := range snapshot.Layers {
+		if layer.Source != scope {
+			continue
+		}
+		if action, ok := findMethodologyActionByExactName(layer.Catalog.Actions, name); ok {
+			return cloneMethodologyAction(action)
+		}
+	}
+	if scope != methodology.CatalogWriteScopeLocal {
+		return methodology.Action{}
+	}
+	if action, ok := findMethodologyActionByExactName(snapshot.Catalog.Actions, name); ok {
+		return cloneMethodologyAction(action)
+	}
+	return methodology.Action{}
+}
+
+func findMethodologyActionByExactName(actions []methodology.Action, name string) (methodology.Action, bool) {
+	for _, action := range actions {
+		if strings.EqualFold(strings.TrimSpace(action.Name), name) {
+			return action, true
+		}
+	}
+	return methodology.Action{}, false
+}
+
+func cloneMethodologyAction(action methodology.Action) methodology.Action {
+	cloned := action
+	cloned.Aliases = append([]string(nil), action.Aliases...)
+	cloned.Operations = append([]methodology.ActionOperation(nil), action.Operations...)
+	return cloned
+}
+
+func methodologyOperationsFromFlags(names []string) []methodology.ActionOperation {
+	operations := make([]methodology.ActionOperation, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		operations = append(operations, methodology.ActionOperation{Name: name, Kind: name})
+	}
+	return operations
 }
 
 func methodologyElementPayload(element methodology.ListedElement) []byte {

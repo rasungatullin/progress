@@ -262,6 +262,14 @@ func selectAction(actions []Action, name string) (Action, error) {
 			return action, nil
 		}
 	}
+	for index := len(actions) - 1; index >= 0; index-- {
+		action := normalizeAction(actions[index])
+		for _, alias := range action.Aliases {
+			if alias == name {
+				return action, nil
+			}
+		}
+	}
 	return Action{}, fmt.Errorf("действие методики %q не найдено", name)
 }
 

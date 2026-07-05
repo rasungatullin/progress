@@ -232,13 +232,21 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	if err != nil {
 		if result.StructuredOutput != nil {
 			state.tracker.complete(name, fmt.Sprintf("status=%s", result.Status))
-			state.tracker.completeIO(OperationKindParseResult, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат синтеза получен и нормализован.")
-			state.tracker.fail(OperationKindFinalize, "Завершающая операция после синтеза не выполнена.", err, "final_operation_failed", true, true)
+			if parseResultName, ok := actionOperationNameByKind(state.action, OperationKindParseResult); ok {
+				state.tracker.completeIO(parseResultName, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат синтеза получен и нормализован.")
+			}
+			if finalizeName, ok := actionOperationNameByKind(state.action, OperationKindFinalize); ok {
+				state.tracker.fail(finalizeName, "Завершающая операция после синтеза не выполнена.", err, "final_operation_failed", true, true)
+			} else {
+				state.tracker.fail(name, "Запуск синтеза завершился отказом после получения результата.", err, "synthesis_failed", true, true)
+			}
 			return err
 		}
 
 		state.tracker.fail(name, "Запуск синтеза завершился отказом.", err, "synthesis_failed", true, true)
-		state.tracker.fail(OperationKindParseResult, "Результат выполнения не приведён к нормализованной форме.", err, "result_not_parsed", false, true)
+		if parseResultName, ok := actionOperationNameByKind(state.action, OperationKindParseResult); ok {
+			state.tracker.fail(parseResultName, "Результат выполнения не приведён к нормализованной форме.", err, "result_not_parsed", false, true)
+		}
 		return err
 	}
 
@@ -304,6 +312,16 @@ func (e builtinOperationExecutor) finalize(ctx context.Context, state *operation
 
 	state.tracker.complete(name, finalizeSummary(state.result))
 	return nil
+}
+
+func actionOperationNameByKind(action Action, kind string) (string, bool) {
+	for _, operation := range action.Operations {
+		if operationKind(operation) != model.OperationKind(kind) {
+			continue
+		}
+		return operationResultName(operation), true
+	}
+	return "", false
 }
 
 func joinExecutionSummaries(values ...string) string {

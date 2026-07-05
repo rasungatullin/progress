@@ -20,7 +20,7 @@ func TestServiceSelectsRouteActionAndInstruction(t *testing.T) {
 			Name:       "engineering-synthesis",
 			Class:      "engineering-synthesis",
 			Profile:    "default",
-			Operations: []string{"prepare-data", "launch-synthesis"},
+			Operations: []ActionOperation{{Name: "prepare-data", Kind: "prepare-data"}, {Name: "launch-synthesis", Kind: "launch-synthesis"}},
 		}},
 		Instructions: []Instruction{{
 			Name:    "default-directive",
@@ -68,6 +68,24 @@ func TestServiceSelectsDefaultRouteWhenRouteNameIsEmpty(t *testing.T) {
 	}
 	if result.Route.Name != "default" {
 		t.Fatalf("expected default route, got %#v", result.Route)
+	}
+}
+
+func TestServiceSelectsExactActionNameBeforeAlias(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewService(nil).Select(context.Background(), Catalog{
+		Routes: []Route{{Name: "default", Action: "implement"}},
+		Actions: []Action{
+			{Name: "engineering-synthesis", Aliases: []string{"implement"}, Profile: "global"},
+			{Name: "implement", Profile: "local"},
+		},
+	}, SelectionRequest{})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if result.Action.Name != "implement" || result.Action.Profile != "local" {
+		t.Fatalf("exact action name must win over earlier alias: %#v", result.Action)
 	}
 }
 
