@@ -128,6 +128,66 @@ func TestNewServiceFromConfigWithPrivateStoreReportsMissingPrivateValue(t *testi
 	}
 }
 
+func TestResolvePrivateSystemConfigSkipsGitHubAppPrivateKeyAfterPrivateToken(t *testing.T) {
+	t.Parallel()
+
+	config := model.IntegrationSystemConfig{
+		Type:                       "github",
+		TokenPrivate:               "github_auth_token",
+		GitHubAppPrivateKeyPrivate: "github_app_key",
+	}
+
+	err := resolvePrivateSystemConfig(context.Background(), "github", &config, mapPrivateStore{values: map[string]string{
+		"github_auth_token": "resolved-token",
+	}})
+	if err != nil {
+		t.Fatalf("resolve private config: %v", err)
+	}
+	if config.Token != "resolved-token" {
+		t.Fatalf("unexpected resolved token: %q", config.Token)
+	}
+	if config.GitHubAppPrivateKey != "" {
+		t.Fatalf("GitHub App private key must not be read after private token, got: %q", config.GitHubAppPrivateKey)
+	}
+}
+
+func TestResolvePrivateSystemConfigReadsGitHubAppPrivateKeyWhenTokenEnvIsEmpty(t *testing.T) {
+	t.Setenv("PROGRESS_TEST_EMPTY_GITHUB_TOKEN", "")
+
+	config := model.IntegrationSystemConfig{
+		Type:                       "github",
+		TokenEnv:                   "PROGRESS_TEST_EMPTY_GITHUB_TOKEN",
+		GitHubAppPrivateKeyPrivate: "github_app_key",
+	}
+
+	err := resolvePrivateSystemConfig(context.Background(), "github", &config, mapPrivateStore{values: map[string]string{
+		"github_app_key": "resolved-private-key",
+	}})
+	if err != nil {
+		t.Fatalf("resolve private config: %v", err)
+	}
+	if config.GitHubAppPrivateKey != "resolved-private-key" {
+		t.Fatalf("unexpected GitHub App private key: %q", config.GitHubAppPrivateKey)
+	}
+}
+
+func TestResolvePrivateSystemConfigSkipsGitHubAppPrivateKeyWhenTokenEnvHasValue(t *testing.T) {
+	t.Setenv("PROGRESS_TEST_GITHUB_TOKEN", "direct-token")
+
+	config := model.IntegrationSystemConfig{
+		Type:                       "github",
+		TokenEnv:                   "PROGRESS_TEST_GITHUB_TOKEN",
+		GitHubAppPrivateKeyPrivate: "github_app_key",
+	}
+
+	if err := resolvePrivateSystemConfig(context.Background(), "github", &config, nil); err != nil {
+		t.Fatalf("resolve private config: %v", err)
+	}
+	if config.GitHubAppPrivateKey != "" {
+		t.Fatalf("GitHub App private key must not be read when token_env has value, got: %q", config.GitHubAppPrivateKey)
+	}
+}
+
 func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
 	t.Parallel()
 

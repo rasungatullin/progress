@@ -53,7 +53,51 @@ flowchart LR
 - часть ошибок приходит как текст из `stderr` и должна быть нормализована;
 - доступные операции ограничены возможностями установленной версии `gh`.
 
-Режим `api` выполняет прямые HTTP-вызовы к GitHub REST API и GraphQL API. Он использует `token` или `token_env` из описания системы, по умолчанию обращается к `https://api.github.com`, а для GitHub Enterprise Server может получать базовый адрес через `base_url`. CLI-команды контура при этом не меняются: наружу возвращаются те же канонические объекты `Response`, `CanonicalTask`, `Repository`, `MergeRequest`, `ReviewRemark`, `OperationResult` и `Failure`.
+Режим `api` выполняет прямые HTTP-вызовы к GitHub REST API и GraphQL API. Он использует `token`, `token_env`, `token_private` или данные GitHub App из описания системы, по умолчанию обращается к `https://api.github.com`, а для GitHub Enterprise Server может получать базовый адрес через `base_url`. CLI-команды контура при этом не меняются: наружу возвращаются те же канонические объекты `Response`, `CanonicalTask`, `Repository`, `MergeRequest`, `ReviewRemark`, `OperationResult` и `Failure`.
+
+### 3.1 Авторизация GitHub App
+
+В режиме `api` GitHub-адаптер может работать через установку GitHub App. В этом случае в настройке интегрируемой системы задаются данные приложения и установки, а контур интеграции выпускает установочный токен внутри процесса.
+
+Минимальная настройка:
+
+```json
+{
+  "default_systems": {
+    "tracker": "github-app",
+    "repository": "github-app"
+  },
+  "systems": {
+    "github-app": {
+      "type": "github",
+      "transport": "api",
+      "default_repo": "rasungatullin/progress",
+      "github_app_id": "12345",
+      "github_app_installation_id": "144549701",
+      "github_app_private_key_path": "~/.progress/integration_data/progress-synthesis.2026-07-05.private-key.pem"
+    }
+  }
+}
+```
+
+Вместо `github_app_id` можно задать `github_app_client_id`; если заполнены оба поля, для `iss` JWT используется `github_app_id`. PEM-ключ можно передать через `github_app_private_key_private`; тогда значение читается из выбранного хранилища приватных значений и не записывается в проектную конфигурацию.
+
+Дополнительное поле `github_app_token_refresh_before` задаёт упреждающее обновление установочного токена. Если поле не задано, применяется запас `5m`. Значение должно быть положительной длительностью Go, например `10m`.
+
+Порядок работы:
+
+1. адаптер формирует JWT приложения с `iat`, `exp`, `iss` и подписью `RS256`;
+2. выполняет `POST /app/installations/{github_app_installation_id}/access_tokens`;
+3. сохраняет установочный токен только в памяти процесса;
+4. использует его как bearer-токен для REST API и GraphQL API;
+5. переиздаёт токен до `expires_at` с заданным запасом.
+
+JWT, установочный токен и содержимое PEM не включаются в CLI-вывод, структурированный вывод, журналы или `CommandResult.Stdout`. Для живой проверки после заполнения `github_app_id` или `github_app_client_id` можно выполнить:
+
+```bash
+progress integration github auth status --system github-app --format json
+progress integration github repo get --system github-app --repo rasungatullin/progress --format json
+```
 
 ## 4. Внутренние модули реализации
 
@@ -259,7 +303,7 @@ gh auth status
 2. убедиться, что для GitHub выполнена авторизация;
 3. вернуть диагностируемую ошибку, если дальнейшие вызовы невозможны.
 
-Для режима `api` вместо системного вызова выполняется `GET /user` с заголовком `Authorization: Bearer <token>`.
+Для режима `api` с готовым токеном вместо системного вызова выполняется `GET /user` с заголовком `Authorization: Bearer <token>`. Для режима GitHub App команда выпускает установочный токен через `POST /app/installations/{installation_id}/access_tokens` и считает интеграцию готовой, если выпуск завершён успешно.
 
 ### 7.5 `progress integration github repo get`
 
@@ -613,7 +657,7 @@ GitHub-адаптер должен различать как минимум сл
 2. `default_systems.<type>` заменяет систему по умолчанию для конкретного типа интеграции;
 3. `private_store` задаёт реализацию хранилища приватных значений и сливается по простым полям;
 4. `systems.<name>` дополняет или переопределяет одноимённую систему из глобального слоя;
-5. простые поля системы, например `transport`, `command`, `path`, `timeout`, `base_url`, `token_private`, `token_env`, `repository`, `project`, `channel_id`, `chat_id` и `default_repo`, заменяются локальными значениями;
+5. простые поля системы, например `transport`, `command`, `path`, `timeout`, `base_url`, `token_private`, `token_env`, `github_app_id`, `github_app_client_id`, `github_app_installation_id`, `github_app_private_key_path`, `github_app_private_key_private`, `github_app_token_refresh_before`, `repository`, `project`, `channel_id`, `chat_id` и `default_repo`, заменяются локальными значениями;
 6. `database` дополняется по полям `driver`, `path` и `dsn`;
 7. `settings` сливается по имени настройки;
 8. `task_label_mapping` сливается по внешней метке;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"strings"
 
@@ -172,23 +173,57 @@ func resolvePrivateSystemConfig(ctx context.Context, system string, config *mode
 	if config == nil {
 		return nil
 	}
-	if strings.TrimSpace(config.Token) != "" || strings.TrimSpace(config.TokenPrivate) == "" {
+	if strings.TrimSpace(config.Token) != "" {
+		return nil
+	}
+	if strings.TrimSpace(config.TokenPrivate) != "" {
+		if store == nil {
+			return fmt.Errorf("integration system %q requires private value %q but private store is not configured", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+		}
+		value, err := store.Get(ctx, config.TokenPrivate)
+		if err != nil {
+			if errors.Is(err, secrets.ErrNotFound) {
+				return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+			}
+			return fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate), err)
+		}
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("integration system %q references empty private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+		}
+		config.Token = value
+		return nil
+	}
+	if resolvedTokenEnvValue(*config) != "" {
+		return nil
+	}
+	return resolvePrivateGitHubAppConfig(ctx, system, config, store)
+}
+
+func resolvedTokenEnvValue(config model.IntegrationSystemConfig) string {
+	if name := strings.TrimSpace(config.TokenEnv); name != "" {
+		return strings.TrimSpace(os.Getenv(name))
+	}
+	return ""
+}
+
+func resolvePrivateGitHubAppConfig(ctx context.Context, system string, config *model.IntegrationSystemConfig, store secrets.Store) error {
+	if config == nil || strings.TrimSpace(config.GitHubAppPrivateKey) != "" || strings.TrimSpace(config.GitHubAppPrivateKeyPrivate) == "" {
 		return nil
 	}
 	if store == nil {
-		return fmt.Errorf("integration system %q requires private value %q but private store is not configured", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+		return fmt.Errorf("integration system %q requires private value %q but private store is not configured", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))
 	}
-	value, err := store.Get(ctx, config.TokenPrivate)
+	value, err := store.Get(ctx, config.GitHubAppPrivateKeyPrivate)
 	if err != nil {
 		if errors.Is(err, secrets.ErrNotFound) {
-			return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+			return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))
 		}
-		return fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate), err)
+		return fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate), err)
 	}
 	if strings.TrimSpace(value) == "" {
-		return fmt.Errorf("integration system %q references empty private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+		return fmt.Errorf("integration system %q references empty private value %q", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))
 	}
-	config.Token = value
+	config.GitHubAppPrivateKey = value
 	return nil
 }
 

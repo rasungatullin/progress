@@ -2,11 +2,17 @@ package github
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,6 +140,276 @@ func TestAPITransportUsesTokenEnv(t *testing.T) {
 	}
 	if issue.Number != 123 || issue.Title != "API issue" {
 		t.Fatalf("unexpected issue payload: %#v", issue)
+	}
+}
+
+func TestAPITransportDirectTokenIgnoresGitHubAppRefreshInterval(t *testing.T) {
+	t.Parallel()
+
+	var seenAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/repos/owner/name/issues/123" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"number":   123,
+			"title":    "API issue",
+			"state":    "open",
+			"html_url": "https://github.com/owner/name/issues/123",
+		})
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                     server.URL,
+			Token:                       "direct-secret",
+			Repository:                  "owner/name",
+			GitHubAppInstallationID:     "144549701",
+			GitHubAppTokenRefreshBefore: "soon",
+		},
+		client: server.Client(),
+	}
+
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("execute issue get through direct token: %v", err)
+	}
+	if seenAuth != "Bearer direct-secret" {
+		t.Fatalf("unexpected auth header: %q", seenAuth)
+	}
+}
+
+func TestAPITransportUsesGitHubAppInstallationToken(t *testing.T) {
+	t.Parallel()
+
+	keyPEM := testRSAPrivateKeyPEM(t)
+	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	var seenJWT string
+	var seenRepoAuth string
+	tokenRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/144549701/access_tokens":
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected token method: %s", r.Method)
+			}
+			seenJWT = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			tokenRequests++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"token":                "installation-secret",
+				"expires_at":           now.Add(time.Hour).Format(time.RFC3339),
+				"repository_selection": "selected",
+				"permissions":          map[string]string{"contents": "read", "pull_requests": "write"},
+			})
+		case "/repos/owner/name/issues/123":
+			seenRepoAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"number":   123,
+				"title":    "GitHub App issue",
+				"state":    "open",
+				"html_url": "https://github.com/owner/name/issues/123",
+			})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                     server.URL,
+			Repository:                  "owner/name",
+			GitHubAppID:                 "12345",
+			GitHubAppInstallationID:     "144549701",
+			GitHubAppPrivateKeyPath:     "/keys/progress-synthesis.pem",
+			GitHubAppTokenRefreshBefore: "5m",
+		},
+		client: server.Client(),
+		readFile: func(path string) ([]byte, error) {
+			if path != "/keys/progress-synthesis.pem" {
+				t.Fatalf("unexpected private key path: %s", path)
+			}
+			return keyPEM, nil
+		},
+		now: func() time.Time { return now },
+	}
+
+	authResult, _, err := runner.RunAuthStatus(context.Background())
+	if err != nil {
+		t.Fatalf("auth status through GitHub App: %v", err)
+	}
+	if strings.Contains(authResult.Stdout, "installation-secret") {
+		t.Fatalf("auth status must not expose installation token: %s", authResult.Stdout)
+	}
+	assertGitHubAppJWT(t, seenJWT, "12345", now)
+
+	result, _, err := runner.RunIssueView(context.Background(), "", 123)
+	if err != nil {
+		t.Fatalf("execute issue get through GitHub App token: %v", err)
+	}
+	if tokenRequests != 1 {
+		t.Fatalf("expected cached token after auth status, got token requests: %d", tokenRequests)
+	}
+	if seenRepoAuth != "Bearer installation-secret" {
+		t.Fatalf("unexpected repository auth header: %q", seenRepoAuth)
+	}
+	var issue ghIssueView
+	if err := json.Unmarshal([]byte(result.Stdout), &issue); err != nil {
+		t.Fatalf("decode issue stdout: %v", err)
+	}
+	if issue.Title != "GitHub App issue" {
+		t.Fatalf("unexpected issue: %#v", issue)
+	}
+}
+
+func TestGitHubAppInstallationTokenCacheRefreshesBeforeExpiry(t *testing.T) {
+	t.Parallel()
+
+	keyPEM := testRSAPrivateKeyPEM(t)
+	baseTime := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	currentTime := baseTime
+	tokenRequests := 0
+	var seenAuth []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/42/access_tokens":
+			tokenRequests++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"token":      fmt.Sprintf("installation-secret-%d", tokenRequests),
+				"expires_at": baseTime.Add(time.Hour).Format(time.RFC3339),
+			})
+		case "/repos/owner/name/issues/123":
+			seenAuth = append(seenAuth, r.Header.Get("Authorization"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 123, "title": "cached", "state": "open"})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                 server.URL,
+			Repository:              "owner/name",
+			GitHubAppClientID:       "Iv1.client",
+			GitHubAppInstallationID: "42",
+			GitHubAppPrivateKey:     string(keyPEM),
+		},
+		client: server.Client(),
+		now:    func() time.Time { return currentTime },
+	}
+
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("first issue get: %v", err)
+	}
+	currentTime = baseTime.Add(30 * time.Minute)
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("second issue get: %v", err)
+	}
+	currentTime = baseTime.Add(56 * time.Minute)
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("third issue get: %v", err)
+	}
+	if tokenRequests != 2 {
+		t.Fatalf("expected one cached use and one refresh, got token requests: %d", tokenRequests)
+	}
+	if len(seenAuth) != 3 || seenAuth[0] != "Bearer installation-secret-1" || seenAuth[1] != "Bearer installation-secret-1" || seenAuth[2] != "Bearer installation-secret-2" {
+		t.Fatalf("unexpected auth headers: %#v", seenAuth)
+	}
+}
+
+func TestGitHubAppInstallationTokenUsesValidCacheWhenRefreshFails(t *testing.T) {
+	t.Parallel()
+
+	keyPEM := testRSAPrivateKeyPEM(t)
+	baseTime := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	currentTime := baseTime
+	tokenRequests := 0
+	var seenAuth []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/42/access_tokens":
+			tokenRequests++
+			if tokenRequests > 1 {
+				http.Error(w, `{"message":"temporary failure"}`, http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"token":      "installation-secret-1",
+				"expires_at": baseTime.Add(time.Hour).Format(time.RFC3339),
+			})
+		case "/repos/owner/name/issues/123":
+			seenAuth = append(seenAuth, r.Header.Get("Authorization"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 123, "title": "cached", "state": "open"})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                 server.URL,
+			Repository:              "owner/name",
+			GitHubAppClientID:       "Iv1.client",
+			GitHubAppInstallationID: "42",
+			GitHubAppPrivateKey:     string(keyPEM),
+		},
+		client: server.Client(),
+		now:    func() time.Time { return currentTime },
+	}
+
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("first issue get: %v", err)
+	}
+	currentTime = baseTime.Add(56 * time.Minute)
+	if _, _, err := runner.RunIssueView(context.Background(), "", 123); err != nil {
+		t.Fatalf("second issue get with valid cache after refresh failure: %v", err)
+	}
+	if tokenRequests != 2 {
+		t.Fatalf("expected refresh attempt after cache entered refresh window, got token requests: %d", tokenRequests)
+	}
+	if len(seenAuth) != 2 || seenAuth[0] != "Bearer installation-secret-1" || seenAuth[1] != "Bearer installation-secret-1" {
+		t.Fatalf("unexpected auth headers: %#v", seenAuth)
+	}
+}
+
+func TestGitHubAppAuthRequiresCompleteSettings(t *testing.T) {
+	t.Parallel()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                 "https://api.invalid",
+			Repository:              "owner/name",
+			GitHubAppInstallationID: "42",
+			GitHubAppPrivateKey:     string(testRSAPrivateKeyPEM(t)),
+		},
+	}
+
+	_, _, err := runner.RunIssueView(context.Background(), "", 123)
+	var ghErr *Error
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodeAuthRequired {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+}
+
+func TestGitHubAppIssuerPrefersAppIDWhenBothIDsAreConfigured(t *testing.T) {
+	t.Parallel()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			GitHubAppID:       "4221694",
+			GitHubAppClientID: "Iv23liRLhoM9JEx89zu",
+		},
+	}
+
+	config, err := runner.resolveBaseConfig()
+	if err != nil {
+		t.Fatalf("resolve config: %v", err)
+	}
+	if config.GitHubAppIssuer != "4221694" {
+		t.Fatalf("unexpected issuer: %q", config.GitHubAppIssuer)
 	}
 }
 
@@ -786,5 +1062,49 @@ func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
 				t.Fatalf("unexpected number: %d", response.PullRequestStatus.Number)
 			}
 		})
+	}
+}
+
+func testRSAPrivateKeyPEM(t *testing.T) []byte {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+}
+
+func assertGitHubAppJWT(t *testing.T, token string, expectedIssuer string, now time.Time) {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("unexpected jwt parts: %q", token)
+	}
+	var header map[string]string
+	decodeJWTPart(t, parts[0], &header)
+	if header["alg"] != "RS256" || header["typ"] != "JWT" {
+		t.Fatalf("unexpected jwt header: %#v", header)
+	}
+	var payload map[string]any
+	decodeJWTPart(t, parts[1], &payload)
+	if payload["iss"] != expectedIssuer {
+		t.Fatalf("unexpected issuer: %#v", payload)
+	}
+	if int64(payload["iat"].(float64)) != now.Add(-time.Minute).Unix() {
+		t.Fatalf("unexpected iat: %#v", payload)
+	}
+	if int64(payload["exp"].(float64)) != now.Add(9*time.Minute).Unix() {
+		t.Fatalf("unexpected exp: %#v", payload)
+	}
+}
+
+func decodeJWTPart(t *testing.T, part string, out any) {
+	t.Helper()
+	content, err := base64.RawURLEncoding.DecodeString(part)
+	if err != nil {
+		t.Fatalf("decode jwt part: %v", err)
+	}
+	if err := json.Unmarshal(content, out); err != nil {
+		t.Fatalf("decode jwt json: %v", err)
 	}
 }

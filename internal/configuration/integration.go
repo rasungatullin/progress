@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
@@ -305,6 +306,31 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 		merged.Token = ""
 		merged.TokenPrivate = ""
 	}
+	if hasGitHubAppAuthConfig(override) && !hasDirectGitHubTokenSource(override) {
+		merged.Token = ""
+		merged.TokenPrivate = ""
+		merged.TokenEnv = ""
+	}
+	if value := strings.TrimSpace(override.GitHubAppID); value != "" {
+		merged.GitHubAppID = value
+	}
+	if value := strings.TrimSpace(override.GitHubAppClientID); value != "" {
+		merged.GitHubAppClientID = value
+	}
+	if value := strings.TrimSpace(override.GitHubAppInstallationID); value != "" {
+		merged.GitHubAppInstallationID = value
+	}
+	if value := strings.TrimSpace(override.GitHubAppPrivateKeyPath); value != "" {
+		merged.GitHubAppPrivateKeyPath = value
+		merged.GitHubAppPrivateKeyPrivate = ""
+	}
+	if value := strings.TrimSpace(override.GitHubAppPrivateKeyPrivate); value != "" {
+		merged.GitHubAppPrivateKeyPrivate = value
+		merged.GitHubAppPrivateKeyPath = ""
+	}
+	if value := strings.TrimSpace(override.GitHubAppTokenRefreshBefore); value != "" {
+		merged.GitHubAppTokenRefreshBefore = value
+	}
 	if value := strings.TrimSpace(override.Username); value != "" {
 		merged.Username = value
 	}
@@ -493,6 +519,9 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 		if strings.TrimSpace(system.Type) == "" {
 			return fmt.Errorf("system %q must define type when enabled", name)
 		}
+		if err := validateGitHubAppConfig(system, name); err != nil {
+			return err
+		}
 		if err := validateTaskLabelMapping(system.TaskLabelMapping, name); err != nil {
 			return err
 		}
@@ -532,6 +561,71 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 	}
 
 	return nil
+}
+
+func validateGitHubAppConfig(system integrationmodel.IntegrationSystemConfig, systemName string) error {
+	if normalizeSystemName(system.Type) != "github" {
+		if hasGitHubAppConfig(system) {
+			return fmt.Errorf("system %q defines GitHub App settings for unsupported adapter type %q", normalizeSystemName(systemName), normalizeSystemName(system.Type))
+		}
+		return nil
+	}
+	if !hasGitHubAppConfig(system) || hasDirectGitHubTokenConfig(system) {
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(system.Transport), "api") {
+		return fmt.Errorf("system %q uses GitHub App auth without transport=api", normalizeSystemName(systemName))
+	}
+	if strings.TrimSpace(system.GitHubAppID) == "" && strings.TrimSpace(system.GitHubAppClientID) == "" {
+		return fmt.Errorf("system %q uses GitHub App auth without github_app_id or github_app_client_id", normalizeSystemName(systemName))
+	}
+	if strings.TrimSpace(system.GitHubAppInstallationID) == "" {
+		return fmt.Errorf("system %q uses GitHub App auth without github_app_installation_id", normalizeSystemName(systemName))
+	}
+	if strings.TrimSpace(system.GitHubAppPrivateKeyPath) == "" && strings.TrimSpace(system.GitHubAppPrivateKeyPrivate) == "" {
+		return fmt.Errorf("system %q uses GitHub App auth without github_app_private_key_path or github_app_private_key_private", normalizeSystemName(systemName))
+	}
+	if strings.TrimSpace(system.GitHubAppTokenRefreshBefore) != "" {
+		parsed, err := time.ParseDuration(strings.TrimSpace(system.GitHubAppTokenRefreshBefore))
+		if err != nil {
+			return fmt.Errorf("system %q uses invalid github_app_token_refresh_before: %w", normalizeSystemName(systemName), err)
+		}
+		if parsed <= 0 {
+			return fmt.Errorf("system %q uses non-positive github_app_token_refresh_before", normalizeSystemName(systemName))
+		}
+	}
+	return nil
+}
+
+func hasGitHubAppConfig(system integrationmodel.IntegrationSystemConfig) bool {
+	return strings.TrimSpace(system.GitHubAppID) != "" ||
+		strings.TrimSpace(system.GitHubAppClientID) != "" ||
+		strings.TrimSpace(system.GitHubAppInstallationID) != "" ||
+		strings.TrimSpace(system.GitHubAppPrivateKeyPath) != "" ||
+		strings.TrimSpace(system.GitHubAppPrivateKeyPrivate) != "" ||
+		strings.TrimSpace(system.GitHubAppTokenRefreshBefore) != ""
+}
+
+func hasGitHubAppAuthConfig(system integrationmodel.IntegrationSystemConfig) bool {
+	return strings.TrimSpace(system.GitHubAppID) != "" ||
+		strings.TrimSpace(system.GitHubAppClientID) != "" ||
+		strings.TrimSpace(system.GitHubAppInstallationID) != "" ||
+		strings.TrimSpace(system.GitHubAppPrivateKeyPath) != "" ||
+		strings.TrimSpace(system.GitHubAppPrivateKeyPrivate) != ""
+}
+
+func hasDirectGitHubTokenConfig(system integrationmodel.IntegrationSystemConfig) bool {
+	if strings.TrimSpace(system.Token) != "" || strings.TrimSpace(system.TokenPrivate) != "" {
+		return true
+	}
+	if tokenEnv := strings.TrimSpace(system.TokenEnv); tokenEnv != "" {
+		return strings.TrimSpace(os.Getenv(tokenEnv)) != ""
+	}
+	return false
+}
+
+func hasDirectGitHubTokenSource(system integrationmodel.IntegrationSystemConfig) bool {
+	return strings.TrimSpace(system.Token) != "" || strings.TrimSpace(system.TokenPrivate) != "" || strings.TrimSpace(system.TokenEnv) != ""
 }
 
 func validateIntegrationPrivateStoreConfig(config integrationmodel.IntegrationPrivateStoreConfig) error {

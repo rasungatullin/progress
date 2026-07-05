@@ -3,42 +3,79 @@ package github
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 const defaultAPIBaseURL = "https://api.github.com"
+const defaultGitHubAppTokenRefreshBefore = 5 * time.Minute
 
 type APIRunner struct {
 	systemConfig integrationmodel.IntegrationSystemConfig
 	client       *http.Client
 	getenv       func(string) string
+	readFile     func(string) ([]byte, error)
+	now          func() time.Time
+	tokenMu      sync.Mutex
+	cachedToken  *githubAppInstallationToken
 }
 
 type apiConfig struct {
-	BaseURL     string
-	Token       string
-	Timeout     time.Duration
-	DefaultRepo string
+	BaseURL                 string
+	Token                   string
+	Timeout                 time.Duration
+	DefaultRepo             string
+	GitHubAppIssuer         string
+	GitHubAppInstallationID string
+	GitHubAppPrivateKeyPath string
+	GitHubAppPrivateKey     string
+	TokenRefreshBefore      time.Duration
+}
+
+type githubAppInstallationToken struct {
+	Token     string
+	ExpiresAt time.Time
+}
+
+type githubAppInstallationTokenResponse struct {
+	Token               string            `json:"token"`
+	ExpiresAt           string            `json:"expires_at"`
+	Permissions         map[string]string `json:"permissions"`
+	RepositorySelection string            `json:"repository_selection"`
 }
 
 func NewAPIRunnerWithSystemConfig(config integrationmodel.IntegrationSystemConfig) *APIRunner {
-	return &APIRunner{systemConfig: config, client: http.DefaultClient, getenv: os.Getenv}
+	return &APIRunner{systemConfig: config, client: http.DefaultClient, getenv: os.Getenv, readFile: os.ReadFile, now: time.Now}
 }
 
 func (r *APIRunner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedConfig, error) {
-	config, err := r.resolveConfig()
+	config, err := r.resolveBaseConfig()
 	if err != nil {
 		return apiErrorResult("auth status", config, err)
+	}
+	if config.Token == "" && githubAppAuthConfigured(config) {
+		_, result, err := r.installationAccessToken(ctx, config)
+		return result, apiResolvedConfig(config), err
+	}
+	if config.Token == "" {
+		return apiErrorResult("auth status", config, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub API token or GitHub App settings are required"})
 	}
 	var raw map[string]any
 	result, err := r.do(ctx, config, http.MethodGet, "user", nil, &raw)
@@ -46,7 +83,7 @@ func (r *APIRunner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedC
 }
 
 func (r *APIRunner) RunRepoView(ctx context.Context, repository string) (CommandResult, resolvedConfig, error) {
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("repo view", config, err)
 	}
@@ -75,7 +112,7 @@ func (r *APIRunner) RunIssueView(ctx context.Context, repository string, number 
 	if err != nil {
 		return apiErrorResult("issue view", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("issue view", config, err)
 	}
@@ -97,7 +134,7 @@ func (r *APIRunner) RunIssueComments(ctx context.Context, repository string, num
 	if err != nil {
 		return apiErrorResult("issue comments", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("issue comments", config, err)
 	}
@@ -131,7 +168,7 @@ func (r *APIRunner) RunIssueCommentCreate(ctx context.Context, repository string
 	if body == "" {
 		return apiErrorResult("issue comment create", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub issue comment body is required"})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("issue comment create", config, err)
 	}
@@ -165,7 +202,7 @@ func (r *APIRunner) runIssueLabelsChange(ctx context.Context, repository string,
 	if len(labels) == 0 {
 		return apiErrorResult("issue labels", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub issue label is required"})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("issue labels", config, err)
 	}
@@ -194,7 +231,7 @@ func (r *APIRunner) RunPRView(ctx context.Context, repository string, number int
 	if err != nil {
 		return apiErrorResult("pr view", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("pr view", config, err)
 	}
@@ -225,7 +262,7 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 	if (strings.TrimSpace(request.Query) != "" && !querySupported) || request.Scope != "all" {
 		return apiErrorResult("pr list", apiConfig{}, &Error{Code: ErrorCodeUnsupportedOperation, Message: "GitHub API transport does not support pull request search query or scope yet"})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("pr list", config, err)
 	}
@@ -321,7 +358,7 @@ func (r *APIRunner) RunPRCreate(ctx context.Context, repository string, request 
 	if err != nil {
 		return apiErrorResult("pr create", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("pr create", config, err)
 	}
@@ -376,7 +413,7 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 	if err != nil {
 		return apiErrorResult("pr review threads", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("pr review threads", config, err)
 	}
@@ -429,7 +466,7 @@ func (r *APIRunner) RunPRCommentCreate(ctx context.Context, repository string, n
 	if request.Path == "" && request.Line == 0 {
 		return r.RunIssueCommentCreate(ctx, repository, number, request.Body)
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("pr comment create", config, err)
 	}
@@ -465,7 +502,7 @@ func (r *APIRunner) RunPRReviewThreadResolve(ctx context.Context, threadID strin
 	if threadID == "" {
 		return apiErrorResult("pr review thread resolve", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review thread id is required"})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("pr review thread resolve", config, err)
 	}
@@ -484,7 +521,7 @@ func (r *APIRunner) RunPRReviewThreadReply(ctx context.Context, request PRReview
 	if err != nil {
 		return apiErrorResult("pr review thread reply", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	config, err := r.resolveConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("pr review thread reply", config, err)
 	}
@@ -498,7 +535,26 @@ func (r *APIRunner) RunPRReviewThreadReply(ctx context.Context, request PRReview
 	return result, apiResolvedConfig(config), nil
 }
 
-func (r *APIRunner) resolveConfig() (apiConfig, error) {
+func (r *APIRunner) resolveConfig(ctx context.Context) (apiConfig, error) {
+	config, err := r.resolveBaseConfig()
+	if err != nil {
+		return config, err
+	}
+	if config.Token != "" {
+		return config, nil
+	}
+	if !githubAppAuthConfigured(config) {
+		return config, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub API token or GitHub App settings are required"}
+	}
+	token, _, err := r.installationAccessToken(ctx, config)
+	if err != nil {
+		return config, err
+	}
+	config.Token = token.Token
+	return config, nil
+}
+
+func (r *APIRunner) resolveBaseConfig() (apiConfig, error) {
 	timeout := defaultTimeout
 	if value := strings.TrimSpace(r.systemConfig.Timeout); value != "" {
 		parsed, err := time.ParseDuration(value)
@@ -509,21 +565,260 @@ func (r *APIRunner) resolveConfig() (apiConfig, error) {
 	}
 	token := strings.TrimSpace(r.systemConfig.Token)
 	if token == "" && strings.TrimSpace(r.systemConfig.TokenEnv) != "" {
-		token = strings.TrimSpace(r.getenv(strings.TrimSpace(r.systemConfig.TokenEnv)))
-	}
-	if token == "" {
-		return apiConfig{Timeout: timeout}, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub API token is required"}
+		token = strings.TrimSpace(r.env(strings.TrimSpace(r.systemConfig.TokenEnv)))
 	}
 	baseURL := strings.TrimRight(strings.TrimSpace(r.systemConfig.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = defaultAPIBaseURL
 	}
+	refreshBefore := defaultGitHubAppTokenRefreshBefore
+	if token == "" {
+		var err error
+		refreshBefore, err = parseGitHubAppTokenRefreshBefore(r.systemConfig.GitHubAppTokenRefreshBefore)
+		if err != nil {
+			return apiConfig{BaseURL: baseURL, Timeout: timeout}, err
+		}
+	}
 	return apiConfig{
-		BaseURL:     baseURL,
-		Token:       token,
-		Timeout:     timeout,
-		DefaultRepo: firstNonEmpty(strings.TrimSpace(r.systemConfig.Repository), strings.TrimSpace(r.systemConfig.DefaultRepo)),
+		BaseURL:                 baseURL,
+		Token:                   token,
+		Timeout:                 timeout,
+		DefaultRepo:             firstNonEmpty(strings.TrimSpace(r.systemConfig.Repository), strings.TrimSpace(r.systemConfig.DefaultRepo)),
+		GitHubAppIssuer:         firstNonEmpty(strings.TrimSpace(r.systemConfig.GitHubAppID), strings.TrimSpace(r.systemConfig.GitHubAppClientID)),
+		GitHubAppInstallationID: strings.TrimSpace(r.systemConfig.GitHubAppInstallationID),
+		GitHubAppPrivateKeyPath: strings.TrimSpace(r.systemConfig.GitHubAppPrivateKeyPath),
+		GitHubAppPrivateKey:     strings.TrimSpace(r.systemConfig.GitHubAppPrivateKey),
+		TokenRefreshBefore:      refreshBefore,
 	}, nil
+}
+
+func parseGitHubAppTokenRefreshBefore(raw string) (time.Duration, error) {
+	refreshBefore := defaultGitHubAppTokenRefreshBefore
+	if value := strings.TrimSpace(raw); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			return 0, fmt.Errorf("parse GitHub App token refresh interval: %w", err)
+		}
+		if parsed <= 0 {
+			return 0, fmt.Errorf("GitHub App token refresh interval must be positive")
+		}
+		refreshBefore = parsed
+	}
+	return refreshBefore, nil
+}
+
+func (r *APIRunner) installationAccessToken(ctx context.Context, config apiConfig) (githubAppInstallationToken, CommandResult, error) {
+	now := r.currentTime()
+	r.tokenMu.Lock()
+	defer r.tokenMu.Unlock()
+
+	if r.cachedToken != nil && strings.TrimSpace(r.cachedToken.Token) != "" && now.Add(config.TokenRefreshBefore).Before(r.cachedToken.ExpiresAt) {
+		return *r.cachedToken, cachedInstallationTokenResult(config, *r.cachedToken, "cache"), nil
+	}
+
+	if strings.TrimSpace(config.GitHubAppIssuer) == "" {
+		return githubAppInstallationToken{}, CommandResult{Command: "http", Path: config.BaseURL, ExitCode: -1}, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub App issuer is required"}
+	}
+	if strings.TrimSpace(config.GitHubAppInstallationID) == "" {
+		return githubAppInstallationToken{}, CommandResult{Command: "http", Path: config.BaseURL, ExitCode: -1}, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub App installation id is required"}
+	}
+
+	privateKey, err := r.githubAppPrivateKey(config)
+	if err != nil {
+		return githubAppInstallationToken{}, CommandResult{Command: "http", Path: config.BaseURL, ExitCode: -1}, err
+	}
+	jwt, err := githubAppJWT(privateKey, config.GitHubAppIssuer, now)
+	if err != nil {
+		return githubAppInstallationToken{}, CommandResult{Command: "http", Path: config.BaseURL, ExitCode: -1}, err
+	}
+
+	result, response, err := r.createInstallationAccessToken(ctx, config, jwt)
+	if err != nil {
+		if r.cachedToken != nil && strings.TrimSpace(r.cachedToken.Token) != "" && now.Before(r.cachedToken.ExpiresAt) {
+			return *r.cachedToken, cachedInstallationTokenResult(config, *r.cachedToken, "cache_after_refresh_error"), nil
+		}
+		return githubAppInstallationToken{}, result, err
+	}
+	expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(response.ExpiresAt))
+	if err != nil {
+		if r.cachedToken != nil && strings.TrimSpace(r.cachedToken.Token) != "" && now.Before(r.cachedToken.ExpiresAt) {
+			return *r.cachedToken, cachedInstallationTokenResult(config, *r.cachedToken, "cache_after_refresh_error"), nil
+		}
+		result.ExitCode = -1
+		return githubAppInstallationToken{}, result, &Error{Code: ErrorCodeInternalIntegration, Message: fmt.Sprintf("decode GitHub App installation token expiry: %v", err), Err: err, Result: result}
+	}
+	if strings.TrimSpace(response.Token) == "" {
+		if r.cachedToken != nil && strings.TrimSpace(r.cachedToken.Token) != "" && now.Before(r.cachedToken.ExpiresAt) {
+			return *r.cachedToken, cachedInstallationTokenResult(config, *r.cachedToken, "cache_after_refresh_error"), nil
+		}
+		result.ExitCode = -1
+		return githubAppInstallationToken{}, result, &Error{Code: ErrorCodeInternalIntegration, Message: "GitHub App installation token response does not contain token", Result: result}
+	}
+
+	token := githubAppInstallationToken{Token: strings.TrimSpace(response.Token), ExpiresAt: expiresAt}
+	r.cachedToken = &token
+	result.Stdout = mustJSON(map[string]any{
+		"expires_at":           response.ExpiresAt,
+		"repository_selection": response.RepositorySelection,
+		"permissions":          response.Permissions,
+	})
+	return token, result, nil
+}
+
+func cachedInstallationTokenResult(config apiConfig, token githubAppInstallationToken, source string) CommandResult {
+	result := CommandResult{Command: "http", Path: config.BaseURL, Args: []string{http.MethodPost, "app/installations/" + config.GitHubAppInstallationID + "/access_tokens"}, ExitCode: 0}
+	result.Stdout = mustJSON(map[string]string{"expires_at": token.ExpiresAt.Format(time.RFC3339), "source": source})
+	return result
+}
+
+func (r *APIRunner) createInstallationAccessToken(ctx context.Context, config apiConfig, jwt string) (CommandResult, githubAppInstallationTokenResponse, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, config.Timeout)
+	defer cancel()
+	endpoint := "app/installations/" + strings.TrimSpace(config.GitHubAppInstallationID) + "/access_tokens"
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, config.BaseURL+"/"+endpoint, nil)
+	if err != nil {
+		result := CommandResult{Command: "http", Path: config.BaseURL, Args: []string{http.MethodPost, endpoint}, ExitCode: -1}
+		return result, githubAppInstallationTokenResponse{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error(), Err: err, Result: result}
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+jwt)
+
+	resp, err := r.httpClient().Do(req)
+	result := CommandResult{Command: "http", Path: config.BaseURL, Args: []string{http.MethodPost, endpoint}, ExitCode: 0}
+	if err != nil {
+		result.ExitCode = -1
+		code := ErrorCodeExternalFailure
+		if isTimeoutError(err, reqCtx) {
+			code = ErrorCodeTimeout
+		}
+		return result, githubAppInstallationTokenResponse{}, &Error{Code: code, Message: err.Error(), Err: err, Result: result}
+	}
+	defer resp.Body.Close()
+	content, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		result.ExitCode = resp.StatusCode
+		result.Stdout = strings.TrimSpace(string(content))
+		return result, githubAppInstallationTokenResponse{}, errorForHTTPStatus(resp.StatusCode, result.Stdout, result)
+	}
+	var response githubAppInstallationTokenResponse
+	if err := json.Unmarshal(content, &response); err != nil {
+		result.ExitCode = -1
+		return result, githubAppInstallationTokenResponse{}, &Error{Code: ErrorCodeInternalIntegration, Message: fmt.Sprintf("decode GitHub App installation token response: %v", err), Err: err, Result: result}
+	}
+	return result, response, nil
+}
+
+func (r *APIRunner) githubAppPrivateKey(config apiConfig) (*rsa.PrivateKey, error) {
+	content := strings.TrimSpace(config.GitHubAppPrivateKey)
+	if content == "" {
+		path, err := expandUserPath(config.GitHubAppPrivateKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(path) == "" {
+			return nil, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub App private key path or private value is required"}
+		}
+		raw, err := r.fileReader()(path)
+		if err != nil {
+			return nil, &Error{Code: ErrorCodeAuthRequired, Message: fmt.Sprintf("read GitHub App private key: %v", err), Err: err}
+		}
+		content = strings.TrimSpace(string(raw))
+	}
+	return parseGitHubAppPrivateKey([]byte(content))
+}
+
+func parseGitHubAppPrivateKey(content []byte) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode(content)
+	if block == nil {
+		return nil, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub App private key is not a PEM block"}
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, &Error{Code: ErrorCodeAuthRequired, Message: fmt.Sprintf("parse GitHub App private key: %v", err), Err: err}
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub App private key must be RSA"}
+	}
+	return key, nil
+}
+
+func githubAppJWT(privateKey *rsa.PrivateKey, issuer string, now time.Time) (string, error) {
+	if privateKey == nil {
+		return "", &Error{Code: ErrorCodeAuthRequired, Message: "GitHub App private key is required"}
+	}
+	issuer = strings.TrimSpace(issuer)
+	if issuer == "" {
+		return "", &Error{Code: ErrorCodeAuthRequired, Message: "GitHub App issuer is required"}
+	}
+	header := map[string]string{"alg": "RS256", "typ": "JWT"}
+	payload := map[string]any{
+		"iat": now.Add(-1 * time.Minute).Unix(),
+		"exp": now.Add(9 * time.Minute).Unix(),
+		"iss": issuer,
+	}
+	encodedHeader := base64.RawURLEncoding.EncodeToString([]byte(mustJSON(header)))
+	encodedPayload := base64.RawURLEncoding.EncodeToString([]byte(mustJSON(payload)))
+	signingInput := encodedHeader + "." + encodedPayload
+	sum := sha256.Sum256([]byte(signingInput))
+	signature, err := rsa.SignPKCS1v15(nil, privateKey, crypto.SHA256, sum[:])
+	if err != nil {
+		return "", &Error{Code: ErrorCodeAuthRequired, Message: fmt.Sprintf("sign GitHub App JWT: %v", err), Err: err}
+	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func githubAppAuthConfigured(config apiConfig) bool {
+	return strings.TrimSpace(config.GitHubAppIssuer) != "" ||
+		strings.TrimSpace(config.GitHubAppInstallationID) != "" ||
+		strings.TrimSpace(config.GitHubAppPrivateKeyPath) != "" ||
+		strings.TrimSpace(config.GitHubAppPrivateKey) != ""
+}
+
+func (r *APIRunner) httpClient() *http.Client {
+	if r.client != nil {
+		return r.client
+	}
+	return http.DefaultClient
+}
+
+func (r *APIRunner) env(name string) string {
+	if r.getenv != nil {
+		return r.getenv(name)
+	}
+	return os.Getenv(name)
+}
+
+func (r *APIRunner) fileReader() func(string) ([]byte, error) {
+	if r.readFile != nil {
+		return r.readFile
+	}
+	return os.ReadFile
+}
+
+func (r *APIRunner) currentTime() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
+}
+
+func expandUserPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" || path == "~" {
+		return path, nil
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory for GitHub App private key: %w", err)
+		}
+		return filepath.Join(home, strings.TrimPrefix(path, "~/")), nil
+	}
+	return filepath.Clean(path), nil
 }
 
 func (r *APIRunner) do(ctx context.Context, config apiConfig, method string, endpoint string, payload any, out any) (CommandResult, error) {
@@ -542,7 +837,7 @@ func (r *APIRunner) do(ctx context.Context, config apiConfig, method string, end
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := r.client.Do(req)
+	resp, err := r.httpClient().Do(req)
 	result := CommandResult{Command: "http", Path: config.BaseURL, Args: []string{method, endpoint}, ExitCode: 0}
 	if err != nil {
 		result.ExitCode = -1
@@ -587,7 +882,7 @@ func (r *APIRunner) graphql(ctx context.Context, config apiConfig, query string,
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+config.Token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := r.client.Do(req)
+	resp, err := r.httpClient().Do(req)
 	result := CommandResult{Command: "http", Path: config.BaseURL, Args: []string{http.MethodPost, "graphql"}}
 	if err != nil {
 		result.ExitCode = -1
@@ -780,7 +1075,23 @@ func apiResolvedConfig(config apiConfig) resolvedConfig {
 }
 
 func apiErrorResult(command string, config apiConfig, err error) (CommandResult, resolvedConfig, error) {
-	return CommandResult{Command: "http", Path: config.BaseURL, Args: []string{command}, ExitCode: -1}, apiResolvedConfig(config), err
+	result := CommandResult{Command: "http", Path: config.BaseURL, Args: []string{command}, ExitCode: -1}
+	var ghErr *Error
+	if errors.As(err, &ghErr) {
+		if ghErr.Result.Command != "" || ghErr.Result.Path != "" || ghErr.Result.ExitCode != 0 || ghErr.Result.Stdout != "" || ghErr.Result.Stderr != "" {
+			result = ghErr.Result
+			if result.Command == "" {
+				result.Command = "http"
+			}
+			if result.Path == "" {
+				result.Path = config.BaseURL
+			}
+			if len(result.Args) == 0 {
+				result.Args = []string{command}
+			}
+		}
+	}
+	return result, apiResolvedConfig(config), err
 }
 
 func mustJSON(value any) string {
