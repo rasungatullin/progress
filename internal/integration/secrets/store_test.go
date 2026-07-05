@@ -166,3 +166,38 @@ func TestFileStoreLockHonorsContextCancellation(t *testing.T) {
 		t.Fatalf("expected context deadline while waiting for file store lock, got %v", err)
 	}
 }
+
+func TestFileStoreRecoversStaleLock(t *testing.T) {
+	t.Parallel()
+
+	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("create file store: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(descriptor.Location), 0o700); err != nil {
+		t.Fatalf("create private file store directory: %v", err)
+	}
+	lockDir := descriptor.Location + ".lock"
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatalf("create stale lock directory: %v", err)
+	}
+	staleTime := time.Now().Add(-fileStoreLockStaleAfter - time.Second)
+	if err := os.Chtimes(lockDir, staleTime, staleTime); err != nil {
+		t.Fatalf("mark lock directory stale: %v", err)
+	}
+
+	if err := store.Set(context.Background(), "token", "secret"); err != nil {
+		t.Fatalf("set private value with stale lock: %v", err)
+	}
+	if _, err := os.Stat(lockDir); !os.IsNotExist(err) {
+		t.Fatalf("stale lock must be removed after write, got %v", err)
+	}
+
+	value, err := store.Get(context.Background(), "token")
+	if err != nil {
+		t.Fatalf("get private value: %v", err)
+	}
+	if value != "secret" {
+		t.Fatalf("unexpected private value: %q", value)
+	}
+}

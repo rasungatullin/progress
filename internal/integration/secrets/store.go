@@ -18,6 +18,7 @@ const (
 	defaultServiceName      = "progress"
 	defaultFilePath         = "integration/private-values.json"
 	fileStoreLockPollPeriod = 10 * time.Millisecond
+	fileStoreLockStaleAfter = 30 * time.Second
 )
 
 var (
@@ -187,6 +188,13 @@ func (s fileStore) lock(ctx context.Context) (func(), error) {
 		} else if !os.IsExist(err) {
 			return nil, fmt.Errorf("lock private file store %s: %w", s.path, err)
 		}
+		removed, err := removeStaleFileStoreLock(lockDir, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("lock private file store %s: %w", s.path, err)
+		}
+		if removed {
+			continue
+		}
 
 		timer := time.NewTimer(fileStoreLockPollPeriod)
 		select {
@@ -198,6 +206,29 @@ func (s fileStore) lock(ctx context.Context) (func(), error) {
 		case <-timer.C:
 		}
 	}
+}
+
+func removeStaleFileStoreLock(lockDir string, now time.Time) (bool, error) {
+	info, err := os.Stat(lockDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("%s is not a directory", lockDir)
+	}
+	if now.Sub(info.ModTime()) < fileStoreLockStaleAfter {
+		return false, nil
+	}
+	if err := os.Remove(lockDir); err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (s fileStore) read() (map[string]string, error) {
