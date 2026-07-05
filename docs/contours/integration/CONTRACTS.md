@@ -257,7 +257,7 @@ type PullRequestComment struct {
 - `cli` — вызов через `gh`;
 - `api` — прямой вызов GitHub REST API и GraphQL API.
 
-Если поле не задано, используется `cli`, чтобы сохранить совместимость существующих установок. В режиме `api` GitHub-адаптер использует `token`, `token_env`, `token_private` или данные GitHub App. Для GitHub App поля `github_app_id` и `github_app_client_id` задают значение `iss` для JWT, `github_app_installation_id` выбирает установку, а `github_app_token_refresh_before` задаёт запас упреждающего переиздания установочного токена. Если `base_url` не указан, применяется `https://api.github.com`.
+Если поле не задано, используется `cli`, чтобы сохранить совместимость существующих установок. В режиме `api` GitHub-адаптер использует `token`, `token_env`, `token_private` или данные GitHub App. Для GitHub App поля `github_app_id` и `github_app_client_id` задают значение `iss` для JWT; при заполненных обоих полях используется `github_app_id`. Поле `github_app_installation_id` выбирает установку, а `github_app_token_refresh_before` задаёт запас упреждающего переиздания установочного токена. Если `base_url` не указан, применяется `https://api.github.com`.
 
 Независимо от выбранного транспорта адаптер возвращает тот же `Response`: канонические объекты `CanonicalTask`, `TaskComment`, `Repository`, `MergeRequest`, `ReviewRemark`, `OperationResult` и `Failure` не должны раскрывать вызывающему контуру, был ли внешний вызов выполнен через `gh` или напрямую через HTTP API. Диагностика маршрута может включать транспорт как служебный признак, например `transport=api`.
 

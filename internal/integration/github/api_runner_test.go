@@ -301,6 +301,25 @@ func TestGitHubAppAuthRequiresCompleteSettings(t *testing.T) {
 	}
 }
 
+func TestGitHubAppIssuerPrefersAppIDWhenBothIDsAreConfigured(t *testing.T) {
+	t.Parallel()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			GitHubAppID:       "4221694",
+			GitHubAppClientID: "Iv23liRLhoM9JEx89zu",
+		},
+	}
+
+	config, err := runner.resolveBaseConfig()
+	if err != nil {
+		t.Fatalf("resolve config: %v", err)
+	}
+	if config.GitHubAppIssuer != "4221694" {
+		t.Fatalf("unexpected issuer: %q", config.GitHubAppIssuer)
+	}
+}
+
 func TestAPITransportMapsNotFound(t *testing.T) {
 	t.Parallel()
 

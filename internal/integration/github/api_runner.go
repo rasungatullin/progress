@@ -587,7 +587,7 @@ func (r *APIRunner) resolveBaseConfig() (apiConfig, error) {
 		Token:                   token,
 		Timeout:                 timeout,
 		DefaultRepo:             firstNonEmpty(strings.TrimSpace(r.systemConfig.Repository), strings.TrimSpace(r.systemConfig.DefaultRepo)),
-		GitHubAppIssuer:         firstNonEmpty(strings.TrimSpace(r.systemConfig.GitHubAppClientID), strings.TrimSpace(r.systemConfig.GitHubAppID)),
+		GitHubAppIssuer:         firstNonEmpty(strings.TrimSpace(r.systemConfig.GitHubAppID), strings.TrimSpace(r.systemConfig.GitHubAppClientID)),
 		GitHubAppInstallationID: strings.TrimSpace(r.systemConfig.GitHubAppInstallationID),
 		GitHubAppPrivateKeyPath: strings.TrimSpace(r.systemConfig.GitHubAppPrivateKeyPath),
 		GitHubAppPrivateKey:     strings.TrimSpace(r.systemConfig.GitHubAppPrivateKey),
