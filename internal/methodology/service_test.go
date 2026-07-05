@@ -39,6 +39,9 @@ func TestServiceSelectsRouteActionAndInstruction(t *testing.T) {
 	if result.Action.Name != "engineering-synthesis" {
 		t.Fatalf("unexpected action: %#v", result.Action)
 	}
+	if result.Profile != "default" {
+		t.Fatalf("unexpected profile: %q", result.Profile)
+	}
 	if result.Instruction.Name != "default-directive" {
 		t.Fatalf("unexpected instruction: %#v", result.Instruction)
 	}

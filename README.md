@@ -105,6 +105,7 @@ progress synthesize --config ./configs/dev.yaml
 - [docs/contours/execution/STRUCTURED_IO.md](docs/contours/execution/STRUCTURED_IO.md) — структурированный ввод и вывод контура исполнения;
 - [docs/contours/execution/CLI.md](docs/contours/execution/CLI.md) — изолированный и полный запуск исполнительного контура;
 - [docs/contours/methodology/README.md](docs/contours/methodology/README.md) — контур методик;
+- [docs/contours/methodology/CLI.md](docs/contours/methodology/CLI.md) — управление каталогом методик через CLI;
 - [docs/contours/settings-resources/README.md](docs/contours/settings-resources/README.md) — контур настроек и ресурсов;
 - [docs/contours/observability/README.md](docs/contours/observability/README.md) — контур журналирования и наблюдаемости;
 - [docs/contours/user-interface/README.md](docs/contours/user-interface/README.md) — контур пользовательского интерфейса;
