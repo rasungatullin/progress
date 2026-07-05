@@ -306,7 +306,7 @@ func newMethodologyAddActionCommand(parent *methodologyFlags) *cobra.Command {
 					Name:           flags.name,
 					Class:          flags.class,
 					Profile:        flags.profile,
-					Operations:     flags.operations,
+					Operations:     methodologyOperationsFromFlags(flags.operations),
 					Description:    flags.description,
 					ExpectedResult: flags.expectedResult,
 				}},
@@ -567,6 +567,18 @@ func printMethodologySelection(cmd *cobra.Command, result methodology.SelectionR
 
 func printMethodologyWriteResult(cmd *cobra.Command, result methodology.CatalogWriteResult) {
 	cmd.Printf("scope=%s\npath=%s\nroutes=%d\nactions=%d\ninstructions=%d\nentities=%d\n", result.Scope, result.Path, len(result.Catalog.Routes), len(result.Catalog.Actions), len(result.Catalog.Instructions), len(result.Catalog.Entities))
+}
+
+func methodologyOperationsFromFlags(names []string) []methodology.ActionOperation {
+	operations := make([]methodology.ActionOperation, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		operations = append(operations, methodology.ActionOperation{Name: name, Kind: name})
+	}
+	return operations
 }
 
 func methodologyElementPayload(element methodology.ListedElement) []byte {

@@ -110,6 +110,54 @@ func TestLoadCatalogRejectsDuplicateRoutesInsideSingleLayer(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsAmbiguousActionAliases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		actions   string
+		wantError string
+	}{
+		{
+			name: "alias conflicts with action name",
+			actions: `[
+				{"name": "engineering-synthesis", "aliases": ["review"]},
+				{"name": "review"}
+			]`,
+			wantError: `action "engineering-synthesis" alias "review" conflicts with action name`,
+		},
+		{
+			name: "alias conflicts with another alias",
+			actions: `[
+				{"name": "engineering-synthesis", "aliases": ["implement"]},
+				{"name": "task-preparation", "aliases": ["IMPLEMENT"]}
+			]`,
+			wantError: `action "task-preparation" alias "implement" conflicts with action "engineering-synthesis" alias`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			readFile := func(path string) ([]byte, error) {
+				if path == "/repo/.progress/methodology/catalog.json" {
+					return []byte(`{"actions": ` + tt.actions + `}`), nil
+				}
+				return nil, fs.ErrNotExist
+			}
+
+			_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+			if err == nil {
+				t.Fatal("expected alias conflict error")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestSaveCatalogRejectsDuplicateRoutesBeforeNormalization(t *testing.T) {
 	t.Parallel()
 
@@ -149,7 +197,7 @@ func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 			Name:        "implement",
 			Class:       "engineering-synthesis",
 			Profile:     "coder",
-			Operations:  []string{"prepare-data", "launch-synthesis"},
+			Operations:  []ActionOperation{{Name: "prepare-data", Kind: "prepare-data"}, {Name: "launch-synthesis", Kind: "launch-synthesis"}},
 			Description: "Выполнение инженерного изменения.",
 		}},
 	})

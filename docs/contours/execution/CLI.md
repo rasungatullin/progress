@@ -90,7 +90,9 @@
 
 Вызов действия проходит по списку операций, закреплённому в разрешённом `Action.Operations`.
 
-Для действия инженерного синтеза текущий встроенный порядок включает:
+Контур исполнения получает от внешнего инициатора только имя действия в `ExecutionAssignment.Action`. Само разрешение имени выполняется через объединённый каталог методик из глобального и локального слоёв.
+
+Для действия инженерного синтеза типовой порядок в поставляемом каталоге методик включает:
 
 1. `resolve-action`;
 2. `prepare-data`;
@@ -104,13 +106,13 @@
 
 Эти имена можно использовать для диагностического вызова `progress execution operation <operation>`, но сами стадии не становятся отдельными CLI-командами.
 
-Для ручного инженерного цикла дополнительно поддержаны действия:
+Поставляемый каталог методик содержит действия ручного инженерного цикла:
 
 - `start-implementation-pr` - выполнить реализацию задачи, отправить ветку и открыть запрос на слияние;
 - `review-pull-request` - проверить открытый запрос на слияние и записать замечания ревизии;
 - `apply-review-comments` - получить замечания ревизии, исправить их, отправить ветку и записать ответы на замечания.
 
-Действие `start-implementation-pr` добавляет к базовому порядку операции `commit-push` и `publish-merge-request`. Действие `review-pull-request` добавляет операции `load-pull-request`, `load-review-remarks` и `publish-review-remarks`. Действие `apply-review-comments` добавляет операции `load-pull-request`, `load-review-remarks`, `commit-push` и `publish-review-responses`.
+Состав этих действий также задан в каталоге методик. Действие `start-implementation-pr` включает операции `commit-push` и `publish-merge-request`, действие `review-pull-request` включает операции `load-pull-request`, `load-review-remarks` и `publish-review-remarks`, действие `apply-review-comments` включает операции `load-pull-request`, `load-review-remarks`, `commit-push` и `publish-review-responses`.
 
 ## 6. Выходной формат
 
