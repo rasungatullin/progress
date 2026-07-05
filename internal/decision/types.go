@@ -10,6 +10,7 @@ const (
 	SignalKindTask   = "task-number"
 
 	DecisionTypeExecute = "execute"
+	DecisionTypeNone    = "none"
 
 	ConsiderationStatusExecution          = "execution"
 	ConsiderationStatusCompleted          = "completed"
@@ -33,9 +34,10 @@ type StartInput struct {
 }
 
 type DecisionContext struct {
-	Signal Signal
-	Task   integration.CanonicalTask
-	Issue  *integration.TrackerIssue
+	Signal       Signal
+	Task         integration.CanonicalTask
+	Issue        *integration.TrackerIssue
+	MergeRequest *integration.MergeRequest
 }
 
 type DecisionType string

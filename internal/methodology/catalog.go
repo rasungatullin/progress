@@ -28,6 +28,7 @@ type Route struct {
 	Name            string   `json:"name"`
 	Title           string   `json:"title,omitempty"`
 	Action          string   `json:"action,omitempty"`
+	Outcome         string   `json:"outcome,omitempty"`
 	Profile         string   `json:"profile,omitempty"`
 	Description     string   `json:"description,omitempty"`
 	Checks          []string `json:"checks,omitempty"`
@@ -107,6 +108,7 @@ type ListedElement struct {
 	Description   string                         `json:"description,omitempty"`
 	Profile       string                         `json:"profile,omitempty"`
 	Action        string                         `json:"action,omitempty"`
+	Outcome       string                         `json:"outcome,omitempty"`
 	Class         string                         `json:"class,omitempty"`
 	Route         *Route                         `json:"route,omitempty"`
 	ActionEntry   *Action                        `json:"action_entry,omitempty"`
@@ -182,6 +184,7 @@ func ListCatalogElements(snapshot CatalogSnapshot, filter ElementFilter) []Liste
 				Description: route.Description,
 				Profile:     route.Profile,
 				Action:      route.Action,
+				Outcome:     route.Outcome,
 				Route:       &route,
 			})
 		}
@@ -330,8 +333,8 @@ func validateCatalog(catalog Catalog) error {
 			return fmt.Errorf("routes contains duplicate name %q", route.Name)
 		}
 		seenRoutes[route.Name] = struct{}{}
-		if route.Action == "" {
-			return fmt.Errorf("route %q must define action", route.Name)
+		if route.Action == "" && route.Outcome == "" {
+			return fmt.Errorf("route %q must define action or outcome", route.Name)
 		}
 	}
 
@@ -422,6 +425,7 @@ func normalizeRoute(route Route) Route {
 	route.Name = normalizeName(route.Name)
 	route.Title = strings.TrimSpace(route.Title)
 	route.Action = normalizeName(route.Action)
+	route.Outcome = normalizeName(route.Outcome)
 	route.Profile = strings.TrimSpace(route.Profile)
 	route.Description = strings.TrimSpace(route.Description)
 	route.Checks = normalizeStringList(route.Checks)

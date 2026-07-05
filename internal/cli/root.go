@@ -21,6 +21,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.CompletionOptions.DisableDefaultCmd = true
 
 	cmd.AddCommand(newDecisionCommand())
+	cmd.AddCommand(newReactivityCommand())
 	cmd.AddCommand(newIntegrationCommand())
 	cmd.AddCommand(newConfigurationCommand())
 	cmd.AddCommand(newMethodologyCommand())

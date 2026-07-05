@@ -163,13 +163,20 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 	}
 
 	actionName := firstNonEmpty(request.Action, route.Action)
-	action, err := selectAction(catalog.Actions, actionName)
-	if err != nil {
-		return SelectionResult{}, err
+	var action Action
+	if actionName != "" {
+		var err error
+		action, err = selectAction(catalog.Actions, actionName)
+		if err != nil {
+			return SelectionResult{}, err
+		}
 	}
 
 	profile := firstNonEmpty(request.Profile, action.Profile, route.Profile)
-	instruction := selectInstruction(catalog.Instructions, action.Name, profile)
+	instruction := Instruction{}
+	if action.Name != "" {
+		instruction = selectInstruction(catalog.Instructions, action.Name, profile)
+	}
 	result := SelectionResult{
 		Route:       route,
 		Action:      action,
@@ -177,13 +184,18 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 		Instruction: instruction,
 		Diagnostics: []string{
 			fmt.Sprintf("route=%s", route.Name),
-			fmt.Sprintf("action=%s", action.Name),
-			fmt.Sprintf("profile=%s", profile),
 		},
 	}
+	if action.Name != "" {
+		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("action=%s", action.Name))
+	}
+	if route.Outcome != "" {
+		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("outcome=%s", route.Outcome))
+	}
+	result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("profile=%s", profile))
 	if instruction.Name != "" {
 		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("instruction=%s", instruction.Name))
-	} else if profile != "" {
+	} else if profile != "" && action.Name != "" {
 		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("instruction-missing-for-profile=%s", profile))
 	}
 
@@ -216,6 +228,14 @@ func (s *Service) repoRootForWrite(ctx context.Context, repoRoot string, scope c
 
 func selectRoute(routes []Route, name string) (Route, error) {
 	name = normalizeName(name)
+	if name == "" {
+		for _, route := range routes {
+			route = normalizeRoute(route)
+			if route.Name == "default" {
+				return route, nil
+			}
+		}
+	}
 	for _, route := range routes {
 		route = normalizeRoute(route)
 		if route.Name == "" {

@@ -408,6 +408,71 @@ func TestAPITransportReportsUnsupportedPRSearch(t *testing.T) {
 	}
 }
 
+func TestAPITransportPRSearchSupportsHeadQuery(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/graphql" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"repository": map[string]any{
+						"pullRequest": map[string]any{
+							"reviewDecision": "APPROVED",
+							"labels":         map[string]any{"nodes": []map[string]string{}},
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path != "/repos/owner/name/pulls" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("head"); got != "owner:119" {
+			t.Fatalf("unexpected head query: %q", got)
+		}
+		if got := r.URL.Query().Get("state"); got != "open" {
+			t.Fatalf("unexpected state query: %q", got)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"number":     120,
+			"title":      "PR",
+			"state":      "open",
+			"html_url":   "https://github.com/owner/name/pull/120",
+			"base":       map[string]string{"ref": "main"},
+			"head":       map[string]string{"ref": "119"},
+			"created_at": "2026-07-05T12:00:00Z",
+			"updated_at": "2026-07-05T12:00:00Z",
+			"user":       map[string]string{"login": "alice"},
+		}})
+	}))
+	defer server.Close()
+
+	service := NewServiceWithConfig(model.IntegrationSystemConfig{
+		Transport:  "api",
+		BaseURL:    server.URL,
+		Token:      "secret",
+		Repository: "owner/name",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "pr",
+		ObjectType:      "merge-request",
+		Operation:       "search",
+		Query:           "head:119",
+		State:           "open",
+		Limit:           10,
+	})
+	if err != nil {
+		t.Fatalf("execute pr search through api transport: %v", err)
+	}
+	if len(response.MergeRequests) != 1 || response.MergeRequests[0].Number != 120 || response.MergeRequests[0].HeadRef != "119" {
+		t.Fatalf("unexpected merge requests: %#v", response.MergeRequests)
+	}
+}
+
 func TestAPITransportPaginatesIssueComments(t *testing.T) {
 	t.Parallel()
 

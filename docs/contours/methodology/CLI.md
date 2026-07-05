@@ -31,6 +31,12 @@
       "title": "Маршрут по умолчанию",
       "action": "implement",
       "profile": "default"
+    },
+    {
+      "name": "completed",
+      "title": "Завершение обработки",
+      "outcome": "completed",
+      "has_labels": ["Экспертиза пройдена"]
     }
   ],
   "actions": [
@@ -146,6 +152,18 @@ progress methodology add route \
   --profile default \
   --reason-code issue_context_ready \
   --reason-message "Контекст задачи готов к передаче в контур исполнения."
+```
+
+Маршрут может возвращать исход без запуска действия. Такой маршрут используется, когда контур принятия решения должен явно зафиксировать отсутствие следующей операции:
+
+```bash
+progress methodology add route \
+  --name task-processing-completed \
+  --title "Экспертиза пройдена" \
+  --outcome completed \
+  --has-label "Экспертиза пройдена" \
+  --reason-code review_already_passed \
+  --reason-message "У задачи зафиксирован признак пройденной экспертизы."
 ```
 
 Добавить или обновить инструкцию:

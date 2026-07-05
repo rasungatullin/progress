@@ -80,6 +80,30 @@ func DefaultRegistry() Registry {
 				},
 			},
 			{
+				ID:      "reactivity-to-decision-consideration-context",
+				Source:  Reactivity,
+				Target:  Decision,
+				Kind:    ContractKindWrite,
+				Object:  "контекст рассмотрения задачи",
+				Summary: "Контур реакции передаёт контуру принятия решения восстановленную задачу, связанные объекты и сигнал текущего цикла.",
+				Invariants: []string{
+					"контур реакции не выбирает следующий инженерный шаг при полной обработке",
+					"контур принятия решения возвращает задание на выполнение или отсутствие следующей операции",
+				},
+			},
+			{
+				ID:      "reactivity-to-execution-dispatch",
+				Source:  Reactivity,
+				Target:  Execution,
+				Kind:    ContractKindWrite,
+				Object:  "запуск задания на выполнение",
+				Summary: "Контур реакции запускает задание, сформированное контуром принятия решения или явно выбранное ручной командой.",
+				Invariants: []string{
+					"при полной обработке контур реакции не меняет действие, выбранное маршрутом",
+					"ручной запуск действия ограничен одним циклом обработки",
+				},
+			},
+			{
 				ID:      "integration-to-decision-canonical-context",
 				Source:  Integration,
 				Target:  Decision,
@@ -467,6 +491,8 @@ func validateRequiredContours(contours map[string]Contour) error {
 func validateRequiredContracts(contractIDs map[string]struct{}) error {
 	required := []string{
 		"reactivity-to-integration-restore-request",
+		"reactivity-to-decision-consideration-context",
+		"reactivity-to-execution-dispatch",
 		"integration-to-decision-canonical-context",
 		"decision-to-execution-assignment",
 		"execution-to-decision-result",

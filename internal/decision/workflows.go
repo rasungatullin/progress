@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/integration"
+	"github.com/rasungatullin/progress/internal/methodology"
 )
 
 const workflowConfigRelativePath = ".progress/decision/workflows.json"
@@ -23,6 +24,7 @@ type workflowRouteConfig struct {
 	Title           string   `json:"title"`
 	Description     string   `json:"description"`
 	Action          string   `json:"action"`
+	Outcome         string   `json:"outcome"`
 	HasFeatures     []string `json:"has_features"`
 	MissingFeatures []string `json:"missing_features"`
 	HasLabels       []string `json:"has_labels"`
@@ -35,6 +37,7 @@ type workflowRouteConfig struct {
 
 type selectedWorkflowRoute struct {
 	Action         string
+	Outcome        string
 	ExpectedResult string
 	Constraints    []string
 	ReasonCode     string
@@ -51,6 +54,7 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 
 	selected := selectedWorkflowRoute{
 		Action:         strings.TrimSpace(config.Defaults.Action),
+		Outcome:        strings.TrimSpace(config.Defaults.Outcome),
 		ExpectedResult: strings.TrimSpace(config.Defaults.ExpectedResult),
 		Constraints:    normalizeRouteConstraints(config.Defaults.Constraints),
 		ReasonCode:     strings.TrimSpace(config.Defaults.ReasonCode),
@@ -69,14 +73,20 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 			}},
 		}},
 	}
+	bestScore := -1
 	for index, route := range config.Routes {
 		check := evaluateWorkflowRoute(route, task)
 		if check.Status != RouteCheckStatusPassed {
 			continue
 		}
+		score := workflowRouteScore(route)
+		if score <= bestScore {
+			continue
+		}
 
 		selected = selectedWorkflowRoute{
 			Action:         strings.TrimSpace(route.Action),
+			Outcome:        strings.TrimSpace(route.Outcome),
 			ExpectedResult: strings.TrimSpace(route.ExpectedResult),
 			Constraints:    normalizeRouteConstraints(route.Constraints),
 			ReasonCode:     strings.TrimSpace(route.ReasonCode),
@@ -88,7 +98,7 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 			},
 			Checks: []RouteCheckResult{check},
 		}
-		break
+		bestScore = score
 	}
 
 	return selected, nil
@@ -107,6 +117,12 @@ func (s *Service) loadWorkflowConfig(ctx context.Context) (workflowConfigFile, e
 	repoRoot, err := resolveRepoRoot(ctx)
 	if err != nil {
 		return workflowConfigFile{}, fmt.Errorf("resolve git repository root for decision workflows: %w", err)
+	}
+
+	if config, err := s.loadWorkflowConfigFromMethodology(ctx, repoRoot); err == nil {
+		return config, nil
+	} else if !isMethodologyCatalogNotFound(err) {
+		return workflowConfigFile{}, err
 	}
 
 	configPath := filepath.Join(repoRoot, workflowConfigRelativePath)
@@ -130,9 +146,74 @@ func (s *Service) loadWorkflowConfig(ctx context.Context) (workflowConfigFile, e
 	return config, nil
 }
 
+func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoot string) (workflowConfigFile, error) {
+	snapshot, err := methodology.NewService(s.logger).Load(ctx, methodology.CatalogRequest{RepoRoot: repoRoot})
+	if err != nil {
+		return workflowConfigFile{}, err
+	}
+
+	config := workflowConfigFile{}
+	for _, route := range snapshot.Catalog.Routes {
+		routeConfig := workflowRouteConfig{
+			Name:            route.Name,
+			Title:           route.Title,
+			Description:     route.Description,
+			Action:          route.Action,
+			Outcome:         route.Outcome,
+			HasFeatures:     append([]string(nil), route.HasFeatures...),
+			MissingFeatures: append([]string(nil), route.MissingFeatures...),
+			HasLabels:       append([]string(nil), route.HasLabels...),
+			MissingLabels:   append([]string(nil), route.MissingLabels...),
+			ExpectedResult:  route.ExpectedResult,
+			Constraints:     append([]string(nil), route.Constraints...),
+			ReasonCode:      route.ReasonCode,
+			ReasonMessage:   route.ReasonMessage,
+		}
+		if routeConfig.Name == "default" {
+			config.Defaults = routeConfig
+			continue
+		}
+		if !workflowRouteHasMatchers(routeConfig) {
+			continue
+		}
+		config.Routes = append(config.Routes, routeConfig)
+	}
+	if config.Defaults.Action == "" && config.Defaults.Outcome == "" {
+		config.Defaults = workflowRouteConfig{
+			Name:          "default",
+			Title:         "Маршрут по умолчанию",
+			Action:        "implement",
+			ReasonCode:    "issue_context_ready",
+			ReasonMessage: "Контекст задачи готов к передаче в контур исполнения.",
+		}
+	}
+	if err := validateWorkflowConfig(config); err != nil {
+		return workflowConfigFile{}, fmt.Errorf("invalid methodology decision routes: %w", err)
+	}
+
+	return config, nil
+}
+
+func workflowRouteHasMatchers(route workflowRouteConfig) bool {
+	return len(normalizeLabels(route.HasLabels)) != 0 ||
+		len(normalizeLabels(route.MissingLabels)) != 0 ||
+		len(normalizeFeatures(route.HasFeatures)) != 0 ||
+		len(normalizeFeatures(route.MissingFeatures)) != 0
+}
+
+func workflowRouteScore(route workflowRouteConfig) int {
+	required := len(normalizeLabels(route.HasLabels)) + len(normalizeFeatures(route.HasFeatures))
+	missing := len(normalizeLabels(route.MissingLabels)) + len(normalizeFeatures(route.MissingFeatures))
+	return required*10 + missing
+}
+
+func isMethodologyCatalogNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "methodology catalog not found")
+}
+
 func validateWorkflowConfig(config workflowConfigFile) error {
-	if strings.TrimSpace(config.Defaults.Action) == "" {
-		return fmt.Errorf("defaults.action must be non-empty")
+	if strings.TrimSpace(config.Defaults.Action) == "" && strings.TrimSpace(config.Defaults.Outcome) == "" {
+		return fmt.Errorf("defaults.action or defaults.outcome must be non-empty")
 	}
 	if strings.TrimSpace(config.Defaults.ReasonCode) == "" {
 		return fmt.Errorf("defaults.reason_code must be non-empty")
@@ -142,13 +223,11 @@ func validateWorkflowConfig(config workflowConfigFile) error {
 	}
 
 	for index, route := range config.Routes {
-		if strings.TrimSpace(route.Action) == "" {
-			return fmt.Errorf("routes[%d].action must be non-empty", index)
+		if strings.TrimSpace(route.Action) == "" && strings.TrimSpace(route.Outcome) == "" {
+			return fmt.Errorf("routes[%d].action or outcome must be non-empty", index)
 		}
-		if len(normalizeLabels(route.HasLabels)) == 0 && len(normalizeLabels(route.MissingLabels)) == 0 {
-			if len(normalizeFeatures(route.HasFeatures)) == 0 && len(normalizeFeatures(route.MissingFeatures)) == 0 {
-				return fmt.Errorf("routes[%d] must declare at least one matcher", index)
-			}
+		if !workflowRouteHasMatchers(route) {
+			return fmt.Errorf("routes[%d] must declare at least one matcher", index)
 		}
 		if strings.TrimSpace(route.ReasonCode) == "" {
 			return fmt.Errorf("routes[%d].reason_code must be non-empty", index)
