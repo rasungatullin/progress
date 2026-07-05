@@ -880,6 +880,8 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 				}}}, nil
 			case "create":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", URL: "https://github.com/owner/name/pull/17#issuecomment-1"}}, nil
+			case "reply":
+				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", ExternalID: "comment-1"}}, nil
 			case "resolve":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", ExternalID: req.ThreadID}}, nil
 			default:
@@ -924,9 +926,9 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 		t.Fatalf("review rework action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
 	}
 	if len(integrations.calls) != 4 {
-		t.Fatalf("expected get, comments, create and resolve integration calls, got %#v", integrations.calls)
+		t.Fatalf("expected get, comments, reply and resolve integration calls, got %#v", integrations.calls)
 	}
-	if integrations.calls[2].Operation != "create" || integrations.calls[3].Operation != "resolve" || integrations.calls[3].ThreadID != "thread-1" {
+	if integrations.calls[2].Operation != "reply" || integrations.calls[2].ThreadID != "thread-1" || integrations.calls[3].Operation != "resolve" || integrations.calls[3].ThreadID != "thread-1" {
 		t.Fatalf("unexpected response publication calls: %#v", integrations.calls)
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishReviewResponses)
