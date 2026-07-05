@@ -190,6 +190,36 @@ func TestServiceStartRecoversMergeRequestForReviewRoute(t *testing.T) {
 	}
 }
 
+func TestServiceStartReturnsMergeRequestSearchErrorForReviewRoute(t *testing.T) {
+	t.Parallel()
+
+	integrationStub := &stubIntegrationExecutor{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     201,
+				Title:      "Run review route",
+				Labels:     []string{"Ожидает экспертизы"},
+			},
+		},
+		errOnSearch: errors.New("search unavailable"),
+	}
+	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
+	service := &Service{logger: log.Default(), integration: integrationStub, execution: executionStub, resolveRepo: func(context.Context) (string, error) { return "owner/name", nil }}
+
+	_, err := service.Start(context.Background(), StartInput{TaskNumber: 201})
+	if err == nil {
+		t.Fatal("expected merge request search error")
+	}
+	if !strings.Contains(err.Error(), "search unavailable") {
+		t.Fatalf("expected original search error, got: %v", err)
+	}
+	if executionStub.request.Assignment != nil {
+		t.Fatalf("execution must not start after merge request restoration failure: %#v", executionStub.request)
+	}
+}
+
 func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T) {
 	t.Parallel()
 
@@ -554,15 +584,19 @@ func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *test
 }
 
 type stubIntegrationExecutor struct {
-	response integration.Response
-	err      error
-	request  integration.Request
-	requests []integration.Request
+	response    integration.Response
+	err         error
+	errOnSearch error
+	request     integration.Request
+	requests    []integration.Request
 }
 
 func (s *stubIntegrationExecutor) Execute(_ context.Context, request integration.Request) (integration.Response, error) {
 	s.requests = append(s.requests, request)
 	s.request = request
+	if request.Operation == "search" && s.errOnSearch != nil {
+		return integration.Response{}, s.errOnSearch
+	}
 	return s.response, s.err
 }
 

@@ -247,6 +247,30 @@ func TestServiceProcessTaskReviewWithoutConclusionMarksRework(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskReturnsMergeRequestSearchErrorForReviewLabel(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelAwaitingReview})
+	integrations.searchErr = errors.New("search unavailable")
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{results: []decision.ConsiderationResult{
+		processingConsideration(execution.ActionReviewPullRequest),
+	}}
+	service.execution = &processingExecutionStub{}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err == nil {
+		t.Fatal("expected merge request search error")
+	}
+	if !strings.Contains(err.Error(), "search unavailable") {
+		t.Fatalf("expected original search error, got: %v", err)
+	}
+	if service.decision.(*processingDecisionStub).calls != 0 {
+		t.Fatal("decision must not run after merge request restoration failure")
+	}
+}
+
 func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 	t.Parallel()
 
@@ -327,9 +351,10 @@ func processingConsideration(action string) decision.ConsiderationResult {
 }
 
 type processingIntegrationStub struct {
-	issue    integration.TrackerIssue
-	labels   []string
-	requests []integration.Request
+	issue     integration.TrackerIssue
+	labels    []string
+	requests  []integration.Request
+	searchErr error
 }
 
 func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
@@ -353,6 +378,9 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 		issue.Labels = append([]string(nil), s.issue.Labels...)
 		return integration.Response{Issue: &issue}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "search":
+		if s.searchErr != nil {
+			return integration.Response{}, s.searchErr
+		}
 		return integration.Response{MergeRequests: []integration.MergeRequest{{
 			System:     "github",
 			Repository: "owner/name",

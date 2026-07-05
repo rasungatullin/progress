@@ -71,6 +71,9 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 
 	mergeRequest, err := s.findTaskMergeRequest(ctx, response.Issue)
 	if err != nil {
+		if taskLabelsRequireMergeRequest(response.Issue.Labels) {
+			return StartResult{}, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, err)
+		}
 		s.logger.Printf("Не удалось восстановить связанный запрос на слияние: задача=%d ошибка=%v", input.TaskNumber, err)
 	}
 
@@ -145,6 +148,20 @@ func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.T
 	}
 
 	return nil, nil
+}
+
+func taskLabelsRequireMergeRequest(labels []string) bool {
+	return hasLabel(labels, "Ожидает экспертизы") || hasLabel(labels, "Требует доработки")
+}
+
+func hasLabel(labels []string, candidate string) bool {
+	candidate = strings.ToLower(strings.TrimSpace(candidate))
+	for _, label := range labels {
+		if strings.ToLower(strings.TrimSpace(label)) == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (ConsiderationResult, error) {

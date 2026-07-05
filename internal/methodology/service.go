@@ -228,6 +228,14 @@ func (s *Service) repoRootForWrite(ctx context.Context, repoRoot string, scope c
 
 func selectRoute(routes []Route, name string) (Route, error) {
 	name = normalizeName(name)
+	if name == "" {
+		for _, route := range routes {
+			route = normalizeRoute(route)
+			if route.Name == "default" {
+				return route, nil
+			}
+		}
+	}
 	for _, route := range routes {
 		route = normalizeRoute(route)
 		if route.Name == "" {

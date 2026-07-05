@@ -211,6 +211,9 @@ func (s *Service) loadTaskState(ctx context.Context, taskNumber int) (*integrati
 
 	mergeRequest, err := s.findTaskMergeRequest(ctx, response.Issue)
 	if err != nil {
+		if taskLabelsRequireMergeRequest(response.Issue.Labels) {
+			return nil, nil, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, err)
+		}
 		s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%d ошибка=%v", taskNumber, err)
 	}
 	return response.Issue, mergeRequest, nil
@@ -504,6 +507,12 @@ func labelsMissing(existing []string, candidates []string) []string {
 		}
 	}
 	return dedupeLabels(result)
+}
+
+func taskLabelsRequireMergeRequest(labels []string) bool {
+	_, awaitingReview := findLabel(labels, LabelAwaitingReview)
+	_, needsRework := findLabel(labels, LabelNeedsRework)
+	return awaitingReview || needsRework
 }
 
 func removeLabels(existing []string, removed []string) []string {

@@ -50,6 +50,27 @@ func TestServiceSelectsRouteActionAndInstruction(t *testing.T) {
 	}
 }
 
+func TestServiceSelectsDefaultRouteWhenRouteNameIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewService(nil).Select(context.Background(), Catalog{
+		Routes: []Route{
+			{Name: "task-processing-completed", Outcome: "completed"},
+			{Name: "default", Action: "engineering-synthesis", Profile: "default"},
+		},
+		Actions: []Action{{
+			Name:    "engineering-synthesis",
+			Profile: "default",
+		}},
+	}, SelectionRequest{})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if result.Route.Name != "default" {
+		t.Fatalf("expected default route, got %#v", result.Route)
+	}
+}
+
 func TestServiceSelectReportsMissingAction(t *testing.T) {
 	t.Parallel()
 
