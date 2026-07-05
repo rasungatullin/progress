@@ -11,6 +11,7 @@ import (
 
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/integration"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
@@ -91,11 +92,17 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Execution.Status != "completed" {
 		t.Fatalf("unexpected execution status: %q", result.Execution.Status)
 	}
-	if integrationStub.request.System != "github" || integrationStub.request.Resource != "issue" || integrationStub.request.Operation != "get" {
-		t.Fatalf("unexpected integration request: %#v", integrationStub.request)
+	if got := len(integrationStub.requests); got != 2 {
+		t.Fatalf("unexpected number of integration requests: %d", got)
 	}
-	if integrationStub.request.Number != 123 {
-		t.Fatalf("unexpected integration request number: %d", integrationStub.request.Number)
+	if integrationStub.requests[0].System != "github" || integrationStub.requests[0].Resource != "issue" || integrationStub.requests[0].Operation != "get" {
+		t.Fatalf("unexpected issue request: %#v", integrationStub.requests[0])
+	}
+	if integrationStub.requests[0].Number != 123 {
+		t.Fatalf("unexpected issue request number: %d", integrationStub.requests[0].Number)
+	}
+	if integrationStub.requests[1].IntegrationType != integrationmodel.IntegrationTypeRepository || integrationStub.requests[1].Resource != "merge-request" || integrationStub.requests[1].Operation != "search" {
+		t.Fatalf("unexpected merge-request request: %#v", integrationStub.requests[1])
 	}
 	if executionStub.request.Assignment == nil {
 		t.Fatal("expected execution assignment")
@@ -111,6 +118,69 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	}
 	if executionStub.request.Assignment.StructuredInput == nil || executionStub.request.Assignment.StructuredInput.Task != result.Decision.ExecutionPlan.StructuredInput.Task {
 		t.Fatalf("unexpected execution structured input: %#v", executionStub.request.Assignment.StructuredInput)
+	}
+}
+
+func TestServiceStartRecoversMergeRequestForReviewRoute(t *testing.T) {
+	t.Parallel()
+
+	integrationStub := &stubIntegrationExecutor{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     201,
+				Title:      "Run review route",
+				Labels:     []string{"Ожидает экспертизы"},
+			},
+			MergeRequests: []integration.MergeRequest{{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     45,
+				Title:      "Review route task",
+				State:      "open",
+				BaseRef:    "main",
+				HeadRef:    "201",
+			}},
+		},
+	}
+	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
+	service := &Service{logger: log.Default(), integration: integrationStub, execution: executionStub, resolveRepo: func(context.Context) (string, error) { return "owner/name", nil }}
+
+	result, err := service.Start(context.Background(), StartInput{TaskNumber: 201})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if result.Decision == nil || result.Decision.ExecutionPlan == nil {
+		t.Fatalf("expected execution plan")
+	}
+	if result.Decision.ExecutionPlan.Action != execution.ActionReviewPullRequest {
+		t.Fatalf("unexpected execution action: %q", result.Decision.ExecutionPlan.Action)
+	}
+	if result.Context.MergeRequest == nil || result.Context.MergeRequest.Number != 45 {
+		t.Fatalf("expected recovered merge request in decision context: %#v", result.Context.MergeRequest)
+	}
+	if result.Consideration.Failure != nil {
+		t.Fatalf("did not expect consideration failure: %#v", result.Consideration.Failure)
+	}
+	if len(result.Consideration.Route.Name) == 0 {
+		t.Fatalf("unexpected empty route")
+	}
+	if executionStub.request.Assignment == nil || len(executionStub.request.Assignment.RelatedObjects) != 1 {
+		t.Fatalf("expected merge request related object in execution assignment: %#v", executionStub.request.Assignment)
+	}
+	object := executionStub.request.Assignment.RelatedObjects[0]
+	if object.Number != 45 {
+		t.Fatalf("unexpected execution related object: %#v", object)
+	}
+	if object.Attributes["head_ref"] != "201" {
+		t.Fatalf("expected execution related object with head_ref=201: %#v", object)
+	}
+	if object.Type != "merge-request" {
+		t.Fatalf("expected merge-request related object type: %#v", object)
+	}
+	if len(integrationStub.requests) != 2 {
+		t.Fatalf("unexpected number of integration requests: %d", len(integrationStub.requests))
 	}
 }
 
@@ -481,9 +551,11 @@ type stubIntegrationExecutor struct {
 	response integration.Response
 	err      error
 	request  integration.Request
+	requests []integration.Request
 }
 
 func (s *stubIntegrationExecutor) Execute(_ context.Context, request integration.Request) (integration.Response, error) {
+	s.requests = append(s.requests, request)
 	s.request = request
 	return s.response, s.err
 }

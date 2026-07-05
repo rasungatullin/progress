@@ -311,22 +311,22 @@ func reviewExecutionPassed(result *execution.ExecutionResult) bool {
 		output = result.Launch.StructuredOutput
 	}
 	if output == nil {
-		return true
+		return false
 	}
 	if hasReviewRemarks(output.Remarks) {
 		return false
 	}
 	if output.Conclusion == nil {
-		return true
+		return false
 	}
 
 	switch strings.ToLower(strings.TrimSpace(output.Conclusion.Status)) {
-	case "", "ok", "ready", "passed", "approved", "success", "completed":
+	case "ok", "ready", "passed", "approved", "approve", "success", "completed":
 		return true
 	case "failed", "blocked", "needs-work", "needs-rework", "changes-requested", "needs-follow-up", "rejected":
 		return false
 	default:
-		return !hasReviewRemarks(output.Remarks)
+		return false
 	}
 }
 

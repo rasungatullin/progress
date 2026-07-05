@@ -200,6 +200,74 @@ func TestServiceRunTaskActionSkipsDecisionAndMarksRework(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskReviewWithoutConclusionMarksRework(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelAwaitingReview})
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{results: []decision.ConsiderationResult{
+		processingConsideration(execution.ActionReviewPullRequest),
+	}}
+	service.execution = &processingExecutionStub{results: []execution.ExecutionResult{
+		{
+			Status: "completed",
+			Launch: &execution.LaunchResult{
+				Status: "completed",
+				StructuredOutput: &execution.StructuredOutput{Summary: "Reviewed"},
+			},
+		},
+	}}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(result.Cycles) != 1 {
+		t.Fatalf("expected one cycle, got %#v", result.Cycles)
+	}
+	if result.Cycles[0].ReviewPassed == nil || *result.Cycles[0].ReviewPassed {
+		t.Fatalf("review must be marked as failed: %#v", result.Cycles[0].ReviewPassed)
+	}
+	if got := strings.Join(integrations.labels, "|"); got != "remove:Ожидает экспертизы|add:Требует доработки" {
+		t.Fatalf("unexpected label operations: %s", got)
+	}
+}
+
+func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
+	t.Parallel()
+
+	if !reviewExecutionPassed(&execution.ExecutionResult{
+		Status: "completed",
+		Launch: &execution.LaunchResult{
+			Status: "completed",
+			StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "ok"}},
+		},
+	}) {
+		t.Fatal("expected review to pass with ok conclusion")
+	}
+
+	if reviewExecutionPassed(&execution.ExecutionResult{
+		Status: "completed",
+		Launch: &execution.LaunchResult{
+			Status: "completed",
+			StructuredOutput: &execution.StructuredOutput{Summary: "Reviewed"},
+		},
+	}) {
+		t.Fatal("expected review to fail without conclusion")
+	}
+
+	if reviewExecutionPassed(&execution.ExecutionResult{
+		Status: "completed",
+		Launch: &execution.LaunchResult{
+			Status: "completed",
+			StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "needs-work"}},
+		},
+	}) {
+		t.Fatal("expected review to fail on negative conclusion status")
+	}
+}
+
 func processingConsideration(action string) decision.ConsiderationResult {
 	return decision.ConsiderationResult{
 		Status: decision.ConsiderationStatusExecution,

@@ -7,10 +7,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/integration"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 type integrationExecutor interface {
@@ -67,10 +69,16 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		return StartResult{}, fmt.Errorf("integration did not return issue for task %d", input.TaskNumber)
 	}
 
+	mergeRequest, err := s.findTaskMergeRequest(ctx, response.Issue)
+	if err != nil {
+		s.logger.Printf("Не удалось восстановить связанный запрос на слияние: задача=%d ошибка=%v", input.TaskNumber, err)
+	}
+
 	decisionContext := DecisionContext{
-		Signal: signal,
-		Task:   canonicalTaskFromIssue(response.Issue),
-		Issue:  response.Issue,
+		Signal:       signal,
+		Task:         canonicalTaskFromIssue(response.Issue),
+		Issue:        response.Issue,
+		MergeRequest: mergeRequest,
 	}
 	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext})
 	if err != nil {
@@ -105,6 +113,37 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 
 	s.logger.Printf("Контекст решения собран: задача=%d готовность=%t решение=%q", input.TaskNumber, result.Ready, decision.Type)
 	return result, nil
+}
+
+func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.TrackerIssue) (*integration.MergeRequest, error) {
+	if issue == nil || issue.Number <= 0 || strings.TrimSpace(issue.Repository) == "" {
+		return nil, nil
+	}
+
+	response, err := s.integration.Execute(ctx, integration.Request{
+		IntegrationType: integrationmodel.IntegrationTypeRepository,
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "search",
+		Repository:      issue.Repository,
+		RepoProvided:    true,
+		State:           "open",
+		Limit:           100,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	head := strconv.Itoa(issue.Number)
+	for _, mergeRequest := range response.MergeRequests {
+		if strings.TrimSpace(mergeRequest.HeadRef) != head {
+			continue
+		}
+		copyOfMergeRequest := mergeRequest
+		return &copyOfMergeRequest, nil
+	}
+
+	return nil, nil
 }
 
 func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (ConsiderationResult, error) {
