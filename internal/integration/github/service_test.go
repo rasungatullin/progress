@@ -1565,6 +1565,54 @@ func TestServicePRCommentResolve(t *testing.T) {
 	}
 }
 
+func TestServicePRCommentReply(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `{
+			"data": {
+				"addPullRequestReviewThreadReply": {
+					"comment": {
+						"id": "comment-1",
+						"body": "Reply body",
+						"url": "https://github.com/owner/name/pull/42#discussion_r1",
+						"path": "file.go",
+						"line": 12,
+						"author": {"login": "alice", "url": "https://github.com/alice"},
+						"createdAt": "2026-06-01T12:00:00Z",
+						"updatedAt": "2026-06-01T12:01:00Z"
+					}
+				}
+			}
+		}`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "comment",
+		Operation:       "reply",
+		ThreadID:        "thread-1",
+		Body:            "Reply body",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if stub.prReplyCalls != 1 || stub.prReplyRequest.ThreadID != "thread-1" || stub.prReplyRequest.Body != "Reply body" {
+		t.Fatalf("unexpected reply call: %#v", stub)
+	}
+	if len(response.ReviewRemarks) != 1 || response.ReviewRemarks[0].State != "reply" || response.ReviewRemarks[0].ReplyToID != "thread-1" {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+	if response.OperationResult == nil || response.OperationResult.Operation != "reply" || response.OperationResult.ExternalID != "comment-1" {
+		t.Fatalf("unexpected operation result: %#v", response.OperationResult)
+	}
+}
+
 type stubRunner struct {
 	result            CommandResult
 	config            resolvedConfig
@@ -1578,6 +1626,7 @@ type stubRunner struct {
 	prListCalls       int
 	prReviewCalls     int
 	prCommentCalls    int
+	prReplyCalls      int
 	prResolveCalls    int
 	number            int
 	base              string
@@ -1588,6 +1637,7 @@ type stubRunner struct {
 	draft             bool
 	prListRequest     PRListRequest
 	prCommentRequest  PRCommentCreateRequest
+	prReplyRequest    PRReviewThreadReplyRequest
 	threadID          string
 	reviewResult      CommandResult
 }
@@ -1679,6 +1729,12 @@ func (r *stubRunner) RunPRCommentCreate(_ context.Context, repository string, nu
 	r.repo = repository
 	r.number = number
 	r.prCommentRequest = request
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRReviewThreadReply(_ context.Context, request PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error) {
+	r.prReplyCalls++
+	r.prReplyRequest = request
 	return r.result, r.config, r.err
 }
 

@@ -451,6 +451,25 @@ func (r *APIRunner) RunPRReviewThreadResolve(ctx context.Context, threadID strin
 	return result, apiResolvedConfig(config), nil
 }
 
+func (r *APIRunner) RunPRReviewThreadReply(ctx context.Context, request PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error) {
+	request, err := normalizePRReviewThreadReplyRequest(request)
+	if err != nil {
+		return apiErrorResult("pr review thread reply", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	config, err := r.resolveConfig()
+	if err != nil {
+		return apiErrorResult("pr review thread reply", config, err)
+	}
+	mutation := `mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id body url path line author { login url } createdAt updatedAt } } }`
+	var raw json.RawMessage
+	result, err := r.graphql(ctx, config, mutation, map[string]any{"threadId": request.ThreadID, "body": request.Body}, &raw)
+	if err != nil {
+		return result, apiResolvedConfig(config), err
+	}
+	result.Stdout = string(raw)
+	return result, apiResolvedConfig(config), nil
+}
+
 func (r *APIRunner) resolveConfig() (apiConfig, error) {
 	timeout := defaultTimeout
 	if value := strings.TrimSpace(r.systemConfig.Timeout); value != "" {

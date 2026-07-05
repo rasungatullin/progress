@@ -2266,6 +2266,39 @@ func TestIntegrationGitHubPRCommentResolveCommandPassesThread(t *testing.T) {
 	}
 }
 
+func TestIntegrationGitHubPRCommentReplyCommandPassesThread(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "pr", "comment", "reply", "--thread", "thread-1", "--body", "Reply body"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			ReviewRemarks:   []integration.ReviewRemark{{System: "github", ExternalID: "comment-1", ReplyToID: "thread-1", State: "reply", Body: "Reply body"}},
+			OperationResult: &integration.OperationResult{System: "github", ObjectType: "review-remark", Operation: "reply", Status: "ok", ExternalID: "comment-1"},
+		},
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github pr comment reply command: %v", err)
+	}
+	if provider.request.ThreadID != "thread-1" || provider.request.Body != "Reply body" || provider.request.Operation != "reply" || provider.request.IntegrationType != "repository" {
+		t.Fatalf("unexpected request: %#v", provider.request)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "remark_thread_id=thread-1\n") || !strings.Contains(output, "operation=reply\n") {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func TestIntegrationGitHubIssueLabelAddCommandSendsCanonicalLabels(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}

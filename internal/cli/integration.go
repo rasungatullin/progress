@@ -633,6 +633,7 @@ func newIntegrationMergeRequestCommentCommand(system string, label string) *cobr
 		Short: "Операции с комментариями запроса на слияние " + label,
 	}
 	cmd.AddCommand(newIntegrationMergeRequestCommentCreateCommand(system, label))
+	cmd.AddCommand(newIntegrationMergeRequestCommentReplyCommand(system, label))
 	cmd.AddCommand(newIntegrationMergeRequestCommentResolveCommand(system, label))
 	return cmd
 }
@@ -683,6 +684,46 @@ func newIntegrationMergeRequestCommentCreateCommand(system string, label string)
 	cmd.Flags().StringVar(&flags.path, "path", "", "Путь файла для inline-комментария")
 	cmd.Flags().IntVar(&flags.line, "line", 0, "Номер строки для inline-комментария")
 	cmd.Flags().StringVar(&flags.side, "side", flags.side, "Сторона diff для inline-комментария: LEFT или RIGHT")
+	return cmd
+}
+
+func newIntegrationMergeRequestCommentReplyCommand(system string, label string) *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{
+		Use:   "reply",
+		Short: "Ответ на замечание ревизии запроса на слияние " + label,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("thread") || strings.TrimSpace(flags.threadID) == "" {
+				return fmt.Errorf("--thread is required")
+			}
+			if !cmd.Flags().Changed("body") || strings.TrimSpace(flags.body) == "" {
+				return fmt.Errorf("--body is required")
+			}
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(context.Background(), integration.Request{
+				IntegrationType: "repository",
+				System:          system,
+				Resource:        "comment",
+				ObjectType:      "comment",
+				Operation:       "reply",
+				ThreadID:        flags.threadID,
+				Body:            flags.body,
+			})
+			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationReviewRemarkOperation); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flags.threadID, "thread", "", "Идентификатор review thread")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Текст ответа")
 	return cmd
 }
 

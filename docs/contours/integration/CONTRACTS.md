@@ -301,6 +301,7 @@ type Service interface {
 - `tracker.task.label.add`;
 - `repository.repo.get`;
 - `repository.merge-request.create`;
+- `repository.review-remark.reply`;
 - `repository.review-remark.resolve`;
 - `messenger.thread.get`;
 - `wiki.page.search`.

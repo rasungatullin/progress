@@ -103,6 +103,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			mergeRequestCommentListOperation(),
 			mergeRequestCommentCreateOperation(),
 			reviewRemarkListOperation(),
+			reviewRemarkReplyOperation(),
 			reviewRemarkResolveOperation(),
 		}
 	case "bitbucket":
@@ -515,6 +516,19 @@ func reviewRemarkListOperation() operationTemplate {
 	}
 }
 
+func reviewRemarkReplyOperation() operationTemplate {
+	return operationTemplate{
+		Name:            "repository.review-remark.reply",
+		IntegrationType: model.IntegrationTypeRepository,
+		ObjectType:      "review-remark",
+		Operation:       "reply",
+		SideEffect:      true,
+		Input:           inputMany([]model.OperationField{requiredField("thread", "string"), requiredField("body", "string")}),
+		Output:          output("operation-result", "OperationResult"),
+		FailureKinds:    defaultFailureKinds(),
+	}
+}
+
 func reviewRemarkResolveOperation() operationTemplate {
 	return operationTemplate{
 		Name:            "repository.review-remark.resolve",
@@ -611,7 +625,7 @@ func output(resource string, shape string) model.OperationOutputContract {
 
 func isSideEffectOperation(operation string) bool {
 	switch normalizeOperation(operation) {
-	case "create", "update", "add", "remove", "resolve", "delete":
+	case "create", "update", "add", "remove", "reply", "resolve", "delete":
 		return true
 	default:
 		return false

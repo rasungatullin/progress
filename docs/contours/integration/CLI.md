@@ -169,6 +169,7 @@ type Provider interface {
 - `progress integration github pr create`;
 - `progress integration github pr comments`;
 - `progress integration github pr comment create`;
+- `progress integration github pr comment reply`;
 - `progress integration github pr comment resolve`;
 - `progress integration bitbucket auth status`;
 - `progress integration bitbucket repo get`;
@@ -220,6 +221,7 @@ progress integration operations --name tracker.task.get
 - `tracker.task.get`;
 - `tracker.task.comment.create`;
 - `repository.merge-request.create`;
+- `repository.review-remark.reply`;
 - `repository.review-remark.resolve`;
 - `messenger.message.create`;
 - `wiki.page.search`.
@@ -419,7 +421,17 @@ progress integration github pr comment create --repo owner/name --number 456 --b
 
 Если `--path` и `--line` не переданы, адаптер создаёт обычный комментарий обсуждения через issue-часть PR. Если они переданы, адаптер создаёт review thread через GraphQL mutation `addPullRequestReviewThread`. Флаг `--side` задаёт сторону diff и по умолчанию равен `RIGHT`.
 
-### 7.15 `progress integration github pr comment resolve`
+### 7.15 `progress integration github pr comment reply`
+
+Команда создаёт ответ в существующей цепочке inline-замечания ревизии.
+
+```bash
+progress integration github pr comment reply --thread PRRT_kw... --body "Исправлено в новом коммите"
+```
+
+Команда использует GraphQL mutation `addPullRequestReviewThreadReply`. Идентификатор thread можно получить из поля `remark_thread_id` команды `progress integration github pr comments` или из ответа команды создания inline-замечания.
+
+### 7.16 `progress integration github pr comment resolve`
 
 Команда разрешает inline-замечание ревизии по идентификатору review thread.
 
@@ -429,7 +441,7 @@ progress integration github pr comment resolve --thread PRRT_kw...
 
 Команда использует GraphQL mutation `resolveReviewThread`. Идентификатор thread можно получить из поля `remark_thread_id` команды `progress integration github pr comments`.
 
-### 7.16 `progress integration bitbucket pr search`
+### 7.17 `progress integration bitbucket pr search`
 
 Команда выполняет поиск запросов на слияние в Bitbucket.
 
@@ -442,13 +454,13 @@ progress integration github pr comment resolve --thread PRRT_kw...
 - `--query` для выражения фильтра Bitbucket Cloud;
 - `--limit` для ограничения количества результатов.
 
-### 7.17 `progress integration bitbucket pr comment create`
+### 7.18 `progress integration bitbucket pr comment create`
 
 Команда создаёт комментарий к запросу на слияние Bitbucket Cloud. Для inline-комментария используются `--path`, `--line` и `--side`.
 
 `progress integration bitbucket pr comment resolve` присутствует в CLI как единая операция контура, но текущий Bitbucket-адаптер возвращает `unsupported-operation`, потому что механизм разрешения замечаний различается между Bitbucket Cloud и Server/Data Center и требует отдельного контракта.
 
-### 7.18 `progress integration github api`
+### 7.19 `progress integration github api`
 
 Команда даёт управляемый резервный путь для редких операций, которые ещё не вынесены в отдельный подкомандный интерфейс.
 
@@ -519,7 +531,8 @@ flowchart TD
     D --> M[pr list]
     D --> N[pr comments]
     D --> O[pr comment create]
-    D --> P[pr comment resolve]
+    D --> P[pr comment reply]
+    D --> AA[pr comment resolve]
     B --> Q[bitbucket]
     Q --> R[auth status]
     Q --> S[repo get]
