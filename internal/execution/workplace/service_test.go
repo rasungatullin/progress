@@ -95,6 +95,61 @@ func TestPrepareUsesRequestedHeadBranch(t *testing.T) {
 	})
 }
 
+func TestPrepareUsesFetchedRequestedHeadBranchWhenRemoteRefIsMissing(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	responses := map[gitOutputKey]string{
+		{dir: hostRepoRoot, args: keyArgs("fetch", "origin", "feature/narrow")}: "fetched\n",
+	}
+	service, gitCalls := newStubService(t, hostRepoRoot, responses)
+
+	workplace, err := service.Prepare(context.Background(), model.Invocation{
+		Workplace: model.WorkplaceSpec{
+			Name:    "feature-narrow",
+			BaseRef: "main",
+			HeadRef: "feature/narrow",
+		},
+	}, model.Profile{}, model.Allocation{})
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+
+	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "feature-narrow")
+	if workplace.Name != expectedDir {
+		t.Fatalf("unexpected workplace path: %q", workplace.Name)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{
+		{dir: hostRepoRoot, args: []string{"fetch", "origin", "main"}},
+		{dir: hostRepoRoot, args: []string{"worktree", "add", "-b", "feature/narrow", expectedDir, "FETCH_HEAD"}},
+	})
+}
+
+func TestPrepareRejectsMissingRequestedHeadBranch(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	service, gitCalls := newStubService(t, hostRepoRoot, nil)
+
+	_, err := service.Prepare(context.Background(), model.Invocation{
+		Workplace: model.WorkplaceSpec{
+			Name:    "feature-missing",
+			BaseRef: "main",
+			HeadRef: "feature/missing",
+		},
+	}, model.Profile{}, model.Allocation{})
+	if err == nil {
+		t.Fatal("expected missing requested head branch error")
+	}
+	if !strings.Contains(err.Error(), `head branch "feature/missing" is not available for workplace preparation`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertGitCalls(t, gitCalls, []gitCall{
+		{dir: hostRepoRoot, args: []string{"fetch", "origin", "main"}},
+	})
+}
+
 func TestPrepareUsesRemoteTaskBranchWhenPresent(t *testing.T) {
 	t.Parallel()
 

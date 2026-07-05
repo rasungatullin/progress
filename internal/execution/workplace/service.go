@@ -80,6 +80,7 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 		return model.Workplace{}, err
 	}
 	branchName := strings.TrimSpace(in.Workplace.HeadRef)
+	requireHeadBranch := branchName != ""
 	if branchName == "" {
 		branchName = name
 	}
@@ -142,13 +143,21 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 	if err := s.runGit(ctx, repoRoot, "fetch", "origin", baseBranch); err != nil {
 		return model.Workplace{}, fmt.Errorf("fetch origin/%s: %w", baseBranch, err)
 	}
-	s.fetchRemoteBranch(ctx, repoRoot, branchName)
+	headFetchErr := s.fetchRemoteBranch(ctx, repoRoot, branchName)
+	headFetched := headFetchErr == nil
 
 	addArgs := []string{"worktree", "add", "-b", branchName, targetDir, "origin/" + baseBranch}
 	if s.localBranchExists(ctx, repoRoot, branchName) {
 		addArgs = []string{"worktree", "add", targetDir, branchName}
 	} else if s.remoteBranchExists(ctx, repoRoot, branchName) {
 		addArgs = []string{"worktree", "add", "-b", branchName, targetDir, "origin/" + branchName}
+	} else if requireHeadBranch && headFetched {
+		addArgs = []string{"worktree", "add", "-b", branchName, targetDir, "FETCH_HEAD"}
+	} else if requireHeadBranch {
+		if headFetchErr != nil {
+			return model.Workplace{}, fmt.Errorf("head branch %q is not available for workplace preparation: %w", branchName, headFetchErr)
+		}
+		return model.Workplace{}, fmt.Errorf("head branch %q is not available for workplace preparation", branchName)
 	}
 	if err := s.runGit(ctx, repoRoot, addArgs...); err != nil {
 		return model.Workplace{}, fmt.Errorf("create git worktree %q: %w", branchName, err)
@@ -167,8 +176,9 @@ func (s *Service) remoteBranchExists(ctx context.Context, dir string, name strin
 	return err == nil
 }
 
-func (s *Service) fetchRemoteBranch(ctx context.Context, dir string, name string) {
-	_, _ = s.runGitOutput(ctx, dir, "fetch", "origin", name)
+func (s *Service) fetchRemoteBranch(ctx context.Context, dir string, name string) error {
+	_, err := s.runGitOutput(ctx, dir, "fetch", "origin", name)
+	return err
 }
 
 func selectedEnvironment(in model.Invocation, allocation model.Allocation) (string, string) {
