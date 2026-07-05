@@ -221,7 +221,8 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 	if err != nil {
 		return apiErrorResult("pr list", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	if strings.TrimSpace(request.Query) != "" || request.Scope != "all" {
+	headRef, querySupported := apiPRListHeadQuery(request.Query)
+	if (strings.TrimSpace(request.Query) != "" && !querySupported) || request.Scope != "all" {
 		return apiErrorResult("pr list", apiConfig{}, &Error{Code: ErrorCodeUnsupportedOperation, Message: "GitHub API transport does not support pull request search query or scope yet"})
 	}
 	config, err := r.resolveConfig()
@@ -229,6 +230,10 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 		return apiErrorResult("pr list", config, err)
 	}
 	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return apiErrorResult("pr list", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	owner, _, err := splitRepository(repository)
 	if err != nil {
 		return apiErrorResult("pr list", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
@@ -249,7 +254,14 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 	var pullRequests []apiPullRequest
 	for page := 1; len(pullRequests) < request.Limit; page++ {
 		var raw []apiPullRequest
-		endpoint := fmt.Sprintf("repos/%s/pulls?state=%s&per_page=%d&page=%d", repository, apiState, perPage, page)
+		query := url.Values{}
+		query.Set("state", apiState)
+		query.Set("per_page", fmt.Sprintf("%d", perPage))
+		query.Set("page", fmt.Sprintf("%d", page))
+		if headRef != "" {
+			query.Set("head", owner+":"+headRef)
+		}
+		endpoint := fmt.Sprintf("repos/%s/pulls?%s", repository, query.Encode())
 		result, err = r.do(ctx, config, http.MethodGet, endpoint, nil, &raw)
 		if err != nil {
 			return result, apiResolvedConfig(config), err
@@ -282,6 +294,22 @@ func (r *APIRunner) RunPRList(ctx context.Context, repository string, request PR
 	}
 	result.Stdout = mustJSON(views)
 	return result, apiResolvedConfig(config), nil
+}
+
+func apiPRListHeadQuery(query string) (string, bool) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", true
+	}
+	parts := strings.Fields(query)
+	if len(parts) != 1 {
+		return "", false
+	}
+	head, ok := strings.CutPrefix(parts[0], "head:")
+	if !ok || strings.TrimSpace(head) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(head), true
 }
 
 func (r *APIRunner) RunPRCreate(ctx context.Context, repository string, request PRCreateRequest) (CommandResult, resolvedConfig, error) {
