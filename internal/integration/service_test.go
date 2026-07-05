@@ -225,6 +225,50 @@ func TestDispatchReportsUnsupportedConfiguredSystemType(t *testing.T) {
 	}
 }
 
+func TestDispatchRepositoryCommentReplyReturnsOperationResult(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	route, err := service.Dispatch(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "comment",
+		Operation:       "reply",
+	})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if route.ExpectedResult != "integration-operation-result" {
+		t.Fatalf("unexpected expected result: %q", route.ExpectedResult)
+	}
+	if route.Operation != "reply" || route.ObjectType != "comment" {
+		t.Fatalf("unexpected route: %#v", route)
+	}
+}
+
+func TestDispatchRepositoryReviewRemarkReplyReturnsOperationResult(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	route, err := service.Dispatch(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "review-remark",
+		Operation:       "reply",
+	})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if route.ExpectedResult != "integration-operation-result" {
+		t.Fatalf("unexpected expected result: %q", route.ExpectedResult)
+	}
+	if route.Operation != "reply" || route.ObjectType != "review-remark" {
+		t.Fatalf("unexpected route: %#v", route)
+	}
+}
+
 func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	t.Parallel()
 

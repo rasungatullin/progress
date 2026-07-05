@@ -1524,6 +1524,71 @@ func TestServicePRCommentCreateInline(t *testing.T) {
 	}
 }
 
+func TestServicePRCommentsSupportsReviewRemarkObjectAlias(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `[[{
+			"id": 100,
+			"body": "Conversation comment",
+			"html_url": "https://github.com/owner/name/pull/42#issuecomment-100",
+			"user": {"login": "alice", "html_url": "https://github.com/alice"},
+			"created_at": "2026-06-01T10:00:00Z",
+			"updated_at": "2026-06-01T10:01:00Z"
+		}]]`},
+		reviewResult: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `{
+			"data": {
+				"repository": {
+					"pullRequest": {
+						"reviewThreads": {
+							"nodes": [{
+								"id": "thread-1",
+								"isResolved": false,
+								"path": "file.go",
+								"line": 12,
+								"comments": {
+									"nodes": [{
+										"id": "comment-1",
+										"body": "Inline remark",
+										"url": "https://github.com/owner/name/pull/42#discussion_r1",
+										"path": "file.go",
+										"line": 12,
+										"author": {"login": "bob", "url": "https://github.com/bob"},
+										"createdAt": "2026-06-01T11:00:00Z",
+										"updatedAt": "2026-06-01T11:01:00Z"
+									}]
+								}
+							}]
+						}
+					}
+				}
+			}
+		}`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "review-remark",
+		Operation:       "list",
+		Repository:      "owner/name",
+		RepoProvided:    true,
+		Number:          42,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.issueCommentCalls != 1 || stub.prReviewCalls != 1 {
+		t.Fatalf("unexpected calls: %#v", stub)
+	}
+	if len(response.ReviewRemarks) != 2 {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+}
+
 func TestServicePRCommentResolve(t *testing.T) {
 	t.Parallel()
 
@@ -1547,6 +1612,47 @@ func TestServicePRCommentResolve(t *testing.T) {
 		System:          "github",
 		Resource:        "comment",
 		ObjectType:      "comment",
+		Operation:       "resolve",
+		ThreadID:        "thread-1",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if stub.prResolveCalls != 1 || stub.threadID != "thread-1" {
+		t.Fatalf("unexpected resolve call: %#v", stub)
+	}
+	if len(response.ReviewRemarks) != 1 || response.ReviewRemarks[0].State != "resolved" {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+	if response.OperationResult == nil || response.OperationResult.ExternalID != "thread-1" {
+		t.Fatalf("unexpected operation result: %#v", response.OperationResult)
+	}
+}
+
+func TestServicePRCommentResolveSupportsReviewRemarkObject(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `{
+			"data": {
+				"resolveReviewThread": {
+					"thread": {
+						"id": "thread-1",
+						"isResolved": true
+					}
+				}
+			}
+		}`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "review-remark",
 		Operation:       "resolve",
 		ThreadID:        "thread-1",
 	})
@@ -1594,6 +1700,54 @@ func TestServicePRCommentReply(t *testing.T) {
 		System:          "github",
 		Resource:        "comment",
 		ObjectType:      "comment",
+		Operation:       "reply",
+		ThreadID:        "thread-1",
+		Body:            "Reply body",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if stub.prReplyCalls != 1 || stub.prReplyRequest.ThreadID != "thread-1" || stub.prReplyRequest.Body != "Reply body" {
+		t.Fatalf("unexpected reply call: %#v", stub)
+	}
+	if len(response.ReviewRemarks) != 1 || response.ReviewRemarks[0].State != "reply" || response.ReviewRemarks[0].ReplyToID != "thread-1" {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+	if response.OperationResult == nil || response.OperationResult.Operation != "reply" || response.OperationResult.ExternalID != "comment-1" {
+		t.Fatalf("unexpected operation result: %#v", response.OperationResult)
+	}
+}
+
+func TestServicePRCommentReplySupportsReviewRemarkObject(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `{
+			"data": {
+				"addPullRequestReviewThreadReply": {
+					"comment": {
+						"id": "comment-1",
+						"body": "Reply body",
+						"url": "https://github.com/owner/name/pull/42#discussion_r1",
+						"path": "file.go",
+						"line": 12,
+						"author": {"login": "alice", "url": "https://github.com/alice"},
+						"createdAt": "2026-06-01T12:00:00Z",
+						"updatedAt": "2026-06-01T12:01:00Z"
+					}
+				}
+			}
+		}`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "comment",
+		ObjectType:      "review-remark",
 		Operation:       "reply",
 		ThreadID:        "thread-1",
 		Body:            "Reply body",

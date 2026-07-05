@@ -202,6 +202,8 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executePRCreate(ctx, response, req)
 	case isPullRequestRequest(req) && req.Operation == "comments":
 		return s.executePRComments(ctx, response, req)
+	case isPullRequestCommentRequest(req) && req.Operation == "list":
+		return s.executePRComments(ctx, response, req)
 	case isPullRequestCommentRequest(req) && req.Operation == "create":
 		return s.executePRCommentCreate(ctx, response, req)
 	case isPullRequestCommentRequest(req) && req.Operation == "reply":
@@ -2091,7 +2093,7 @@ func isIssueLabelRequest(req model.ProviderRequest) bool {
 
 func isPullRequestCommentRequest(req model.ProviderRequest) bool {
 	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
-	return object == "comment" && req.IntegrationType == model.IntegrationTypeRepository
+	return (object == "comment" || object == "review-remark" || object == "merge-request-comment") && req.IntegrationType == model.IntegrationTypeRepository
 }
 
 func isPullRequestRequest(req model.ProviderRequest) bool {
