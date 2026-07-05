@@ -187,6 +187,118 @@ func TestLoadIntegrationConfigLetsLocalTokenEnvOverridePrivateToken(t *testing.T
 	}
 }
 
+func TestLoadIntegrationConfigMergesGitHubAppSettings(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/integration/systems.json":
+			return []byte(`{
+				"systems": {
+					"github-app": {
+						"type": "github",
+						"transport": "api",
+						"github_app_id": "12345",
+						"github_app_installation_id": "144549701",
+						"github_app_private_key_path": "/global/key.pem",
+						"github_app_token_refresh_before": "10m"
+					}
+				}
+			}`), nil
+		case "/repo/.progress/integration/systems.json":
+			return []byte(`{
+				"systems": {
+					"github-app": {
+						"github_app_client_id": "Iv1.client",
+						"github_app_private_key_private": "progress_synthesis_pem"
+					}
+				}
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load integration config: %v", err)
+	}
+	system := config.Config.Systems["github-app"]
+	if system.GitHubAppID != "12345" {
+		t.Fatalf("unexpected app id: %q", system.GitHubAppID)
+	}
+	if system.GitHubAppClientID != "Iv1.client" {
+		t.Fatalf("unexpected client id: %q", system.GitHubAppClientID)
+	}
+	if system.GitHubAppInstallationID != "144549701" {
+		t.Fatalf("unexpected installation id: %q", system.GitHubAppInstallationID)
+	}
+	if system.GitHubAppPrivateKeyPrivate != "progress_synthesis_pem" {
+		t.Fatalf("unexpected private key reference: %q", system.GitHubAppPrivateKeyPrivate)
+	}
+	if system.GitHubAppPrivateKeyPath != "" {
+		t.Fatalf("expected private value to clear key path, got: %q", system.GitHubAppPrivateKeyPath)
+	}
+	if system.GitHubAppTokenRefreshBefore != "10m" {
+		t.Fatalf("unexpected refresh interval: %q", system.GitHubAppTokenRefreshBefore)
+	}
+}
+
+func TestLoadIntegrationConfigRejectsIncompleteGitHubAppSettings(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{
+				"systems": {
+					"github-app": {
+						"type": "github",
+						"transport": "api",
+						"github_app_installation_id": "144549701"
+					}
+				}
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if err.Error() != `invalid integration config after merge of 1 layers: system "github-app" uses GitHub App auth without github_app_id or github_app_client_id` {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadIntegrationConfigAllowsTokenToOverrideIncompleteGitHubAppSettings(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/integration/systems.json" {
+			return []byte(`{
+				"systems": {
+					"github-app": {
+						"type": "github",
+						"transport": "api",
+						"token": "direct-token",
+						"github_app_installation_id": "144549701"
+					}
+				}
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	config, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load integration config: %v", err)
+	}
+	if config.Config.Systems["github-app"].Token != "direct-token" {
+		t.Fatalf("unexpected token: %q", config.Config.Systems["github-app"].Token)
+	}
+}
+
 func TestLoadIntegrationConfigKeepsTokenPriorityWithinLayer(t *testing.T) {
 	t.Parallel()
 

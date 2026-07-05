@@ -172,8 +172,11 @@ func resolvePrivateSystemConfig(ctx context.Context, system string, config *mode
 	if config == nil {
 		return nil
 	}
-	if strings.TrimSpace(config.Token) != "" || strings.TrimSpace(config.TokenPrivate) == "" {
+	if strings.TrimSpace(config.Token) != "" || strings.TrimSpace(config.TokenEnv) != "" {
 		return nil
+	}
+	if strings.TrimSpace(config.TokenPrivate) == "" {
+		return resolvePrivateGitHubAppConfig(ctx, system, config, store)
 	}
 	if store == nil {
 		return fmt.Errorf("integration system %q requires private value %q but private store is not configured", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
@@ -189,6 +192,27 @@ func resolvePrivateSystemConfig(ctx context.Context, system string, config *mode
 		return fmt.Errorf("integration system %q references empty private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
 	}
 	config.Token = value
+	return resolvePrivateGitHubAppConfig(ctx, system, config, store)
+}
+
+func resolvePrivateGitHubAppConfig(ctx context.Context, system string, config *model.IntegrationSystemConfig, store secrets.Store) error {
+	if config == nil || strings.TrimSpace(config.GitHubAppPrivateKey) != "" || strings.TrimSpace(config.GitHubAppPrivateKeyPrivate) == "" {
+		return nil
+	}
+	if store == nil {
+		return fmt.Errorf("integration system %q requires private value %q but private store is not configured", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))
+	}
+	value, err := store.Get(ctx, config.GitHubAppPrivateKeyPrivate)
+	if err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))
+		}
+		return fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate), err)
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("integration system %q references empty private value %q", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))
+	}
+	config.GitHubAppPrivateKey = value
 	return nil
 }
 

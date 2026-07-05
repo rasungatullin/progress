@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/configuration"
+	"github.com/rasungatullin/progress/internal/integration/model"
 	"github.com/rasungatullin/progress/internal/logging"
 )
 
@@ -77,5 +78,40 @@ func TestNewConfiguredServiceLoadsGlobalLayerWhenRepoRootUnavailable(t *testing.
 	}
 	if !route.ProviderAvailable {
 		t.Fatal("provider from global layer must be available even without repo root")
+	}
+}
+
+func TestConfigUsesPrivateValuesDetectsGitHubAppPrivateKey(t *testing.T) {
+	t.Parallel()
+
+	config := model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github-app": {
+				Type:                       "github",
+				GitHubAppPrivateKeyPrivate: "progress_synthesis_pem",
+			},
+		},
+	}
+
+	if !configUsesPrivateValues(config) {
+		t.Fatal("expected GitHub App private key reference to require private store")
+	}
+}
+
+func TestConfigUsesPrivateValuesSkipsGitHubAppPrivateKeyWhenTokenIsConfigured(t *testing.T) {
+	t.Parallel()
+
+	config := model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github-app": {
+				Type:                       "github",
+				TokenEnv:                   "GITHUB_TOKEN",
+				GitHubAppPrivateKeyPrivate: "progress_synthesis_pem",
+			},
+		},
+	}
+
+	if configUsesPrivateValues(config) {
+		t.Fatal("token_env must not require GitHub App private key store")
 	}
 }
