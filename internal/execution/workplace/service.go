@@ -92,11 +92,16 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 
 	repoRoot := hostRepoRoot
 	repositoryURL := ""
+	useRepositoryCache := repoSource != nil
 	if repoSource != nil {
 		repositoryURL = repoSource.CloneURL
-		repoRoot, err = s.materializeRepository(ctx, hostRepoRoot, *repoSource)
-		if err != nil {
-			return model.Workplace{}, err
+		if s.repositoryMatchesHost(ctx, hostRepoRoot, *repoSource) {
+			useRepositoryCache = false
+		} else {
+			repoRoot, err = s.materializeRepository(ctx, hostRepoRoot, *repoSource)
+			if err != nil {
+				return model.Workplace{}, err
+			}
 		}
 	}
 
@@ -106,7 +111,7 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 	}
 
 	targetDir := filepath.Join(repoRoot, ".progress", "workplaces", name)
-	if repoSource != nil {
+	if repoSource != nil && useRepositoryCache {
 		targetDir = filepath.Join(hostRepoRoot, ".progress", "workplaces", repoSource.CacheKey, name)
 	}
 	if err := os.MkdirAll(filepath.Dir(targetDir), 0o755); err != nil {
@@ -130,12 +135,33 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 	if err := s.runGit(ctx, repoRoot, "fetch", "origin", baseBranch); err != nil {
 		return model.Workplace{}, fmt.Errorf("fetch origin/%s: %w", baseBranch, err)
 	}
+	s.fetchRemoteBranch(ctx, repoRoot, name)
 
-	if err := s.runGit(ctx, repoRoot, "worktree", "add", "-b", name, targetDir, "FETCH_HEAD"); err != nil {
+	addArgs := []string{"worktree", "add", "-b", name, targetDir, "origin/" + baseBranch}
+	if s.localBranchExists(ctx, repoRoot, name) {
+		addArgs = []string{"worktree", "add", targetDir, name}
+	} else if s.remoteBranchExists(ctx, repoRoot, name) {
+		addArgs = []string{"worktree", "add", "-b", name, targetDir, "origin/" + name}
+	}
+	if err := s.runGit(ctx, repoRoot, addArgs...); err != nil {
 		return model.Workplace{}, fmt.Errorf("create git worktree %q: %w", name, err)
 	}
 
 	return model.Workplace{Name: targetDir, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
+}
+
+func (s *Service) localBranchExists(ctx context.Context, dir string, name string) bool {
+	_, err := s.runGitOutput(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil
+}
+
+func (s *Service) remoteBranchExists(ctx context.Context, dir string, name string) bool {
+	_, err := s.runGitOutput(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+name)
+	return err == nil
+}
+
+func (s *Service) fetchRemoteBranch(ctx context.Context, dir string, name string) {
+	_, _ = s.runGitOutput(ctx, dir, "fetch", "origin", name)
 }
 
 func selectedEnvironment(in model.Invocation, allocation model.Allocation) (string, string) {
@@ -280,6 +306,20 @@ func (s *Service) materializeRepository(ctx context.Context, hostRepoRoot string
 	}
 
 	return cacheDir, nil
+}
+
+func (s *Service) repositoryMatchesHost(ctx context.Context, hostRepoRoot string, repository repositoryRef) bool {
+	originURL, err := s.runGitOutput(ctx, hostRepoRoot, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return false
+	}
+
+	hostRepository, err := normalizeRepositoryRef(originURL)
+	if err != nil || hostRepository == nil {
+		return false
+	}
+
+	return hostRepository.CacheKey == repository.CacheKey
 }
 
 func normalizeRepositoryRef(raw string) (*repositoryRef, error) {

@@ -35,6 +35,7 @@ type StructuredOutput struct {
 	Summary         string                `json:"summary,omitempty"`
 	CommitMessage   string                `json:"commit_message,omitempty"`
 	Remarks         []StructuredRemark    `json:"remarks,omitempty"`
+	ReviewResponses []StructuredResponse  `json:"review_responses,omitempty"`
 	Questions       []StructuredQuestion  `json:"questions,omitempty"`
 	FollowUpActions []StructuredAction    `json:"follow_up_actions,omitempty"`
 	Changes         []StructuredChange    `json:"changes,omitempty"`

@@ -25,6 +25,14 @@ type actionFlags struct {
 	reviewRemarks       []string
 	reviewResponses     []string
 	integrationActions  []string
+	repository          string
+	taskNumber          int
+	prNumber            int
+	baseRef             string
+	headRef             string
+	title               string
+	body                string
+	draft               bool
 }
 
 type operationFlags struct {
@@ -164,6 +172,14 @@ func bindStructuredInputFlags(cmd *cobra.Command, flags *actionFlags) {
 	cmd.Flags().StringArrayVar(&flags.reviewRemarks, "review-remark", nil, "JSON-объект для review_remarks, флаг можно повторять")
 	cmd.Flags().StringArrayVar(&flags.reviewResponses, "review-response", nil, "JSON-объект для review_responses, флаг можно повторять")
 	cmd.Flags().StringArrayVar(&flags.integrationActions, "integration-action", nil, "JSON-объект для integration_actions, флаг можно повторять")
+	cmd.Flags().StringVar(&flags.repository, "repository", "", "Репозиторий внешней системы в форме owner/name")
+	cmd.Flags().IntVar(&flags.taskNumber, "task-number", 0, "Номер задачи для имени ветки и рабочего места")
+	cmd.Flags().IntVar(&flags.prNumber, "pr-number", 0, "Номер запроса на слияние")
+	cmd.Flags().StringVar(&flags.baseRef, "base", "", "Базовая ветка запроса на слияние")
+	cmd.Flags().StringVar(&flags.headRef, "head", "", "Ветка с изменениями для запроса на слияние")
+	cmd.Flags().StringVar(&flags.title, "title", "", "Заголовок задачи или запроса на слияние")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Описание задачи или запроса на слияние")
+	cmd.Flags().BoolVar(&flags.draft, "draft", false, "Открыть запрос на слияние как черновик")
 }
 
 func actionInvocationFromFlags(flags *actionFlags) (execution.ActionInvocation, error) {
@@ -181,9 +197,68 @@ func actionInvocationFromFlags(flags *actionFlags) (execution.ActionInvocation, 
 	return execution.ActionInvocation{
 		Assignment: &execution.ExecutionAssignment{
 			Action:          strings.TrimSpace(flags.action),
+			CanonicalTask:   canonicalTaskFromFlags(flags),
+			RelatedObjects:  relatedObjectsFromFlags(flags),
 			StructuredInput: input,
 		},
 	}, nil
+}
+
+func canonicalTaskFromFlags(flags *actionFlags) *execution.ObjectRef {
+	if flags == nil {
+		return nil
+	}
+	if flags.taskNumber <= 0 && strings.TrimSpace(flags.repository) == "" && strings.TrimSpace(flags.title) == "" && strings.TrimSpace(flags.body) == "" {
+		return nil
+	}
+
+	task := &execution.ObjectRef{
+		Type:       "task",
+		Repository: strings.TrimSpace(flags.repository),
+		Number:     flags.taskNumber,
+		Title:      strings.TrimSpace(flags.title),
+		Attributes: map[string]string{},
+	}
+	if body := strings.TrimSpace(flags.body); body != "" {
+		task.Attributes["body"] = body
+	}
+	if len(task.Attributes) == 0 {
+		task.Attributes = nil
+	}
+	return task
+}
+
+func relatedObjectsFromFlags(flags *actionFlags) []execution.ObjectRef {
+	if flags == nil {
+		return nil
+	}
+	if flags.prNumber <= 0 && strings.TrimSpace(flags.baseRef) == "" && strings.TrimSpace(flags.headRef) == "" && !flags.draft {
+		return nil
+	}
+
+	attributes := map[string]string{}
+	if value := strings.TrimSpace(flags.baseRef); value != "" {
+		attributes["base_ref"] = value
+	}
+	if value := strings.TrimSpace(flags.headRef); value != "" {
+		attributes["head_ref"] = value
+	}
+	if value := strings.TrimSpace(flags.body); value != "" {
+		attributes["body"] = value
+	}
+	if flags.draft {
+		attributes["draft"] = "true"
+	}
+	if len(attributes) == 0 {
+		attributes = nil
+	}
+	return []execution.ObjectRef{{
+		Type:       "merge-request",
+		Repository: strings.TrimSpace(flags.repository),
+		Number:     flags.prNumber,
+		Title:      strings.TrimSpace(flags.title),
+		Attributes: attributes,
+	}}
 }
 
 func operationInvocationFromFlags(flags *operationFlags) (execution.OperationInvocation, error) {
@@ -405,6 +480,7 @@ func printStructuredOutputBlock(cmd *cobra.Command, output *execution.Structured
 	printLaunchResultSection(cmd, "summary-field", []string{output.Summary})
 	printLaunchResultSection(cmd, "commit-message", []string{output.CommitMessage})
 	printStructuredJSONSection(cmd, "remark", output.Remarks)
+	printStructuredJSONSection(cmd, "review-response", output.ReviewResponses)
 	printStructuredJSONSection(cmd, "question", output.Questions)
 	printStructuredJSONSection(cmd, "follow-up-action", output.FollowUpActions)
 	printStructuredJSONSection(cmd, "change", output.Changes)

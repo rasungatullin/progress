@@ -16,16 +16,25 @@ const (
 	ActionClassIntegrationChange    = "integration-change"
 	ActionClassService              = "service"
 
-	OperationKindResolveAction     = "resolve-action"
-	OperationKindPrepareData       = "prepare-data"
-	OperationKindResolveProfile    = "resolve-profile"
-	OperationKindAllocateResources = "allocate-resources"
-	OperationKindPrepareWorkplace  = "prepare-workplace"
-	OperationKindBuildDirective    = "build-directive"
-	OperationKindLaunchSynthesis   = "launch-synthesis"
-	OperationKindParseResult       = "parse-result"
-	OperationKindCommitPush        = "commit-push"
-	OperationKindFinalize          = "finalize"
+	ActionStartImplementationPR = "start-implementation-pr"
+	ActionReviewPullRequest     = "review-pull-request"
+	ActionApplyReviewComments   = "apply-review-comments"
+
+	OperationKindResolveAction          = "resolve-action"
+	OperationKindPrepareData            = "prepare-data"
+	OperationKindLoadPullRequest        = "load-pull-request"
+	OperationKindLoadReviewRemarks      = "load-review-remarks"
+	OperationKindResolveProfile         = "resolve-profile"
+	OperationKindAllocateResources      = "allocate-resources"
+	OperationKindPrepareWorkplace       = "prepare-workplace"
+	OperationKindBuildDirective         = "build-directive"
+	OperationKindLaunchSynthesis        = "launch-synthesis"
+	OperationKindParseResult            = "parse-result"
+	OperationKindCommitPush             = "commit-push"
+	OperationKindPublishMergeRequest    = "publish-merge-request"
+	OperationKindPublishReviewRemarks   = "publish-review-remarks"
+	OperationKindPublishReviewResponses = "publish-review-responses"
+	OperationKindFinalize               = "finalize"
 
 	OperationStatusPending   = "pending"
 	OperationStatusCompleted = "completed"
@@ -48,7 +57,10 @@ func newActionCatalog() *actionCatalog {
 	actions := map[string]model.Action{
 		ActionClassEngineeringSynthesis: newActionTemplate(ActionClassEngineeringSynthesis, ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза в нормализованной форме."),
 		"engineering-synthesis-commit":  newActionTemplateWithOperations("engineering-synthesis-commit", ActionClassEngineeringSynthesis, "default", true, true, "Получить результат инженерного синтеза, создать коммит и отправить ветку.", actionOperationsWithCommitPush()),
+		ActionStartImplementationPR:     newActionTemplateWithOperations(ActionStartImplementationPR, ActionClassEngineeringSynthesis, "coder", true, true, "Выполнить реализацию задачи, отправить ветку и открыть запрос на слияние.", startImplementationPROperations()),
 		ActionClassReview:               newActionTemplate(ActionClassReview, ActionClassReview, "review", true, true, "Провести ревизию результата и вернуть заключение ревизии."),
+		ActionReviewPullRequest:         newActionTemplateWithOperations(ActionReviewPullRequest, ActionClassReview, "review", true, true, "Проверить открытый запрос на слияние и записать замечания ревизии.", reviewPullRequestOperations()),
+		ActionApplyReviewComments:       newActionTemplateWithOperations(ActionApplyReviewComments, ActionClassEngineeringSynthesis, "coder", true, true, "Получить замечания ревизии, исправить их и записать ответы на замечания.", applyReviewCommentsOperations()),
 		ActionClassTaskPreparation:      newActionTemplate(ActionClassTaskPreparation, ActionClassTaskPreparation, "task-description-assessor", true, true, "Подготовить или оценить постановку задачи."),
 		ActionClassIntegrationChange:    newActionTemplate(ActionClassIntegrationChange, ActionClassIntegrationChange, "default", false, false, "Выполнить интеграционное изменение через опубликованную операцию."),
 		ActionClassService:              newActionTemplate(ActionClassService, ActionClassService, "default", true, false, "Выполнить служебное действие без содержательного синтеза."),
@@ -66,6 +78,18 @@ func newActionCatalog() *actionCatalog {
 		"implement":                   ActionClassEngineeringSynthesis,
 		"implement-commit":            "engineering-synthesis-commit",
 		"implementation":              ActionClassEngineeringSynthesis,
+		"implement-pr":                ActionStartImplementationPR,
+		"implementation-pr":           ActionStartImplementationPR,
+		"open-pr":                     ActionStartImplementationPR,
+		"start-implementation":        ActionStartImplementationPR,
+		"start-implementation-pr":     ActionStartImplementationPR,
+		"pr-review":                   ActionReviewPullRequest,
+		"review-pr":                   ActionReviewPullRequest,
+		"review-pull-request":         ActionReviewPullRequest,
+		"address-review-comments":     ActionApplyReviewComments,
+		"apply-review-comments":       ActionApplyReviewComments,
+		"fix-review-comments":         ActionApplyReviewComments,
+		"reply-review-comments":       ActionApplyReviewComments,
 		"pull-request":                ActionClassIntegrationChange,
 		"comment":                     ActionClassIntegrationChange,
 		"integration":                 ActionClassIntegrationChange,
@@ -273,20 +297,67 @@ func defaultActionOperations() []model.OperationSpec {
 
 func actionOperationsWithCommitPush() []model.OperationSpec {
 	operations := defaultActionOperations()
+	return insertBeforeFinalize(operations, builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true))
+}
+
+func startImplementationPROperations() []model.OperationSpec {
+	operations := defaultActionOperations()
+	return insertBeforeFinalize(operations,
+		builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true),
+		builtinOperation(OperationKindPublishMergeRequest, "Открытие запроса на слияние", true),
+	)
+}
+
+func reviewPullRequestOperations() []model.OperationSpec {
+	return []model.OperationSpec{
+		builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
+		builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
+		builtinOperation(OperationKindLoadPullRequest, "Получение запроса на слияние", true),
+		builtinOperation(OperationKindLoadReviewRemarks, "Получение замечаний ревизии", false),
+		builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
+		builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
+		builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
+		builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
+		builtinOperation(OperationKindLaunchSynthesis, "Запуск ревизии", true),
+		builtinOperation(OperationKindParseResult, "Разбор результата", true),
+		builtinOperation(OperationKindPublishReviewRemarks, "Запись замечаний ревизии", true),
+		builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
+	}
+}
+
+func applyReviewCommentsOperations() []model.OperationSpec {
+	operations := []model.OperationSpec{
+		builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
+		builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
+		builtinOperation(OperationKindLoadPullRequest, "Получение запроса на слияние", true),
+		builtinOperation(OperationKindLoadReviewRemarks, "Получение замечаний ревизии", true),
+		builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
+		builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
+		builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
+		builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
+		builtinOperation(OperationKindLaunchSynthesis, "Запуск доработки", true),
+		builtinOperation(OperationKindParseResult, "Разбор результата", true),
+		builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true),
+		builtinOperation(OperationKindPublishReviewResponses, "Запись ответов на замечания", true),
+		builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
+	}
+	return operations
+}
+
+func insertBeforeFinalize(operations []model.OperationSpec, additions ...model.OperationSpec) []model.OperationSpec {
 	for index, operation := range operations {
 		if operation.Name != OperationKindFinalize {
 			continue
 		}
 
-		commitOperation := builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true)
-		withCommit := make([]model.OperationSpec, 0, len(operations)+1)
-		withCommit = append(withCommit, operations[:index]...)
-		withCommit = append(withCommit, commitOperation)
-		withCommit = append(withCommit, operations[index:]...)
-		return withCommit
+		withAdditions := make([]model.OperationSpec, 0, len(operations)+len(additions))
+		withAdditions = append(withAdditions, operations[:index]...)
+		withAdditions = append(withAdditions, additions...)
+		withAdditions = append(withAdditions, operations[index:]...)
+		return withAdditions
 	}
 
-	return append(operations, builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true))
+	return append(operations, additions...)
 }
 
 func builtinOperation(kind string, title string, required bool) model.OperationSpec {

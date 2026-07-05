@@ -35,7 +35,31 @@ func TestPrepareUsesCurrentRepositoryWhenRepoIsOmitted(t *testing.T) {
 	}
 	assertGitCalls(t, gitCalls, []gitCall{
 		{dir: hostRepoRoot, args: []string{"fetch", "origin", "main"}},
-		{dir: hostRepoRoot, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "FETCH_HEAD"}},
+		{dir: hostRepoRoot, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "origin/main"}},
+	})
+}
+
+func TestPrepareUsesRemoteTaskBranchWhenPresent(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	responses := map[gitOutputKey]string{
+		{dir: hostRepoRoot, args: keyArgs("rev-parse", "--verify", "--quiet", "refs/remotes/origin/112")}: "abc123\n",
+	}
+	service, gitCalls := newStubService(t, hostRepoRoot, responses)
+
+	workplace, err := service.Prepare(context.Background(), model.Invocation{Workplace: model.WorkplaceSpec{Name: "112"}}, model.Profile{}, model.Allocation{})
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+
+	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "112")
+	if workplace.Name != expectedDir {
+		t.Fatalf("unexpected workplace path: %q", workplace.Name)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{
+		{dir: hostRepoRoot, args: []string{"fetch", "origin", "main"}},
+		{dir: hostRepoRoot, args: []string{"worktree", "add", "-b", "112", expectedDir, "origin/112"}},
 	})
 }
 
@@ -67,7 +91,37 @@ func TestPrepareClonesExternalRepositoryWhenCacheIsMissing(t *testing.T) {
 	assertGitCalls(t, gitCalls, []gitCall{
 		{dir: hostRepoRoot, args: []string{"clone", "https://github.com/owner/name.git", cacheDir}},
 		{dir: cacheDir, args: []string{"fetch", "origin", "main"}},
-		{dir: cacheDir, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "FETCH_HEAD"}},
+		{dir: cacheDir, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "origin/main"}},
+	})
+}
+
+func TestPrepareUsesCurrentRepositoryWhenExplicitRepoMatchesOrigin(t *testing.T) {
+	t.Parallel()
+
+	hostRepoRoot := t.TempDir()
+	responses := map[gitOutputKey]string{
+		{dir: hostRepoRoot, args: keyArgs("config", "--get", "remote.origin.url")}: "git@github.com:owner/name.git\n",
+	}
+	service, gitCalls := newStubService(t, hostRepoRoot, responses)
+
+	workplace, err := service.Prepare(context.Background(), model.Invocation{
+		Repository: model.RepositorySpec{URL: "owner/name"},
+		Workplace:  model.WorkplaceSpec{Name: "task-49"},
+	}, model.Profile{}, model.Allocation{})
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+
+	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "task-49")
+	if workplace.Name != expectedDir {
+		t.Fatalf("unexpected workplace path: %q", workplace.Name)
+	}
+	if workplace.RepositoryRoot != hostRepoRoot {
+		t.Fatalf("unexpected repository root: %q", workplace.RepositoryRoot)
+	}
+	assertGitCalls(t, gitCalls, []gitCall{
+		{dir: hostRepoRoot, args: []string{"fetch", "origin", "main"}},
+		{dir: hostRepoRoot, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "origin/main"}},
 	})
 }
 
@@ -170,7 +224,7 @@ func TestPrepareFetchesExternalRepositoryWhenCacheExists(t *testing.T) {
 	assertGitCalls(t, gitCalls, []gitCall{
 		{dir: cacheDir, args: []string{"fetch", "origin"}},
 		{dir: cacheDir, args: []string{"fetch", "origin", "main"}},
-		{dir: cacheDir, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "FETCH_HEAD"}},
+		{dir: cacheDir, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "origin/main"}},
 	})
 }
 

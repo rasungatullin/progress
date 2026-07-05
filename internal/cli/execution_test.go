@@ -85,6 +85,54 @@ func TestStructuredInputFlagsOverrideInputFile(t *testing.T) {
 	}
 }
 
+func TestActionFlagsBuildCanonicalTaskAndPullRequestContext(t *testing.T) {
+	t.Parallel()
+
+	flags := newActionFlags()
+	cmd := &cobra.Command{Use: "action"}
+	bindActionFlags(cmd, flags)
+
+	err := cmd.ParseFlags([]string{
+		"--action", "start-implementation-pr",
+		"--repository", "owner/name",
+		"--task-number", "112",
+		"--pr-number", "17",
+		"--base", "main",
+		"--head", "112",
+		"--title", "Поддержать действие",
+		"--body", "Описание изменения.",
+		"--draft",
+	})
+	if err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	request, err := actionInvocationFromFlags(flags)
+	if err != nil {
+		t.Fatalf("build invocation: %v", err)
+	}
+	assignment := request.Assignment
+	if assignment == nil || assignment.CanonicalTask == nil {
+		t.Fatalf("expected canonical task: %#v", assignment)
+	}
+	if assignment.CanonicalTask.Number != 112 || assignment.CanonicalTask.Repository != "owner/name" || assignment.CanonicalTask.Title != "Поддержать действие" {
+		t.Fatalf("unexpected canonical task: %#v", assignment.CanonicalTask)
+	}
+	if assignment.CanonicalTask.Attributes["body"] != "Описание изменения." {
+		t.Fatalf("task body must be stored as an attribute: %#v", assignment.CanonicalTask.Attributes)
+	}
+	if len(assignment.RelatedObjects) != 1 {
+		t.Fatalf("expected pull request object: %#v", assignment.RelatedObjects)
+	}
+	pr := assignment.RelatedObjects[0]
+	if pr.Type != "merge-request" || pr.Number != 17 || pr.Repository != "owner/name" {
+		t.Fatalf("unexpected pull request object: %#v", pr)
+	}
+	if pr.Attributes["base_ref"] != "main" || pr.Attributes["head_ref"] != "112" || pr.Attributes["draft"] != "true" {
+		t.Fatalf("unexpected pull request attributes: %#v", pr.Attributes)
+	}
+}
+
 func TestExecutionActionAllowsActionOnlyInvocation(t *testing.T) {
 	t.Parallel()
 
@@ -181,7 +229,7 @@ func TestExecutionActionHelpDoesNotIncludeRemovedFlags(t *testing.T) {
 	if !strings.Contains(help, "--action") {
 		t.Fatalf("action help must include action flag, got %q", help)
 	}
-	for _, fragment := range []string{"--profile", "--name", "--dir", "--repo", "--runner", "--model", "--model-binding", "--prompt", "--structured-output", "--structured-output-required"} {
+	for _, fragment := range []string{"--profile", "--name", "--dir", "--runner", "--model", "--model-binding", "--prompt", "--structured-output", "--structured-output-required"} {
 		if strings.Contains(help, fragment) {
 			t.Fatalf("action help must not include removed flag %q, got %q", fragment, help)
 		}

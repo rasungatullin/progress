@@ -8,6 +8,7 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
+	"github.com/rasungatullin/progress/internal/integration"
 )
 
 type operationExecution struct {
@@ -18,6 +19,8 @@ type operationExecution struct {
 	allocation    allocation
 	workplace     workplace
 	result        LaunchResult
+	pullRequest   *integration.MergeRequest
+	reviewRemarks []integration.ReviewRemark
 	historyRoot   string
 	historyHandle history.Handle
 	tracker       *operationTracker
@@ -59,6 +62,10 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindPrepareData:
 		state.tracker.completeIO(name, assignmentSummary(state.assignment), structuredInputSummary(state.assignment.StructuredInput), "Данные задания подготовлены для выполнения.")
 		return nil
+	case OperationKindLoadPullRequest:
+		return e.loadPullRequest(ctx, state, name)
+	case OperationKindLoadReviewRemarks:
+		return e.loadReviewRemarks(ctx, state, name)
 	case OperationKindResolveProfile:
 		return e.resolveProfile(ctx, state, name)
 	case OperationKindAllocateResources:
@@ -73,6 +80,12 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 		return e.parseResult(state, name)
 	case OperationKindCommitPush:
 		return e.commitPush(ctx, state, name)
+	case OperationKindPublishMergeRequest:
+		return e.publishMergeRequest(ctx, state, name)
+	case OperationKindPublishReviewRemarks:
+		return e.publishReviewRemarks(ctx, state, name)
+	case OperationKindPublishReviewResponses:
+		return e.publishReviewResponses(ctx, state, name)
 	case OperationKindFinalize:
 		return e.finalize(ctx, state, name)
 	default:

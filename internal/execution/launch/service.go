@@ -367,6 +367,13 @@ func validateStructuredOutputPayload(payload model.StructuredOutput) error {
 
 		return fmt.Errorf("structured output remarks[%d] must include at least one non-empty field", index)
 	}
+	for index, value := range payload.ReviewResponses {
+		if hasNonEmptyStructuredField(value.ID, value.RemarkID, value.Status, value.Summary, value.Body) {
+			continue
+		}
+
+		return fmt.Errorf("structured output review_responses[%d] must include at least one non-empty field", index)
+	}
 	for index, value := range payload.Questions {
 		if hasNonEmptyStructuredField(value.ID, value.Status, value.Title, value.Body, value.Answer) {
 			continue
@@ -803,13 +810,13 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 		return gitResult{}, fmt.Errorf("git commit failed: %w", err)
 	}
 
-	hasUpstream, err := s.hasUpstream(ctx, in.Launch.Directory, branch)
+	upstream, err := s.upstreamBranch(ctx, in.Launch.Directory, branch)
 	if err != nil {
 		return gitResult{}, err
 	}
 
 	pushArgs := []string{"push"}
-	if !hasUpstream {
+	if upstream != "origin/"+branch {
 		pushArgs = append(pushArgs, "-u", "origin", branch)
 	}
 
@@ -932,13 +939,13 @@ func isProgressRuntimePath(pathValue string) bool {
 		strings.HasPrefix(pathValue, ".progress/execution-runs/")
 }
 
-func (s *Service) hasUpstream(ctx context.Context, dir, branch string) (bool, error) {
+func (s *Service) upstreamBranch(ctx context.Context, dir, branch string) (string, error) {
 	output, err := s.runGitOutput(ctx, dir, "for-each-ref", "--format=%(upstream:short)", "refs/heads/"+branch)
 	if err != nil {
-		return false, fmt.Errorf("resolve git upstream: %w", err)
+		return "", fmt.Errorf("resolve git upstream: %w", err)
 	}
 
-	return strings.TrimSpace(output) != "", nil
+	return strings.TrimSpace(output), nil
 }
 
 func isNoChangesAfterAddError(err error) bool {
@@ -1320,6 +1327,7 @@ func selectedStructuredObjectForms(fields []string) []string {
 		form  string
 	}{
 		{field: "remarks", form: "remarks[{id,status,severity,type,title,body,answer,resolution}]"},
+		{field: "review_responses", form: "review_responses[{id,remark_id,status,summary,body}]"},
 		{field: "questions", form: "questions[{id,status,title,body,answer}]"},
 		{field: "follow_up_actions", form: "follow_up_actions[{id,status,type,title,body}]"},
 		{field: "changes", form: "changes[{summary}]"},
@@ -1352,6 +1360,8 @@ func buildStructuredOutputCanonicalExample(fields []string) string {
 			parts = append(parts, `,"commit_message":"Apply requested review fixes"`)
 		case "remarks":
 			parts = append(parts, `,"remarks":[{"id":"remark-1","title":"Rollback plan"}]`)
+		case "review_responses":
+			parts = append(parts, `,"review_responses":[{"remark_id":"remark-1","status":"resolved","summary":"Fixed"}]`)
 		case "questions":
 			parts = append(parts, `,"questions":[{"id":"question-1","title":"Need extra test?"}]`)
 		case "follow_up_actions":
@@ -1431,6 +1441,7 @@ func normalizeStructuredOutputInstructionFields(fields []string) ([]string, erro
 		"summary":           {},
 		"commit_message":    {},
 		"remarks":           {},
+		"review_responses":  {},
 		"questions":         {},
 		"follow_up_actions": {},
 		"changes":           {},

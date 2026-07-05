@@ -14,6 +14,7 @@ import (
 	profilepkg "github.com/rasungatullin/progress/internal/execution/profile"
 	"github.com/rasungatullin/progress/internal/execution/resources"
 	workplacepkg "github.com/rasungatullin/progress/internal/execution/workplace"
+	"github.com/rasungatullin/progress/internal/integration"
 )
 
 type invocation = model.Invocation
@@ -68,13 +69,18 @@ type launcher interface {
 	Launch(context.Context, invocation, profile, allocation, workplace) (LaunchResult, error)
 }
 
+type integrationExecutor interface {
+	Execute(context.Context, integration.Request) (integration.Response, error)
+}
+
 type Service struct {
-	logger     *log.Logger
-	actions    actionResolver
-	profiles   profileResolver
-	resources  resourceProvider
-	workplaces workplaceManager
-	launcher   launcher
+	logger       *log.Logger
+	actions      actionResolver
+	profiles     profileResolver
+	resources    resourceProvider
+	workplaces   workplaceManager
+	launcher     launcher
+	integrations integrationExecutor
 }
 
 func NewService(logger *log.Logger) *Service {
@@ -83,14 +89,16 @@ func NewService(logger *log.Logger) *Service {
 	resources := resources.NewService()
 	workplaces := workplacepkg.NewService()
 	launcher := launch.NewService()
+	integrations := integration.NewConfiguredService(logger)
 
 	return &Service{
-		logger:     logger,
-		actions:    actions,
-		profiles:   profiles,
-		resources:  resources,
-		workplaces: workplaces,
-		launcher:   launcher,
+		logger:       logger,
+		actions:      actions,
+		profiles:     profiles,
+		resources:    resources,
+		workplaces:   workplaces,
+		launcher:     launcher,
+		integrations: integrations,
 	}
 }
 
@@ -271,7 +279,7 @@ func repositoryFromAssignment(assignment *ExecutionAssignment) string {
 
 func workplaceNameFromAssignment(assignment *ExecutionAssignment) string {
 	if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
-		return fmt.Sprintf("task-%d", assignment.CanonicalTask.Number)
+		return fmt.Sprintf("%d", assignment.CanonicalTask.Number)
 	}
 	if assignment != nil {
 		if name := stableIdentifier(strings.TrimSpace(assignment.Action)); name != "" {
