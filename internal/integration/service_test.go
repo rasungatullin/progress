@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -211,7 +212,7 @@ func TestDispatchReportsUnsupportedConfiguredSystemType(t *testing.T) {
 
 	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
 		Systems: map[string]model.IntegrationSystemConfig{
-			"gitlab": {Type: "script"},
+			"gitlab": {Type: "custom"},
 		},
 	})
 
@@ -219,7 +220,7 @@ func TestDispatchReportsUnsupportedConfiguredSystemType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if !contains(route.Diagnostics, "provider=gitlab configured with unsupported type=script") {
+	if !contains(route.Diagnostics, "provider=gitlab configured with unsupported type=custom") {
 		t.Fatalf("expected unsupported-type diagnostic, got %#v", route.Diagnostics)
 	}
 }
@@ -587,8 +588,8 @@ func TestOperationsCatalogIncludesScriptOperationConfig(t *testing.T) {
 	if operation.Name != "tracker.task.get" || operation.AdapterType != "script" {
 		t.Fatalf("unexpected script operation: %#v", operation)
 	}
-	if operation.Available {
-		t.Fatalf("script operation must stay unavailable before adapter registration: %#v", operation)
+	if !operation.Available {
+		t.Fatalf("script operation must be available after adapter registration: %#v", operation)
 	}
 	if len(operation.Input.Required) != 1 || operation.Input.Required[0].Name != "number" {
 		t.Fatalf("unexpected required fields: %#v", operation.Input.Required)
@@ -656,6 +657,139 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 	}
 	if result.Route.System != "local" {
 		t.Fatalf("expected default local tracker route, got %#v", result.Route)
+	}
+}
+
+func TestOperationsCatalogMarksScriptOperationWithoutExecutableUnavailable(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {
+				Type:            "script",
+				IntegrationType: model.IntegrationTypeTracker,
+				Operations: map[string]model.IntegrationOperationConfig{
+					"tracker.task.get": {Required: []string{"number"}},
+				},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "work-tracker", Name: "tracker.task.get"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one script operation, got %#v", operations)
+	}
+	if operations[0].Available {
+		t.Fatalf("script operation without executable must be unavailable: %#v", operations[0])
+	}
+	if !contains(operations[0].Diagnostics, "script operation has no script, command or path") {
+		t.Fatalf("expected missing executable diagnostic, got %#v", operations[0].Diagnostics)
+	}
+}
+
+func TestOperationsCatalogMarksUnsupportedConfiguredOperationUnavailable(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {
+				Type: "script",
+				Operations: map[string]model.IntegrationOperationConfig{
+					"repository.merge-request.get": {Script: ".progress/integration/work-tracker/pr-get.sh"},
+				},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "work-tracker", Name: "repository.merge-request.get"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one script operation, got %#v", operations)
+	}
+	if operations[0].Available {
+		t.Fatalf("unsupported script operation must be unavailable: %#v", operations[0])
+	}
+	if !contains(operations[0].Diagnostics, "system does not support integration type=repository") {
+		t.Fatalf("expected unsupported integration type diagnostic, got %#v", operations[0].Diagnostics)
+	}
+}
+
+func TestOperationsCatalogUsesSearchResultContractForTaskSearch(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {
+				Type:            "script",
+				IntegrationType: model.IntegrationTypeTracker,
+				Operations: map[string]model.IntegrationOperationConfig{
+					"tracker.task.search": {Script: ".progress/integration/work-tracker/task-search.sh"},
+				},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "work-tracker", Name: "tracker.task.search"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one script search operation, got %#v", operations)
+	}
+	if operations[0].Output.Shape != "TrackerSearchResult[]" {
+		t.Fatalf("unexpected search output shape: %#v", operations[0].Output)
+	}
+	route, err := service.Dispatch(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "work-tracker",
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "search",
+	})
+	if err != nil {
+		t.Fatalf("dispatch task search: %v", err)
+	}
+	if route.ExpectedResult != "tracker-search-result[]" {
+		t.Fatalf("unexpected task search result contract: %q", route.ExpectedResult)
+	}
+}
+
+func TestNewServiceFromConfigRegistersScriptProvider(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	scriptPath := filepath.Join(root, "task-get.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nprintf '%s\\n' '{\"status\":\"ok\",\"task\":{\"system\":\"work-tracker\",\"number\":7,\"title\":\"Script task\",\"state\":\"open\"}}'\n"), 0o755); err != nil {
+		t.Fatalf("write script fixture: %v", err)
+	}
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeTracker: "work-tracker"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {
+				Type:            "script",
+				IntegrationType: model.IntegrationTypeTracker,
+				Path:            root,
+				Operations: map[string]model.IntegrationOperationConfig{
+					"tracker.task.get": {Script: "task-get.sh", Required: []string{"number"}},
+				},
+			},
+		},
+	})
+
+	operations := service.Operations(context.Background(), OperationFilter{System: "work-tracker", Name: "tracker.task.get"})
+	if len(operations) != 1 || !operations[0].Available {
+		t.Fatalf("expected available script operation, got %#v", operations)
+	}
+
+	result, err := service.Execute(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeTracker,
+		Resource:        "task",
+		ObjectType:      "task",
+		Operation:       "get",
+		Number:          7,
+	})
+	if err != nil {
+		t.Fatalf("execute script provider: %v", err)
+	}
+	if result.Task == nil || result.Task.Number != 7 || result.Task.Title != "Script task" {
+		t.Fatalf("unexpected script task: %#v", result.Task)
 	}
 }
 

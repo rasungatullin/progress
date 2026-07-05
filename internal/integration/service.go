@@ -14,6 +14,7 @@ import (
 	localtrackerprovider "github.com/rasungatullin/progress/internal/integration/localtracker"
 	mattermostprovider "github.com/rasungatullin/progress/internal/integration/mattermost"
 	"github.com/rasungatullin/progress/internal/integration/model"
+	scriptprovider "github.com/rasungatullin/progress/internal/integration/script"
 	"github.com/rasungatullin/progress/internal/integration/secrets"
 	telegramprovider "github.com/rasungatullin/progress/internal/integration/telegram"
 )
@@ -154,6 +155,8 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 			service.registerConfiguredProvider(name, state, confluenceprovider.NewService(providerConfig))
 		case "local-tracker":
 			service.registerConfiguredProvider(name, state, localtrackerprovider.NewService(providerConfig))
+		case "script":
+			service.registerConfiguredProvider(name, state, scriptprovider.NewService(providerConfig))
 		case "":
 			service.systems[name] = state
 		default:
@@ -627,7 +630,7 @@ func defaultIntegrationTypesForProvider(providerType string) []string {
 		return []string{model.IntegrationTypeMessenger}
 	case "confluence":
 		return []string{model.IntegrationTypeWiki}
-	case "local-tracker":
+	case "local-tracker", "script":
 		return []string{model.IntegrationTypeTracker}
 	default:
 		return nil

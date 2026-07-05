@@ -327,6 +327,23 @@ func mergeIntegrationSystemConfig(base, override integrationmodel.IntegrationSys
 		merged.ChatID = value
 	}
 	merged.Database = mergeIntegrationDatabaseConfig(merged.Database, override.Database)
+	if len(base.Settings) > 0 || len(override.Settings) > 0 {
+		merged.Settings = map[string]string{}
+		for name, value := range base.Settings {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			merged.Settings[name] = strings.TrimSpace(value)
+		}
+		for name, value := range override.Settings {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			merged.Settings[name] = strings.TrimSpace(value)
+		}
+	}
 	if len(base.TaskLabelMapping) > 0 || len(override.TaskLabelMapping) > 0 {
 		merged.TaskLabelMapping = map[string]string{}
 		for external, canonical := range base.TaskLabelMapping {
@@ -441,6 +458,9 @@ func validateIntegrationLayer(config integrationmodel.IntegrationConfigFile) err
 		if err := validateIntegrationDatabase(system.Database, name); err != nil {
 			return err
 		}
+		if err := validateIntegrationSettings(system.Settings, name); err != nil {
+			return err
+		}
 		if err := validateIntegrationOperations(system.Operations, name); err != nil {
 			return err
 		}
@@ -477,6 +497,9 @@ func validateIntegrationConfig(config integrationmodel.IntegrationConfigFile) er
 			return err
 		}
 		if err := validateIntegrationDatabase(system.Database, name); err != nil {
+			return err
+		}
+		if err := validateIntegrationSettings(system.Settings, name); err != nil {
 			return err
 		}
 		if err := validateIntegrationOperations(system.Operations, name); err != nil {
@@ -572,6 +595,15 @@ func validateIntegrationDatabase(database integrationmodel.IntegrationDatabaseCo
 	}
 }
 
+func validateIntegrationSettings(settings map[string]string, systemName string) error {
+	for name := range settings {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("system %q contains settings with empty name", normalizeSystemName(systemName))
+		}
+	}
+	return nil
+}
+
 func validateIntegrationSystemType(systemName, systemType string) error {
 	systemType = normalizeSystemName(systemType)
 	if systemType == "" {
@@ -628,7 +660,7 @@ func systemDeclaresIntegrationType(system integrationmodel.IntegrationSystemConf
 		return integrationType == "messenger"
 	case "confluence":
 		return integrationType == "wiki"
-	case "local-tracker":
+	case "local-tracker", "script":
 		return integrationType == "tracker"
 	default:
 		return true

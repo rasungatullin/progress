@@ -126,6 +126,7 @@ type IntegrationSystemConfig struct {
 	ChannelID        string                                `json:"channel_id,omitempty"`
 	ChatID           string                                `json:"chat_id,omitempty"`
 	Database         IntegrationDatabaseConfig             `json:"database,omitempty"`
+	Settings         map[string]string                     `json:"settings,omitempty"`
 	TaskLabelMapping map[string]string                     `json:"task_label_mapping,omitempty"`
 	Operations       map[string]IntegrationOperationConfig `json:"operations,omitempty"`
 }

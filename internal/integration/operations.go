@@ -154,6 +154,14 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 	optional := operationFields(operation.Optional, operation.Defaults)
 
 	available := state.Enabled && state.Registered
+	unsupportedIntegrationType := !systemSupportsIntegrationType(state, integrationType)
+	if unsupportedIntegrationType {
+		available = false
+	}
+	missingScriptExecutable := state.Type == "script" && !scriptOperationHasExecutable(operation)
+	if missingScriptExecutable {
+		available = false
+	}
 	descriptor := OperationDescriptor{
 		Name:            name,
 		IntegrationType: integrationType,
@@ -169,10 +177,20 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 		FailureKinds:    defaultFailureKinds(),
 		Diagnostics:     operationDiagnostics(state, available),
 	}
+	if missingScriptExecutable {
+		descriptor.Diagnostics = append(descriptor.Diagnostics, "script operation has no script, command or path")
+	}
+	if unsupportedIntegrationType {
+		descriptor.Diagnostics = append(descriptor.Diagnostics, "system does not support integration type="+integrationType)
+	}
 	if operation.Script != "" {
 		descriptor.Diagnostics = append(descriptor.Diagnostics, "script="+strings.TrimSpace(operation.Script))
 	}
 	return descriptor
+}
+
+func scriptOperationHasExecutable(operation model.IntegrationOperationConfig) bool {
+	return strings.TrimSpace(firstNonEmpty(operation.Script, operation.Command, operation.Path)) != ""
 }
 
 func operationDiagnostics(state systemState, available bool) []string {
@@ -240,7 +258,7 @@ func operationOutputShape(integrationType string, objectType string, operation s
 		switch objectType {
 		case "task":
 			if operation == "search" || operation == "list" {
-				return "CanonicalTask[]"
+				return "TrackerSearchResult[]"
 			}
 			return "CanonicalTask"
 		case "task-comment", "comment":
@@ -608,7 +626,9 @@ func defaultFailureKinds() []string {
 		model.FailureKindNotFound,
 		model.FailureKindTemporaryUnavailable,
 		model.FailureKindRateLimited,
+		model.FailureKindTimeout,
 		model.FailureKindUnsupportedOperation,
+		model.FailureKindInternalIntegration,
 		model.FailureKindExternalFailure,
 	}
 }

@@ -226,7 +226,7 @@ progress integration operations --name tracker.task.get
 
 Текстовый вывод предназначен для ручной диагностики. JSON-вывод возвращает массив `OperationDescriptor` и пригоден для машинного чтения.
 
-Отключённая система может присутствовать в каталоге только с `available=false`. Сценарные системы типа `script` публикуют операции из `systems.<name>.operations`; до подключения адаптера они также помечаются как недоступные, но сохраняют контракт входных полей из конфигурации.
+Отключённая система может присутствовать в каталоге только с `available=false`. Сценарные системы типа `script` публикуют операции из `systems.<name>.operations`; доступными считаются только операции с заданным `script`, `command` или `path`. Контракт входных полей сохраняется из конфигурации.
 
 ### 7.3 `progress integration private`
 
@@ -602,9 +602,10 @@ GitHub-адаптер должен различать как минимум сл
 4. `systems.<name>` дополняет или переопределяет одноимённую систему из глобального слоя;
 5. простые поля системы, например `transport`, `command`, `path`, `timeout`, `base_url`, `token_private`, `token_env`, `repository`, `project`, `channel_id`, `chat_id` и `default_repo`, заменяются локальными значениями;
 6. `database` дополняется по полям `driver`, `path` и `dsn`;
-7. `task_label_mapping` сливается по внешней метке;
-8. `operations` сливается по ключу операции;
-9. `enabled=false` в локальном слое выключает систему целиком.
+7. `settings` сливается по имени настройки;
+8. `task_label_mapping` сливается по внешней метке;
+9. `operations` сливается по ключу операции;
+10. `enabled=false` в локальном слое выключает систему целиком.
 
 Минимальная конфигурация встроенных адаптеров может выглядеть так:
 
@@ -677,6 +678,31 @@ GitHub-адаптер должен различать как минимум сл
         "driver": "sqlite",
         "path": ".progress/local-tracker/tasks.sqlite"
       }
+    },
+    "work-tracker": {
+      "type": "script",
+      "integration_type": "tracker",
+      "enabled": true,
+      "timeout": "30s",
+      "project": "ABC",
+      "settings": {
+        "tracker_url": "https://tracker.example"
+      },
+      "operations": {
+        "tracker.task.get": {
+          "script": ".progress/integration/work-tracker/task-get.sh",
+          "required": ["number"],
+          "optional": ["project", "tracker_url"],
+          "defaults": {
+            "project": "${system.project}",
+            "tracker_url": "${system.settings.tracker_url}"
+          }
+        },
+        "tracker.task.comment.create": {
+          "script": ".progress/integration/work-tracker/task-comment-create.sh",
+          "required": ["number", "body"]
+        }
+      }
     }
   }
 }
@@ -700,8 +726,9 @@ GitHub-адаптер должен различать как минимум сл
 14. `channel_id` задаёт резервный канал Mattermost;
 15. `chat_id` задаёт резервный чат Telegram;
 16. `database` задаёт хранилище локального трекера; в текущем срезе поддержан `driver=sqlite`;
-17. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
-18. `operations` резервирует пространство для пооперационной настройки.
+17. `settings` задаёт несекретные настройки сценарных систем и других расширяемых адаптеров;
+18. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
+19. `operations` задаёт пооперационную настройку сценариев и их входных контрактов.
 
 Пример GitHub-системы в режиме `api`:
 
@@ -757,6 +784,74 @@ GitHub-адаптер должен различать как минимум сл
 - `tracker.task.label.remove`.
 
 Хранилище создаёт схему при первом обращении. Задачи и комментарии возвращаются как `CanonicalTask`, `TaskComment`, `OperationResult` и совместимые структуры `TrackerIssue`/`TrackerComment`.
+
+### 11.2 Сценарная система `script`
+
+Система `type=script` позволяет подключить внешний трекер или служебную систему через локальный исполняемый файл. Сценарий выбирается по каноническому имени операции из `operations`.
+
+Перед запуском адаптер:
+
+1. выбирает операцию по `IntegrationType`, `ObjectType` и `Operation`;
+2. применяет значения по умолчанию из `defaults`;
+3. проверяет обязательные поля `required`;
+4. записывает входной JSON во временный файл;
+5. запускает сценарий из корня репозитория или из директории `path`, если она задана;
+6. читает JSON-ответ из stdout и нормализует его в `Response`.
+
+Сценарий получает переменные окружения:
+
+```text
+PROGRESS_INTEGRATION_SYSTEM
+PROGRESS_INTEGRATION_TYPE
+PROGRESS_INTEGRATION_OPERATION
+PROGRESS_INTEGRATION_REQUEST_FILE
+PROGRESS_INTEGRATION_TIMEOUT
+```
+
+Файл `PROGRESS_INTEGRATION_REQUEST_FILE` содержит `system`, `integration_type`, `operation_name`, `object_type`, `operation`, `request` и `settings`. Поле `settings` содержит только явно настроенные несекретные значения. `token` и значение из `token_env` в JSON-файл не записываются.
+
+Успешный ответ сценария:
+
+```json
+{
+  "status": "ok",
+  "task": {
+    "system": "work-tracker",
+    "number": 123,
+    "title": "Задача",
+    "body": "Описание",
+    "state": "open",
+    "traits": ["backend"]
+  }
+}
+```
+
+Ответ операции изменения:
+
+```json
+{
+  "status": "ok",
+  "operation_result": {
+    "status": "ok",
+    "message": "Комментарий создан",
+    "url": "https://tracker.example/task/ABC-123#comment-1"
+  }
+}
+```
+
+Отказ сценария:
+
+```json
+{
+  "status": "failed",
+  "failure": {
+    "kind": "not-found",
+    "message": "Задача не найдена"
+  }
+}
+```
+
+Ошибки запуска, ненулевой код выхода, таймаут, невалидный JSON и неподдержанная операция переводятся в канонические отказные состояния контура интеграции.
 
 Настройка `private_store` выбирает реализацию хранилища приватных значений. Если `type` не задан, на macOS в сборке с `cgo` используется `keychain` с сервисом `progress`. В остальных средах используется файловая реализация `file` в `$PROGRESS_CONFIG_HOME/integration/private-values.json` или `~/.config/progress/integration/private-values.json` с правами доступа `0600`. Явный `keychain` отклоняется при запуске сборки, где macOS Keychain недоступен.
 
@@ -817,6 +912,7 @@ progress integration private set mt_auth_token --stdin
 5. Mattermost-адаптер через HTTP API для цепочек обсуждения и сообщений;
 6. Telegram-адаптер через Bot API для отправки сообщений;
 7. локальный трекер задач с SQLite-хранилищем по умолчанию;
-8. нормализованные отказные состояния для отсутствия авторизации, недоступности, неподдерживаемой операции, неполного ответа и ошибок внешнего источника.
+8. сценарный адаптер `script` для операций трекера, настроенных через `systems.<name>.operations`;
+9. нормализованные отказные состояния для отсутствия авторизации, недоступности, неподдерживаемой операции, неполного ответа, таймаута и ошибок внешнего источника.
 
 Принцип проектирования остаётся прежним: другие контуры не должны знать синтаксис `gh`, HTTP-маршруты GitHub, Bitbucket, Mattermost или Telegram, формат токенов и поля внешних ответов. Эти сведения остаются внутри адаптеров, а наружу выходит канонический ответ контура интеграции.
