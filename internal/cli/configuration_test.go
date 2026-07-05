@@ -72,6 +72,39 @@ func TestConfigurationResourcesCLIHonorsGlobalScope(t *testing.T) {
 	}
 }
 
+func TestConfigurationResourcesCLIPreservesTypesOnPartialUpdate(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	runConfigurationCommand(t, "configuration", "resources", "--repo-root", root, "tool", "set", "runner-x", "--type", "custom-tool")
+	runConfigurationCommand(t, "configuration", "resources", "--repo-root", root, "resource", "set", "secret-x", "--type", "secret")
+
+	runConfigurationCommand(t, "configuration", "resources", "--repo-root", root, "tool", "set", "runner-x", "--disabled")
+	runConfigurationCommand(t, "configuration", "resources", "--repo-root", root, "resource", "set", "secret-x", "--tool", "runner-x")
+
+	configPath := filepath.Join(root, ".progress", "execution", "resources.json")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var config model.ResourceConfigFile
+	if err := json.Unmarshal(content, &config); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	if config.Tools["runner-x"].Type != "custom-tool" {
+		t.Fatalf("tool type must be preserved: %#v", config.Tools["runner-x"])
+	}
+	if config.Tools["runner-x"].Enabled {
+		t.Fatalf("partial tool update must still apply enabled flag: %#v", config.Tools["runner-x"])
+	}
+	if config.Resources["secret-x"].Type != "secret" {
+		t.Fatalf("resource type must be preserved: %#v", config.Resources["secret-x"])
+	}
+	if len(config.Resources["secret-x"].Tools) != 1 || config.Resources["secret-x"].Tools[0] != "runner-x" {
+		t.Fatalf("partial resource update must still apply tools: %#v", config.Resources["secret-x"])
+	}
+}
+
 func runConfigurationCommand(t *testing.T, args ...string) string {
 	t.Helper()
 

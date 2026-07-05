@@ -165,8 +165,9 @@ func newConfigurationToolSetCommand(parentFlags *configurationResourceFlags) *co
 				if name == "" {
 					return fmt.Errorf("tool name must not be empty")
 				}
+				exists := mapHasKey(config.Tools, name)
 				tool := config.Tools[name]
-				if strings.TrimSpace(flags.typ) != "" {
+				if cmd.Flags().Changed("type") {
 					tool.Type = strings.TrimSpace(flags.typ)
 				}
 				if strings.TrimSpace(tool.Type) == "" {
@@ -176,7 +177,7 @@ func newConfigurationToolSetCommand(parentFlags *configurationResourceFlags) *co
 				if err != nil {
 					return err
 				}
-				if changed || !mapHasKey(config.Tools, name) {
+				if changed || !exists {
 					tool.Enabled = enabled
 				}
 				values, err := parseConfigurationKeyValues(flags.config)
@@ -226,8 +227,9 @@ func newConfigurationResourceSetCommand(parentFlags *configurationResourceFlags)
 				if name == "" {
 					return fmt.Errorf("resource name must not be empty")
 				}
+				exists := mapHasKey(config.Resources, name)
 				resource := config.Resources[name]
-				if strings.TrimSpace(flags.typ) != "" {
+				if cmd.Flags().Changed("type") {
 					resource.Type = strings.TrimSpace(flags.typ)
 				}
 				if strings.TrimSpace(resource.Type) == "" {
@@ -237,7 +239,7 @@ func newConfigurationResourceSetCommand(parentFlags *configurationResourceFlags)
 				if err != nil {
 					return err
 				}
-				if changed || !mapHasKey(config.Resources, name) {
+				if changed || !exists {
 					resource.Enabled = enabled
 				}
 				if cmd.Flags().Changed("tool") {
