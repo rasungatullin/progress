@@ -98,6 +98,43 @@ func TestReactivityActionCommandPassesExplicitAction(t *testing.T) {
 	}
 }
 
+func TestReactivityCommandsPassCommandContext(t *testing.T) {
+	t.Parallel()
+
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "command-context")
+
+	cmd := NewRootCommand()
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"reactivity", "process", "--task", "123", "--once"})
+	processStub := &stubReactivityService{processResult: reactivity.TaskProcessingResult{TaskNumber: 123}}
+	setReactivityServiceFactory(cmd, func(*cobra.Command) reactivityCommandService { return processStub })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute reactivity process: %v", err)
+	}
+	if got := processStub.processCtx.Value(contextKey{}); got != "command-context" {
+		t.Fatalf("process command must pass command context, got %#v", got)
+	}
+
+	cmd = NewRootCommand()
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"reactivity", "action", "--task", "123", "--action", execution.ActionReviewPullRequest})
+	actionStub := &stubReactivityService{actionResult: reactivity.TaskProcessingResult{TaskNumber: 123}}
+	setReactivityServiceFactory(cmd, func(*cobra.Command) reactivityCommandService { return actionStub })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute reactivity action: %v", err)
+	}
+	if got := actionStub.actionCtx.Value(contextKey{}); got != "command-context" {
+		t.Fatalf("action command must pass command context, got %#v", got)
+	}
+}
+
 type stubReactivityService struct {
 	processResult reactivity.TaskProcessingResult
 	actionResult  reactivity.TaskProcessingResult
@@ -105,14 +142,18 @@ type stubReactivityService struct {
 	actionErr     error
 	processInput  reactivity.TaskProcessingInput
 	actionInput   reactivity.TaskActionInput
+	processCtx    context.Context
+	actionCtx     context.Context
 }
 
-func (s *stubReactivityService) ProcessTask(_ context.Context, input reactivity.TaskProcessingInput) (reactivity.TaskProcessingResult, error) {
+func (s *stubReactivityService) ProcessTask(ctx context.Context, input reactivity.TaskProcessingInput) (reactivity.TaskProcessingResult, error) {
+	s.processCtx = ctx
 	s.processInput = input
 	return s.processResult, s.processErr
 }
 
-func (s *stubReactivityService) RunTaskAction(_ context.Context, input reactivity.TaskActionInput) (reactivity.TaskProcessingResult, error) {
+func (s *stubReactivityService) RunTaskAction(ctx context.Context, input reactivity.TaskActionInput) (reactivity.TaskProcessingResult, error) {
+	s.actionCtx = ctx
 	s.actionInput = input
 	return s.actionResult, s.actionErr
 }

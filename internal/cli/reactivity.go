@@ -59,7 +59,7 @@ func newReactivityProcessCommand() *cobra.Command {
 		Short: "Обработка указанной задачи",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newReactivityService(cmd)
-			result, err := service.ProcessTask(context.Background(), reactivity.TaskProcessingInput{
+			result, err := service.ProcessTask(cmd.Context(), reactivity.TaskProcessingInput{
 				TaskNumber: flags.task,
 				Once:       flags.once,
 				MaxCycles:  flags.maxCycles,
@@ -88,7 +88,7 @@ func newReactivityActionCommand() *cobra.Command {
 		Short: "Запуск указанного действия для задачи",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newReactivityService(cmd)
-			result, err := service.RunTaskAction(context.Background(), reactivity.TaskActionInput{
+			result, err := service.RunTaskAction(cmd.Context(), reactivity.TaskActionInput{
 				TaskNumber: flags.task,
 				Action:     flags.action,
 			})

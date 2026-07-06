@@ -481,6 +481,7 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 	if root == "" {
 		return
 	}
+	ctx = context.WithoutCancel(ctx)
 	errorText := ""
 	if launchErr != nil {
 		errorText = strings.TrimSpace(launchErr.Error())
