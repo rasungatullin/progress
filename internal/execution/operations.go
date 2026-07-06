@@ -113,20 +113,20 @@ func syncPullRequestRefsWithWorkplace(state *operationExecution) error {
 	if base := strings.TrimSpace(ref.Base); base != "" && strings.TrimSpace(state.in.Workplace.BaseRef) == "" {
 		state.in.Workplace.BaseRef = base
 	}
-	if explicitPullRequestHeadFromAssignment(state.assignment) == "" && state.action.Name != ActionStartImplementationPR {
+	explicitHead := explicitPullRequestHeadFromAssignment(state.assignment)
+	if explicitHead == "" {
 		return nil
 	}
-	if head := strings.TrimSpace(ref.Head); head != "" && strings.TrimSpace(state.in.Workplace.HeadRef) == "" {
-		state.in.Workplace.HeadRef = head
+	if strings.TrimSpace(state.in.Workplace.HeadRef) == "" {
+		state.in.Workplace.HeadRef = explicitHead
 	}
 	if state.action.Name != ActionStartImplementationPR {
 		return nil
 	}
 
-	head := explicitPullRequestHeadFromAssignment(state.assignment)
 	workplaceName := strings.TrimSpace(state.in.Workplace.Name)
-	if head != "" && workplaceName != "" && head != workplaceName {
-		return fmt.Errorf("head branch %q does not match workplace branch %q for %s", head, workplaceName, ActionStartImplementationPR)
+	if workplaceName != "" && explicitHead != workplaceName {
+		return fmt.Errorf("head branch %q does not match workplace branch %q for %s", explicitHead, workplaceName, ActionStartImplementationPR)
 	}
 	return nil
 }

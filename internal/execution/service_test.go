@@ -695,7 +695,7 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 				Changes:       []model.StructuredChange{{Summary: "Добавлена операция публикации запроса на слияние."}},
 			},
 		},
-		commitSummary: "git=committed+pushed branch=112",
+		commitSummary: "git=committed+pushed branch=132",
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
@@ -708,12 +708,13 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 			}, nil
 		},
 	}
+	workplaces := &stubWorkplaceManager{workplace: model.Workplace{Name: root, RepositoryRoot: root, Ready: true}}
 	service := &Service{
 		logger:       log.Default(),
 		actions:      newMethodologyActionResolver(),
 		profiles:     &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
 		resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
-		workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: root, RepositoryRoot: root, Ready: true}},
+		workplaces:   workplaces,
 		launcher:     launcher,
 		integrations: integrations,
 		runGitOutput: func(_ context.Context, dir string, args ...string) (string, error) {
@@ -727,7 +728,7 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
 		Assignment: &ExecutionAssignment{
 			Action:        ActionStartImplementationPR,
-			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112, Title: "Поддержать действие"},
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132, Title: "Поддержать действие"},
 			StructuredInput: &StructuredInput{
 				Task: "Выполнить реализацию.",
 			},
@@ -739,11 +740,14 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 	if !launcher.commitCalled {
 		t.Fatal("start implementation action must push the task branch before pull request publication")
 	}
+	if workplaces.invocation.Workplace.Name != "132" || workplaces.invocation.Workplace.HeadRef != "" {
+		t.Fatalf("start implementation must prepare a new task branch without forced head_ref: %#v", workplaces.invocation.Workplace)
+	}
 	if len(integrations.calls) != 1 {
 		t.Fatalf("expected one integration request, got %#v", integrations.calls)
 	}
 	request := integrations.calls[0]
-	if request.Repository != "owner/name" || request.Base != "develop" || request.Head != "112" || request.Title == "" {
+	if request.Repository != "owner/name" || request.Base != "develop" || request.Head != "132" || request.Title == "" {
 		t.Fatalf("unexpected pull request publication request: %#v", request)
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishMergeRequest)
