@@ -247,8 +247,15 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 		}
 		path := strings.TrimSpace(comment.Path)
 		side := strings.TrimSpace(comment.Side)
-		if path != "" && comment.Line > 0 && side == "" {
-			side = "RIGHT"
+		line := 0
+		if path != "" && comment.Line > 0 {
+			line = comment.Line
+			if side == "" {
+				side = "RIGHT"
+			}
+		} else {
+			path = ""
+			side = ""
 		}
 		_, err := executor.Execute(ctx, integration.Request{
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
@@ -261,7 +268,7 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 			Body:            body,
 			Text:            body,
 			Path:            path,
-			Line:            comment.Line,
+			Line:            line,
 			Side:            side,
 		})
 		if err != nil {

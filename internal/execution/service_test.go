@@ -969,6 +969,16 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 					ID:    "remark-2",
 					Title: "Общее замечание",
 					Body:  "Проверьте описание результата.",
+				}, {
+					ID:    "remark-3",
+					Title: "Неполная привязка без строки",
+					Body:  "Публикуется как общий комментарий.",
+					Path:  "internal/execution/integration_operations.go",
+				}, {
+					ID:    "remark-4",
+					Title: "Неполная привязка без пути",
+					Body:  "Публикуется как общий комментарий.",
+					Line:  42,
 				}},
 			},
 		},
@@ -1029,7 +1039,7 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	if workplaces.invocation.Workplace.Name != "feature-review" || workplaces.invocation.Workplace.HeadRef != "feature/review" || workplaces.invocation.Workplace.BaseRef != "main" {
 		t.Fatalf("review action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
 	}
-	if len(integrations.calls) != 4 {
+	if len(integrations.calls) != 6 {
 		t.Fatalf("expected get, comments and create integration calls, got %#v", integrations.calls)
 	}
 	if integrations.calls[2].Number != 17 || integrations.calls[2].Repository != "owner/name" {
@@ -1040,6 +1050,12 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	}
 	if integrations.calls[3].Path != "" || integrations.calls[3].Line != 0 || integrations.calls[3].Side != "" {
 		t.Fatalf("review remark without location must stay pull request comment: %#v", integrations.calls[3])
+	}
+	if integrations.calls[4].Path != "" || integrations.calls[4].Line != 0 || integrations.calls[4].Side != "" {
+		t.Fatalf("review remark without line must stay pull request comment: %#v", integrations.calls[4])
+	}
+	if integrations.calls[5].Path != "" || integrations.calls[5].Line != 0 || integrations.calls[5].Side != "" {
+		t.Fatalf("review remark without path must stay pull request comment: %#v", integrations.calls[5])
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishReviewRemarks)
 	if operation == nil || operation.Status != OperationStatusCompleted {
