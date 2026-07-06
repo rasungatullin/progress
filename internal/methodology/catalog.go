@@ -18,6 +18,7 @@ const (
 )
 
 type Catalog struct {
+	DefaultRoute string        `json:"default_route,omitempty"`
 	Routes       []Route       `json:"routes,omitempty"`
 	Actions      []Action      `json:"actions,omitempty"`
 	Instructions []Instruction `json:"instructions,omitempty"`
@@ -25,13 +26,31 @@ type Catalog struct {
 }
 
 type Route struct {
+	Name            string       `json:"name"`
+	Title           string       `json:"title,omitempty"`
+	Action          string       `json:"action,omitempty"`
+	Outcome         string       `json:"outcome,omitempty"`
+	Profile         string       `json:"profile,omitempty"`
+	Description     string       `json:"description,omitempty"`
+	Checks          []RouteCheck `json:"checks,omitempty"`
+	Step            string       `json:"step,omitempty"`
+	HasFeatures     []string     `json:"has_features,omitempty"`
+	MissingFeatures []string     `json:"missing_features,omitempty"`
+	HasLabels       []string     `json:"has_labels,omitempty"`
+	MissingLabels   []string     `json:"missing_labels,omitempty"`
+	ExpectedResult  string       `json:"expected_result,omitempty"`
+	Constraints     []string     `json:"constraints,omitempty"`
+	ReasonCode      string       `json:"reason_code,omitempty"`
+	ReasonMessage   string       `json:"reason_message,omitempty"`
+}
+
+type RouteCheck struct {
 	Name            string   `json:"name"`
 	Title           string   `json:"title,omitempty"`
 	Action          string   `json:"action,omitempty"`
 	Outcome         string   `json:"outcome,omitempty"`
 	Profile         string   `json:"profile,omitempty"`
 	Description     string   `json:"description,omitempty"`
-	Checks          []string `json:"checks,omitempty"`
 	Step            string   `json:"step,omitempty"`
 	HasFeatures     []string `json:"has_features,omitempty"`
 	MissingFeatures []string `json:"missing_features,omitempty"`
@@ -41,6 +60,30 @@ type Route struct {
 	Constraints     []string `json:"constraints,omitempty"`
 	ReasonCode      string   `json:"reason_code,omitempty"`
 	ReasonMessage   string   `json:"reason_message,omitempty"`
+}
+
+func (c *RouteCheck) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*c = RouteCheck{}
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var name string
+		if err := json.Unmarshal(trimmed, &name); err != nil {
+			return err
+		}
+		*c = RouteCheck{Name: name}
+		return nil
+	}
+
+	type rawRouteCheck RouteCheck
+	var raw rawRouteCheck
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return err
+	}
+	*c = RouteCheck(raw)
+	return nil
 }
 
 type Action struct {
@@ -173,6 +216,10 @@ func mergeCatalogLayers(layers []CatalogLayer) CatalogSnapshot {
 		}
 		if layer.Source == configuration.ConfigFileSourceLocal {
 			snapshot.LocalCatalogPath = layer.Path
+		}
+
+		if defaultRoute := normalizeName(layer.Catalog.DefaultRoute); defaultRoute != "" {
+			snapshot.Catalog.DefaultRoute = defaultRoute
 		}
 
 		for _, route := range layer.Catalog.Routes {
@@ -315,7 +362,7 @@ func GetCatalogElement(snapshot CatalogSnapshot, kind string, name string, entit
 }
 
 func normalizeCatalog(catalog Catalog) Catalog {
-	result := Catalog{}
+	result := Catalog{DefaultRoute: normalizeName(catalog.DefaultRoute)}
 	routeIndexes := map[string]int{}
 	actionIndexes := map[string]int{}
 	instructionIndexes := map[string]int{}
@@ -368,8 +415,22 @@ func validateCatalog(catalog Catalog) error {
 			return fmt.Errorf("routes contains duplicate name %q", route.Name)
 		}
 		seenRoutes[route.Name] = struct{}{}
-		if route.Action == "" && route.Outcome == "" {
-			return fmt.Errorf("route %q must define action or outcome", route.Name)
+		if route.Action == "" && route.Outcome == "" && len(route.Checks) == 0 {
+			return fmt.Errorf("route %q must define action, outcome or checks", route.Name)
+		}
+		seenChecks := map[string]struct{}{}
+		for checkIndex, check := range route.Checks {
+			check = normalizeRouteCheck(check)
+			if check.Name == "" {
+				return fmt.Errorf("route %q checks[%d].name must be non-empty", route.Name, checkIndex)
+			}
+			if _, ok := seenChecks[check.Name]; ok {
+				return fmt.Errorf("route %q checks contains duplicate name %q", route.Name, check.Name)
+			}
+			seenChecks[check.Name] = struct{}{}
+			if check.Action == "" && check.Outcome == "" {
+				return fmt.Errorf("route %q check %q must define action or outcome", route.Name, check.Name)
+			}
 		}
 	}
 
@@ -496,7 +557,7 @@ func normalizeRoute(route Route) Route {
 	route.Outcome = normalizeName(route.Outcome)
 	route.Profile = strings.TrimSpace(route.Profile)
 	route.Description = strings.TrimSpace(route.Description)
-	route.Checks = normalizeStringList(route.Checks)
+	route.Checks = normalizeRouteChecks(route.Checks)
 	route.Step = strings.TrimSpace(route.Step)
 	route.HasFeatures = normalizeNameList(route.HasFeatures)
 	route.MissingFeatures = normalizeNameList(route.MissingFeatures)
@@ -507,6 +568,40 @@ func normalizeRoute(route Route) Route {
 	route.ReasonCode = strings.TrimSpace(route.ReasonCode)
 	route.ReasonMessage = strings.TrimSpace(route.ReasonMessage)
 	return route
+}
+
+func normalizeRouteChecks(checks []RouteCheck) []RouteCheck {
+	result := make([]RouteCheck, 0, len(checks))
+	for _, check := range checks {
+		check = normalizeRouteCheck(check)
+		if check.Name == "" {
+			continue
+		}
+		result = append(result, check)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func normalizeRouteCheck(check RouteCheck) RouteCheck {
+	check.Name = normalizeName(check.Name)
+	check.Title = strings.TrimSpace(check.Title)
+	check.Action = normalizeName(check.Action)
+	check.Outcome = normalizeName(check.Outcome)
+	check.Profile = strings.TrimSpace(check.Profile)
+	check.Description = strings.TrimSpace(check.Description)
+	check.Step = strings.TrimSpace(check.Step)
+	check.HasFeatures = normalizeNameList(check.HasFeatures)
+	check.MissingFeatures = normalizeNameList(check.MissingFeatures)
+	check.HasLabels = normalizeNameList(check.HasLabels)
+	check.MissingLabels = normalizeNameList(check.MissingLabels)
+	check.ExpectedResult = strings.TrimSpace(check.ExpectedResult)
+	check.Constraints = normalizeStringList(check.Constraints)
+	check.ReasonCode = strings.TrimSpace(check.ReasonCode)
+	check.ReasonMessage = strings.TrimSpace(check.ReasonMessage)
+	return check
 }
 
 func normalizeAction(action Action) Action {

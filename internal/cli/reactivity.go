@@ -11,6 +11,7 @@ import (
 
 type reactivityFlags struct {
 	task      int
+	route     string
 	action    string
 	once      bool
 	maxCycles int
@@ -61,6 +62,7 @@ func newReactivityProcessCommand() *cobra.Command {
 			service := newReactivityService(cmd)
 			result, err := service.ProcessTask(context.Background(), reactivity.TaskProcessingInput{
 				TaskNumber: flags.task,
+				Route:      flags.route,
 				Once:       flags.once,
 				MaxCycles:  flags.maxCycles,
 			})
@@ -74,6 +76,7 @@ func newReactivityProcessCommand() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&flags.task, "task", 0, "Номер задачи для обработки")
+	cmd.Flags().StringVar(&flags.route, "route", "", "Имя маршрута обработки")
 	cmd.Flags().BoolVar(&flags.once, "once", false, "Выполнить только один цикл обработки")
 	cmd.Flags().IntVar(&flags.maxCycles, "max-cycles", 0, "Максимальное число циклов обработки")
 	_ = cmd.MarkFlagRequired("task")

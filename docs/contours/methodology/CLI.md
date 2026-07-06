@@ -25,18 +25,27 @@
 
 ```json
 {
+  "default_route": "task-processing",
   "routes": [
     {
-      "name": "default",
-      "title": "Маршрут по умолчанию",
-      "action": "implement",
-      "profile": "default"
-    },
-    {
-      "name": "completed",
-      "title": "Завершение обработки",
-      "outcome": "completed",
-      "has_labels": ["Экспертиза пройдена"]
+      "name": "task-processing",
+      "title": "Реализация задачи и саморевизия результата",
+      "checks": [
+        {
+          "name": "task-processing-start",
+          "action": "start-implementation-pr",
+          "missing_labels": ["Ожидает экспертизы"],
+          "reason_code": "task_processing_not_started",
+          "reason_message": "Требуется начать выполнение."
+        },
+        {
+          "name": "task-processing-completed",
+          "outcome": "completed",
+          "has_labels": ["Экспертиза пройдена"],
+          "reason_code": "review_already_passed",
+          "reason_message": "Экспертиза уже пройдена."
+        }
+      ]
     }
   ],
   "actions": [
@@ -91,7 +100,7 @@ progress methodology list --kind decision-rule --target-contour decision
 Просмотр одной сущности:
 
 ```bash
-progress methodology show --kind route --name default
+progress methodology show --kind route --name task-processing
 progress methodology show --kind decision-rule --name description-assessment
 ```
 
@@ -102,13 +111,13 @@ progress methodology show --kind decision-rule --name description-assessment
 Выбор маршрута, действия и инструкции из объединённого каталога:
 
 ```bash
-progress methodology select --route default
+progress methodology select --route task-processing
 ```
 
 Переопределение действия или профиля:
 
 ```bash
-progress methodology select --route default --action implement --profile coder
+progress methodology select --route task-processing --action implement --profile coder
 ```
 
 Вывод содержит выбранные сущности, источники `global` или `local`, пути каталогов и диагностические строки выбора.
@@ -146,8 +155,8 @@ progress methodology add action \
 
 ```bash
 progress methodology add route \
-  --name default \
-  --title "Маршрут по умолчанию" \
+  --name manual-action \
+  --title "Ручной запуск действия" \
   --action implement \
   --profile default \
   --reason-code issue_context_ready \

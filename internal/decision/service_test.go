@@ -65,8 +65,11 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Consideration.Status != ConsiderationStatusExecution {
 		t.Fatalf("unexpected consideration status: %q", result.Consideration.Status)
 	}
-	if result.Consideration.Route.Name != "task-processing-start" {
+	if result.Consideration.Route.Name != "task-processing" {
 		t.Fatalf("unexpected consideration route: %#v", result.Consideration.Route)
+	}
+	if len(result.Consideration.Checks) != 1 || result.Consideration.Checks[0].Name != "task-processing-start" {
+		t.Fatalf("unexpected consideration checks: %#v", result.Consideration.Checks)
 	}
 	if result.Decision.Type != DecisionType(DecisionTypeExecute) {
 		t.Fatalf("unexpected decision type: %q", result.Decision.Type)
@@ -229,6 +232,7 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"default_route": "description-assessment",
 		"defaults": {
 			"name": "default",
 			"title": "Маршрут по умолчанию",
@@ -307,6 +311,127 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 	}
 	if result.ExecutionPlan.StructuredInput == nil || len(result.ExecutionPlan.StructuredInput.Constraints) != 1 {
 		t.Fatalf("expected constraints in structured input: %#v", result.ExecutionPlan.StructuredInput)
+	}
+}
+
+func TestServiceConsiderUsesExplicitNamedRoute(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"default_route": "implementation",
+		"routes": [
+			{
+				"name": "implementation",
+				"title": "Реализация задачи",
+				"checks": [{
+					"name": "implementation-start",
+					"action": "start-implementation-pr",
+					"missing_labels": ["Ожидает экспертизы"],
+					"reason_code": "implementation_start",
+					"reason_message": "Запущена реализация."
+				}]
+			},
+			{
+				"name": "review-only",
+				"title": "Ревизия чужой реализации",
+				"checks": [{
+					"name": "review-run",
+					"action": "review-pull-request",
+					"reason_code": "review_run",
+					"reason_message": "Запущена ревизия."
+				}]
+			}
+		]
+	}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Route: "review-only", Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 212},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 212, Title: "Review external change"},
+		MergeRequest: &integration.MergeRequest{
+			System: "github", Repository: "owner/name", Number: 12, HeadRef: "212",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.Route.Name != "review-only" {
+		t.Fatalf("unexpected route: %#v", result.Route)
+	}
+	if len(result.Checks) != 1 || result.Checks[0].Name != "review-run" {
+		t.Fatalf("unexpected checks: %#v", result.Checks)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionReviewPullRequest {
+		t.Fatalf("expected review action, got %#v", result.ExecutionPlan)
+	}
+}
+
+func TestServiceConsiderDiagnosesMissingDefaultRoute(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{"routes": []}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 213},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 213, Title: "No route"},
+	}})
+	if err == nil {
+		t.Fatal("expected missing default route error")
+	}
+	if result.Failure == nil || result.Failure.Code != "default_route_not_configured" {
+		t.Fatalf("unexpected failure: %#v", result.Failure)
+	}
+}
+
+func TestServiceConsiderDiagnosesDefaultRouteNotFound(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"default_route": "missing-route",
+		"routes": [{
+			"name": "implementation",
+			"checks": [{
+				"name": "implementation-start",
+				"action": "start-implementation-pr",
+				"missing_labels": ["Ожидает экспертизы"],
+				"reason_code": "implementation_start",
+				"reason_message": "Запущена реализация."
+			}]
+		}]
+	}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 214},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 214, Title: "Missing default route"},
+	}})
+	if err == nil {
+		t.Fatal("expected default route not found error")
+	}
+	if result.Failure == nil || result.Failure.Code != "default_route_not_found" {
+		t.Fatalf("unexpected failure: %#v", result.Failure)
 	}
 }
 
@@ -432,7 +557,7 @@ func TestServiceStartRoutesTaskDescriptionAssessment(t *testing.T) {
 	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
 	service := &Service{logger: log.Default(), integration: integrationStub, execution: executionStub, resolveRepo: func(context.Context) (string, error) { return "owner/name", nil }}
 
-	result, err := service.Start(context.Background(), StartInput{TaskNumber: 211})
+	result, err := service.Start(context.Background(), StartInput{TaskNumber: 211, Route: "task-description"})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}

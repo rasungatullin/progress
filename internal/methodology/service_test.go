@@ -14,7 +14,7 @@ func TestServiceSelectsRouteActionAndInstruction(t *testing.T) {
 			Title:   "Маршрут исполнения",
 			Action:  "engineering-synthesis",
 			Profile: "default",
-			Checks:  []string{"task-ready"},
+			Checks:  []RouteCheck{{Name: "task-ready", Action: "engineering-synthesis"}},
 		}},
 		Actions: []Action{{
 			Name:       "engineering-synthesis",

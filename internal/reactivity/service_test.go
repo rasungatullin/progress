@@ -182,6 +182,27 @@ func TestServiceProcessTaskOnceStopsAfterFirstCycle(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskPassesExplicitRouteToDecision(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	decisions := &processingDecisionStub{results: []decision.ConsiderationResult{
+		processingConsideration(execution.ActionStartImplementationPR),
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = decisions
+	service.execution = &processingExecutionStub{results: []execution.ExecutionResult{{Status: "completed", Launch: &execution.LaunchResult{Status: "completed"}}}}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Route: "task-description", Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(decisions.inputs) != 1 || decisions.inputs[0].Route != "task-description" {
+		t.Fatalf("unexpected decision inputs: %#v", decisions.inputs)
+	}
+}
+
 func TestServiceRunTaskActionSkipsDecisionAndMarksRework(t *testing.T) {
 	t.Parallel()
 
@@ -426,9 +447,11 @@ type processingDecisionStub struct {
 	results []decision.ConsiderationResult
 	err     error
 	calls   int
+	inputs  []decision.ConsiderationInput
 }
 
-func (s *processingDecisionStub) Consider(_ context.Context, _ decision.ConsiderationInput) (decision.ConsiderationResult, error) {
+func (s *processingDecisionStub) Consider(_ context.Context, input decision.ConsiderationInput) (decision.ConsiderationResult, error) {
+	s.inputs = append(s.inputs, input)
 	if s.err != nil {
 		return decision.ConsiderationResult{}, s.err
 	}

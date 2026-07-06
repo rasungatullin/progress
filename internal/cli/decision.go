@@ -14,7 +14,8 @@ type decisionStarter interface {
 }
 
 type decisionFlags struct {
-	task int
+	task  int
+	route string
 }
 
 type decisionServiceFactoryFunc func(*cobra.Command) decisionStarter
@@ -52,7 +53,7 @@ func newDecisionStartCommand() *cobra.Command {
 		Short: "Полный запуск контура принятия решения",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newDecisionService(cmd)
-			result, err := service.Start(context.Background(), decision.StartInput{TaskNumber: flags.task})
+			result, err := service.Start(context.Background(), decision.StartInput{TaskNumber: flags.task, Route: flags.route})
 			if err != nil {
 				printDecisionStartResultOnError(cmd, result)
 				return err
@@ -64,6 +65,7 @@ func newDecisionStartCommand() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&flags.task, "task", 0, "Номер задачи для запуска контура решения")
+	cmd.Flags().StringVar(&flags.route, "route", "", "Имя маршрута обработки")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
 }

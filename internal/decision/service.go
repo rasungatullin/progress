@@ -83,7 +83,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		Issue:        response.Issue,
 		MergeRequest: mergeRequest,
 	}
-	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext})
+	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext, Route: input.Route})
 	if err != nil {
 		return StartResult{
 			Context:       decisionContext,
@@ -176,14 +176,20 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 		result.Context.Task = canonicalTaskFromIssue(input.Context.Issue)
 	}
 
-	route, err := s.selectWorkflowRoute(ctx, result.Context.Task)
+	route, err := s.selectWorkflowRoute(ctx, result.Context.Task, input.Route)
 	if err != nil {
 		result.Status = ConsiderationStatusFailed
-		result.Failure = decisionFailure("route_resolution_failed", err, false, true)
+		failureCode := "route_resolution_failed"
+		if coded, ok := err.(interface{ Code() string }); ok && strings.TrimSpace(coded.Code()) != "" {
+			failureCode = coded.Code()
+		}
+		result.Failure = decisionFailure(failureCode, err, false, true)
 		return result, err
 	}
 
 	result.Route = route.Route
+	result.RouteSource = route.RouteSource
+	result.CheckSources = route.CheckSources
 	result.Checks = route.Checks
 	if strings.TrimSpace(route.Outcome) != "" && strings.TrimSpace(route.Action) == "" {
 		result.Status = ConsiderationStatusCompleted

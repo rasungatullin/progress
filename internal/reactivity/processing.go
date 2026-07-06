@@ -18,6 +18,7 @@ const (
 
 type TaskProcessingInput struct {
 	TaskNumber int
+	Route      string
 	Once       bool
 	MaxCycles  int
 }
@@ -68,7 +69,7 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 
 	result := TaskProcessingResult{TaskNumber: input.TaskNumber}
 	for index := 1; index <= maxCycles; index++ {
-		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, index)
+		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index)
 		result.Cycles = append(result.Cycles, cycle)
 		result.FinalIssue = cycle.Issue
 		if err != nil {
@@ -138,7 +139,7 @@ func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (Tas
 	return result, nil
 }
 
-func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, index int) (TaskProcessingCycle, error) {
+func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route string, index int) (TaskProcessingCycle, error) {
 	issue, mergeRequest, err := s.loadTaskState(ctx, taskNumber, false)
 	if err != nil {
 		return TaskProcessingCycle{Index: index}, err
@@ -149,7 +150,7 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, index in
 		Issue:        issue,
 		MergeRequest: mergeRequest,
 	}
-	consideration, err := s.decision.Consider(ctx, decision.ConsiderationInput{Context: decision.DecisionContext{
+	consideration, err := s.decision.Consider(ctx, decision.ConsiderationInput{Route: route, Context: decision.DecisionContext{
 		Signal:       decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: taskNumber},
 		Issue:        issue,
 		MergeRequest: mergeRequest,

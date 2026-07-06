@@ -15,11 +15,30 @@ import (
 const workflowConfigRelativePath = ".progress/decision/workflows.json"
 
 type workflowConfigFile struct {
-	Defaults workflowRouteConfig   `json:"defaults"`
-	Routes   []workflowRouteConfig `json:"routes"`
+	DefaultRoute string                          `json:"default_route"`
+	Defaults     workflowRouteCheckConfig        `json:"defaults"`
+	Routes       []workflowProcessingRouteConfig `json:"routes"`
 }
 
-type workflowRouteConfig struct {
+type workflowProcessingRouteConfig struct {
+	Name            string                     `json:"name"`
+	Title           string                     `json:"title"`
+	Description     string                     `json:"description"`
+	Action          string                     `json:"action,omitempty"`
+	Outcome         string                     `json:"outcome,omitempty"`
+	HasFeatures     []string                   `json:"has_features,omitempty"`
+	MissingFeatures []string                   `json:"missing_features,omitempty"`
+	HasLabels       []string                   `json:"has_labels,omitempty"`
+	MissingLabels   []string                   `json:"missing_labels,omitempty"`
+	ExpectedResult  string                     `json:"expected_result,omitempty"`
+	Constraints     []string                   `json:"constraints,omitempty"`
+	ReasonCode      string                     `json:"reason_code,omitempty"`
+	ReasonMessage   string                     `json:"reason_message,omitempty"`
+	Checks          []workflowRouteCheckConfig `json:"checks"`
+	Source          string                     `json:"-"`
+}
+
+type workflowRouteCheckConfig struct {
 	Name            string   `json:"name"`
 	Title           string   `json:"title"`
 	Description     string   `json:"description"`
@@ -33,6 +52,7 @@ type workflowRouteConfig struct {
 	Constraints     []string `json:"constraints"`
 	ReasonCode      string   `json:"reason_code"`
 	ReasonMessage   string   `json:"reason_message"`
+	Source          string   `json:"-"`
 }
 
 type selectedWorkflowRoute struct {
@@ -44,61 +64,85 @@ type selectedWorkflowRoute struct {
 	ReasonMessage  string
 	Route          ProcessingRoute
 	Checks         []RouteCheckResult
+	RouteSource    string
+	CheckSources   map[string]string
 }
 
-func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.CanonicalTask) (selectedWorkflowRoute, error) {
+type workflowRouteResolutionError struct {
+	code    string
+	message string
+}
+
+func (e workflowRouteResolutionError) Error() string { return e.message }
+
+func (e workflowRouteResolutionError) Code() string { return e.code }
+
+func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.CanonicalTask, routeName string) (selectedWorkflowRoute, error) {
 	config, err := s.loadWorkflowConfig(ctx)
 	if err != nil {
 		return selectedWorkflowRoute{}, err
 	}
 
-	selected := selectedWorkflowRoute{
-		Action:         strings.TrimSpace(config.Defaults.Action),
-		Outcome:        strings.TrimSpace(config.Defaults.Outcome),
-		ExpectedResult: strings.TrimSpace(config.Defaults.ExpectedResult),
-		Constraints:    normalizeRouteConstraints(config.Defaults.Constraints),
-		ReasonCode:     strings.TrimSpace(config.Defaults.ReasonCode),
-		ReasonMessage:  strings.TrimSpace(config.Defaults.ReasonMessage),
-		Route: ProcessingRoute{
-			Name:        firstNonEmpty(strings.TrimSpace(config.Defaults.Name), "default"),
-			Title:       firstNonEmpty(strings.TrimSpace(config.Defaults.Title), "Маршрут по умолчанию"),
-			Description: strings.TrimSpace(config.Defaults.Description),
-		},
-		Checks: []RouteCheckResult{{
-			Name:   "default-route",
-			Status: RouteCheckStatusPassed,
-			Reasons: []DecisionReason{{
-				Code:    "default_route_available",
-				Message: "Маршрут по умолчанию доступен для задачи.",
-			}},
-		}},
+	requestedRoute := strings.TrimSpace(routeName)
+	if requestedRoute == "" {
+		requestedRoute = strings.TrimSpace(config.DefaultRoute)
+		if requestedRoute == "" {
+			return selectedWorkflowRoute{}, workflowRouteResolutionError{code: "default_route_not_configured", message: "маршрут обработки по умолчанию не настроен"}
+		}
 	}
+
+	var processingRoute workflowProcessingRouteConfig
+	found := false
+	for _, route := range config.Routes {
+		if strings.TrimSpace(route.Name) != requestedRoute {
+			continue
+		}
+		processingRoute = route
+		found = true
+		break
+	}
+	if !found {
+		code := "route_not_found"
+		if strings.TrimSpace(routeName) == "" {
+			code = "default_route_not_found"
+		}
+		return selectedWorkflowRoute{}, workflowRouteResolutionError{code: code, message: fmt.Sprintf("маршрут обработки %q не найден", requestedRoute)}
+	}
+
 	bestScore := -1
-	for index, route := range config.Routes {
-		check := evaluateWorkflowRoute(route, task)
+	var selected selectedWorkflowRoute
+	for index, checkConfig := range processingRoute.Checks {
+		check := evaluateWorkflowRoute(checkConfig, task)
 		if check.Status != RouteCheckStatusPassed {
 			continue
 		}
-		score := workflowRouteScore(route)
+		score := workflowRouteScore(checkConfig)
 		if score <= bestScore {
 			continue
 		}
 
 		selected = selectedWorkflowRoute{
-			Action:         strings.TrimSpace(route.Action),
-			Outcome:        strings.TrimSpace(route.Outcome),
-			ExpectedResult: strings.TrimSpace(route.ExpectedResult),
-			Constraints:    normalizeRouteConstraints(route.Constraints),
-			ReasonCode:     strings.TrimSpace(route.ReasonCode),
-			ReasonMessage:  strings.TrimSpace(route.ReasonMessage),
+			Action:         strings.TrimSpace(checkConfig.Action),
+			Outcome:        strings.TrimSpace(checkConfig.Outcome),
+			ExpectedResult: strings.TrimSpace(checkConfig.ExpectedResult),
+			Constraints:    normalizeRouteConstraints(checkConfig.Constraints),
+			ReasonCode:     strings.TrimSpace(checkConfig.ReasonCode),
+			ReasonMessage:  strings.TrimSpace(checkConfig.ReasonMessage),
 			Route: ProcessingRoute{
-				Name:        firstNonEmpty(strings.TrimSpace(route.Name), fmt.Sprintf("route-%d", index+1)),
-				Title:       firstNonEmpty(strings.TrimSpace(route.Title), strings.TrimSpace(route.Action)),
-				Description: strings.TrimSpace(route.Description),
+				Name:        strings.TrimSpace(processingRoute.Name),
+				Title:       strings.TrimSpace(processingRoute.Title),
+				Description: strings.TrimSpace(processingRoute.Description),
 			},
-			Checks: []RouteCheckResult{check},
+			RouteSource: strings.TrimSpace(processingRoute.Source),
+			Checks:      []RouteCheckResult{check},
+			CheckSources: map[string]string{
+				firstNonEmpty(strings.TrimSpace(checkConfig.Name), fmt.Sprintf("check-%d", index+1)): firstNonEmpty(strings.TrimSpace(checkConfig.Source), strings.TrimSpace(processingRoute.Source)),
+			},
 		}
 		bestScore = score
+	}
+	if bestScore < 0 {
+		return selectedWorkflowRoute{}, workflowRouteResolutionError{code: "route_check_not_found", message: fmt.Sprintf("маршрут обработки %q не содержит подходящую проверку", requestedRoute)}
 	}
 
 	return selected, nil
@@ -139,6 +183,7 @@ func (s *Service) loadWorkflowConfig(ctx context.Context) (workflowConfigFile, e
 	if err := json.Unmarshal(content, &config); err != nil {
 		return workflowConfigFile{}, fmt.Errorf("parse decision workflow config %s: %w", configPath, err)
 	}
+	config = normalizeWorkflowConfig(config)
 	if err := validateWorkflowConfig(config); err != nil {
 		return workflowConfigFile{}, fmt.Errorf("invalid decision workflow config %s: %w", configPath, err)
 	}
@@ -152,9 +197,22 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 		return workflowConfigFile{}, err
 	}
 
-	config := workflowConfigFile{}
+	config := workflowConfigFile{DefaultRoute: strings.TrimSpace(snapshot.Catalog.DefaultRoute)}
+	legacyChecks := make([]workflowRouteCheckConfig, 0, len(snapshot.Catalog.Routes))
 	for _, route := range snapshot.Catalog.Routes {
-		routeConfig := workflowRouteConfig{
+		if len(route.Checks) != 0 {
+			routeConfig := workflowProcessingRouteConfig{
+				Name:        route.Name,
+				Title:       route.Title,
+				Description: route.Description,
+				Checks:      workflowChecksFromMethodologyChecks(route.Checks, string(snapshot.Sources.Routes[route.Name])),
+				Source:      string(snapshot.Sources.Routes[route.Name]),
+			}
+			config.Routes = append(config.Routes, routeConfig)
+			continue
+		}
+
+		checkConfig := workflowRouteCheckConfig{
 			Name:            route.Name,
 			Title:           route.Title,
 			Description:     route.Description,
@@ -168,25 +226,33 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 			Constraints:     append([]string(nil), route.Constraints...),
 			ReasonCode:      route.ReasonCode,
 			ReasonMessage:   route.ReasonMessage,
+			Source:          string(snapshot.Sources.Routes[route.Name]),
 		}
-		if routeConfig.Name == "default" {
-			config.Defaults = routeConfig
+		if checkConfig.Name == "default" {
+			config.Defaults = checkConfig
 			continue
 		}
-		if !workflowRouteHasMatchers(routeConfig) {
+		if !workflowRouteHasMatchers(checkConfig) {
 			continue
 		}
-		config.Routes = append(config.Routes, routeConfig)
+		legacyChecks = append(legacyChecks, checkConfig)
 	}
-	if config.Defaults.Action == "" && config.Defaults.Outcome == "" {
-		config.Defaults = workflowRouteConfig{
-			Name:          "default",
-			Title:         "Маршрут по умолчанию",
-			Action:        "implement",
-			ReasonCode:    "issue_context_ready",
-			ReasonMessage: "Контекст задачи готов к передаче в контур исполнения.",
-		}
+	if len(config.Routes) == 0 && len(legacyChecks) != 0 {
+		config.Routes = append(config.Routes, workflowProcessingRouteConfig{
+			Name:        "task-processing",
+			Title:       "Обработка задачи",
+			Description: "Совместимый маршрут обработки, собранный из плоского списка проверок.",
+			Checks:      legacyChecks,
+		})
 	}
+	if len(config.Routes) == 0 && (config.Defaults.Action != "" || config.Defaults.Outcome != "") {
+		config.Routes = append(config.Routes, workflowProcessingRouteConfig{
+			Name:   "default",
+			Title:  "Маршрут по умолчанию",
+			Checks: []workflowRouteCheckConfig{config.Defaults},
+		})
+	}
+	config = normalizeWorkflowConfig(config)
 	if err := validateWorkflowConfig(config); err != nil {
 		return workflowConfigFile{}, fmt.Errorf("invalid methodology decision routes: %w", err)
 	}
@@ -194,14 +260,62 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 	return config, nil
 }
 
-func workflowRouteHasMatchers(route workflowRouteConfig) bool {
+func workflowChecksFromMethodologyChecks(checks []methodology.RouteCheck, source string) []workflowRouteCheckConfig {
+	result := make([]workflowRouteCheckConfig, 0, len(checks))
+	for _, check := range checks {
+		result = append(result, workflowRouteCheckConfig{
+			Name:            check.Name,
+			Title:           check.Title,
+			Description:     check.Description,
+			Action:          check.Action,
+			Outcome:         check.Outcome,
+			HasFeatures:     append([]string(nil), check.HasFeatures...),
+			MissingFeatures: append([]string(nil), check.MissingFeatures...),
+			HasLabels:       append([]string(nil), check.HasLabels...),
+			MissingLabels:   append([]string(nil), check.MissingLabels...),
+			ExpectedResult:  check.ExpectedResult,
+			Constraints:     append([]string(nil), check.Constraints...),
+			ReasonCode:      check.ReasonCode,
+			ReasonMessage:   check.ReasonMessage,
+			Source:          source,
+		})
+	}
+	return result
+}
+
+func normalizeWorkflowConfig(config workflowConfigFile) workflowConfigFile {
+	config.DefaultRoute = strings.TrimSpace(config.DefaultRoute)
+	for routeIndex, route := range config.Routes {
+		if len(route.Checks) == 0 && (strings.TrimSpace(route.Action) != "" || strings.TrimSpace(route.Outcome) != "") {
+			route.Checks = []workflowRouteCheckConfig{{
+				Name:            route.Name,
+				Title:           route.Title,
+				Description:     route.Description,
+				Action:          route.Action,
+				Outcome:         route.Outcome,
+				HasFeatures:     route.HasFeatures,
+				MissingFeatures: route.MissingFeatures,
+				HasLabels:       route.HasLabels,
+				MissingLabels:   route.MissingLabels,
+				ExpectedResult:  route.ExpectedResult,
+				Constraints:     route.Constraints,
+				ReasonCode:      route.ReasonCode,
+				ReasonMessage:   route.ReasonMessage,
+			}}
+		}
+		config.Routes[routeIndex] = route
+	}
+	return config
+}
+
+func workflowRouteHasMatchers(route workflowRouteCheckConfig) bool {
 	return len(normalizeLabels(route.HasLabels)) != 0 ||
 		len(normalizeLabels(route.MissingLabels)) != 0 ||
 		len(normalizeFeatures(route.HasFeatures)) != 0 ||
 		len(normalizeFeatures(route.MissingFeatures)) != 0
 }
 
-func workflowRouteScore(route workflowRouteConfig) int {
+func workflowRouteScore(route workflowRouteCheckConfig) int {
 	required := len(normalizeLabels(route.HasLabels)) + len(normalizeFeatures(route.HasFeatures))
 	missing := len(normalizeLabels(route.MissingLabels)) + len(normalizeFeatures(route.MissingFeatures))
 	return required*10 + missing
@@ -212,35 +326,30 @@ func isMethodologyCatalogNotFound(err error) bool {
 }
 
 func validateWorkflowConfig(config workflowConfigFile) error {
-	if strings.TrimSpace(config.Defaults.Action) == "" && strings.TrimSpace(config.Defaults.Outcome) == "" {
-		return fmt.Errorf("defaults.action or defaults.outcome must be non-empty")
-	}
-	if strings.TrimSpace(config.Defaults.ReasonCode) == "" {
-		return fmt.Errorf("defaults.reason_code must be non-empty")
-	}
-	if strings.TrimSpace(config.Defaults.ReasonMessage) == "" {
-		return fmt.Errorf("defaults.reason_message must be non-empty")
-	}
-
 	for index, route := range config.Routes {
-		if strings.TrimSpace(route.Action) == "" && strings.TrimSpace(route.Outcome) == "" {
-			return fmt.Errorf("routes[%d].action or outcome must be non-empty", index)
+		if strings.TrimSpace(route.Name) == "" {
+			return fmt.Errorf("routes[%d].name must be non-empty", index)
 		}
-		if !workflowRouteHasMatchers(route) {
-			return fmt.Errorf("routes[%d] must declare at least one matcher", index)
+		if len(route.Checks) == 0 {
+			return fmt.Errorf("routes[%d].checks must be non-empty", index)
 		}
-		if strings.TrimSpace(route.ReasonCode) == "" {
-			return fmt.Errorf("routes[%d].reason_code must be non-empty", index)
-		}
-		if strings.TrimSpace(route.ReasonMessage) == "" {
-			return fmt.Errorf("routes[%d].reason_message must be non-empty", index)
+		for checkIndex, check := range route.Checks {
+			if strings.TrimSpace(check.Action) == "" && strings.TrimSpace(check.Outcome) == "" {
+				return fmt.Errorf("routes[%d].checks[%d].action or outcome must be non-empty", index, checkIndex)
+			}
+			if strings.TrimSpace(check.ReasonCode) == "" {
+				return fmt.Errorf("routes[%d].checks[%d].reason_code must be non-empty", index, checkIndex)
+			}
+			if strings.TrimSpace(check.ReasonMessage) == "" {
+				return fmt.Errorf("routes[%d].checks[%d].reason_message must be non-empty", index, checkIndex)
+			}
 		}
 	}
 
 	return nil
 }
 
-func evaluateWorkflowRoute(route workflowRouteConfig, task integration.CanonicalTask) RouteCheckResult {
+func evaluateWorkflowRoute(route workflowRouteCheckConfig, task integration.CanonicalTask) RouteCheckResult {
 	taskFeatures := taskFeatureSet(task)
 	reasons := make([]DecisionReason, 0)
 	for _, feature := range normalizeFeatures(append(route.HasFeatures, route.HasLabels...)) {

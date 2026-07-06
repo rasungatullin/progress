@@ -67,6 +67,25 @@ func TestReactivityProcessCommandPrintsCycles(t *testing.T) {
 	}
 }
 
+func TestReactivityProcessCommandPassesExplicitRoute(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"reactivity", "process", "--task", "123", "--route", "pull-request-review", "--once"})
+
+	stub := &stubReactivityService{processResult: reactivity.TaskProcessingResult{TaskNumber: 123}}
+	setReactivityServiceFactory(cmd, func(*cobra.Command) reactivityCommandService { return stub })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute reactivity process: %v", err)
+	}
+	if stub.processInput.TaskNumber != 123 || stub.processInput.Route != "pull-request-review" || !stub.processInput.Once {
+		t.Fatalf("unexpected process input: %#v", stub.processInput)
+	}
+}
+
 func TestReactivityActionCommandPassesExplicitAction(t *testing.T) {
 	t.Parallel()
 
