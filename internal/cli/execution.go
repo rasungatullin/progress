@@ -89,7 +89,7 @@ func newExecutionActionCommand() *cobra.Command {
 				return err
 			}
 
-			result, err := service.ExecuteAction(context.Background(), request)
+			result, err := service.ExecuteAction(cmd.Context(), request)
 			if err != nil {
 				printExecutionResultOnError(cmd, result)
 				return err
@@ -118,7 +118,7 @@ func newExecutionOperationCommand() *cobra.Command {
 				return err
 			}
 
-			result, err := service.ExecuteOperation(context.Background(), request)
+			result, err := service.ExecuteOperation(cmd.Context(), request)
 			if err != nil {
 				printOperationResultOnError(cmd, result)
 				return err
