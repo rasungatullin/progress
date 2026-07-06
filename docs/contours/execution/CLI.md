@@ -37,7 +37,7 @@
 - `--project-context` - JSON-объект для `project_context`, флаг можно повторять;
 - `--operational-context` - JSON-объект для `operational_context`, флаг можно повторять;
 - `--previous-run-result` - JSON-объект для `previous_run_results`, флаг можно повторять;
-- `--review-remark` - JSON-объект для `review_remarks`, флаг можно повторять;
+- `--review-remark` - JSON-объект для `review_remarks`, флаг можно повторять; для замечаний ревизии допустимы поля `path`, `line` и `side`, где `line` относится к строке diff на выбранной стороне;
 - `--review-response` - JSON-объект для `review_responses`, флаг можно повторять;
 - `--integration-action` - JSON-объект для `integration_actions`, флаг можно повторять.
 - `--repository` - репозиторий внешней системы в форме `owner/name`;

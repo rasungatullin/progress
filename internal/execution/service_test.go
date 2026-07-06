@@ -963,6 +963,12 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 					Severity: "major",
 					Title:    "Не хватает проверки",
 					Body:     "Добавьте проверку отказа интеграционной операции.",
+					Path:     "internal/execution/integration_operations.go",
+					Line:     42,
+				}, {
+					ID:    "remark-2",
+					Title: "Общее замечание",
+					Body:  "Проверьте описание результата.",
 				}},
 			},
 		},
@@ -1023,11 +1029,17 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	if workplaces.invocation.Workplace.Name != "feature-review" || workplaces.invocation.Workplace.HeadRef != "feature/review" || workplaces.invocation.Workplace.BaseRef != "main" {
 		t.Fatalf("review action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
 	}
-	if len(integrations.calls) != 3 {
+	if len(integrations.calls) != 4 {
 		t.Fatalf("expected get, comments and create integration calls, got %#v", integrations.calls)
 	}
 	if integrations.calls[2].Number != 17 || integrations.calls[2].Repository != "owner/name" {
 		t.Fatalf("unexpected review remark target: %#v", integrations.calls[2])
+	}
+	if integrations.calls[2].Path != "internal/execution/integration_operations.go" || integrations.calls[2].Line != 42 || integrations.calls[2].Side != "RIGHT" {
+		t.Fatalf("inline review remark must keep diff location with default side: %#v", integrations.calls[2])
+	}
+	if integrations.calls[3].Path != "" || integrations.calls[3].Line != 0 || integrations.calls[3].Side != "" {
+		t.Fatalf("review remark without location must stay pull request comment: %#v", integrations.calls[3])
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishReviewRemarks)
 	if operation == nil || operation.Status != OperationStatusCompleted {

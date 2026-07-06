@@ -61,6 +61,9 @@ type StructuredRemark struct {
 	Type       string `json:"type,omitempty"`
 	Title      string `json:"title,omitempty"`
 	Body       string `json:"body,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	Side       string `json:"side,omitempty"`
 	Answer     string `json:"answer,omitempty"`
 	Resolution string `json:"resolution,omitempty"`
 }

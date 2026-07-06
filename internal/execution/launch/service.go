@@ -338,7 +338,7 @@ func validateStructuredInputPayload(payload model.StructuredInput) error {
 		return fmt.Errorf("structured input previous_run_results[%d] must include at least one non-empty field", index)
 	}
 	for index, value := range payload.ReviewRemarks {
-		if hasNonEmptyStructuredField(value.ID, value.Status, value.Severity, value.Type, value.Title, value.Body, value.Answer, value.Resolution) {
+		if hasNonEmptyStructuredRemark(value) {
 			continue
 		}
 
@@ -367,7 +367,7 @@ func validateStructuredOutputPayload(payload model.StructuredOutput) error {
 		return fmt.Errorf("structured output must include a non-empty summary")
 	}
 	for index, value := range payload.Remarks {
-		if hasNonEmptyStructuredField(value.ID, value.Status, value.Severity, value.Type, value.Title, value.Body, value.Answer, value.Resolution) {
+		if hasNonEmptyStructuredRemark(value) {
 			continue
 		}
 
@@ -482,6 +482,10 @@ func hasNonEmptyStructuredField(values ...string) bool {
 	return false
 }
 
+func hasNonEmptyStructuredRemark(value model.StructuredRemark) bool {
+	return hasNonEmptyStructuredField(value.ID, value.Status, value.Severity, value.Type, value.Title, value.Body, value.Path, value.Side, value.Answer, value.Resolution) || value.Line > 0
+}
+
 func decodeJSONStrict(raw string, target any) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -531,7 +535,7 @@ func strictExpectedShapeForField(field string) (string, bool) {
 
 	switch strings.ToLower(segment) {
 	case "remarks":
-		return "array of objects with id/status/severity/type/title/body/answer/resolution", true
+		return "array of objects with id/status/severity/type/title/body/path/line/side/answer/resolution", true
 	case "questions":
 		return "array of objects with id/status/title/body/answer", true
 	case "follow_up_actions":
@@ -1332,7 +1336,7 @@ func selectedStructuredObjectForms(fields []string) []string {
 		field string
 		form  string
 	}{
-		{field: "remarks", form: "remarks[{id,status,severity,type,title,body,answer,resolution}]"},
+		{field: "remarks", form: "remarks[{id,status,severity,type,title,body,path,line,side,answer,resolution}]"},
 		{field: "review_responses", form: "review_responses[{id,remark_id,status,summary,body}]"},
 		{field: "questions", form: "questions[{id,status,title,body,answer}]"},
 		{field: "follow_up_actions", form: "follow_up_actions[{id,status,type,title,body}]"},
@@ -1365,7 +1369,7 @@ func buildStructuredOutputCanonicalExample(fields []string) string {
 		case "commit_message":
 			parts = append(parts, `,"commit_message":"Apply requested review fixes"`)
 		case "remarks":
-			parts = append(parts, `,"remarks":[{"id":"remark-1","title":"Rollback plan"}]`)
+			parts = append(parts, `,"remarks":[{"id":"remark-1","title":"Rollback plan","path":"internal/service.go","line":42,"side":"RIGHT"}]`)
 		case "review_responses":
 			parts = append(parts, `,"review_responses":[{"remark_id":"remark-1","status":"resolved","summary":"Fixed"}]`)
 		case "questions":

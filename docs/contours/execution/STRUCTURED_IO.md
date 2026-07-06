@@ -40,6 +40,8 @@
 
 В текущей реализации канонический структурированный вывод выражается через JSON-контракт верхнего уровня с полями `summary`, `commit_message`, `remarks`, `review_responses`, `questions`, `follow_up_actions`, `changes`, `commands`, `conclusion`, `extensions`.
 
+Элементы `remarks` поддерживают привязку к строке diff через поля `path`, `line` и `side`. Если для замечания заданы `path` и `line`, операция `publish-review-remarks` передаёт эти поля в контур интеграции и публикует замечание как inline-комментарий. Если `side` не задан, используется значение `RIGHT`. Поле `line` должно указывать строку diff на выбранной стороне, а не произвольную строку файла вне изменения. Если `path` или `line` отсутствуют, замечание публикуется как общий комментарий к запросу на слияние.
+
 ## 4. Ответственность контура исполнения
 
 Контур исполнения отвечает за весь цикл работы со структурированным вводом и выводом.
@@ -132,7 +134,7 @@ flowchart TD
 Наглядное сопоставление ошибочной и канонической формы:
 
 - wrong short form: `{"summary":"Done.","remarks":"fixed","conclusion":"ready"}`
-- canonical form: `{"summary":"Done.","remarks":[{"title":"Fixed"}],"conclusion":{"status":"ok","summary":"Ready for review"}}`
+- canonical form: `{"summary":"Done.","remarks":[{"title":"Fixed","path":"internal/service.go","line":42,"side":"RIGHT"}],"conclusion":{"status":"ok","summary":"Ready for review"}}`
 
 ## 8. Расширяемость через конфигурацию
 
