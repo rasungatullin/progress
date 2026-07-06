@@ -71,6 +71,28 @@ func TestServiceSelectsDefaultRouteWhenRouteNameIsEmpty(t *testing.T) {
 	}
 }
 
+func TestServiceSelectsConfiguredDefaultRouteWhenRouteNameIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewService(nil).Select(context.Background(), Catalog{
+		DefaultRoute: "task-processing",
+		Routes: []Route{
+			{Name: "pull-request-review", Action: "review-pull-request"},
+			{Name: "task-processing", Action: "engineering-synthesis"},
+		},
+		Actions: []Action{
+			{Name: "engineering-synthesis"},
+			{Name: "review-pull-request"},
+		},
+	}, SelectionRequest{})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if result.Route.Name != "task-processing" {
+		t.Fatalf("expected configured default route, got %#v", result.Route)
+	}
+}
+
 func TestValidateCatalogAllowsRouteCheckReference(t *testing.T) {
 	t.Parallel()
 

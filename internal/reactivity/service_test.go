@@ -311,6 +311,31 @@ func TestServiceProcessTaskReturnsMergeRequestSearchErrorForReviewLabel(t *testi
 	}
 }
 
+func TestServiceProcessTaskReturnsMergeRequestSearchErrorForExplicitReviewRoute(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.searchErr = errors.New("search unavailable")
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{
+		results: []decision.ConsiderationResult{{
+			Status:  decision.ConsiderationStatusManualIntervention,
+			Failure: &decision.DecisionFailure{Code: "merge_request_missing"},
+		}},
+		err: errors.New("merge request is required for action \"review-pull-request\""),
+	}
+	service.execution = &processingExecutionStub{}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Route: "pull-request-review", Once: true})
+	if err == nil {
+		t.Fatal("expected merge request search error")
+	}
+	if !strings.Contains(err.Error(), "search unavailable") {
+		t.Fatalf("expected original search error, got: %v", err)
+	}
+}
+
 func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 	t.Parallel()
 
@@ -453,7 +478,12 @@ type processingDecisionStub struct {
 func (s *processingDecisionStub) Consider(_ context.Context, input decision.ConsiderationInput) (decision.ConsiderationResult, error) {
 	s.inputs = append(s.inputs, input)
 	if s.err != nil {
-		return decision.ConsiderationResult{}, s.err
+		if s.calls >= len(s.results) {
+			return decision.ConsiderationResult{}, s.err
+		}
+		result := s.results[s.calls]
+		s.calls++
+		return result, s.err
 	}
 	if s.calls >= len(s.results) {
 		return decision.ConsiderationResult{Status: decision.ConsiderationStatusCompleted}, nil

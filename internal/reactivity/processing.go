@@ -140,7 +140,7 @@ func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (Tas
 }
 
 func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route string, index int) (TaskProcessingCycle, error) {
-	issue, mergeRequest, err := s.loadTaskState(ctx, taskNumber, false)
+	issue, mergeRequest, mergeRequestErr, err := s.loadTaskStateWithMergeRequestError(ctx, taskNumber, false)
 	if err != nil {
 		return TaskProcessingCycle{Index: index}, err
 	}
@@ -157,6 +157,9 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route st
 	}})
 	cycle.Consideration = &consideration
 	if err != nil {
+		if mergeRequestErr != nil && consideration.Failure != nil && consideration.Failure.Code == "merge_request_missing" {
+			return cycle, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, mergeRequestErr)
+		}
 		return cycle, err
 	}
 	if consideration.ExecutionPlan == nil {
@@ -196,6 +199,11 @@ func (s *Service) ensureProcessingDependencies() {
 }
 
 func (s *Service) loadTaskState(ctx context.Context, taskNumber int, requireMergeRequest bool) (*integration.TrackerIssue, *integration.MergeRequest, error) {
+	issue, mergeRequest, _, err := s.loadTaskStateWithMergeRequestError(ctx, taskNumber, requireMergeRequest)
+	return issue, mergeRequest, err
+}
+
+func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNumber int, requireMergeRequest bool) (*integration.TrackerIssue, *integration.MergeRequest, error, error) {
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType: integrationTypeTracker,
 		Resource:        "issue",
@@ -204,20 +212,20 @@ func (s *Service) loadTaskState(ctx context.Context, taskNumber int, requireMerg
 		Number:          taskNumber,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if response.Issue == nil {
-		return nil, nil, fmt.Errorf("контур интеграции не вернул задачу %d", taskNumber)
+		return nil, nil, nil, fmt.Errorf("контур интеграции не вернул задачу %d", taskNumber)
 	}
 
 	mergeRequest, err := s.findTaskMergeRequest(ctx, response.Issue)
 	if err != nil {
 		if requireMergeRequest || taskLabelsRequireMergeRequest(response.Issue.Labels) {
-			return nil, nil, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, err)
+			return nil, nil, err, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, err)
 		}
 		s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%d ошибка=%v", taskNumber, err)
 	}
-	return response.Issue, mergeRequest, nil
+	return response.Issue, mergeRequest, err, nil
 }
 
 func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.TrackerIssue) (*integration.MergeRequest, error) {

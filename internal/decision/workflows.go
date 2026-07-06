@@ -258,6 +258,9 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 			Title:  "Маршрут по умолчанию",
 			Checks: []workflowRouteCheckConfig{config.Defaults},
 		})
+		if config.DefaultRoute == "" {
+			config.DefaultRoute = "default"
+		}
 	}
 	config = normalizeWorkflowConfig(config)
 	if err := validateWorkflowConfig(config); err != nil {

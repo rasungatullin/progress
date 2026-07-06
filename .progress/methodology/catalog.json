@@ -77,6 +77,7 @@
           "action": "review-pull-request",
           "profile": "review",
           "step": "review-pull-request",
+          "missing_labels": ["Требует доработки"],
           "expected_result": "Проверить открытый запрос на слияние и записать заключение ревизии.",
           "constraints": ["Работать в отдельном исполнительном рабочем месте.", "Не изменять код в ходе ревизии.", "Замечания и заключение записывать через контур интеграции."],
           "reason_code": "explicit_pull_request_review",
