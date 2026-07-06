@@ -35,10 +35,17 @@ type StartInput struct {
 }
 
 type DecisionContext struct {
-	Signal       Signal
-	Task         integration.CanonicalTask
-	Issue        *integration.TrackerIssue
-	MergeRequest *integration.MergeRequest
+	Signal                    Signal
+	Task                      integration.CanonicalTask
+	Issue                     *integration.TrackerIssue
+	MergeRequest              *integration.MergeRequest
+	MergeRequestExternalState *MergeRequestExternalState
+}
+
+type MergeRequestExternalState struct {
+	HasUnresolvedReviewRemarks bool
+	HasMergeConflict           bool
+	ReviewRemarks              []integration.ReviewRemark
 }
 
 type DecisionType string

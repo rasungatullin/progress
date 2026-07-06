@@ -191,6 +191,11 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	result.RouteSource = route.RouteSource
 	result.CheckSources = route.CheckSources
 	result.Checks = route.Checks
+	if externalMergeRequestBlocksCompletion(input.Context.MergeRequestExternalState) && strings.TrimSpace(route.Outcome) != "" {
+		route = reworkRouteForExternalMergeRequestState(route, input.Context.MergeRequestExternalState)
+		result.Route = route.Route
+		result.Checks = route.Checks
+	}
 	if strings.TrimSpace(route.Outcome) != "" && strings.TrimSpace(route.Action) == "" {
 		result.Status = ConsiderationStatusCompleted
 		result.Reasons = []DecisionReason{decisionReasonFromRoute(route, "route_completed", "Маршрут обработки завершён; следующая операция не требуется.")}
@@ -209,6 +214,55 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	result.Reasons = append([]DecisionReason(nil), decision.Reasons...)
 	result.ExecutionPlan = decision.ExecutionPlan
 	return result, nil
+}
+
+func externalMergeRequestBlocksCompletion(state *MergeRequestExternalState) bool {
+	return state != nil && (state.HasUnresolvedReviewRemarks || state.HasMergeConflict)
+}
+
+func reworkRouteForExternalMergeRequestState(previous selectedWorkflowRoute, state *MergeRequestExternalState) selectedWorkflowRoute {
+	reasonCode := "external_pr_requires_rework"
+	reasonMessage := "Актуальное внешнее состояние запроса на слияние требует доработки."
+	if state != nil && state.HasUnresolvedReviewRemarks && !state.HasMergeConflict {
+		reasonCode = "external_review_remarks_unresolved"
+		reasonMessage = "В запросе на слияние есть нерешённые внешние замечания ревизии; задача возвращена в доработку."
+	} else if state != nil && state.HasMergeConflict && !state.HasUnresolvedReviewRemarks {
+		reasonCode = "merge_request_conflict"
+		reasonMessage = "Запрос на слияние находится в конфликтном состоянии; задача возвращена в доработку."
+	}
+
+	return selectedWorkflowRoute{
+		Action:         execution.ActionApplyReviewComments,
+		ExpectedResult: "Получить актуальные внешние замечания или состояние конфликта запроса на слияние, доработать ветку и отправить результат на повторную экспертизу.",
+		Constraints: []string{
+			"Работать в отдельном исполнительном рабочем месте.",
+			"Сохранять имя ветки по номеру задачи.",
+			"После доработки задача должна быть повторно направлена на экспертизу.",
+		},
+		ReasonCode:    reasonCode,
+		ReasonMessage: reasonMessage,
+		Route: ProcessingRoute{
+			Name:        "task-processing-external-pr-rework",
+			Title:       "Доработка внешнего состояния запроса на слияние",
+			Description: "Направляет задачу на доработку, если завершённая задача имеет открытые внешние препятствия в запросе на слияние.",
+		},
+		Checks: []RouteCheckResult{externalMergeRequestStateCheck(previous, state, reasonCode, reasonMessage)},
+	}
+}
+
+func externalMergeRequestStateCheck(previous selectedWorkflowRoute, state *MergeRequestExternalState, reasonCode string, reasonMessage string) RouteCheckResult {
+	name := "external-merge-request-state"
+	if strings.TrimSpace(previous.Route.Name) != "" {
+		name = previous.Route.Name + ":external-merge-request-state"
+	}
+	return RouteCheckResult{
+		Name:   name,
+		Status: RouteCheckStatusPassed,
+		Reasons: []DecisionReason{{
+			Code:    reasonCode,
+			Message: reasonMessage,
+		}},
+	}
 }
 
 func (s *Service) validateIssueRepository(ctx context.Context, issue *integration.TrackerIssue) error {

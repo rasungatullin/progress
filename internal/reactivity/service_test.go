@@ -291,6 +291,62 @@ func TestServiceProcessTaskReviewWithoutConclusionMarksRework(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskReworksReviewPassedTaskWithExternalRemarks(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{{ExternalID: "thread-1", State: "unresolved", Body: "Исправить обработку"}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{results: []execution.ExecutionResult{{Status: "completed", Launch: &execution.LaunchResult{Status: "completed"}}}}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(result.Cycles) != 1 {
+		t.Fatalf("expected one cycle, got %#v", result.Cycles)
+	}
+	cycle := result.Cycles[0]
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	}
+	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasUnresolvedReviewRemarks {
+		t.Fatalf("expected unresolved external remarks: %#v", cycle.MergeRequestExternalState)
+	}
+	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы|remove:Экспертиза пройдена" {
+		t.Fatalf("unexpected label operations: %s", got)
+	}
+}
+
+func TestServiceProcessTaskReworksReviewPassedTaskWithMergeConflict(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.mergeRequest.Attributes = map[string]string{"mergeable_state": "dirty"}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{results: []execution.ExecutionResult{{Status: "completed", Launch: &execution.LaunchResult{Status: "completed"}}}}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(result.Cycles) != 1 {
+		t.Fatalf("expected one cycle, got %#v", result.Cycles)
+	}
+	cycle := result.Cycles[0]
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	}
+	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasMergeConflict {
+		t.Fatalf("expected merge conflict state: %#v", cycle.MergeRequestExternalState)
+	}
+	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы|remove:Экспертиза пройдена" {
+		t.Fatalf("unexpected label operations: %s", got)
+	}
+}
+
 func TestServiceProcessTaskReturnsMergeRequestSearchErrorForReviewLabel(t *testing.T) {
 	t.Parallel()
 
@@ -423,10 +479,12 @@ func processingConsideration(action string) decision.ConsiderationResult {
 }
 
 type processingIntegrationStub struct {
-	issue     integration.TrackerIssue
-	labels    []string
-	requests  []integration.Request
-	searchErr error
+	issue         integration.TrackerIssue
+	mergeRequest  integration.MergeRequest
+	reviewRemarks []integration.ReviewRemark
+	labels        []string
+	requests      []integration.Request
+	searchErr     error
 }
 
 func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
@@ -438,6 +496,15 @@ func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
 			Title:      "Task",
 			State:      "OPEN",
 			Labels:     append([]string(nil), labels...),
+		},
+		mergeRequest: integration.MergeRequest{
+			System:     "github",
+			Repository: "owner/name",
+			Number:     17,
+			Title:      "Task",
+			State:      "OPEN",
+			BaseRef:    "main",
+			HeadRef:    "123",
 		},
 	}
 }
@@ -453,15 +520,17 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 		if s.searchErr != nil {
 			return integration.Response{}, s.searchErr
 		}
-		return integration.Response{MergeRequests: []integration.MergeRequest{{
-			System:     "github",
-			Repository: "owner/name",
-			Number:     17,
-			Title:      "Task",
-			State:      "OPEN",
-			BaseRef:    "main",
-			HeadRef:    "123",
-		}}}, nil
+		mergeRequest := s.mergeRequest
+		mergeRequest.Traits = append([]string(nil), s.mergeRequest.Traits...)
+		if s.mergeRequest.Attributes != nil {
+			mergeRequest.Attributes = make(map[string]string, len(s.mergeRequest.Attributes))
+			for key, value := range s.mergeRequest.Attributes {
+				mergeRequest.Attributes[key] = value
+			}
+		}
+		return integration.Response{MergeRequests: []integration.MergeRequest{mergeRequest}}, nil
+	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "comments":
+		return integration.Response{ReviewRemarks: append([]integration.ReviewRemark(nil), s.reviewRemarks...)}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeTracker && request.Operation == "add":
 		s.labels = append(s.labels, "add:"+strings.Join(request.Labels, ","))
 		s.issue.Labels = append(s.issue.Labels, request.Labels...)

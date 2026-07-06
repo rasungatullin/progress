@@ -815,6 +815,78 @@ func TestServiceConsiderCompletesWhenReviewPassed(t *testing.T) {
 	}
 }
 
+func TestServiceConsiderRoutesReviewPassedTaskToReworkForExternalRemarks(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     123,
+			Title:      "Completed task",
+			Labels:     []string{"Экспертиза пройдена"},
+		},
+		MergeRequest: &integration.MergeRequest{
+			System:     "github",
+			Repository: "owner/name",
+			Number:     17,
+			Title:      "Completed task",
+			BaseRef:    "main",
+			HeadRef:    "123",
+		},
+		MergeRequestExternalState: &MergeRequestExternalState{HasUnresolvedReviewRemarks: true},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.Status != ConsiderationStatusExecution {
+		t.Fatalf("unexpected status: %q", result.Status)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected rework execution plan, got %#v", result.ExecutionPlan)
+	}
+	if result.Route.Name != "task-processing-external-pr-rework" {
+		t.Fatalf("unexpected route: %#v", result.Route)
+	}
+	if len(result.Reasons) != 1 || result.Reasons[0].Code != "external_review_remarks_unresolved" {
+		t.Fatalf("unexpected reasons: %#v", result.Reasons)
+	}
+}
+
+func TestServiceConsiderRoutesReviewPassedTaskToReworkForMergeConflict(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     123,
+			Title:      "Completed task",
+			Labels:     []string{"Экспертиза пройдена"},
+		},
+		MergeRequest: &integration.MergeRequest{
+			System:     "github",
+			Repository: "owner/name",
+			Number:     17,
+			Title:      "Completed task",
+			BaseRef:    "main",
+			HeadRef:    "123",
+		},
+		MergeRequestExternalState: &MergeRequestExternalState{HasMergeConflict: true},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected rework execution plan, got %#v", result.ExecutionPlan)
+	}
+	if len(result.Reasons) != 1 || result.Reasons[0].Code != "merge_request_conflict" {
+		t.Fatalf("unexpected reasons: %#v", result.Reasons)
+	}
+}
+
 func TestServiceConsiderRequiresMergeRequestForReview(t *testing.T) {
 	t.Parallel()
 
