@@ -241,6 +241,9 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 		}
 		legacyChecks = append(legacyChecks, checkConfig)
 	}
+	if len(legacyChecks) != 0 && (config.Defaults.Action != "" || config.Defaults.Outcome != "") {
+		legacyChecks = append(legacyChecks, config.Defaults)
+	}
 	if len(config.Routes) == 0 && len(legacyChecks) != 0 {
 		config.Routes = append(config.Routes, workflowProcessingRouteConfig{
 			Name:        compatibleWorkflowRouteName,
@@ -353,7 +356,7 @@ func methodologyRouteCheckIsReference(check methodology.RouteCheck) bool {
 }
 
 func applyLegacyWorkflowConfigCompatibility(config workflowConfigFile) workflowConfigFile {
-	if strings.TrimSpace(config.DefaultRoute) != "" || len(config.Routes) == 0 {
+	if strings.TrimSpace(config.DefaultRoute) != "" {
 		return config
 	}
 
@@ -380,6 +383,9 @@ func applyLegacyWorkflowConfigCompatibility(config workflowConfigFile) workflowC
 			ReasonCode:      route.ReasonCode,
 			ReasonMessage:   route.ReasonMessage,
 		})
+	}
+	if config.Defaults.Action != "" || config.Defaults.Outcome != "" {
+		checks = append(checks, config.Defaults)
 	}
 	if len(checks) == 0 {
 		return config

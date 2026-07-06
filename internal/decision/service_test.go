@@ -223,6 +223,76 @@ func TestServiceStartReturnsMergeRequestSearchErrorForReviewRoute(t *testing.T) 
 	}
 }
 
+func TestServiceStartReturnsMergeRequestSearchErrorForExplicitReviewRoute(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"default_route": "task-processing",
+		"routes": [
+			{
+				"name": "task-processing",
+				"checks": [{
+					"name": "task-processing-start",
+					"action": "start-implementation-pr",
+					"reason_code": "implementation_start",
+					"reason_message": "Запущена реализация."
+				}]
+			},
+			{
+				"name": "pull-request-review",
+				"checks": [{
+					"name": "review-run",
+					"action": "review-pull-request",
+					"reason_code": "review_run",
+					"reason_message": "Запущена ревизия."
+				}]
+			}
+		]
+	}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	integrationStub := &stubIntegrationExecutor{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     202,
+				Title:      "Run explicit review route",
+			},
+		},
+		errOnSearch: errors.New("search unavailable"),
+	}
+	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
+	service := &Service{
+		logger:          log.Default(),
+		integration:     integrationStub,
+		execution:       executionStub,
+		resolveRepo:     func(context.Context) (string, error) { return "owner/name", nil },
+		resolveRepoRoot: func(context.Context) (string, error) { return root, nil },
+		readFile:        os.ReadFile,
+	}
+
+	result, err := service.Start(context.Background(), StartInput{TaskNumber: 202, Route: "pull-request-review"})
+	if err == nil {
+		t.Fatal("expected merge request search error")
+	}
+	if !strings.Contains(err.Error(), "search unavailable") {
+		t.Fatalf("expected original search error, got: %v", err)
+	}
+	if result.Consideration == nil || result.Consideration.Failure == nil || result.Consideration.Failure.Code != "merge_request_missing" {
+		t.Fatalf("expected diagnosed missing merge request: %#v", result.Consideration)
+	}
+	if executionStub.request.Assignment != nil {
+		t.Fatalf("execution must not start after merge request restoration failure: %#v", executionStub.request)
+	}
+}
+
 func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T) {
 	t.Parallel()
 
@@ -410,6 +480,87 @@ func TestServiceConsiderUsesCompatibleDefaultRouteForLegacyWorkflowConfig(t *tes
 	}
 }
 
+func TestServiceConsiderUsesLegacyWorkflowDefaultsWhenNoRouteMatches(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"defaults": {
+			"name": "default",
+			"action": "start-implementation-pr",
+			"reason_code": "implementation_start",
+			"reason_message": "Запущена реализация."
+		},
+		"routes": [{
+			"name": "task-processing-review",
+			"title": "Ревизия результата",
+			"action": "review-pull-request",
+			"has_labels": ["Ожидает экспертизы"],
+			"reason_code": "review_required",
+			"reason_message": "Запущена ревизия."
+		}]
+	}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 218},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 218, Title: "Legacy default fallback"},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.Route.Name != "task-processing" {
+		t.Fatalf("unexpected route: %#v", result.Route)
+	}
+	if len(result.Checks) != 1 || result.Checks[0].Name != "default" {
+		t.Fatalf("unexpected checks: %#v", result.Checks)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionStartImplementationPR {
+		t.Fatalf("unexpected execution plan: %#v", result.ExecutionPlan)
+	}
+}
+
+func TestServiceConsiderUsesLegacyWorkflowDefaultsWithoutRoutes(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"defaults": {
+			"name": "default",
+			"action": "start-implementation-pr",
+			"reason_code": "implementation_start",
+			"reason_message": "Запущена реализация."
+		}
+	}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 219},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 219, Title: "Legacy defaults only"},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.Route.Name != "task-processing" {
+		t.Fatalf("unexpected route: %#v", result.Route)
+	}
+	if len(result.Checks) != 1 || result.Checks[0].Name != "default" {
+		t.Fatalf("unexpected checks: %#v", result.Checks)
+	}
+}
+
 func TestServiceConsiderUsesCompatibleDefaultRouteForLegacyMethodologyCatalog(t *testing.T) {
 	t.Parallel()
 
@@ -443,6 +594,52 @@ func TestServiceConsiderUsesCompatibleDefaultRouteForLegacyMethodologyCatalog(t 
 		t.Fatalf("unexpected route: %#v", result.Route)
 	}
 	if len(result.Checks) != 1 || result.Checks[0].Name != "task-processing-start" {
+		t.Fatalf("unexpected checks: %#v", result.Checks)
+	}
+}
+
+func TestServiceConsiderUsesLegacyMethodologyDefaultWhenNoRouteMatches(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "methodology")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "catalog.json"), []byte(`{
+		"routes": [
+			{
+				"name": "default",
+				"title": "Маршрут по умолчанию",
+				"action": "start-implementation-pr",
+				"reason_code": "implementation_start",
+				"reason_message": "Запущена реализация."
+			},
+			{
+				"name": "task-processing-review",
+				"title": "Ревизия результата",
+				"action": "review-pull-request",
+				"has_labels": ["Ожидает экспертизы"],
+				"reason_code": "review_required",
+				"reason_message": "Запущена ревизия."
+			}
+		]
+	}`), 0o600); err != nil {
+		t.Fatalf("write methodology catalog: %v", err)
+	}
+
+	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 220},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 220, Title: "Legacy methodology default fallback"},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.Route.Name != "task-processing" {
+		t.Fatalf("unexpected route: %#v", result.Route)
+	}
+	if len(result.Checks) != 1 || result.Checks[0].Name != "default" {
 		t.Fatalf("unexpected checks: %#v", result.Checks)
 	}
 }

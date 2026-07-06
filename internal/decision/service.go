@@ -69,12 +69,12 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		return StartResult{}, fmt.Errorf("integration did not return issue for task %d", input.TaskNumber)
 	}
 
-	mergeRequest, err := s.findTaskMergeRequest(ctx, response.Issue)
-	if err != nil {
+	mergeRequest, mergeRequestErr := s.findTaskMergeRequest(ctx, response.Issue)
+	if mergeRequestErr != nil {
 		if taskLabelsRequireMergeRequest(response.Issue.Labels) {
-			return StartResult{}, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, err)
+			return StartResult{}, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, mergeRequestErr)
 		}
-		s.logger.Printf("Не удалось восстановить связанный запрос на слияние: задача=%d ошибка=%v", input.TaskNumber, err)
+		s.logger.Printf("Не удалось восстановить связанный запрос на слияние: задача=%d ошибка=%v", input.TaskNumber, mergeRequestErr)
 	}
 
 	decisionContext := DecisionContext{
@@ -85,6 +85,9 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 	}
 	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext, Route: input.Route})
 	if err != nil {
+		if mergeRequestErr != nil && consideration.Failure != nil && consideration.Failure.Code == "merge_request_missing" {
+			err = fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, mergeRequestErr)
+		}
 		return StartResult{
 			Context:       decisionContext,
 			Consideration: &consideration,
