@@ -71,6 +71,18 @@ func TestServiceSelectsDefaultRouteWhenRouteNameIsEmpty(t *testing.T) {
 	}
 }
 
+func TestValidateCatalogAllowsRouteCheckReference(t *testing.T) {
+	t.Parallel()
+
+	err := validateCatalog(Catalog{Routes: []Route{
+		{Name: "task-processing", Checks: []RouteCheck{{Name: "task-processing-start"}}},
+		{Name: "task-processing-start", Action: "engineering-synthesis"},
+	}})
+	if err != nil {
+		t.Fatalf("validate catalog with check reference: %v", err)
+	}
+}
+
 func TestServiceSelectsExactActionNameBeforeAlias(t *testing.T) {
 	t.Parallel()
 

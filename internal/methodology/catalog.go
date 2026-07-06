@@ -428,7 +428,7 @@ func validateCatalog(catalog Catalog) error {
 				return fmt.Errorf("route %q checks contains duplicate name %q", route.Name, check.Name)
 			}
 			seenChecks[check.Name] = struct{}{}
-			if check.Action == "" && check.Outcome == "" {
+			if check.Action == "" && check.Outcome == "" && !routeCheckIsReference(check) {
 				return fmt.Errorf("route %q check %q must define action or outcome", route.Name, check.Name)
 			}
 		}
@@ -602,6 +602,24 @@ func normalizeRouteCheck(check RouteCheck) RouteCheck {
 	check.ReasonCode = strings.TrimSpace(check.ReasonCode)
 	check.ReasonMessage = strings.TrimSpace(check.ReasonMessage)
 	return check
+}
+
+func routeCheckIsReference(check RouteCheck) bool {
+	return check.Name != "" &&
+		check.Title == "" &&
+		check.Action == "" &&
+		check.Outcome == "" &&
+		check.Profile == "" &&
+		check.Description == "" &&
+		check.Step == "" &&
+		len(check.HasFeatures) == 0 &&
+		len(check.MissingFeatures) == 0 &&
+		len(check.HasLabels) == 0 &&
+		len(check.MissingLabels) == 0 &&
+		check.ExpectedResult == "" &&
+		len(check.Constraints) == 0 &&
+		check.ReasonCode == "" &&
+		check.ReasonMessage == ""
 }
 
 func normalizeAction(action Action) Action {

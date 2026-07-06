@@ -14,6 +14,8 @@ import (
 
 const workflowConfigRelativePath = ".progress/decision/workflows.json"
 
+const compatibleWorkflowRouteName = "task-processing"
+
 type workflowConfigFile struct {
 	DefaultRoute string                          `json:"default_route"`
 	Defaults     workflowRouteCheckConfig        `json:"defaults"`
@@ -183,6 +185,7 @@ func (s *Service) loadWorkflowConfig(ctx context.Context) (workflowConfigFile, e
 	if err := json.Unmarshal(content, &config); err != nil {
 		return workflowConfigFile{}, fmt.Errorf("parse decision workflow config %s: %w", configPath, err)
 	}
+	config = applyLegacyWorkflowConfigCompatibility(config)
 	config = normalizeWorkflowConfig(config)
 	if err := validateWorkflowConfig(config); err != nil {
 		return workflowConfigFile{}, fmt.Errorf("invalid decision workflow config %s: %w", configPath, err)
@@ -199,13 +202,14 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 
 	config := workflowConfigFile{DefaultRoute: strings.TrimSpace(snapshot.Catalog.DefaultRoute)}
 	legacyChecks := make([]workflowRouteCheckConfig, 0, len(snapshot.Catalog.Routes))
+	legacyCheckRefs := workflowCheckReferencesFromMethodology(snapshot)
 	for _, route := range snapshot.Catalog.Routes {
 		if len(route.Checks) != 0 {
 			routeConfig := workflowProcessingRouteConfig{
 				Name:        route.Name,
 				Title:       route.Title,
 				Description: route.Description,
-				Checks:      workflowChecksFromMethodologyChecks(route.Checks, string(snapshot.Sources.Routes[route.Name])),
+				Checks:      workflowChecksFromMethodologyChecks(route.Checks, legacyCheckRefs, string(snapshot.Sources.Routes[route.Name])),
 				Source:      string(snapshot.Sources.Routes[route.Name]),
 			}
 			config.Routes = append(config.Routes, routeConfig)
@@ -239,11 +243,14 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 	}
 	if len(config.Routes) == 0 && len(legacyChecks) != 0 {
 		config.Routes = append(config.Routes, workflowProcessingRouteConfig{
-			Name:        "task-processing",
+			Name:        compatibleWorkflowRouteName,
 			Title:       "Обработка задачи",
 			Description: "Совместимый маршрут обработки, собранный из плоского списка проверок.",
 			Checks:      legacyChecks,
 		})
+		if config.DefaultRoute == "" {
+			config.DefaultRoute = compatibleWorkflowRouteName
+		}
 	}
 	if len(config.Routes) == 0 && (config.Defaults.Action != "" || config.Defaults.Outcome != "") {
 		config.Routes = append(config.Routes, workflowProcessingRouteConfig{
@@ -260,9 +267,50 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 	return config, nil
 }
 
-func workflowChecksFromMethodologyChecks(checks []methodology.RouteCheck, source string) []workflowRouteCheckConfig {
+type workflowCheckReference struct {
+	check  workflowRouteCheckConfig
+	source string
+}
+
+func workflowCheckReferencesFromMethodology(snapshot methodology.CatalogSnapshot) map[string]workflowCheckReference {
+	result := make(map[string]workflowCheckReference, len(snapshot.Catalog.Routes))
+	for _, route := range snapshot.Catalog.Routes {
+		if len(route.Checks) != 0 {
+			continue
+		}
+		check := workflowRouteCheckConfig{
+			Name:            route.Name,
+			Title:           route.Title,
+			Description:     route.Description,
+			Action:          route.Action,
+			Outcome:         route.Outcome,
+			HasFeatures:     append([]string(nil), route.HasFeatures...),
+			MissingFeatures: append([]string(nil), route.MissingFeatures...),
+			HasLabels:       append([]string(nil), route.HasLabels...),
+			MissingLabels:   append([]string(nil), route.MissingLabels...),
+			ExpectedResult:  route.ExpectedResult,
+			Constraints:     append([]string(nil), route.Constraints...),
+			ReasonCode:      route.ReasonCode,
+			ReasonMessage:   route.ReasonMessage,
+			Source:          string(snapshot.Sources.Routes[route.Name]),
+		}
+		if check.Name == "" || (strings.TrimSpace(check.Action) == "" && strings.TrimSpace(check.Outcome) == "") {
+			continue
+		}
+		result[check.Name] = workflowCheckReference{check: check, source: check.Source}
+	}
+	return result
+}
+
+func workflowChecksFromMethodologyChecks(checks []methodology.RouteCheck, refs map[string]workflowCheckReference, source string) []workflowRouteCheckConfig {
 	result := make([]workflowRouteCheckConfig, 0, len(checks))
 	for _, check := range checks {
+		if methodologyRouteCheckIsReference(check) {
+			if ref, ok := refs[check.Name]; ok {
+				result = append(result, ref.check)
+				continue
+			}
+		}
 		result = append(result, workflowRouteCheckConfig{
 			Name:            check.Name,
 			Title:           check.Title,
@@ -281,6 +329,67 @@ func workflowChecksFromMethodologyChecks(checks []methodology.RouteCheck, source
 		})
 	}
 	return result
+}
+
+func methodologyRouteCheckIsReference(check methodology.RouteCheck) bool {
+	return strings.TrimSpace(check.Name) != "" &&
+		strings.TrimSpace(check.Title) == "" &&
+		strings.TrimSpace(check.Action) == "" &&
+		strings.TrimSpace(check.Outcome) == "" &&
+		strings.TrimSpace(check.Profile) == "" &&
+		strings.TrimSpace(check.Description) == "" &&
+		strings.TrimSpace(check.Step) == "" &&
+		len(check.HasFeatures) == 0 &&
+		len(check.MissingFeatures) == 0 &&
+		len(check.HasLabels) == 0 &&
+		len(check.MissingLabels) == 0 &&
+		strings.TrimSpace(check.ExpectedResult) == "" &&
+		len(check.Constraints) == 0 &&
+		strings.TrimSpace(check.ReasonCode) == "" &&
+		strings.TrimSpace(check.ReasonMessage) == ""
+}
+
+func applyLegacyWorkflowConfigCompatibility(config workflowConfigFile) workflowConfigFile {
+	if strings.TrimSpace(config.DefaultRoute) != "" || len(config.Routes) == 0 {
+		return config
+	}
+
+	checks := make([]workflowRouteCheckConfig, 0, len(config.Routes))
+	for _, route := range config.Routes {
+		if len(route.Checks) != 0 {
+			return config
+		}
+		if strings.TrimSpace(route.Action) == "" && strings.TrimSpace(route.Outcome) == "" {
+			return config
+		}
+		checks = append(checks, workflowRouteCheckConfig{
+			Name:            route.Name,
+			Title:           route.Title,
+			Description:     route.Description,
+			Action:          route.Action,
+			Outcome:         route.Outcome,
+			HasFeatures:     route.HasFeatures,
+			MissingFeatures: route.MissingFeatures,
+			HasLabels:       route.HasLabels,
+			MissingLabels:   route.MissingLabels,
+			ExpectedResult:  route.ExpectedResult,
+			Constraints:     route.Constraints,
+			ReasonCode:      route.ReasonCode,
+			ReasonMessage:   route.ReasonMessage,
+		})
+	}
+	if len(checks) == 0 {
+		return config
+	}
+
+	config.DefaultRoute = compatibleWorkflowRouteName
+	config.Routes = []workflowProcessingRouteConfig{{
+		Name:        compatibleWorkflowRouteName,
+		Title:       "Обработка задачи",
+		Description: "Совместимый маршрут обработки, собранный из плоского списка проверок.",
+		Checks:      checks,
+	}}
+	return config
 }
 
 func normalizeWorkflowConfig(config workflowConfigFile) workflowConfigFile {
