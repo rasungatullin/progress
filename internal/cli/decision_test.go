@@ -112,6 +112,33 @@ func TestDecisionStartCommandPassesExplicitRoute(t *testing.T) {
 	}
 }
 
+func TestDecisionStartCommandCallsServiceWithCommandContext(t *testing.T) {
+	t.Parallel()
+
+	type contextKey struct{}
+
+	cmd := NewRootCommand()
+	cmd.SetContext(context.WithValue(context.Background(), contextKey{}, "command-context"))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"decision", "start", "--task", "123"})
+
+	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter {
+		return &stubDecisionStarter{start: func(ctx context.Context, _ decision.StartInput) (decision.StartResult, error) {
+			if got := ctx.Value(contextKey{}); got != "command-context" {
+				t.Fatalf("decision start must receive command context, got %#v", got)
+			}
+			return decision.StartResult{Ready: true, Context: decision.DecisionContext{Signal: decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: 123}}}, nil
+		}}
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute decision start: %v", err)
+	}
+}
+
 func TestDecisionStartCommandRequiresTaskFlag(t *testing.T) {
 	t.Parallel()
 
@@ -224,9 +251,13 @@ type stubDecisionStarter struct {
 	result decision.StartResult
 	err    error
 	input  decision.StartInput
+	start  func(context.Context, decision.StartInput) (decision.StartResult, error)
 }
 
-func (s *stubDecisionStarter) Start(_ context.Context, input decision.StartInput) (decision.StartResult, error) {
+func (s *stubDecisionStarter) Start(ctx context.Context, input decision.StartInput) (decision.StartResult, error) {
 	s.input = input
+	if s.start != nil {
+		return s.start(ctx, input)
+	}
 	return s.result, s.err
 }

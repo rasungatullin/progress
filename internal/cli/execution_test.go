@@ -174,7 +174,10 @@ func TestExecutionActionAllowsActionOnlyInvocation(t *testing.T) {
 func TestExecutionActionCommandCallsService(t *testing.T) {
 	t.Parallel()
 
+	type contextKey struct{}
+
 	cmd := NewRootCommand()
+	cmd.SetContext(context.WithValue(context.Background(), contextKey{}, "command-context"))
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
@@ -184,7 +187,10 @@ func TestExecutionActionCommandCallsService(t *testing.T) {
 	var captured execution.ActionInvocation
 	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
 		return executionCommandServiceStub{
-			executeAction: func(_ context.Context, req execution.ActionInvocation) (execution.ExecutionResult, error) {
+			executeAction: func(ctx context.Context, req execution.ActionInvocation) (execution.ExecutionResult, error) {
+				if got := ctx.Value(contextKey{}); got != "command-context" {
+					t.Fatalf("execution action must receive command context, got %#v", got)
+				}
 				captured = req
 				return execution.ExecutionResult{
 					Status: "completed",
@@ -254,7 +260,10 @@ func TestExecutionActionRejectsRemovedDirFlag(t *testing.T) {
 func TestExecutionOperationCommandCallsService(t *testing.T) {
 	t.Parallel()
 
+	type contextKey struct{}
+
 	cmd := NewRootCommand()
+	cmd.SetContext(context.WithValue(context.Background(), contextKey{}, "command-context"))
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
@@ -264,7 +273,10 @@ func TestExecutionOperationCommandCallsService(t *testing.T) {
 	var captured execution.OperationInvocation
 	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
 		return executionCommandServiceStub{
-			executeOperation: func(_ context.Context, req execution.OperationInvocation) (execution.OperationResult, error) {
+			executeOperation: func(ctx context.Context, req execution.OperationInvocation) (execution.OperationResult, error) {
+				if got := ctx.Value(contextKey{}); got != "command-context" {
+					t.Fatalf("execution operation must receive command context, got %#v", got)
+				}
 				captured = req
 				return execution.OperationResult{
 					Name:    "resolve-action",

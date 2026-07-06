@@ -169,6 +169,49 @@ func TestLaunchRecordsInvalidStructuredInputInHistory(t *testing.T) {
 	}
 }
 
+func TestLaunchRecordsInterruptedRunOnContextCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	service := &Service{
+		runRunner: func(ctx context.Context, _ model.Invocation) (string, error) {
+			cancel()
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when launch is interrupted")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	workplace := validWorkplace(t)
+	result, err := service.Launch(ctx, invocation, validProfile(), validAllocation(), workplace)
+	if err == nil {
+		t.Fatal("expected interrupted launch error")
+	}
+	if result.Status != "interrupted" || strings.TrimSpace(result.RunRecordPath) == "" {
+		t.Fatalf("interrupted result must include status and run record path: %#v", result)
+	}
+
+	record := readLaunchRunRecord(t, result.RunRecordPath)
+	if record.Result.Status != "interrupted" || strings.TrimSpace(record.Error) == "" {
+		t.Fatalf("interrupted run record must keep diagnostic details: %#v", record)
+	}
+
+	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10, Status: "interrupted"})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one interrupted sqlite history run, got %d", len(runs))
+	}
+	if runs[0].Error == "" || runs[0].RunRecordPath == "" {
+		t.Fatalf("interrupted sqlite row must keep error and run record path: %#v", runs[0])
+	}
+}
+
 func TestLaunchUnavailableDirectoryDoesNotCreateHistoryArtifacts(t *testing.T) {
 	t.Parallel()
 

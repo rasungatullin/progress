@@ -150,7 +150,7 @@ func newIntegrationPrivateSetCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := store.Set(context.Background(), args[0], value); err != nil {
+			if err := store.Set(cmd.Context(), args[0], value); err != nil {
 				return err
 			}
 			return printIntegrationPrivateResult(cmd, integrationPrivateResult{
@@ -180,7 +180,7 @@ func newIntegrationPrivateDeleteCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := store.Delete(context.Background(), args[0]); err != nil {
+			if err := store.Delete(cmd.Context(), args[0]); err != nil {
 				if errors.Is(err, secrets.ErrNotFound) {
 					return fmt.Errorf("private value %q not found", strings.TrimSpace(args[0]))
 				}
@@ -401,7 +401,7 @@ func newIntegrationSystemAuthCommand(system string, label string) *cobra.Command
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				System:    system,
 				Resource:  "auth",
 				Operation: "status",
@@ -429,7 +429,7 @@ func newIntegrationRepositoryGetCommand(system string, label string) *cobra.Comm
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "repository",
 				System:          system,
 				Resource:        "repository",
@@ -465,7 +465,7 @@ func newIntegrationMergeRequestGetCommand(system string, label string) *cobra.Co
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "repository",
 				System:          system,
 				Resource:        "merge-request",
@@ -515,7 +515,7 @@ func newIntegrationMergeRequestCreateCommand(system string, label string) *cobra
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "repository",
 				System:          system,
 				Resource:        "merge-request",
@@ -559,7 +559,7 @@ func newIntegrationMergeRequestListCommand(system string, label string) *cobra.C
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "repository",
 				System:          system,
 				Resource:        "merge-request",
@@ -603,7 +603,7 @@ func newIntegrationMergeRequestCommentsCommand(system string, label string) *cob
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "repository",
 				System:          system,
 				Resource:        "merge-request",
@@ -655,7 +655,7 @@ func newIntegrationMergeRequestCommentCreateCommand(system string, label string)
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "repository",
 				System:          system,
 				Resource:        "comment",
@@ -704,7 +704,7 @@ func newIntegrationMergeRequestCommentReplyCommand(system string, label string) 
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "repository",
 				System:          system,
 				Resource:        "comment",
@@ -741,7 +741,7 @@ func newIntegrationMergeRequestCommentResolveCommand(system string, label string
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "repository",
 				System:          system,
 				Resource:        "comment",
@@ -776,7 +776,7 @@ func newIntegrationThreadGetCommand(system string, label string) *cobra.Command 
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "messenger",
 				System:          system,
 				Resource:        "thread",
@@ -811,7 +811,7 @@ func newIntegrationMessageCreateCommand(system string, label string) *cobra.Comm
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "messenger",
 				System:          system,
 				Resource:        "message",
@@ -852,7 +852,7 @@ func newIntegrationConfluencePageGetCommand() *cobra.Command {
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "wiki",
 				System:          "confluence",
 				Resource:        "page",
@@ -887,7 +887,7 @@ func newIntegrationConfluencePageSearchCommand() *cobra.Command {
 				return err
 			}
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "wiki",
 				System:          "confluence",
 				Resource:        "page",
@@ -921,7 +921,7 @@ func newIntegrationGitHubAuthStatusCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				System:    "github",
 				Resource:  "auth",
 				Operation: "status",
@@ -951,7 +951,7 @@ func newIntegrationGitHubRepoGetCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				System:       "github",
 				Resource:     "repo",
 				Operation:    "get",
@@ -989,7 +989,7 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				System:       "github",
 				Resource:     "issue",
 				Operation:    "get",
@@ -1029,7 +1029,7 @@ func newIntegrationGitHubIssueCommentsCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				System:       "github",
 				Resource:     "issue",
 				Operation:    "comments",
@@ -1072,7 +1072,7 @@ func newIntegrationGitHubIssueCommentCreateCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "tracker",
 				System:          "github",
 				Resource:        "comment",
@@ -1123,7 +1123,7 @@ func newIntegrationGitHubIssueLabelChangeCommand(operation string) *cobra.Comman
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: "tracker",
 				System:          "github",
 				Resource:        "label",
@@ -1179,7 +1179,7 @@ func newIntegrationGitHubPRCreateCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				System:     "github",
 				Resource:   "pr",
 				Operation:  "create",
@@ -1226,7 +1226,7 @@ func newIntegrationGitHubPRGetCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			response, err := service.Execute(context.Background(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				System:       "github",
 				Resource:     "pr",
 				Operation:    "get",
@@ -1268,7 +1268,7 @@ func newIntegrationDispatcherCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			route, err := service.Dispatch(context.Background(), integration.Request{
+			route, err := service.Dispatch(cmd.Context(), integration.Request{
 				IntegrationType: flags.integrationType,
 				System:          flags.system,
 				SystemProvided:  cmd.Flags().Changed("system"),
@@ -1307,7 +1307,7 @@ func newIntegrationOperationsCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			operations := service.Operations(context.Background(), integration.OperationFilter{
+			operations := service.Operations(cmd.Context(), integration.OperationFilter{
 				System:          flags.system,
 				IntegrationType: flags.integrationType,
 				Name:            flags.operation,

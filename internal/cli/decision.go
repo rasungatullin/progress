@@ -53,7 +53,7 @@ func newDecisionStartCommand() *cobra.Command {
 		Short: "Полный запуск контура принятия решения",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newDecisionService(cmd)
-			result, err := service.Start(context.Background(), decision.StartInput{TaskNumber: flags.task, Route: flags.route})
+			result, err := service.Start(cmd.Context(), decision.StartInput{TaskNumber: flags.task, Route: flags.route})
 			if err != nil {
 				printDecisionStartResultOnError(cmd, result)
 				return err

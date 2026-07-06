@@ -99,6 +99,8 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		status := "failed"
 		if errors.Is(err, errResumeUnsupported) {
 			status = "resume-unsupported"
+		} else if launchInterrupted(ctx, err) {
+			status = "interrupted"
 		}
 		result := model.LaunchResult{
 			Status:  status,
@@ -180,6 +182,10 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 
 func failedLaunchResult(err error) model.LaunchResult {
 	return model.LaunchResult{Status: "failed", Summary: strings.TrimSpace(err.Error())}
+}
+
+func launchInterrupted(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil
 }
 
 func parseStructuredOutput(output string) (string, string, *model.StructuredOutput, trailingStructuredBlockState, error) {

@@ -75,7 +75,7 @@ func newMethodologyListCommand(parent *methodologyFlags) *cobra.Command {
 			flags.repoRoot = parent.repoRoot
 			flags.configHome = parent.configHome
 
-			elements, err := methodology.NewService(nil).List(context.Background(), methodology.ElementRequest{
+			elements, err := methodology.NewService(nil).List(cmd.Context(), methodology.ElementRequest{
 				RepoRoot:      flags.repoRoot,
 				ConfigHome:    flags.configHome,
 				Kind:          flags.kind,
@@ -109,7 +109,7 @@ func newMethodologyShowCommand(parent *methodologyFlags) *cobra.Command {
 			flags.repoRoot = parent.repoRoot
 			flags.configHome = parent.configHome
 
-			element, err := methodology.NewService(nil).Get(context.Background(), methodology.ElementRequest{
+			element, err := methodology.NewService(nil).Get(cmd.Context(), methodology.ElementRequest{
 				RepoRoot:   flags.repoRoot,
 				ConfigHome: flags.configHome,
 				Kind:       flags.kind,
@@ -145,7 +145,7 @@ func newMethodologySelectCommand(parent *methodologyFlags) *cobra.Command {
 			flags.repoRoot = parent.repoRoot
 			flags.configHome = parent.configHome
 
-			result, err := methodology.NewService(nil).Resolve(context.Background(), methodology.SelectionRequest{
+			result, err := methodology.NewService(nil).Resolve(cmd.Context(), methodology.SelectionRequest{
 				RepoRoot:   flags.repoRoot,
 				ConfigHome: flags.configHome,
 				Route:      flags.name,
@@ -188,7 +188,7 @@ func newMethodologySaveCommand(parent *methodologyFlags) *cobra.Command {
 				return err
 			}
 
-			result, err := methodology.NewService(nil).Save(context.Background(), methodology.CatalogWriteRequest{
+			result, err := methodology.NewService(nil).Save(cmd.Context(), methodology.CatalogWriteRequest{
 				RepoRoot:   flags.repoRoot,
 				ConfigHome: flags.configHome,
 				Scope:      scope,
@@ -234,7 +234,7 @@ func newMethodologyAddRouteCommand(parent *methodologyFlags) *cobra.Command {
 				return err
 			}
 
-			result, err := methodology.NewService(nil).Upsert(context.Background(), methodology.CatalogWriteRequest{
+			result, err := methodology.NewService(nil).Upsert(cmd.Context(), methodology.CatalogWriteRequest{
 				RepoRoot:   flags.repoRoot,
 				ConfigHome: flags.configHome,
 				Scope:      scope,
@@ -313,7 +313,7 @@ func newMethodologyAddActionCommand(parent *methodologyFlags) *cobra.Command {
 				return err
 			}
 
-			ctx := context.Background()
+			ctx := cmd.Context()
 			service := methodology.NewService(nil)
 			action := methodologyActionFromFlags(ctx, cmd, service, flags, scope)
 			result, err := service.Upsert(ctx, methodology.CatalogWriteRequest{
@@ -357,7 +357,7 @@ func newMethodologyAddInstructionCommand(parent *methodologyFlags) *cobra.Comman
 				return err
 			}
 
-			result, err := methodology.NewService(nil).Upsert(context.Background(), methodology.CatalogWriteRequest{
+			result, err := methodology.NewService(nil).Upsert(cmd.Context(), methodology.CatalogWriteRequest{
 				RepoRoot:   flags.repoRoot,
 				ConfigHome: flags.configHome,
 				Scope:      scope,
@@ -408,7 +408,7 @@ func newMethodologyAddEntityCommand(parent *methodologyFlags) *cobra.Command {
 				return err
 			}
 
-			result, err := methodology.NewService(nil).Upsert(context.Background(), methodology.CatalogWriteRequest{
+			result, err := methodology.NewService(nil).Upsert(cmd.Context(), methodology.CatalogWriteRequest{
 				RepoRoot:   flags.repoRoot,
 				ConfigHome: flags.configHome,
 				Scope:      scope,
