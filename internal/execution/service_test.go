@@ -683,6 +683,52 @@ func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 	}
 }
 
+func TestServiceExecuteRecordsCommitPushCancellationInHistory(t *testing.T) {
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
+	ctx, cancel := context.WithCancel(context.Background())
+	launcher := &stubLauncher{
+		result: model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}},
+		commit: func(context.Context, model.Invocation, model.Workplace, *model.StructuredOutput) (string, error) {
+			cancel()
+			return "", context.Canceled
+		},
+	}
+	service := &Service{
+		logger:     log.Default(),
+		actions:    newMethodologyActionResolver(),
+		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
+		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
+		launcher:   launcher,
+	}
+
+	result, err := service.ExecuteAction(ctx, ActionInvocation{
+		Assignment: &ExecutionAssignment{
+			Action:          "implement-commit",
+			CanonicalTask:   &ObjectRef{Type: "task", Number: 98},
+			StructuredInput: &StructuredInput{Task: "Ship it."},
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected commit cancellation, got %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("canceled commit-push must fail action result: %#v", result)
+	}
+
+	runs, err := history.List(context.Background(), root, history.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list sqlite history: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one sqlite history run, got %d", len(runs))
+	}
+	if runs[0].Status != "failed" || runs[0].Error != context.Canceled.Error() || strings.TrimSpace(runs[0].RawStructuredOutput) == "" {
+		t.Fatalf("canceled commit-push must overwrite completed launch history: %#v", runs[0])
+	}
+}
+
 func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
@@ -1239,6 +1285,7 @@ type stubLauncher struct {
 	commitCalled  bool
 	commitSummary string
 	commitErr     error
+	commit        func(context.Context, model.Invocation, model.Workplace, *model.StructuredOutput) (string, error)
 }
 
 type stubIntegrationExecutor struct {
@@ -1266,8 +1313,11 @@ func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, profile mo
 	return s.result, s.err
 }
 
-func (s *stubLauncher) CommitAndPush(context.Context, model.Invocation, model.Workplace, *model.StructuredOutput) (string, error) {
+func (s *stubLauncher) CommitAndPush(ctx context.Context, in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
 	s.commitCalled = true
+	if s.commit != nil {
+		return s.commit(ctx, in, workplace, output)
+	}
 	if s.commitErr != nil {
 		return "", s.commitErr
 	}
