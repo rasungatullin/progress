@@ -443,7 +443,7 @@ func (r *APIRunner) enrichPullRequestView(ctx context.Context, config apiConfig,
 	if err != nil {
 		return CommandResult{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
 	}
-	query := `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewDecision labels(first: 100) { nodes { name } } } } }`
+	query := `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewDecision mergeable mergeStateStatus labels(first: 100) { nodes { name } } } } }`
 	var metadata apiPullRequestMetadataResponse
 	result, err := r.graphql(ctx, config, query, map[string]any{"owner": owner, "name": name, "number": view.Number}, &metadata)
 	if err != nil {
@@ -454,6 +454,8 @@ func (r *APIRunner) enrichPullRequestView(ctx context.Context, config apiConfig,
 		return result, &Error{Code: ErrorCodeNotFound, Message: fmt.Sprintf("GitHub pull request not found: %s#%d", repository, view.Number), Result: result}
 	}
 	view.ReviewDecision = strings.TrimSpace(pr.ReviewDecision)
+	view.Mergeable = pr.Mergeable
+	view.MergeState = strings.TrimSpace(pr.MergeState)
 	view.Labels = append([]ghIssueLabel(nil), pr.Labels.Nodes...)
 	return result, nil
 }
@@ -964,6 +966,8 @@ type apiPullRequestMetadataResponse struct {
 		Repository struct {
 			PullRequest *struct {
 				ReviewDecision string `json:"reviewDecision"`
+				Mergeable      string `json:"mergeable"`
+				MergeState     string `json:"mergeStateStatus"`
 				Labels         struct {
 					Nodes []ghIssueLabel `json:"nodes"`
 				} `json:"labels"`

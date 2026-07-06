@@ -1351,6 +1351,8 @@ func TestServicePRListDefaultsToClosedScopeAll(t *testing.T) {
 			"title": "Add integration",
 			"body": "Body",
 			"state": "MERGED",
+			"mergeable": "CONFLICTING",
+			"mergeStateStatus": "DIRTY",
 			"author": {"login": "alice", "url": "https://github.com/alice"},
 			"reviewDecision": "APPROVED",
 			"baseRefName": "main",
@@ -1386,6 +1388,9 @@ func TestServicePRListDefaultsToClosedScopeAll(t *testing.T) {
 	}
 	if response.MergeRequests[0].ReviewDecision != "APPROVED" {
 		t.Fatalf("unexpected merge request: %#v", response.MergeRequests[0])
+	}
+	if response.MergeRequests[0].Attributes["mergeable"] != "CONFLICTING" || response.MergeRequests[0].Attributes["merge_state_status"] != "DIRTY" {
+		t.Fatalf("merge state attributes were not copied: %#v", response.MergeRequests[0].Attributes)
 	}
 	if len(response.SearchResults) != 1 || response.SearchResults[0].Kind != "merge-request" {
 		t.Fatalf("unexpected search results: %#v", response.SearchResults)

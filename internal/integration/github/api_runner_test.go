@@ -693,8 +693,10 @@ func TestAPITransportPRSearchSupportsHeadQuery(t *testing.T) {
 				"data": map[string]any{
 					"repository": map[string]any{
 						"pullRequest": map[string]any{
-							"reviewDecision": "APPROVED",
-							"labels":         map[string]any{"nodes": []map[string]string{}},
+							"reviewDecision":   "APPROVED",
+							"mergeable":        "CONFLICTING",
+							"mergeStateStatus": "DIRTY",
+							"labels":           map[string]any{"nodes": []map[string]string{}},
 						},
 					},
 				},
@@ -746,6 +748,9 @@ func TestAPITransportPRSearchSupportsHeadQuery(t *testing.T) {
 	}
 	if len(response.MergeRequests) != 1 || response.MergeRequests[0].Number != 120 || response.MergeRequests[0].HeadRef != "119" {
 		t.Fatalf("unexpected merge requests: %#v", response.MergeRequests)
+	}
+	if response.MergeRequests[0].Attributes["mergeable"] != "CONFLICTING" || response.MergeRequests[0].Attributes["merge_state_status"] != "DIRTY" {
+		t.Fatalf("merge state attributes were not copied: %#v", response.MergeRequests[0].Attributes)
 	}
 }
 

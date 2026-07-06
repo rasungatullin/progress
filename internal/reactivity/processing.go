@@ -272,6 +272,9 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 
 func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
 	for _, remark := range remarks {
+		if strings.TrimSpace(remark.ReplyToID) == "" {
+			continue
+		}
 		state := strings.ToLower(strings.TrimSpace(remark.State))
 		switch state {
 		case "", "resolved", "fixed", "done", "closed", "outdated":
@@ -297,7 +300,7 @@ func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
 				return true
 			}
 		case "mergeable", "can_merge":
-			if isFalsyExternalState(value) {
+			if isFalsyExternalState(value) || isConflictMergeState(value) {
 				return true
 			}
 		case "mergeable_state", "merge_state", "merge_state_status":
@@ -320,7 +323,7 @@ func hasConflictMarker(values []string) bool {
 
 func isConflictMergeState(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "conflict", "conflicted", "dirty", "blocked", "behind", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
+	case "conflict", "conflicted", "conflicting", "dirty", "blocked", "behind", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
 		return true
 	default:
 		return false

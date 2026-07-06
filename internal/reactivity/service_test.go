@@ -295,7 +295,7 @@ func TestServiceProcessTaskReworksReviewPassedTaskWithExternalRemarks(t *testing
 	t.Parallel()
 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
-	integrations.reviewRemarks = []integration.ReviewRemark{{ExternalID: "thread-1", State: "unresolved", Body: "Исправить обработку"}}
+	integrations.reviewRemarks = []integration.ReviewRemark{{ExternalID: "comment-1", ReplyToID: "thread-1", State: "unresolved", Body: "Исправить обработку"}}
 	service := NewService(nil)
 	service.integration = integrations
 	service.execution = &processingExecutionStub{results: []execution.ExecutionResult{{Status: "completed", Launch: &execution.LaunchResult{Status: "completed"}}}}
@@ -316,6 +316,34 @@ func TestServiceProcessTaskReworksReviewPassedTaskWithExternalRemarks(t *testing
 	}
 	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы|remove:Экспертиза пройдена" {
 		t.Fatalf("unexpected label operations: %s", got)
+	}
+}
+
+func TestServiceProcessTaskIgnoresConversationCommentsForExternalRemarks(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{{ExternalID: "comment-1", State: "conversation", Body: "Общий комментарий"}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(result.Cycles) != 1 {
+		t.Fatalf("expected one cycle, got %#v", result.Cycles)
+	}
+	cycle := result.Cycles[0]
+	if cycle.MergeRequestExternalState != nil {
+		t.Fatalf("conversation comments must not block completion: %#v", cycle.MergeRequestExternalState)
+	}
+	if cycle.Consideration == nil || cycle.Consideration.Status != decision.ConsiderationStatusCompleted {
+		t.Fatalf("expected completed consideration, got %#v", cycle.Consideration)
+	}
+	if len(integrations.labels) != 0 {
+		t.Fatalf("unexpected label operations: %#v", integrations.labels)
 	}
 }
 
@@ -344,6 +372,20 @@ func TestServiceProcessTaskReworksReviewPassedTaskWithMergeConflict(t *testing.T
 	}
 	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы|remove:Экспертиза пройдена" {
 		t.Fatalf("unexpected label operations: %s", got)
+	}
+}
+
+func TestMergeRequestHasConflictUsesGitHubMergeStateAttributes(t *testing.T) {
+	t.Parallel()
+
+	mergeRequest := &integration.MergeRequest{Attributes: map[string]string{"merge_state_status": "DIRTY"}}
+	if !mergeRequestHasConflict(mergeRequest) {
+		t.Fatal("expected merge_state_status=DIRTY to be treated as conflict")
+	}
+
+	mergeRequest = &integration.MergeRequest{Attributes: map[string]string{"mergeable": "CONFLICTING"}}
+	if !mergeRequestHasConflict(mergeRequest) {
+		t.Fatal("expected mergeable=CONFLICTING to be treated as conflict")
 	}
 }
 
