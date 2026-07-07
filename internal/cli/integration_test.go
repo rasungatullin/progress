@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1022,6 +1023,173 @@ func TestIntegrationGitHubIssueGetCommandPrintsJSONResult(t *testing.T) {
 	}
 	if payload.Issue.State != "OPEN" {
 		t.Fatalf("unexpected issue state: %q", payload.Issue.State)
+	}
+}
+
+func TestIntegrationGitHubIssueSearchCommandPassesFiltersAndPrintsResults(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "search", "--repo", "owner/name", "--label", "Готово к реализации", "--label", "backend", "--exclude-label", "Требует проработки", "--query", "author:@me", "--state", "open", "--limit", "5"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{
+			System:    "github",
+			Resource:  "issue",
+			Operation: "search",
+			Metadata:  map[string]string{"repository": "owner/name"},
+			SearchResults: []integration.TrackerSearchResult{{
+				System:     "github",
+				Repository: "owner/name",
+				Kind:       "issue",
+				Number:     123,
+				Title:      "Fix integration",
+				State:      "OPEN",
+				Labels:     []string{"Готово к реализации", "backend"},
+				Author:     integration.TrackerUser{Login: "bob", Name: "Bob", URL: "https://github.com/bob"},
+				Assignees:  []integration.TrackerUser{{Login: "alice", Name: "Alice", URL: "https://github.com/alice"}},
+				URL:        "https://github.com/owner/name/issues/123",
+				CreatedAt:  "2026-05-01T10:00:00Z",
+				UpdatedAt:  "2026-05-02T10:00:00Z",
+			}},
+		},
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue search command: %v", err)
+	}
+	if provider.request.Repository != "owner/name" || !provider.request.RepoProvided {
+		t.Fatalf("unexpected repository request: %#v", provider.request)
+	}
+	if provider.request.State != "open" || provider.request.Query != "author:@me" || provider.request.Limit != 5 {
+		t.Fatalf("unexpected search request: %#v", provider.request)
+	}
+	if fmt.Sprint(provider.request.Labels) != "[Готово к реализации backend]" || fmt.Sprint(provider.request.ExcludeLabels) != "[Требует проработки]" {
+		t.Fatalf("unexpected labels: %#v %#v", provider.request.Labels, provider.request.ExcludeLabels)
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"issue_count=1\n",
+		"number=123\n",
+		"title=Fix integration\n",
+		"state=OPEN\n",
+		"label=Готово к реализации\n",
+		"label=backend\n",
+		"author_login=bob\n",
+		"assignee_login=alice\n",
+		"url=https://github.com/owner/name/issues/123\n",
+		"updated_at=2026-05-02T10:00:00Z\n",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github issue search output must include %q, got %q", fragment, output)
+		}
+	}
+}
+
+func TestIntegrationGitHubIssueSearchCommandAllowsOmittedRepoFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "search", "--label", "ready"})
+
+	provider := &capturingCLIProvider{response: integration.Response{System: "github", Resource: "issue", Operation: "search", SearchResults: []integration.TrackerSearchResult{}}}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue search command without repo: %v", err)
+	}
+	if provider.request.Repository != "" {
+		t.Fatalf("expected empty repository request so provider layer can resolve fallback, got %q", provider.request.Repository)
+	}
+	if provider.request.RepoProvided {
+		t.Fatal("expected omitted repo flag to stay false")
+	}
+}
+
+func TestIntegrationGitHubIssueSearchCommandPassesExplicitEmptyRepoToProvider(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "search", "--repo=", "--label", "ready"})
+
+	provider := &capturingCLIProvider{
+		response: integration.Response{System: "github", Resource: "issue", Operation: "search", Failure: &integration.Failure{Kind: "invalid-request", Message: "GitHub repository is required"}},
+		err:      assertErr("GitHub repository is required"),
+	}
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", provider)
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected github issue search error")
+	}
+	if err.Error() != "GitHub repository is required" {
+		t.Fatalf("unexpected github issue search error: %v", err)
+	}
+	if provider.request.Repository != "" || !provider.request.RepoProvided {
+		t.Fatalf("expected explicit empty repository to reach provider, got %#v", provider.request)
+	}
+}
+
+func TestIntegrationGitHubIssueSearchCommandPrintsJSONResult(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "search", "--format", "json", "--repo", "owner/name", "--exclude-label", "blocked"})
+
+	service := newIntegrationService(cmd)
+	service.RegisterProvider("github", stubCLIProvider{
+		response: integration.Response{
+			System:    "github",
+			Resource:  "issue",
+			Operation: "search",
+			SearchResults: []integration.TrackerSearchResult{{
+				Number: 123,
+				Title:  "Fix integration",
+				Labels: []string{"ready"},
+			}},
+		},
+	})
+
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute github issue search command: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	var payload integration.Response
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("issue search json parse: %v, output: %q", err, output)
+	}
+	if len(payload.SearchResults) != 1 || payload.SearchResults[0].Labels[0] != "ready" {
+		t.Fatalf("unexpected search results: %#v", payload.SearchResults)
 	}
 }
 

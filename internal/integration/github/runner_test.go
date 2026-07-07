@@ -398,6 +398,36 @@ func TestRunnerRunIssueViewUsesConfiguredDefaultRepository(t *testing.T) {
 	}
 }
 
+func TestRunnerRunIssueListBuildsSearchCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"issue", "list", "--repo", "owner/name", "--state", "open", "--limit", "5", "--json", "number,title,state,labels,assignees,author,url,createdAt,updatedAt", "--search", `author:@me label:"ready" label:"backend" -label:"blocked" -label:"needs info"`}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `[]`}
+	}
+
+	result, config, err := runner.RunIssueList(context.Background(), "owner/name", IssueListRequest{State: "", Query: "author:@me", Labels: []string{"ready", "backend"}, ExcludeLabels: []string{"blocked", "needs info"}, Limit: 5})
+	if err != nil {
+		t.Fatalf("run issue list: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", result.ExitCode)
+	}
+	if config.Command != defaultCommand {
+		t.Fatalf("unexpected command: %q", config.Command)
+	}
+}
+
 func TestRunnerRunIssueCommentsBuildsAPICommand(t *testing.T) {
 	t.Parallel()
 

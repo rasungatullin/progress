@@ -365,7 +365,7 @@ func trackerTaskSearchOperation() operationTemplate {
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task",
 		Operation:       "search",
-		Input:           model.OperationInputContract{Optional: optionalFields("query", "state", "labels", "limit")},
+		Input:           model.OperationInputContract{Optional: optionalFields("query", "state", "labels", "exclude_labels", "limit")},
 		Output:          output("tracker-search-result", "TrackerSearchResult[]"),
 		FailureKinds:    defaultFailureKinds(),
 	}

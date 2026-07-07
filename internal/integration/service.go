@@ -484,12 +484,14 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		Reaction:        strings.TrimSpace(req.Reaction),
 		Fields:          trimStrings(req.Fields),
 		Labels:          trimStrings(req.Labels),
+		ExcludeLabels:   trimStrings(req.ExcludeLabels),
 	}
 	if normalized.ObjectType == "" {
 		normalized.ObjectType = normalizeObjectType(normalized.Resource)
 	}
 	if state, ok := s.systems[system]; ok {
 		normalized.Labels = mapCanonicalLabelsToExternal(normalized.Labels, state.TaskLabelMapping)
+		normalized.ExcludeLabels = mapCanonicalLabelsToExternal(normalized.ExcludeLabels, state.TaskLabelMapping)
 	}
 
 	return normalized, nil
@@ -998,6 +1000,9 @@ func applyTaskLabelMapping(result *Response, mapping map[string]string) {
 	}
 	if result.Task != nil {
 		result.Task.Traits = mapExternalLabelsToCanonical(result.Task.Traits, mapping)
+	}
+	for i := range result.SearchResults {
+		result.SearchResults[i].Labels = mapExternalLabelsToCanonical(result.SearchResults[i].Labels, mapping)
 	}
 }
 

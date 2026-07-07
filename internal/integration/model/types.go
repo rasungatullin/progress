@@ -55,6 +55,7 @@ type Request struct {
 	Reaction        string
 	Fields          []string
 	Labels          []string
+	ExcludeLabels   []string
 }
 
 type ProviderRequest struct {
@@ -87,6 +88,7 @@ type ProviderRequest struct {
 	Reaction        string
 	Fields          []string
 	Labels          []string
+	ExcludeLabels   []string
 	Route           Route
 }
 
@@ -558,7 +560,11 @@ type TrackerSearchResult struct {
 	Number     int
 	Title      string
 	State      string
+	Labels     []string
+	Author     TrackerUser
+	Assignees  []TrackerUser
 	URL        string
+	CreatedAt  string
 	UpdatedAt  string
 }
 

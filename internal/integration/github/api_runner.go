@@ -129,6 +129,43 @@ func (r *APIRunner) RunIssueView(ctx context.Context, repository string, number 
 	return result, apiResolvedConfig(config), nil
 }
 
+func (r *APIRunner) RunIssueList(ctx context.Context, repository string, request IssueListRequest) (CommandResult, resolvedConfig, error) {
+	request, err := normalizeIssueListRequest(request)
+	if err != nil {
+		return apiErrorResult("issue list", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	config, err := r.resolveConfig(ctx)
+	if err != nil {
+		return apiErrorResult("issue list", config, err)
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return apiErrorResult("issue list", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+
+	queryParts := []string{"is:issue", "repo:" + repository}
+	if request.State != "all" {
+		queryParts = append(queryParts, "state:"+request.State)
+	}
+	if search := issueListSearchQuery(request); search != "" {
+		queryParts = append(queryParts, search)
+	}
+	endpoint := fmt.Sprintf("search/issues?q=%s&per_page=%d", url.QueryEscape(strings.Join(queryParts, " ")), request.Limit)
+	var raw struct {
+		Items []apiIssue `json:"items"`
+	}
+	result, err := r.do(ctx, config, http.MethodGet, endpoint, nil, &raw)
+	if err != nil {
+		return result, apiResolvedConfig(config), err
+	}
+	issues := make([]ghIssueView, 0, len(raw.Items))
+	for _, item := range raw.Items {
+		issues = append(issues, issueViewFromAPI(item))
+	}
+	result.Stdout = mustJSON(issues)
+	return result, apiResolvedConfig(config), nil
+}
+
 func (r *APIRunner) RunIssueComments(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
 	number, err := normalizeIssueNumber(number)
 	if err != nil {

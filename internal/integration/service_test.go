@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -427,6 +428,42 @@ func TestExecuteMapsCanonicalTaskLabelsToExternal(t *testing.T) {
 	}
 	if len(provider.seen.Labels) != 2 || provider.seen.Labels[0] != "external-bug" || provider.seen.Labels[1] != "plain" {
 		t.Fatalf("unexpected provider labels: %#v", provider.seen.Labels)
+	}
+}
+
+func TestExecuteMapsCanonicalTaskSearchExcludeLabelsToExternal(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {
+				Type: "github",
+				TaskLabelMapping: map[string]string{
+					"external-ready":   "ready",
+					"external-blocked": "blocked",
+				},
+			},
+		},
+	})
+	provider := &capturingProvider{}
+	service.RegisterProvider("github", provider)
+
+	_, err := service.Execute(context.Background(), Request{
+		IntegrationType: "tracker",
+		System:          "github",
+		Resource:        "issue",
+		Operation:       "search",
+		Labels:          []string{"ready"},
+		ExcludeLabels:   []string{"blocked", "plain"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if fmt.Sprint(provider.seen.Labels) != "[external-ready]" {
+		t.Fatalf("unexpected provider labels: %#v", provider.seen.Labels)
+	}
+	if fmt.Sprint(provider.seen.ExcludeLabels) != "[external-blocked plain]" {
+		t.Fatalf("unexpected provider exclude labels: %#v", provider.seen.ExcludeLabels)
 	}
 }
 
