@@ -885,7 +885,13 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 		return textPublicationPolicy{}, false
 	}
 	allSteps := normalizePolicyList(append([]string{state.action.Name}, steps...))
-	operationNames := make(map[string]struct{}, len(state.action.Operations)+1)
+	requestedSteps := make(map[string]struct{}, len(allSteps))
+	for _, step := range allSteps {
+		requestedSteps[step] = struct{}{}
+	}
+
+	operationNames := make(map[string]struct{}, len(state.action.Operations))
+	operationKinds := make(map[string]struct{}, len(state.action.Operations))
 	actionName := strings.TrimSpace(strings.ToLower(state.action.Name))
 	if actionName != "" {
 		operationNames[actionName] = struct{}{}
@@ -895,7 +901,19 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 		if name == "" {
 			continue
 		}
-		operationNames[name] = struct{}{}
+		kind := strings.TrimSpace(strings.ToLower(string(operationKind(operation))))
+		_, requestedByName := requestedSteps[name]
+		_, requestedByKind := requestedSteps[kind]
+		if !requestedByName && !requestedByKind {
+			continue
+		}
+		if requestedByKind {
+			operationKinds[kind] = struct{}{}
+		}
+		if requestedByName {
+			operationNames[name] = struct{}{}
+		}
+		operationKinds[kind] = struct{}{}
 	}
 
 	specificSteps := make([]string, 0, len(allSteps))
@@ -907,6 +925,15 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 	if len(specificSteps) > 0 {
 		if policy, ok := policyForPublication(state.policies, target, specificSteps...); ok {
 			return policy, true
+		}
+		specificOperationKinds := make([]string, 0, len(operationKinds))
+		for step := range operationKinds {
+			specificOperationKinds = append(specificOperationKinds, step)
+		}
+		if len(specificOperationKinds) > 0 {
+			if policy, ok := policyForPublication(state.policies, target, specificOperationKinds...); ok {
+				return policy, true
+			}
 		}
 		return textPublicationPolicy{}, false
 	}
