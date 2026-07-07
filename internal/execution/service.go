@@ -168,6 +168,7 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 		in:            in,
 		assignment:    assignment,
 		action:        action,
+		actionCatalogRoot: s.actionCatalogRoot(ctx),
 		historyRoot:   historyRoot,
 		historyHandle: historyHandle,
 		tracker:       newOperationTracker(action),
@@ -240,12 +241,24 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 		in:            in,
 		assignment:    assignment,
 		action:        action,
+		actionCatalogRoot: s.actionCatalogRoot(ctx),
 		historyRoot:   historyRoot,
 		historyHandle: historyHandle,
 		tracker:       newOperationTracker(action),
 	}
 	err = s.runActionOperations(ctx, state)
 	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), state.result, err), err
+}
+
+func (s *Service) actionCatalogRoot(ctx context.Context) string {
+	if s == nil || s.runGitOutput == nil {
+		return ""
+	}
+	root, err := s.runGitOutput(ctx, "", "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(root)
 }
 
 func invocationFromActionInvocation(request ActionInvocation) invocation {

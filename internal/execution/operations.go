@@ -15,6 +15,7 @@ type operationExecution struct {
 	in            invocation
 	assignment    *ExecutionAssignment
 	action        Action
+	actionCatalogRoot string
 	profile       profile
 	allocation    allocation
 	workplace     workplace

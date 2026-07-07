@@ -113,7 +113,7 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	if strings.TrimSpace(ref.Title) == "" {
 		ref.Title = pullRequestTitle(state)
 	}
-	ref.Body = pullRequestBodyForRef(state, ref)
+	ref.Body = pullRequestBodyForRef(state, name, ref)
 
 	executor, err := e.integrationExecutor()
 	if err != nil {
@@ -176,7 +176,7 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
-	comments := reviewRemarkComments(state)
+	comments := reviewRemarkComments(state, name)
 	if len(comments) == 0 {
 		state.tracker.skip(name, "Структурированный вывод не содержит замечаний или заключения для записи.")
 		return nil
@@ -206,7 +206,7 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 		return nil
 	}
 
-	count, err := e.publishReviewResponseComments(ctx, state, ref, responses)
+	count, err := e.publishReviewResponseComments(ctx, state, name, ref, responses)
 	if err != nil {
 		return e.failIntegrationOperation(ctx, state, name, "Ответы на замечания не записаны.", err, "review_responses_publish_failed")
 	}
@@ -283,14 +283,14 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 	return count, errors.Join(failures...)
 }
 
-func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, state *operationExecution, ref pullRequestRef, responses []StructuredResponse) (int, error) {
+func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, state *operationExecution, operationName string, ref pullRequestRef, responses []StructuredResponse) (int, error) {
 	executor, err := e.integrationExecutor()
 	if err != nil {
 		return 0, err
 	}
 
 	count := 0
-	policy, _ := policyForStatePublication(state, publicationTargetReviewResponse, OperationKindPublishReviewResponses)
+	policy, _ := policyForStatePublication(state, publicationTargetReviewResponse, operationName)
 	for _, response := range responses {
 		body := reviewResponseCommentBodyWithPolicy(response, policy)
 		if body == "" {
@@ -660,8 +660,8 @@ func pullRequestTitle(state *operationExecution) string {
 	return "Инженерное изменение"
 }
 
-func pullRequestBody(state *operationExecution) string {
-	if policy, ok := policyForStatePublication(state, publicationTargetMergeRequestDescription, OperationKindPublishMergeRequest); ok && policy.TaskLinkOnly {
+func pullRequestBody(state *operationExecution, operationName string) string {
+	if policy, ok := policyForStatePublication(state, publicationTargetMergeRequestDescription, operationName); ok && policy.TaskLinkOnly {
 		if body := compactPullRequestBody(state); body != "" {
 			return body
 		}
@@ -701,8 +701,8 @@ func pullRequestBody(state *operationExecution) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func pullRequestBodyForRef(state *operationExecution, ref pullRequestRef) string {
-	if policy, ok := policyForStatePublication(state, publicationTargetMergeRequestDescription, OperationKindPublishMergeRequest); ok && policy.TaskLinkOnly {
+func pullRequestBodyForRef(state *operationExecution, operationName string, ref pullRequestRef) string {
+	if policy, ok := policyForStatePublication(state, publicationTargetMergeRequestDescription, operationName); ok && policy.TaskLinkOnly {
 		if body := compactPullRequestBody(state); body != "" {
 			return body
 		}
@@ -710,7 +710,7 @@ func pullRequestBodyForRef(state *operationExecution, ref pullRequestRef) string
 	if body := strings.TrimSpace(ref.Body); body != "" {
 		return body
 	}
-	return pullRequestBody(state)
+	return pullRequestBody(state, operationName)
 }
 
 func compactPullRequestBody(state *operationExecution) string {
@@ -748,7 +748,7 @@ func pullRequestPublishSummary(response integration.Response) string {
 	return "pull-request=published"
 }
 
-func reviewRemarkComments(state *operationExecution) []reviewRemarkComment {
+func reviewRemarkComments(state *operationExecution, operationName string) []reviewRemarkComment {
 	var output *StructuredOutput
 	if state != nil {
 		output = state.result.StructuredOutput
@@ -756,7 +756,7 @@ func reviewRemarkComments(state *operationExecution) []reviewRemarkComment {
 	if output == nil {
 		return nil
 	}
-	policy, hasPolicy := policyForStatePublication(state, publicationTargetReviewRemark, OperationKindPublishReviewRemarks)
+	policy, hasPolicy := policyForStatePublication(state, publicationTargetReviewRemark, operationName)
 	if len(output.Remarks) == 0 {
 		if output.Conclusion == nil {
 			return nil
@@ -884,7 +884,33 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 	if state == nil {
 		return textPublicationPolicy{}, false
 	}
-	allSteps := append(actionPolicySteps(state.action), steps...)
+	allSteps := normalizePolicyList(append([]string{state.action.Name}, steps...))
+	operationNames := make(map[string]struct{}, len(state.action.Operations)+1)
+	actionName := strings.TrimSpace(strings.ToLower(state.action.Name))
+	if actionName != "" {
+		operationNames[actionName] = struct{}{}
+	}
+	for _, operation := range state.action.Operations {
+		name := strings.TrimSpace(strings.ToLower(operationResultName(operation)))
+		if name == "" {
+			continue
+		}
+		operationNames[name] = struct{}{}
+	}
+
+	specificSteps := make([]string, 0, len(allSteps))
+	for _, step := range allSteps {
+		if _, ok := operationNames[step]; ok {
+			specificSteps = append(specificSteps, step)
+		}
+	}
+	if len(specificSteps) > 0 {
+		if policy, ok := policyForPublication(state.policies, target, specificSteps...); ok {
+			return policy, true
+		}
+		return textPublicationPolicy{}, false
+	}
+
 	return policyForPublication(state.policies, target, allSteps...)
 }
 

@@ -52,7 +52,32 @@ func TestSelectTextPublicationPolicySkipsAnotherContour(t *testing.T) {
 	}
 }
 
-func TestPolicyForStatePublicationMatchesOperationName(t *testing.T) {
+func TestPolicyInEntityContourWins(t *testing.T) {
+	t.Parallel()
+
+	policyPayload := []byte(`{
+		"targets": ["review-response"],
+		"steps": ["publish-review-responses"],
+		"target_contour": "decision"
+	}`)
+	catalog := methodology.Catalog{Entities: []methodology.Entity{{
+		Kind:          publicationPolicyEntityKind,
+		Name:          "review-response",
+		TargetContour: "execution",
+		Payload:       policyPayload,
+	}}}
+	action := model.Action{Name: ActionApplyReviewComments, Operations: []model.OperationSpec{{Name: OperationKindPublishReviewResponses, Kind: OperationKindPublishReviewResponses}}}
+
+	policies := selectTextPublicationPolicies(catalog, action)
+	if len(policies) != 1 {
+		t.Fatalf("expected policy to be selected by entity target_contour, got %#v", policies)
+	}
+	if policies[0].TargetContour != "execution" {
+		t.Fatalf("expected target contour from entity to win, got %q", policies[0].TargetContour)
+	}
+}
+
+func TestPolicyForStatePublicationMatchesOperationNameAndActionOperation(t *testing.T) {
 	t.Parallel()
 
 	state := &operationExecution{
@@ -66,7 +91,7 @@ func TestPolicyForStatePublicationMatchesOperationName(t *testing.T) {
 		}},
 	}
 
-	if _, ok := policyForStatePublication(state, publicationTargetReviewResponse, OperationKindPublishReviewResponses); !ok {
+	if _, ok := policyForStatePublication(state, publicationTargetReviewResponse, "custom-review-response-publication"); !ok {
 		t.Fatal("expected policy matched by operation name")
 	}
 }
@@ -126,7 +151,7 @@ func TestPullRequestBodyUsesCompactTaskLinkPolicy(t *testing.T) {
 		}},
 	}
 
-	body := pullRequestBody(state)
+	body := pullRequestBody(state, OperationKindPublishMergeRequest)
 	if !strings.Contains(body, "Задача: #143") || !strings.Contains(body, "Ссылка на задачу: https://github.com/rasungatullin/progress/issues/143") {
 		t.Fatalf("expected compact task reference, got %q", body)
 	}
@@ -149,7 +174,7 @@ func TestPullRequestBodyForRefAppliesCompactPolicyToExistingBody(t *testing.T) {
 		policies: []textPublicationPolicy{{Targets: []string{publicationTargetMergeRequestDescription}, Steps: []string{ActionStartImplementationPR, OperationKindPublishMergeRequest}, TaskLinkOnly: true}},
 	}
 
-	body := pullRequestBodyForRef(state, pullRequestRef{Body: "Полное описание задачи."})
+	body := pullRequestBodyForRef(state, OperationKindPublishMergeRequest, pullRequestRef{Body: "Полное описание задачи."})
 	if strings.Contains(body, "Полное описание задачи") {
 		t.Fatalf("policy must replace existing full body with compact reference, got %q", body)
 	}
@@ -171,7 +196,7 @@ func TestReviewRemarkUsesPolicyWithoutArtificialHeading(t *testing.T) {
 		}}}},
 	}
 
-	comments := reviewRemarkComments(state)
+	comments := reviewRemarkComments(state, OperationKindPublishReviewRemarks)
 	if len(comments) != 1 {
 		t.Fatalf("expected one comment, got %#v", comments)
 	}
@@ -195,7 +220,7 @@ func TestReviewRemarkConclusionPolicyOmitsStatus(t *testing.T) {
 		}}},
 	}
 
-	comments := reviewRemarkComments(state)
+	comments := reviewRemarkComments(state, OperationKindPublishReviewRemarks)
 	if len(comments) != 1 {
 		t.Fatalf("expected one conclusion comment, got %#v", comments)
 	}
@@ -235,5 +260,105 @@ func TestReviewResponsePolicySkipsStatusOnlyBody(t *testing.T) {
 
 	if body != "" {
 		t.Fatalf("status-only response must be skipped after policy cleanup, got %q", body)
+	}
+}
+
+func TestPolicyForStatePublicationUsesOnlyCurrentOperation(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{
+			Name: ActionApplyReviewComments,
+			Operations: []model.OperationSpec{
+				{Name: "publish-review-remarks", Kind: OperationKindPublishReviewRemarks},
+				{Name: "publish-review-remarks-secondary", Kind: OperationKindPublishReviewRemarks},
+			},
+		},
+		policies: []textPublicationPolicy{
+			{
+				Targets:  []string{publicationTargetReviewRemark},
+				Steps:    []string{"publish-review-remarks"},
+				NoHeading: false,
+			},
+			{
+				Targets:  []string{publicationTargetReviewRemark},
+				Steps:    []string{"publish-review-remarks-secondary"},
+				NoHeading: true,
+			},
+		},
+	}
+
+	policy, ok := policyForStatePublication(state, publicationTargetReviewRemark, "publish-review-remarks")
+	if !ok {
+		t.Fatal("expected policy matched for current operation")
+	}
+	if policy.NoHeading {
+		t.Fatalf("current operation should not inherit secondary operation policy: %#v", policy)
+	}
+}
+
+func TestPolicyForStatePublicationIgnoresSecondaryOperationByKindMatch(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{
+			Name: ActionApplyReviewComments,
+			Operations: []model.OperationSpec{
+				{Name: "publish-review-remarks", Kind: OperationKindPublishReviewRemarks},
+				{Name: "publish-review-remarks-secondary", Kind: OperationKindPublishReviewRemarks},
+			},
+		},
+		policies: []textPublicationPolicy{
+			{
+				Targets:   []string{publicationTargetReviewRemark},
+				Steps:     []string{"publish-review-remarks", string(OperationKindPublishReviewRemarks)},
+				NoHeading: false,
+			},
+			{
+				Targets:   []string{publicationTargetReviewRemark},
+				Steps:     []string{string(OperationKindPublishReviewRemarks)},
+				NoHeading: true,
+			},
+		},
+	}
+
+	policy, ok := policyForStatePublication(state, publicationTargetReviewRemark, "publish-review-remarks", string(OperationKindPublishReviewRemarks))
+	if !ok {
+		t.Fatal("expected policy matched for current operation")
+	}
+	if policy.NoHeading {
+		t.Fatalf("kind-only policy from secondary operation must not override current operation policy: %#v", policy)
+	}
+}
+
+func TestLoadTextPublicationPoliciesUsesActionCatalogRoot(t *testing.T) {
+	t.Parallel()
+
+	marker := "load-from-action-root"
+	var loadedRoot string
+	service := &Service{
+		methodology: func(_ context.Context, request methodology.CatalogRequest) (methodology.CatalogSnapshot, error) {
+			loadedRoot = request.RepoRoot
+			return methodology.CatalogSnapshot{Catalog: methodology.Catalog{Entities: []methodology.Entity{{
+				Kind: publicationPolicyEntityKind,
+				Name: marker,
+				Payload: []byte(`{"targets":["task-comment"],"steps":["review-pull-request"],"format":["short"]}`),
+			}}}}, nil
+		},
+	}
+	state := &operationExecution{
+		action:          model.Action{Name: ActionReviewPullRequest},
+		actionCatalogRoot: "/controller/repo",
+		workplace:        workplace{RepositoryRoot: "/worktree/repo"},
+	}
+	policies := service.loadTextPublicationPolicies(context.Background(), state)
+	if loadedRoot != "/controller/repo" {
+		t.Fatalf("expected action catalog root to be used, got %q", loadedRoot)
+	}
+	if len(policies) != 1 {
+		t.Fatalf("expected one publication policy loaded from action catalog, got %#v", policies)
+	}
+	if policies[0].Name != marker {
+		t.Fatalf("expected policy from action catalog, got %q", policies[0].Name)
 	}
 }

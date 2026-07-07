@@ -70,7 +70,7 @@ func textPublicationPolicyFromEntity(entity methodology.Entity) (textPublication
 	policy.Name = strings.TrimSpace(firstNonEmptyTrimmed(policy.Name, entity.Name))
 	policy.Title = strings.TrimSpace(firstNonEmptyTrimmed(policy.Title, entity.Title))
 	policy.Description = strings.TrimSpace(firstNonEmptyTrimmed(policy.Description, entity.Description))
-	policy.TargetContour = strings.TrimSpace(firstNonEmptyTrimmed(policy.TargetContour, entity.TargetContour))
+	policy.TargetContour = strings.TrimSpace(firstNonEmptyTrimmed(entity.TargetContour, policy.TargetContour))
 	policy.Targets = normalizePolicyList(policy.Targets)
 	policy.Steps = normalizePolicyList(policy.Steps)
 	policy.Format = normalizePolicyList(policy.Format)
@@ -176,7 +176,10 @@ func (s *Service) loadTextPublicationPolicies(ctx context.Context, state *operat
 	if s == nil || s.methodology == nil || state == nil {
 		return nil
 	}
-	repoRoot := strings.TrimSpace(state.workplace.RepositoryRoot)
+	repoRoot := strings.TrimSpace(state.actionCatalogRoot)
+	if repoRoot == "" {
+		repoRoot = strings.TrimSpace(state.workplace.RepositoryRoot)
+	}
 	if repoRoot == "" {
 		repoRoot = strings.TrimSpace(state.workplace.Name)
 	}
