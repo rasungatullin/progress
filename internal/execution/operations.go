@@ -21,6 +21,7 @@ type operationExecution struct {
 	result        LaunchResult
 	pullRequest   *integration.MergeRequest
 	reviewRemarks []integration.ReviewRemark
+	policies      []textPublicationPolicy
 	historyRoot   string
 	historyHandle history.Handle
 	tracker       *operationTracker
@@ -213,6 +214,11 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	state.in.Launch.Model = state.allocation.Model
 	if strings.TrimSpace(state.in.Launch.ModelBinding) == "" {
 		state.in.Launch.ModelBinding = state.allocation.ModelBinding
+	}
+	state.policies = e.service.loadTextPublicationPolicies(ctx, state)
+	if len(state.policies) != 0 {
+		input := ensureExecutionStructuredInput(state)
+		appendPublicationPolicyContext(input, state.policies)
 	}
 	state.tracker.completeIO(name, structuredInputSummary(state.in.Launch.StructuredInput), fmt.Sprintf("runner=%s model=%s", state.in.Launch.Runner, state.in.Launch.Model), "Исполнительная директива подготовлена к запуску.")
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, LaunchResult{Status: "running"}, nil)

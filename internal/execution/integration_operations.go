@@ -178,7 +178,7 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
-	comments := reviewRemarkComments(state.result.StructuredOutput)
+	comments := reviewRemarkComments(state)
 	if len(comments) == 0 {
 		state.tracker.skip(name, "Структурированный вывод не содержит замечаний или заключения для записи.")
 		return nil
@@ -292,8 +292,9 @@ func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Cont
 	}
 
 	count := 0
+	policy, _ := policyForStatePublication(state, publicationTargetReviewResponse, OperationKindPublishReviewResponses)
 	for _, response := range responses {
-		body := reviewResponseCommentBody(response)
+		body := reviewResponseCommentBodyWithPolicy(response, policy)
 		if body == "" {
 			continue
 		}
@@ -662,6 +663,11 @@ func pullRequestTitle(state *operationExecution) string {
 }
 
 func pullRequestBody(state *operationExecution) string {
+	if policy, ok := policyForStatePublication(state, publicationTargetMergeRequestDescription, OperationKindPublishMergeRequest); ok && policy.TaskLinkOnly {
+		if body := compactPullRequestBody(state); body != "" {
+			return body
+		}
+	}
 	parts := []string{}
 	if state != nil && state.assignment != nil && state.assignment.CanonicalTask != nil {
 		task := state.assignment.CanonicalTask
@@ -697,6 +703,21 @@ func pullRequestBody(state *operationExecution) string {
 	return strings.Join(parts, "\n\n")
 }
 
+func compactPullRequestBody(state *operationExecution) string {
+	if state == nil || state.assignment == nil || state.assignment.CanonicalTask == nil {
+		return ""
+	}
+	task := state.assignment.CanonicalTask
+	parts := []string{}
+	if task.Number > 0 {
+		parts = append(parts, fmt.Sprintf("Задача: #%d", task.Number))
+	}
+	if strings.TrimSpace(task.URL) != "" {
+		parts = append(parts, "Ссылка на задачу: "+strings.TrimSpace(task.URL))
+	}
+	return strings.Join(parts, "\n")
+}
+
 func pullRequestAlreadyAvailable(response integration.Response) bool {
 	if response.PullRequestStatus != nil && response.PullRequestStatus.Number > 0 && strings.TrimSpace(response.PullRequestStatus.URL) != "" {
 		return true
@@ -717,21 +738,30 @@ func pullRequestPublishSummary(response integration.Response) string {
 	return "pull-request=published"
 }
 
-func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
+func reviewRemarkComments(state *operationExecution) []reviewRemarkComment {
+	var output *StructuredOutput
+	if state != nil {
+		output = state.result.StructuredOutput
+	}
 	if output == nil {
 		return nil
 	}
+	policy, hasPolicy := policyForStatePublication(state, publicationTargetReviewRemark, OperationKindPublishReviewRemarks)
 	if len(output.Remarks) == 0 {
 		if output.Conclusion == nil {
 			return nil
 		}
+		heading := "## Заключение ревизии"
+		if hasPolicy && policy.NoHeading {
+			heading = ""
+		}
 		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
-			"## Заключение ревизии",
+			heading,
 			output.Conclusion.Status,
 			output.Conclusion.Summary,
 			output.Conclusion.Body,
 		}), "\n\n"))
-		if body == "## Заключение ревизии" {
+		if body == strings.TrimSpace(heading) {
 			return nil
 		}
 		return []reviewRemarkComment{{Body: body}}
@@ -739,12 +769,20 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 
 	comments := make([]reviewRemarkComment, 0, len(output.Remarks))
 	for _, remark := range output.Remarks {
+		heading := "## Замечание ревизии"
+		if hasPolicy && (policy.NoHeading || policy.OptionalHeading && strings.TrimSpace(remark.Title) == "") {
+			heading = ""
+		}
+		title := formatNamedLine("Заголовок", remark.Title)
+		if hasPolicy && policy.OptionalHeading {
+			title = strings.TrimSpace(remark.Title)
+		}
 		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
-			"## Замечание ревизии",
+			heading,
 			formatNamedLine("Идентификатор", remark.ID),
 			formatNamedLine("Критичность", remark.Severity),
 			formatNamedLine("Тип", remark.Type),
-			formatNamedLine("Заголовок", remark.Title),
+			title,
 			remark.Body,
 		}), "\n\n"))
 		if body != "" {
@@ -804,13 +842,33 @@ func reviewResponseCommentBodies(responses []StructuredResponse) []string {
 }
 
 func reviewResponseCommentBody(response StructuredResponse) string {
+	return reviewResponseCommentBodyWithPolicy(response, textPublicationPolicy{})
+}
+
+func reviewResponseCommentBodyWithPolicy(response StructuredResponse, policy textPublicationPolicy) string {
+	heading := "## Ответ на замечание ревизии"
+	if policy.NoHeading {
+		heading = ""
+	}
+	status := formatNamedLine("Состояние", response.Status)
+	if policy.HideStatus {
+		status = ""
+	}
 	return strings.TrimSpace(strings.Join(nonEmptyParts([]string{
-		"## Ответ на замечание ревизии",
+		heading,
 		formatNamedLine("Замечание", response.RemarkID),
-		formatNamedLine("Состояние", response.Status),
+		status,
 		response.Summary,
 		response.Body,
 	}), "\n\n"))
+}
+
+func policyForStatePublication(state *operationExecution, target string, steps ...string) (textPublicationPolicy, bool) {
+	if state == nil {
+		return textPublicationPolicy{}, false
+	}
+	allSteps := append([]string{state.action.Name}, steps...)
+	return policyForPublication(state.policies, target, allSteps...)
 }
 
 func isResolvedReviewResponse(response StructuredResponse) bool {
