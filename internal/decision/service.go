@@ -71,9 +71,6 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 
 	mergeRequest, mergeRequestErr := s.findTaskMergeRequest(ctx, response.Issue)
 	if mergeRequestErr != nil {
-		if taskLabelsRequireMergeRequest(response.Issue.Labels) {
-			return StartResult{}, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, mergeRequestErr)
-		}
 		s.logger.Printf("Не удалось восстановить связанный запрос на слияние: задача=%d ошибка=%v", input.TaskNumber, mergeRequestErr)
 	}
 

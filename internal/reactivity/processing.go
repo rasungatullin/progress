@@ -220,7 +220,7 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 
 	mergeRequest, err := s.findTaskMergeRequest(ctx, response.Issue)
 	if err != nil {
-		if requireMergeRequest || taskLabelsRequireMergeRequest(response.Issue.Labels) {
+		if requireMergeRequest {
 			return nil, nil, err, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, err)
 		}
 		s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%d ошибка=%v", taskNumber, err)

@@ -902,9 +902,10 @@ func TestServiceStartRoutesTaskDescriptionAssessment(t *testing.T) {
 				Number:     211,
 				Title:      "Assess task description",
 				State:      "OPEN",
-				Labels:     []string{"description-assessment"},
+				Labels:     []string{"description-assessment", "Ожидает экспертизы"},
 			},
 		},
+		errOnSearch: errors.New("search unavailable"),
 	}
 	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
 	service := &Service{logger: log.Default(), integration: integrationStub, execution: executionStub, resolveRepo: func(context.Context) (string, error) { return "owner/name", nil }}
@@ -924,6 +925,68 @@ func TestServiceStartRoutesTaskDescriptionAssessment(t *testing.T) {
 	}
 	if executionStub.request.Assignment == nil || executionStub.request.Assignment.Action != "task-description-assessment" {
 		t.Fatalf("unexpected execution request: %#v", executionStub.request)
+	}
+}
+
+func TestServiceConsiderDefaultRouteDoesNotStartImplementationForDescriptionAssessment(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "methodology")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir methodology dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "catalog.json"), []byte(`{
+		"default_route": "task-processing",
+		"routes": [
+			{
+				"name": "task-processing",
+				"checks": [{
+					"name": "task-processing-start",
+					"action": "start-implementation-pr",
+					"missing_labels": ["Ожидает экспертизы", "Требует доработки", "Экспертиза пройдена", "description-assessment"],
+					"reason_code": "task_processing_not_started",
+					"reason_message": "Требуется начать выполнение."
+				}]
+			},
+			{
+				"name": "task-description",
+				"checks": [{
+					"name": "description-assessment",
+					"action": "task-description-assessment",
+					"has_labels": ["description-assessment"],
+					"reason_code": "task_description_not_assessed",
+					"reason_message": "Описание задачи ещё не оценено."
+				}]
+			}
+		]
+	}`), 0o600); err != nil {
+		t.Fatalf("write methodology catalog: %v", err)
+	}
+
+	service := &Service{
+		logger:          log.Default(),
+		resolveRepoRoot: func(context.Context) (string, error) { return root, nil },
+		readFile:        os.ReadFile,
+	}
+
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 211},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     211,
+			Title:      "Assess task description",
+			Labels:     []string{"description-assessment"},
+		},
+	}})
+	if err == nil {
+		t.Fatal("expected default route to skip implementation start")
+	}
+	if result.Failure == nil || result.Failure.Code != "route_check_not_found" {
+		t.Fatalf("unexpected failure: %#v", result.Failure)
+	}
+	if result.ExecutionPlan != nil {
+		t.Fatalf("description assessment task must not start implementation by default: %#v", result.ExecutionPlan)
 	}
 }
 
