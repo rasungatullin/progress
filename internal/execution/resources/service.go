@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/rasungatullin/progress/internal/configuration"
 	"github.com/rasungatullin/progress/internal/execution/model"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/integration/secrets"
 )
 
 const (
@@ -31,6 +34,7 @@ type resourceConfig struct {
 	BindingSources     map[string]configuration.ConfigFileSource
 	GlobalConfigPath   string
 	LocalConfigPath    string
+	ConfigHome         string
 }
 
 func NewService() *Service {
@@ -53,6 +57,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		}
 		allocation.GlobalConfigPath = config.GlobalConfigPath
 		allocation.LocalConfigPath = config.LocalConfigPath
+		allocation.Git = config.Config.Git
 		return allocation, nil
 	}
 
@@ -86,6 +91,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			GlobalConfigPath: config.GlobalConfigPath,
 			LocalConfigPath:  config.LocalConfigPath,
 			FallbackUsed:     false,
+			Git:              config.Config.Git,
 		}, nil
 	}
 
@@ -95,6 +101,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		if err == nil {
 			allocation.GlobalConfigPath = config.GlobalConfigPath
 			allocation.LocalConfigPath = config.LocalConfigPath
+			allocation.Git = config.Config.Git
 			return allocation, nil
 		}
 		if !profile.AllowModelFallback {
@@ -109,6 +116,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		fallback.FallbackUsed = true
 		fallback.GlobalConfigPath = config.GlobalConfigPath
 		fallback.LocalConfigPath = config.LocalConfigPath
+		fallback.Git = config.Config.Git
 		return fallback, nil
 	}
 
@@ -124,6 +132,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 	allocation.FallbackUsed = true
 	allocation.GlobalConfigPath = config.GlobalConfigPath
 	allocation.LocalConfigPath = config.LocalConfigPath
+	allocation.Git = config.Config.Git
 	return allocation, nil
 }
 
@@ -137,6 +146,9 @@ func (s *Service) loadConfig(ctx context.Context) (resourceConfig, error) {
 	if err != nil {
 		return resourceConfig{}, err
 	}
+	if err := resolvePrivateGitConfig(ctx, loaded.Config.Git, loaded.Config.PrivateStore, loaded.ConfigHome); err != nil {
+		return resourceConfig{}, err
+	}
 
 	return resourceConfig{
 		Config:             loaded.Config,
@@ -146,7 +158,34 @@ func (s *Service) loadConfig(ctx context.Context) (resourceConfig, error) {
 		BindingSources:     loaded.BindingSources,
 		GlobalConfigPath:   getLayerPath(loaded.Layers, configuration.ConfigFileSourceGlobal),
 		LocalConfigPath:    getLayerPath(loaded.Layers, configuration.ConfigFileSourceLocal),
+		ConfigHome:         loaded.ConfigHome,
 	}, nil
+}
+
+func resolvePrivateGitConfig(ctx context.Context, git *model.GitConfig, privateStore model.ResourcePrivateStoreConfig, configHome string) error {
+	if git == nil || git.Push == nil || strings.TrimSpace(git.Push.SSHIdentityPrivate) == "" {
+		return nil
+	}
+	store, _, err := secrets.NewStore(integrationmodel.IntegrationPrivateStoreConfig{
+		Type:    privateStore.Type,
+		Service: privateStore.Service,
+		Path:    privateStore.Path,
+	}, configHome)
+	if err != nil {
+		return fmt.Errorf("git.push requires private store for ssh-identity-private %q: %w", git.Push.SSHIdentityPrivate, err)
+	}
+	value, err := store.Get(ctx, git.Push.SSHIdentityPrivate)
+	if err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			return fmt.Errorf("git.push references missing private value %q", git.Push.SSHIdentityPrivate)
+		}
+		return fmt.Errorf("git.push cannot read private value %q: %w", git.Push.SSHIdentityPrivate, err)
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("git.push references empty private value %q", git.Push.SSHIdentityPrivate)
+	}
+	git.Push.SSHIdentityPrivateValue = value
+	return nil
 }
 
 func getLayerPath(layers []configuration.ExecutionResourceLayer, source configuration.ConfigFileSource) string {

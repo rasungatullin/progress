@@ -924,6 +924,111 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 	}
 }
 
+func TestLaunchCommitPushAppliesGitOverrideToCommitAndPush(t *testing.T) {
+	t.Parallel()
+
+	var commitEnv []string
+	var commitArgs []string
+	var pushEnv []string
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "runner output", nil
+		},
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain -z -uall":
+				return "M  file.txt\x00", nil
+			case "add -A -- file.txt":
+				return "", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+		runGitOutputEnv: func(_ context.Context, _ string, env []string, args ...string) (string, error) {
+			switch args[len(args)-1] {
+			case "repo":
+				commitEnv = append([]string(nil), env...)
+				commitArgs = append([]string(nil), args...)
+				return "[feature/test abc123] repo\n", nil
+			default:
+				if len(args) == 1 && args[0] == "push" {
+					pushEnv = append([]string(nil), env...)
+					return "", nil
+				}
+				return "", fmt.Errorf("unexpected git command with env: %v", args)
+			}
+		},
+	}
+	allocation := validAllocation()
+	allocation.Git = &model.GitConfig{
+		Identity: &model.GitIdentityConfig{
+			AuthorName:     "Progress Execution",
+			AuthorEmail:    "progress@example.com",
+			CommitterName:  "Progress Committer",
+			CommitterEmail: "committer@example.com",
+		},
+		Signing: &model.GitSigningConfig{Enabled: true, Format: "ssh", SigningKey: "/keys/signing.pub", Program: "/usr/bin/ssh-keygen"},
+		Push:    &model.GitPushConfig{SSHIdentityFile: "/keys/push", KnownHostsFile: "/keys/known_hosts", IdentitiesOnly: true},
+	}
+
+	_, err := service.Launch(context.Background(), validInvocation(t, true), validProfile(), allocation, validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	expectedEnv := []string{"GIT_AUTHOR_NAME=Progress Execution", "GIT_AUTHOR_EMAIL=progress@example.com", "GIT_COMMITTER_NAME=Progress Committer", "GIT_COMMITTER_EMAIL=committer@example.com"}
+	if !reflect.DeepEqual(commitEnv, expectedEnv) {
+		t.Fatalf("unexpected commit env: %#v", commitEnv)
+	}
+	expectedArgs := []string{"-c", "commit.gpgsign=true", "-c", "gpg.format=ssh", "-c", "user.signingkey=/keys/signing.pub", "-c", "gpg.ssh.program=/usr/bin/ssh-keygen", "commit", "-m", "repo"}
+	if !reflect.DeepEqual(commitArgs, expectedArgs) {
+		t.Fatalf("unexpected commit args: %#v", commitArgs)
+	}
+	if len(pushEnv) != 1 || !strings.Contains(pushEnv[0], "GIT_SSH_COMMAND=ssh -i '/keys/push'") || !strings.Contains(pushEnv[0], "IdentitiesOnly=yes") || !strings.Contains(pushEnv[0], "UserKnownHostsFile='/keys/known_hosts'") {
+		t.Fatalf("unexpected push env: %#v", pushEnv)
+	}
+}
+
+func TestGitPushEnvWritesPrivateIdentityToTemporaryFile(t *testing.T) {
+	t.Parallel()
+
+	env, cleanup, err := gitPushEnv(&model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivateValue: "PRIVATE KEY", IdentitiesOnly: true}})
+	if err != nil {
+		t.Fatalf("git push env: %v", err)
+	}
+	if len(env) != 1 || !strings.Contains(env[0], "GIT_SSH_COMMAND=ssh -i '") {
+		t.Fatalf("unexpected env: %#v", env)
+	}
+	pathStart := strings.Index(env[0], "'")
+	pathEnd := strings.Index(env[0][pathStart+1:], "'")
+	if pathStart == -1 || pathEnd == -1 {
+		t.Fatalf("temporary path was not quoted: %#v", env)
+	}
+	path := env[0][pathStart+1 : pathStart+1+pathEnd]
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read temporary private key: %v", err)
+	}
+	if string(content) != "PRIVATE KEY" {
+		t.Fatalf("unexpected temporary private key content")
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("temporary private key must have 0600 permissions: info=%v err=%v", info, err)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("temporary private key must be removed, err=%v", err)
+	}
+}
+
 func TestLaunchRunnerErrorReturned(t *testing.T) {
 	t.Parallel()
 

@@ -538,10 +538,26 @@ func writeExecutionResourceLayer(path string, config model.ResourceConfigFile) e
 func printConfigurationResourcesText(cmd *cobra.Command, loaded configcontour.ExecutionResourceConfig) {
 	cmd.Printf("defaults.model-binding=%s\n", loaded.Config.Defaults.ModelBinding)
 	cmd.Printf("defaults.environment=%s\n", loaded.Config.Defaults.Environment)
+	printConfigurationGitSummary(cmd, loaded)
 	printConfigurationEnvironmentTable(cmd, loaded)
 	printConfigurationToolTable(cmd, loaded)
 	printConfigurationResourceTable(cmd, loaded)
 	printConfigurationBindingTable(cmd, loaded)
+}
+
+func printConfigurationGitSummary(cmd *cobra.Command, loaded configcontour.ExecutionResourceConfig) {
+	git := loaded.Config.Git
+	identity := false
+	signing := false
+	push := false
+	if git != nil {
+		identity = git.Identity != nil && strings.TrimSpace(git.Identity.AuthorName) != ""
+		signing = git.Signing != nil && git.Signing.Enabled
+		push = git.Push != nil && strings.TrimSpace(git.Push.SSHIdentityFile) != ""
+	}
+	cmd.Printf("git.identity=%t\n", identity)
+	cmd.Printf("git.signing=%t\n", signing)
+	cmd.Printf("git.push-key=%t\n", push)
 }
 
 func printConfigurationEnvironmentTable(cmd *cobra.Command, loaded configcontour.ExecutionResourceConfig) {

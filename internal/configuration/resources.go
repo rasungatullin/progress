@@ -54,6 +54,7 @@ type ExecutionResourceConfig struct {
 	ToolSources        map[string]ConfigFileSource
 	ResourceSources    map[string]ConfigFileSource
 	BindingSources     map[string]ConfigFileSource
+	GitSource          ConfigFileSource
 	ConfigHome         string
 }
 
@@ -262,6 +263,9 @@ func ValidateExecutionResourceConfig(config model.ResourceConfigFile) error {
 			return fmt.Errorf("defaults.environment references unknown environment %q", defaultEnvironment)
 		}
 	}
+	if err := validateGitConfig(config.Git); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -347,6 +351,9 @@ func validateExecutionResourceLayer(config model.ResourceConfigFile) error {
 			return fmt.Errorf("binding %q has empty resource", name)
 		}
 	}
+	if err := validateGitConfig(config.Git); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -363,6 +370,7 @@ func mergeExecutionResourceLayers(layers []ExecutionResourceLayer) ExecutionReso
 	toolSources := map[string]ConfigFileSource{}
 	resourceSources := map[string]ConfigFileSource{}
 	bindingSources := map[string]ConfigFileSource{}
+	var gitSource ConfigFileSource
 
 	for _, layer := range layers {
 		config := normalizeExecutionResourceConfig(layer.Config, false)
@@ -391,6 +399,13 @@ func mergeExecutionResourceLayers(layers []ExecutionResourceLayer) ExecutionReso
 		if strings.TrimSpace(config.Defaults.Environment) != "" {
 			merged.Defaults.Environment = config.Defaults.Environment
 		}
+		if strings.TrimSpace(config.PrivateStore.Type) != "" || strings.TrimSpace(config.PrivateStore.Service) != "" || strings.TrimSpace(config.PrivateStore.Path) != "" {
+			merged.PrivateStore = config.PrivateStore
+		}
+		if !isGitConfigEmpty(config.Git) {
+			merged.Git = config.Git
+			gitSource = layer.Source
+		}
 	}
 
 	merged = normalizeExecutionResourceConfig(merged, true)
@@ -402,6 +417,7 @@ func mergeExecutionResourceLayers(layers []ExecutionResourceLayer) ExecutionReso
 		ToolSources:        toolSources,
 		ResourceSources:    resourceSources,
 		BindingSources:     bindingSources,
+		GitSource:          gitSource,
 	}
 }
 
@@ -409,6 +425,9 @@ func normalizeExecutionResourceConfig(config model.ResourceConfigFile, addDefaul
 	normalized := config
 	normalized.Defaults.ModelBinding = strings.TrimSpace(normalized.Defaults.ModelBinding)
 	normalized.Defaults.Environment = strings.TrimSpace(normalized.Defaults.Environment)
+	normalized.PrivateStore.Type = strings.TrimSpace(normalized.PrivateStore.Type)
+	normalized.PrivateStore.Service = strings.TrimSpace(normalized.PrivateStore.Service)
+	normalized.PrivateStore.Path = strings.TrimSpace(normalized.PrivateStore.Path)
 
 	normalized.Runners = normalizeStringList(normalized.Runners)
 	normalized.Models = normalizeStringList(normalized.Models)
@@ -417,6 +436,7 @@ func normalizeExecutionResourceConfig(config model.ResourceConfigFile, addDefaul
 	normalized.Tools = normalizeTools(normalized.Tools)
 	normalized.Resources = normalizeResources(normalized.Resources)
 	normalized.Bindings = normalizeBindings(normalized.Bindings)
+	normalized.Git = normalizeGitConfig(normalized.Git)
 
 	if addDefaultEnvironments {
 		if _, ok := normalized.Environments[defaultLocalEnvironmentName]; !ok {
@@ -536,6 +556,79 @@ func normalizeBindings(values map[string]model.ResourceBindingConfig) map[string
 		normalized[name] = binding
 	}
 	return normalized
+}
+
+func normalizeGitConfig(config *model.GitConfig) *model.GitConfig {
+	if config == nil {
+		return nil
+	}
+	normalized := *config
+	if normalized.Identity != nil {
+		identity := *normalized.Identity
+		identity.AuthorName = strings.TrimSpace(identity.AuthorName)
+		identity.AuthorEmail = strings.TrimSpace(identity.AuthorEmail)
+		identity.CommitterName = strings.TrimSpace(identity.CommitterName)
+		identity.CommitterEmail = strings.TrimSpace(identity.CommitterEmail)
+		normalized.Identity = &identity
+	}
+	if normalized.Signing != nil {
+		signing := *normalized.Signing
+		signing.Format = strings.TrimSpace(signing.Format)
+		signing.SigningKey = strings.TrimSpace(signing.SigningKey)
+		signing.Program = strings.TrimSpace(signing.Program)
+		normalized.Signing = &signing
+	}
+	if normalized.Push != nil {
+		push := *normalized.Push
+		push.SSHIdentityFile = strings.TrimSpace(push.SSHIdentityFile)
+		push.SSHIdentityPrivate = strings.TrimSpace(push.SSHIdentityPrivate)
+		push.KnownHostsFile = strings.TrimSpace(push.KnownHostsFile)
+		normalized.Push = &push
+	}
+	if isGitConfigEmpty(&normalized) {
+		return nil
+	}
+	return &normalized
+}
+
+func validateGitConfig(config *model.GitConfig) error {
+	if config == nil {
+		return nil
+	}
+	if identity := config.Identity; identity != nil {
+		values := []string{identity.AuthorName, identity.AuthorEmail, identity.CommitterName, identity.CommitterEmail}
+		filled := 0
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				filled++
+			}
+		}
+		if filled > 0 && filled != len(values) {
+			return fmt.Errorf("git.identity must define author-name, author-email, committer-name and committer-email together")
+		}
+	}
+	if signing := config.Signing; signing != nil && signing.Enabled {
+		if strings.TrimSpace(signing.Format) == "" {
+			return fmt.Errorf("git.signing.format is required when git.signing.enabled is true")
+		}
+		if strings.TrimSpace(signing.SigningKey) == "" {
+			return fmt.Errorf("git.signing.signing-key is required when git.signing.enabled is true")
+		}
+	}
+	if push := config.Push; push != nil && strings.TrimSpace(push.SSHIdentityFile) != "" && strings.TrimSpace(push.SSHIdentityPrivate) != "" {
+		return fmt.Errorf("git.push must define only one of ssh-identity-file and ssh-identity-private")
+	}
+	return nil
+}
+
+func isGitConfigEmpty(config *model.GitConfig) bool {
+	if config == nil {
+		return true
+	}
+	identityEmpty := config.Identity == nil || (config.Identity.AuthorName == "" && config.Identity.AuthorEmail == "" && config.Identity.CommitterName == "" && config.Identity.CommitterEmail == "")
+	signingEmpty := config.Signing == nil || (!config.Signing.Enabled && config.Signing.Format == "" && config.Signing.SigningKey == "" && config.Signing.Program == "")
+	pushEmpty := config.Push == nil || (config.Push.SSHIdentityFile == "" && config.Push.SSHIdentityPrivate == "" && config.Push.KnownHostsFile == "" && !config.Push.IdentitiesOnly)
+	return identityEmpty && signingEmpty && pushEmpty
 }
 
 func normalizeStringList(values []string) []string {
