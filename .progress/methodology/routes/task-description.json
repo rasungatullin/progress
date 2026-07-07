@@ -1,0 +1,27 @@
+{
+  "name": "task-description",
+  "title": "Декомпозиция и описание задачи",
+  "description": "Изолированный маршрут оценки достаточности описания задачи перед инженерным изменением.",
+  "checks": [
+    {
+      "name": "description-assessment",
+      "title": "Оценка описания задачи",
+      "action": "task-description-assessment",
+      "profile": "task-description-assessor",
+      "description": "Проверяет достаточность описания задачи перед инженерным изменением.",
+      "step": "assess-description",
+      "has_labels": [
+        "description-assessment"
+      ],
+      "missing_labels": [
+        "description-assessed"
+      ],
+      "expected_result": "Сформировать заключение о достаточности описания.",
+      "constraints": [
+        "Не менять код."
+      ],
+      "reason_code": "task_description_not_assessed",
+      "reason_message": "Описание задачи ещё не оценено; задача направлена на оценку декомпозиции."
+    }
+  ]
+}

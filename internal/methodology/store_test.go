@@ -289,12 +289,55 @@ func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 	if result.Path != filepath.Join(root, ".progress", "methodology", "catalog.json") {
 		t.Fatalf("unexpected write path: %q", result.Path)
 	}
-	content, err := os.ReadFile(result.Path)
+	content, err := os.ReadFile(filepath.Join(root, ".progress", "methodology", "actions", "implement.json"))
 	if err != nil {
-		t.Fatalf("read written catalog: %v", err)
+		t.Fatalf("read written action: %v", err)
 	}
-	if !containsAll(string(content), `"actions"`, `"implement"`, `"engineering-synthesis"`) {
-		t.Fatalf("written catalog does not include action: %s", string(content))
+	if !containsAll(string(content), `"name": "implement"`, `"class": "engineering-synthesis"`) {
+		t.Fatalf("written action does not include action fields: %s", string(content))
+	}
+}
+
+func TestLoadCatalogReadsFileRegistries(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"default_route":"task-processing"}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "routes", "task-processing.json"), `{"name":"task-processing","action":"implement"}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "actions", "implement.json"), `{"name":"implement","profile":"coder"}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "instructions", "implement-directive.json"), `{"name":"implement-directive","action":"implement","profile":"coder","body":"Сформировать изменение."}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "entities", "decision-rule--description-assessment.json"), `{"kind":"decision-rule","name":"description-assessment","target_contour":"decision","payload":{"label":"description-assessment"}}`)
+
+	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	if snapshot.Catalog.DefaultRoute != "task-processing" {
+		t.Fatalf("unexpected default route: %q", snapshot.Catalog.DefaultRoute)
+	}
+	if len(snapshot.Catalog.Routes) != 1 || snapshot.Catalog.Routes[0].Name != "task-processing" {
+		t.Fatalf("unexpected routes: %#v", snapshot.Catalog.Routes)
+	}
+	if len(snapshot.Catalog.Entities) != 1 || entitySourceKey(snapshot.Catalog.Entities[0].Kind, snapshot.Catalog.Entities[0].Name) != "decision-rule/description-assessment" {
+		t.Fatalf("unexpected entities: %#v", snapshot.Catalog.Entities)
+	}
+}
+
+func TestLoadCatalogRejectsRegistryFileNameMismatch(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "routes", "task-processing.json"), `{"name":"other-route","action":"implement"}`)
+
+	_, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err == nil {
+		t.Fatal("expected file name mismatch error")
+	}
+	if !strings.Contains(err.Error(), `key "other-route" must match file name "task-processing"`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -408,4 +451,14 @@ func containsAll(value string, fragments ...string) bool {
 		}
 	}
 	return true
+}
+
+func writeTestFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create parent dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
 }

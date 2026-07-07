@@ -37,6 +37,8 @@ type Service struct {
 	readFile        ReadFileFunc
 	writeFile       WriteFileFunc
 	mkdirAll        MkdirAllFunc
+	readDir         ReadDirFunc
+	removeAll       RemoveAllFunc
 	resolveRepoRoot func(context.Context) (string, error)
 }
 
@@ -50,6 +52,8 @@ func NewService(logger *log.Logger) *Service {
 		readFile:        os.ReadFile,
 		writeFile:       os.WriteFile,
 		mkdirAll:        os.MkdirAll,
+		readDir:         os.ReadDir,
+		removeAll:       os.RemoveAll,
 		resolveRepoRoot: resolveGitRepoRoot,
 	}
 }
@@ -66,7 +70,7 @@ func (s *Service) Load(ctx context.Context, request CatalogRequest) (CatalogSnap
 		}
 	}
 
-	return LoadCatalogWithHome(repoRoot, request.ConfigHome, s.readFile)
+	return loadCatalogWithHome(repoRoot, request.ConfigHome, s.readFile, s.readDir)
 }
 
 func (s *Service) List(ctx context.Context, request ElementRequest) ([]ListedElement, error) {
@@ -104,7 +108,7 @@ func (s *Service) Save(ctx context.Context, request CatalogWriteRequest) (Catalo
 		return CatalogWriteResult{}, err
 	}
 
-	return SaveCatalogWithHome(repoRoot, request.ConfigHome, request.Scope, *request.Catalog, s.readFile, s.writeFile, s.mkdirAll)
+	return SaveCatalogWithHomeFS(repoRoot, request.ConfigHome, request.Scope, *request.Catalog, s.readFile, s.writeFile, s.mkdirAll, s.removeAll, s.readDir)
 }
 
 func (s *Service) Upsert(ctx context.Context, request CatalogWriteRequest) (CatalogWriteResult, error) {
@@ -117,7 +121,7 @@ func (s *Service) Upsert(ctx context.Context, request CatalogWriteRequest) (Cata
 		return CatalogWriteResult{}, err
 	}
 
-	return UpsertCatalogElementWithHome(repoRoot, request.ConfigHome, request.Scope, request.Element, s.readFile, s.writeFile, s.mkdirAll)
+	return UpsertCatalogElementWithHomeFS(repoRoot, request.ConfigHome, request.Scope, request.Element, s.readFile, s.writeFile, s.mkdirAll, s.readDir, s.removeAll)
 }
 
 func (s *Service) Resolve(ctx context.Context, request SelectionRequest) (SelectionResult, error) {

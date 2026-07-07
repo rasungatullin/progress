@@ -1,0 +1,8 @@
+{
+  "name": "task-description-assessment-directive",
+  "profile": "task-description-assessor",
+  "action": "task-description-assessment",
+  "target_contour": "execution",
+  "title": "Оценка описания задачи",
+  "body": "Проверить достаточность описания задачи для дальнейшего исполнения без изменения кодовой базы. Вернуть заключение и необходимые дальнейшие действия."
+}
