@@ -335,6 +335,61 @@ func TestLoadCatalogRejectsInvalidActionContractField(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsNullActionContractSection(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions": [
+					{
+						"name": "implement",
+						"contract": {
+							"in": null
+						}
+					}
+				]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected action contract section validation error")
+	}
+}
+
+func TestLoadCatalogRejectsActionContractFieldRequiredNull(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions": [
+					{
+						"name": "implement",
+						"contract": {
+							"in": {
+								"task_id": {"type": "string", "required": null}
+							}
+						}
+					}
+				]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected required field validation error")
+	}
+	if !strings.Contains(err.Error(), "required must be a boolean") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadCatalogRejectsActionOperationBindingConflictRefAndValue(t *testing.T) {
 	t.Parallel()
 
@@ -446,6 +501,26 @@ func TestLoadCatalogRejectsInvalidOperationContractField(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `operation "resolve-action" contract.out.result.type must be non-empty`) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsNullOperationContractSection(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"operations": [
+					{"name": "resolve-action", "contract": {"in": null, "out": {}}}
+				]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected operation contract section validation error")
 	}
 }
 

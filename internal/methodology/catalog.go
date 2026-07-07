@@ -155,20 +155,72 @@ type Operation struct {
 }
 
 type OperationContract struct {
-	In  map[string]ContractField `json:"in,omitempty"`
-	Out map[string]ContractField `json:"out,omitempty"`
+	In  ContractSection `json:"in,omitempty"`
+	Out ContractSection `json:"out,omitempty"`
 }
 
 type ActionContract struct {
-	In   map[string]ContractField `json:"in,omitempty"`
-	Data map[string]ContractField `json:"data,omitempty"`
-	Out  map[string]ContractField `json:"out,omitempty"`
+	In   ContractSection `json:"in,omitempty"`
+	Data ContractSection `json:"data,omitempty"`
+	Out  ContractSection `json:"out,omitempty"`
 }
 
 type ContractField struct {
 	Type        string `json:"type,omitempty"`
 	Required    *bool  `json:"required,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+type ContractSection map[string]ContractField
+
+func (section *ContractSection) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return fmt.Errorf("must be an object")
+	}
+
+	var raw map[string]ContractField
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return err
+	}
+	*section = ContractSection(raw)
+	return nil
+}
+
+func (field *ContractField) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*field = ContractField{}
+		return nil
+	}
+
+	type rawContractField struct {
+		Type        string          `json:"type"`
+		Required    json.RawMessage `json:"required"`
+		Description string          `json:"description"`
+	}
+
+	var raw rawContractField
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return err
+	}
+
+	field.Type = strings.TrimSpace(raw.Type)
+	field.Description = strings.TrimSpace(raw.Description)
+	if raw.Required == nil {
+		field.Required = nil
+		return nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw.Required), []byte("null")) {
+		return fmt.Errorf("required must be a boolean")
+	}
+
+	var required bool
+	if err := json.Unmarshal(raw.Required, &required); err != nil {
+		return err
+	}
+	field.Required = &required
+	return nil
 }
 
 type OperationBinding struct {
@@ -602,7 +654,7 @@ func validateCatalog(catalog Catalog) error {
 	return nil
 }
 
-func validateContractFields(entityType, entityName, section string, fields map[string]ContractField) error {
+func validateContractFields(entityType, entityName, section string, fields ContractSection) error {
 	for fieldName, field := range fields {
 		if strings.TrimSpace(field.Type) == "" {
 			return fmt.Errorf("%s %q %s.%s.type must be non-empty", entityType, entityName, section, fieldName)
@@ -813,7 +865,7 @@ func normalizeActionContract(contract ActionContract) ActionContract {
 	return contract
 }
 
-func normalizeContractFields(fields map[string]ContractField) map[string]ContractField {
+func normalizeContractFields(fields ContractSection) ContractSection {
 	if len(fields) == 0 {
 		return fields
 	}
