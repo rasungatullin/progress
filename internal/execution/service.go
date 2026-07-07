@@ -16,6 +16,7 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/resources"
 	workplacepkg "github.com/rasungatullin/progress/internal/execution/workplace"
 	"github.com/rasungatullin/progress/internal/integration"
+	"github.com/rasungatullin/progress/internal/methodology"
 )
 
 type invocation = model.Invocation
@@ -82,6 +83,7 @@ type Service struct {
 	workplaces   workplaceManager
 	launcher     launcher
 	integrations integrationExecutor
+	methodology  func(context.Context, methodology.CatalogRequest) (methodology.CatalogSnapshot, error)
 	runGitOutput func(context.Context, string, ...string) (string, error)
 }
 
@@ -92,6 +94,7 @@ func NewService(logger *log.Logger) *Service {
 	workplaces := workplacepkg.NewService()
 	launcher := launch.NewService()
 	integrations := integration.NewConfiguredService(logger)
+	methodologyService := methodology.NewService(nil)
 
 	return &Service{
 		logger:       logger,
@@ -101,6 +104,7 @@ func NewService(logger *log.Logger) *Service {
 		workplaces:   workplaces,
 		launcher:     launcher,
 		integrations: integrations,
+		methodology:  methodologyService.Load,
 		runGitOutput: runGitOutput,
 	}
 }

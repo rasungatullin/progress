@@ -429,6 +429,49 @@
         "branch_name": "task_number",
         "workplace": "worktree"
       }
+    },
+    {
+      "kind": "text-publication-policy",
+      "name": "engineering-cycle-publications",
+      "target_contour": "execution",
+      "title": "Политика внешних текстовых публикаций инженерного цикла",
+      "description": "Правила подготовки человекочитаемых публикаций для задач, запросов на слияние и замечаний ревизии.",
+      "payload": {
+        "targets": [
+          "task-comment",
+          "merge-request-description",
+          "merge-request-comment",
+          "review-remark",
+          "review-response"
+        ],
+        "steps": [
+          "start-implementation-pr",
+          "review-pull-request",
+          "apply-review-comments",
+          "publish-merge-request",
+          "publish-review-remarks",
+          "publish-review-responses"
+        ],
+        "format": [
+          "short",
+          "no-heading",
+          "task-link",
+          "optional-heading"
+        ],
+        "include": [
+          "task-link",
+          "meaningful-review-title",
+          "publication-body"
+        ],
+        "exclude": [
+          "redundant-context",
+          "heading",
+          "status",
+          "resolved",
+          "unresolved"
+        ],
+        "fallback": "use-current-publication"
+      }
     }
   ]
 }
