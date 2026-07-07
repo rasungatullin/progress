@@ -37,6 +37,7 @@ type textPublicationPolicy struct {
 	TaskLinkOnly    bool     `json:"-"`
 	HideStatus      bool     `json:"-"`
 	OptionalHeading bool     `json:"-"`
+	MeaningfulTitle  bool     `json:"-"`
 }
 
 func selectTextPublicationPolicies(catalog methodology.Catalog, action model.Action) []textPublicationPolicy {
@@ -82,6 +83,7 @@ func textPublicationPolicyFromEntity(entity methodology.Entity) (textPublication
 	policy.TaskLinkOnly = policyHas(policy.Format, "task-link") || policyHas(policy.Include, "task-link")
 	policy.HideStatus = policyHas(policy.Exclude, "status") || policyHas(policy.Exclude, "resolved") || policyHas(policy.Exclude, "unresolved")
 	policy.OptionalHeading = policyHas(policy.Format, "optional-heading")
+	policy.MeaningfulTitle = policyHas(policy.Include, "meaningful-review-title")
 	return policy, nil
 }
 

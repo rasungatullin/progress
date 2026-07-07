@@ -789,7 +789,14 @@ func reviewRemarkComments(state *operationExecution, operationName string) []rev
 		}
 		title := formatNamedLine("Заголовок", remark.Title)
 		if hasPolicy && policy.OptionalHeading {
-			title = strings.TrimSpace(remark.Title)
+			rawTitle := strings.TrimSpace(remark.Title)
+			if policy.MeaningfulTitle && isMeaningfulReviewRemarkTitle(rawTitle) {
+				title = rawTitle
+			} else if !policy.MeaningfulTitle {
+				title = formatNamedLine("Заголовок", rawTitle)
+			} else {
+				title = ""
+			}
 		}
 		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
 			heading,
@@ -893,19 +900,12 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 		}
 		requestedStepSet[step] = struct{}{}
 	}
-	requestedSteps := make(map[string]struct{}, len(allSteps))
-	for _, step := range allSteps {
-		requestedSteps[step] = struct{}{}
-	}
 
-	operationNames := make(map[string]struct{}, len(state.action.Operations))
 	operationKindsByAnyMatch := make(map[string]struct{}, len(state.action.Operations))
 	operationKindMatchCounts := make(map[string]int, len(state.action.Operations))
 	operationKindsByNameMatch := make(map[string]struct{}, len(state.action.Operations))
 	actionName := strings.TrimSpace(strings.ToLower(state.action.Name))
-	if actionName != "" {
-		operationNames[actionName] = struct{}{}
-	}
+	requestedOperationNames := make([]string, 0, len(state.action.Operations))
 	for _, operation := range state.action.Operations {
 		name := strings.TrimSpace(strings.ToLower(operationResultName(operation)))
 		if name == "" {
@@ -924,16 +924,14 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 			operationKindMatchCounts[kind]++
 		}
 		if requestedByName {
-			operationNames[name] = struct{}{}
+			requestedOperationNames = append(requestedOperationNames, name)
 			operationKindsByNameMatch[kind] = struct{}{}
 		}
 	}
 
-	specificSteps := make([]string, 0, len(allSteps))
-	for _, step := range allSteps {
-		if _, ok := operationNames[step]; ok {
-			specificSteps = append(specificSteps, step)
-		}
+	specificSteps := normalizePolicyList(append(requestedOperationNames, actionName))
+	if actionName == "" {
+		specificSteps = normalizePolicyList(requestedOperationNames)
 	}
 	if len(specificSteps) > 0 {
 		if policy, ok := policyForPublicationByFirstMatch(state.policies, target, specificSteps...); ok {
@@ -969,12 +967,14 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 func policyForPublicationByFirstMatch(policies []textPublicationPolicy, target string, steps ...string) (textPublicationPolicy, bool) {
 	target = strings.TrimSpace(target)
 	normalizedSteps := normalizePolicyList(steps)
-	for index := 0; index < len(policies); index++ {
-		policy := policies[index]
-		if !policyMatchesTarget(policy, target) || len(policy.Steps) == 0 || !policyMatchesAnyStep(policy, normalizedSteps) {
-			continue
+	for _, step := range normalizedSteps {
+		for index := 0; index < len(policies); index++ {
+			policy := policies[index]
+			if !policyMatchesTarget(policy, target) || len(policy.Steps) == 0 || !policyHas(policy.Steps, step) {
+				continue
+			}
+			return policy, true
 		}
-		return policy, true
 	}
 	for index := 0; index < len(policies); index++ {
 		policy := policies[index]
@@ -985,6 +985,14 @@ func policyForPublicationByFirstMatch(policies []textPublicationPolicy, target s
 	}
 
 	return textPublicationPolicy{}, false
+}
+
+func isMeaningfulReviewRemarkTitle(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" || value == "замечание ревизии" {
+		return false
+	}
+	return true
 }
 
 func isResolvedReviewResponse(response StructuredResponse) bool {

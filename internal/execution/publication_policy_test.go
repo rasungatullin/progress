@@ -208,6 +208,57 @@ func TestReviewRemarkUsesPolicyWithoutArtificialHeading(t *testing.T) {
 	}
 }
 
+func TestReviewRemarkUsesMeaningfulTitleOnlyWithOptionalHeading(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{Name: ActionReviewPullRequest},
+		policies: []textPublicationPolicy{{
+			Targets:          []string{publicationTargetReviewRemark},
+			Steps:            []string{ActionReviewPullRequest, OperationKindPublishReviewRemarks},
+			OptionalHeading: true,
+			MeaningfulTitle: true,
+		}},
+		result: LaunchResult{StructuredOutput: &StructuredOutput{Remarks: []StructuredRemark{{
+			ID:    "remark-1",
+			Title: "Замечание ревизии",
+			Body:  "Проверить обработку ошибки.",
+		}, {
+			ID:    "remark-2",
+			Title: "Проверить граничный кейс",
+			Body:  "Требуется дополнительный тест.",
+		}}},
+	}
+
+	comments := reviewRemarkComments(state, OperationKindPublishReviewRemarks)
+	if len(comments) != 2 {
+		t.Fatalf("expected two comments, got %#v", comments)
+	}
+
+	firstFound := false
+	secondFound := false
+	for _, comment := range comments {
+		if strings.Contains(comment.Body, "Замечание: remark-1") {
+			if strings.Contains(comment.Body, "Проверить граничный кейс") {
+				t.Fatalf("generic title was not filtered as meaningful-only marker: %q", comment.Body)
+			}
+			if strings.Contains(comment.Body, "Заголовок:") {
+				t.Fatalf("generic title must not be rendered for optional heading: %q", comment.Body)
+			}
+			firstFound = true
+		}
+		if strings.Contains(comment.Body, "Замечание: remark-2") {
+			if !strings.Contains(comment.Body, "Проверить граничный кейс") {
+				t.Fatalf("meaningful title should be kept: %q", comment.Body)
+			}
+			secondFound = true
+		}
+	}
+	if !firstFound || !secondFound {
+		t.Fatalf("expected remarks with meaningful filtering and preservation, got %#v", comments)
+	}
+}
+
 func TestReviewRemarkConclusionPolicyOmitsStatus(t *testing.T) {
 	t.Parallel()
 
@@ -328,6 +379,39 @@ func TestPolicyForStatePublicationIgnoresSecondaryOperationByKindMatch(t *testin
 	}
 	if policy.NoHeading {
 		t.Fatalf("kind-only policy from secondary operation must not override current operation policy: %#v", policy)
+	}
+}
+
+func TestPolicyForStatePublicationPrefersCurrentOperationStepOverActionStep(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{
+			Name: ActionApplyReviewComments,
+			Operations: []model.OperationSpec{
+				{Name: "publish-review-remarks", Kind: OperationKindPublishReviewRemarks},
+			},
+		},
+		policies: []textPublicationPolicy{
+			{
+				Targets:   []string{publicationTargetReviewRemark},
+				Steps:     []string{ActionApplyReviewComments},
+				NoHeading: true,
+			},
+			{
+				Targets:   []string{publicationTargetReviewRemark},
+				Steps:     []string{"publish-review-remarks"},
+				NoHeading: false,
+			},
+		},
+	}
+
+	policy, ok := policyForStatePublication(state, publicationTargetReviewRemark, "publish-review-remarks")
+	if !ok {
+		t.Fatal("expected policy matched for current operation")
+	}
+	if policy.NoHeading {
+		t.Fatalf("operation-level policy should have priority over action-level policy: %#v", policy)
 	}
 }
 
