@@ -93,6 +93,7 @@ type Action struct {
 	Class             string            `json:"class,omitempty"`
 	Profile           string            `json:"profile,omitempty"`
 	Aliases           []string          `json:"aliases,omitempty"`
+	Contract          ActionContract    `json:"contract,omitempty"`
 	RequiresWorkplace *bool             `json:"requires_workplace,omitempty"`
 	RequiresSynthesis *bool             `json:"requires_synthesis,omitempty"`
 	Operations        []ActionOperation `json:"operations,omitempty"`
@@ -101,11 +102,13 @@ type Action struct {
 }
 
 type ActionOperation struct {
-	Name     string `json:"name,omitempty"`
-	Kind     string `json:"kind,omitempty"`
-	Title    string `json:"title,omitempty"`
-	Origin   string `json:"origin,omitempty"`
-	Required *bool  `json:"required,omitempty"`
+	Name     string                     `json:"name,omitempty"`
+	Kind     string                     `json:"kind,omitempty"`
+	Title    string                     `json:"title,omitempty"`
+	Origin   string                     `json:"origin,omitempty"`
+	Required *bool                      `json:"required,omitempty"`
+	In       map[string]OperationBinding `json:"in,omitempty"`
+	Out      map[string]OperationBinding `json:"out,omitempty"`
 }
 
 func (o *ActionOperation) UnmarshalJSON(data []byte) error {
@@ -145,9 +148,32 @@ type Instruction struct {
 type Operation struct {
 	Name     string `json:"name"`
 	Kind     string `json:"kind,omitempty"`
+	Contract OperationContract `json:"contract,omitempty"`
 	Title    string `json:"title,omitempty"`
 	Origin   string `json:"origin,omitempty"`
 	Required *bool  `json:"required,omitempty"`
+}
+
+type OperationContract struct {
+	In  map[string]ContractField `json:"in,omitempty"`
+	Out map[string]ContractField `json:"out,omitempty"`
+}
+
+type ActionContract struct {
+	In   map[string]ContractField `json:"in,omitempty"`
+	Data map[string]ContractField `json:"data,omitempty"`
+	Out  map[string]ContractField `json:"out,omitempty"`
+}
+
+type ContractField struct {
+	Type        string `json:"type,omitempty"`
+	Required    *bool  `json:"required,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type OperationBinding struct {
+	Ref   *string           `json:"ref,omitempty"`
+	Value json.RawMessage   `json:"value,omitempty"`
 }
 
 type Entity struct {
@@ -467,6 +493,12 @@ func validateCatalog(catalog Catalog) error {
 		if operation.Name == "" {
 			return fmt.Errorf("operations[%d].name must be non-empty", index)
 		}
+		if err := validateContractFields("operation", operation.Name, "contract.in", operation.Contract.In); err != nil {
+			return err
+		}
+		if err := validateContractFields("operation", operation.Name, "contract.out", operation.Contract.Out); err != nil {
+			return err
+		}
 		if _, ok := seenOperations[operation.Name]; ok {
 			return fmt.Errorf("operations contains duplicate name %q", operation.Name)
 		}
@@ -491,10 +523,22 @@ func validateCatalog(catalog Catalog) error {
 	for actionIndex, action := range normalizedActions {
 		seenAliases := map[string]struct{}{}
 		seenOperationRefs := map[string]struct{}{}
+		if err := validateContractFields("action", action.Name, "contract.in", action.Contract.In); err != nil {
+			return err
+		}
+		if err := validateContractFields("action", action.Name, "contract.data", action.Contract.Data); err != nil {
+			return err
+		}
+		if err := validateContractFields("action", action.Name, "contract.out", action.Contract.Out); err != nil {
+			return err
+		}
 		for operationIndex, operation := range catalog.Actions[actionIndex].Operations {
 			operation = normalizeActionOperation(operation)
 			if operation.Name == "" && operation.Kind == "" {
 				return fmt.Errorf("action %q operations[%d] must define name or kind", action.Name, operationIndex)
+			}
+			if err := validateActionOperationBindings(action.Name, operationIndex, operation); err != nil {
+				return err
 			}
 			if _, ok := seenOperationRefs[operation.Name]; ok {
 				return fmt.Errorf("action %q operations contains duplicate name %q", action.Name, operation.Name)
@@ -555,6 +599,42 @@ func validateCatalog(catalog Catalog) error {
 		}
 	}
 
+	return nil
+}
+
+func validateContractFields(entityType, entityName, section string, fields map[string]ContractField) error {
+	for fieldName, field := range fields {
+		if strings.TrimSpace(field.Type) == "" {
+			return fmt.Errorf("%s %q %s.%s.type must be non-empty", entityType, entityName, section, fieldName)
+		}
+	}
+	return nil
+}
+
+func validateActionOperationBindings(actionName string, operationIndex int, operation ActionOperation) error {
+	if err := validateActionOperationBindingMap(fmt.Sprintf("action %q operations[%d] in", actionName, operationIndex), operation.In); err != nil {
+		return err
+	}
+	if err := validateActionOperationBindingMap(fmt.Sprintf("action %q operations[%d] out", actionName, operationIndex), operation.Out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateActionOperationBindingMap(prefix string, bindings map[string]OperationBinding) error {
+	for fieldName, binding := range bindings {
+		hasRef := binding.Ref != nil
+		hasValue := len(bytes.TrimSpace(binding.Value)) > 0
+		if hasRef == hasValue {
+			if hasRef {
+				return fmt.Errorf("%s.%q has both ref and value", prefix, fieldName)
+			}
+			return fmt.Errorf("%s.%q must specify either ref or value", prefix, fieldName)
+		}
+		if hasRef && strings.TrimSpace(*binding.Ref) == "" {
+			return fmt.Errorf("%s.%q.ref must be non-empty", prefix, fieldName)
+		}
+	}
 	return nil
 }
 
@@ -682,6 +762,7 @@ func normalizeAction(action Action) Action {
 	action.Class = strings.TrimSpace(action.Class)
 	action.Profile = strings.TrimSpace(action.Profile)
 	action.Aliases = normalizeNameList(action.Aliases)
+	action.Contract = normalizeActionContract(action.Contract)
 	action.Operations = normalizeActionOperations(action.Operations)
 	action.Description = strings.TrimSpace(action.Description)
 	action.ExpectedResult = strings.TrimSpace(action.ExpectedResult)
@@ -692,6 +773,12 @@ func normalizeActionOperations(operations []ActionOperation) []ActionOperation {
 	result := make([]ActionOperation, 0, len(operations))
 	for _, operation := range operations {
 		operation = normalizeActionOperation(operation)
+		if len(operation.In) == 0 {
+			operation.In = nil
+		}
+		if len(operation.Out) == 0 {
+			operation.Out = nil
+		}
 		if operation.Name == "" && operation.Kind == "" {
 			continue
 		}
@@ -714,7 +801,42 @@ func normalizeActionOperation(operation ActionOperation) ActionOperation {
 	}
 	operation.Title = strings.TrimSpace(operation.Title)
 	operation.Origin = strings.TrimSpace(operation.Origin)
+	operation.In = normalizeActionOperationBindings(operation.In)
+	operation.Out = normalizeActionOperationBindings(operation.Out)
 	return operation
+}
+
+func normalizeActionContract(contract ActionContract) ActionContract {
+	contract.In = normalizeContractFields(contract.In)
+	contract.Data = normalizeContractFields(contract.Data)
+	contract.Out = normalizeContractFields(contract.Out)
+	return contract
+}
+
+func normalizeContractFields(fields map[string]ContractField) map[string]ContractField {
+	if len(fields) == 0 {
+		return fields
+	}
+	for key, field := range fields {
+		field.Type = strings.TrimSpace(field.Type)
+		field.Description = strings.TrimSpace(field.Description)
+		fields[key] = field
+	}
+	return fields
+}
+
+func normalizeActionOperationBindings(bindings map[string]OperationBinding) map[string]OperationBinding {
+	if len(bindings) == 0 {
+		return bindings
+	}
+	for field, binding := range bindings {
+		if binding.Ref != nil {
+			ref := strings.TrimSpace(*binding.Ref)
+			binding.Ref = &ref
+		}
+		bindings[field] = binding
+	}
+	return bindings
 }
 
 func normalizeOperation(operation Operation) Operation {
@@ -726,6 +848,8 @@ func normalizeOperation(operation Operation) Operation {
 	if operation.Kind == "" {
 		operation.Kind = operation.Name
 	}
+	operation.Contract.In = normalizeContractFields(operation.Contract.In)
+	operation.Contract.Out = normalizeContractFields(operation.Contract.Out)
 	operation.Title = strings.TrimSpace(operation.Title)
 	operation.Origin = strings.TrimSpace(operation.Origin)
 	return operation
