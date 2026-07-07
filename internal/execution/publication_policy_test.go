@@ -245,6 +245,9 @@ func TestReviewRemarkUsesMeaningfulTitleOnlyWithOptionalHeading(t *testing.T) {
 			if strings.Contains(comment.Body, "Заголовок:") {
 				t.Fatalf("generic title must not be rendered for optional heading: %q", comment.Body)
 			}
+			if strings.Contains(comment.Body, "## Замечание ревизии") {
+				t.Fatalf("generic title should suppress optional heading: %q", comment.Body)
+			}
 			firstFound = true
 		}
 		if strings.Contains(comment.Body, "Идентификатор: remark-2") {

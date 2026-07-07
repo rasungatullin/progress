@@ -797,6 +797,15 @@ func reviewRemarkComments(state *operationExecution, operationName string) []rev
 			} else {
 				title = ""
 			}
+			if strings.TrimSpace(title) == "" {
+				heading = ""
+			}
+		}
+		if hasPolicy && policy.OptionalHeading && policy.MeaningfulTitle {
+			if strings.TrimSpace(remark.Title) == "" {
+				heading = ""
+			}
+		}
 		}
 		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
 			heading,
