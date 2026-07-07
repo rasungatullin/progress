@@ -150,17 +150,34 @@ func (r *APIRunner) RunIssueList(ctx context.Context, repository string, request
 	if search := issueListSearchQuery(request); search != "" {
 		queryParts = append(queryParts, search)
 	}
-	endpoint := fmt.Sprintf("search/issues?q=%s&per_page=%d", url.QueryEscape(strings.Join(queryParts, " ")), request.Limit)
-	var raw struct {
-		Items []apiIssue `json:"items"`
+	perPage := request.Limit
+	if perPage > 100 {
+		perPage = 100
 	}
-	result, err := r.do(ctx, config, http.MethodGet, endpoint, nil, &raw)
-	if err != nil {
-		return result, apiResolvedConfig(config), err
-	}
-	issues := make([]ghIssueView, 0, len(raw.Items))
-	for _, item := range raw.Items {
-		issues = append(issues, issueViewFromAPI(item))
+	var result CommandResult
+	issues := make([]ghIssueView, 0, request.Limit)
+	for page := 1; len(issues) < request.Limit; page++ {
+		query := url.Values{}
+		query.Set("q", strings.Join(queryParts, " "))
+		query.Set("per_page", fmt.Sprintf("%d", perPage))
+		query.Set("page", fmt.Sprintf("%d", page))
+		endpoint := "search/issues?" + query.Encode()
+		var raw struct {
+			Items []apiIssue `json:"items"`
+		}
+		result, err = r.do(ctx, config, http.MethodGet, endpoint, nil, &raw)
+		if err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		for _, item := range raw.Items {
+			issues = append(issues, issueViewFromAPI(item))
+			if len(issues) >= request.Limit {
+				break
+			}
+		}
+		if len(raw.Items) < perPage {
+			break
+		}
 	}
 	result.Stdout = mustJSON(issues)
 	return result, apiResolvedConfig(config), nil
