@@ -15,6 +15,7 @@ const (
 	ElementKindAction      = "action"
 	ElementKindInstruction = "instruction"
 	ElementKindEntity      = "entity"
+	ElementKindOperation   = "operation"
 )
 
 type Catalog struct {
@@ -22,6 +23,7 @@ type Catalog struct {
 	Routes       []Route       `json:"routes,omitempty"`
 	Actions      []Action      `json:"actions,omitempty"`
 	Instructions []Instruction `json:"instructions,omitempty"`
+	Operations   []Operation   `json:"operations,omitempty"`
 	Entities     []Entity      `json:"entities,omitempty"`
 }
 
@@ -140,6 +142,14 @@ type Instruction struct {
 	Body          string `json:"body,omitempty"`
 }
 
+type Operation struct {
+	Name     string `json:"name"`
+	Kind     string `json:"kind,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Origin   string `json:"origin,omitempty"`
+	Required *bool  `json:"required,omitempty"`
+}
+
 type Entity struct {
 	Kind          string          `json:"kind"`
 	Name          string          `json:"name"`
@@ -159,6 +169,7 @@ type CatalogSources struct {
 	Routes       map[string]configuration.ConfigFileSource `json:"routes,omitempty"`
 	Actions      map[string]configuration.ConfigFileSource `json:"actions,omitempty"`
 	Instructions map[string]configuration.ConfigFileSource `json:"instructions,omitempty"`
+	Operations   map[string]configuration.ConfigFileSource `json:"operations,omitempty"`
 	Entities     map[string]configuration.ConfigFileSource `json:"entities,omitempty"`
 }
 
@@ -200,6 +211,7 @@ func mergeCatalogLayers(layers []CatalogLayer) CatalogSnapshot {
 			Routes:       map[string]configuration.ConfigFileSource{},
 			Actions:      map[string]configuration.ConfigFileSource{},
 			Instructions: map[string]configuration.ConfigFileSource{},
+			Operations:   map[string]configuration.ConfigFileSource{},
 			Entities:     map[string]configuration.ConfigFileSource{},
 		},
 		Layers: append([]CatalogLayer(nil), layers...),
@@ -208,6 +220,7 @@ func mergeCatalogLayers(layers []CatalogLayer) CatalogSnapshot {
 	routeIndexes := map[string]int{}
 	actionIndexes := map[string]int{}
 	instructionIndexes := map[string]int{}
+	operationIndexes := map[string]int{}
 	entityIndexes := map[string]int{}
 
 	for _, layer := range layers {
@@ -236,6 +249,11 @@ func mergeCatalogLayers(layers []CatalogLayer) CatalogSnapshot {
 			instruction = normalizeInstruction(instruction)
 			upsertInstruction(&snapshot.Catalog, instructionIndexes, instruction)
 			snapshot.Sources.Instructions[instruction.Name] = layer.Source
+		}
+		for _, operation := range layer.Catalog.Operations {
+			operation = normalizeOperation(operation)
+			upsertOperation(&snapshot.Catalog, operationIndexes, operation)
+			snapshot.Sources.Operations[operationSourceKey(operation.Name)] = layer.Source
 		}
 		for _, entity := range layer.Catalog.Entities {
 			entity = normalizeEntity(entity)
@@ -366,6 +384,7 @@ func normalizeCatalog(catalog Catalog) Catalog {
 	routeIndexes := map[string]int{}
 	actionIndexes := map[string]int{}
 	instructionIndexes := map[string]int{}
+	operationIndexes := map[string]int{}
 	entityIndexes := map[string]int{}
 
 	for _, route := range catalog.Routes {
@@ -391,6 +410,14 @@ func normalizeCatalog(catalog Catalog) Catalog {
 			continue
 		}
 		upsertInstruction(&result, instructionIndexes, instruction)
+	}
+	for _, operation := range catalog.Operations {
+		operation = normalizeOperation(operation)
+		if operation.Name == "" {
+			result.Operations = append(result.Operations, operation)
+			continue
+		}
+		upsertOperation(&result, operationIndexes, operation)
 	}
 	for _, entity := range catalog.Entities {
 		entity = normalizeEntity(entity)
@@ -434,6 +461,19 @@ func validateCatalog(catalog Catalog) error {
 		}
 	}
 
+	seenOperations := map[string]struct{}{}
+	for index, rawOperation := range catalog.Operations {
+		operation := normalizeOperation(rawOperation)
+		if operation.Name == "" {
+			return fmt.Errorf("operations[%d].name must be non-empty", index)
+		}
+		if _, ok := seenOperations[operation.Name]; ok {
+			return fmt.Errorf("operations contains duplicate name %q", operation.Name)
+		}
+		seenOperations[operation.Name] = struct{}{}
+	}
+	hasOperationRegistry := len(seenOperations) > 0
+
 	seenActions := map[string]struct{}{}
 	normalizedActions := make([]Action, 0, len(catalog.Actions))
 	for index, rawAction := range catalog.Actions {
@@ -450,16 +490,21 @@ func validateCatalog(catalog Catalog) error {
 	seenActionAliases := map[string]string{}
 	for actionIndex, action := range normalizedActions {
 		seenAliases := map[string]struct{}{}
-		seenOperations := map[string]struct{}{}
+		seenOperationRefs := map[string]struct{}{}
 		for operationIndex, operation := range catalog.Actions[actionIndex].Operations {
 			operation = normalizeActionOperation(operation)
 			if operation.Name == "" && operation.Kind == "" {
 				return fmt.Errorf("action %q operations[%d] must define name or kind", action.Name, operationIndex)
 			}
-			if _, ok := seenOperations[operation.Name]; ok {
+			if _, ok := seenOperationRefs[operation.Name]; ok {
 				return fmt.Errorf("action %q operations contains duplicate name %q", action.Name, operation.Name)
 			}
-			seenOperations[operation.Name] = struct{}{}
+			seenOperationRefs[operation.Name] = struct{}{}
+			if hasOperationRegistry && operation.Name != "" && operation.Origin == "" && operation.Title == "" && operation.Required == nil {
+				if _, ok := seenOperations[operation.Name]; !ok {
+					return fmt.Errorf("action %q operations[%d] references unknown operation %q", action.Name, operationIndex, operation.Name)
+				}
+			}
 		}
 		for _, alias := range action.Aliases {
 			if alias == action.Name {
@@ -538,6 +583,16 @@ func upsertInstruction(catalog *Catalog, indexes map[string]int, instruction Ins
 	}
 	indexes[instruction.Name] = len(catalog.Instructions)
 	catalog.Instructions = append(catalog.Instructions, instruction)
+}
+
+func upsertOperation(catalog *Catalog, indexes map[string]int, operation Operation) {
+	key := operationSourceKey(operation.Name)
+	if index, ok := indexes[key]; ok {
+		catalog.Operations[index] = operation
+		return
+	}
+	indexes[key] = len(catalog.Operations)
+	catalog.Operations = append(catalog.Operations, operation)
 }
 
 func upsertEntity(catalog *Catalog, indexes map[string]int, entity Entity) {
@@ -662,6 +717,20 @@ func normalizeActionOperation(operation ActionOperation) ActionOperation {
 	return operation
 }
 
+func normalizeOperation(operation Operation) Operation {
+	operation.Name = normalizeName(operation.Name)
+	operation.Kind = normalizeName(operation.Kind)
+	if operation.Name == "" {
+		operation.Name = operation.Kind
+	}
+	if operation.Kind == "" {
+		operation.Kind = operation.Name
+	}
+	operation.Title = strings.TrimSpace(operation.Title)
+	operation.Origin = strings.TrimSpace(operation.Origin)
+	return operation
+}
+
 func normalizeInstruction(instruction Instruction) Instruction {
 	instruction.Name = normalizeName(instruction.Name)
 	instruction.Profile = strings.TrimSpace(instruction.Profile)
@@ -735,6 +804,10 @@ func normalizeName(name string) string {
 
 func normalizeKind(kind string) string {
 	return strings.TrimSpace(strings.ToLower(kind))
+}
+
+func operationSourceKey(operationName string) string {
+	return normalizeName(operationName)
 }
 
 func entitySourceKey(kind string, name string) string {

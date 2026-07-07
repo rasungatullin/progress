@@ -1,0 +1,7 @@
+{
+  "name": "resolve-profile",
+  "kind": "resolve-profile",
+  "title": "Выбор исполнительного профиля",
+  "origin": "builtin",
+  "required": true
+}

@@ -1,0 +1,7 @@
+{
+  "name": "launch-synthesis",
+  "kind": "launch-synthesis",
+  "title": "Запуск синтеза",
+  "origin": "builtin",
+  "required": true
+}

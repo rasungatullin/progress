@@ -1,0 +1,7 @@
+{
+  "name": "publish-merge-request",
+  "kind": "publish-merge-request",
+  "title": "Открытие запроса на слияние",
+  "origin": "builtin",
+  "required": true
+}

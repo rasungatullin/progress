@@ -650,7 +650,7 @@ func methodologyOperationsFromFlags(names []string) []methodology.ActionOperatio
 		if name == "" {
 			continue
 		}
-		operations = append(operations, methodology.ActionOperation{Name: name, Kind: name})
+		operations = append(operations, methodology.ActionOperation{Name: name})
 	}
 	return operations
 }

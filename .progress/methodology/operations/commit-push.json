@@ -1,0 +1,7 @@
+{
+  "name": "commit-push",
+  "kind": "commit-push",
+  "title": "Создание коммита и отправка ветки",
+  "origin": "builtin",
+  "required": true
+}

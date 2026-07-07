@@ -143,7 +143,16 @@ func resolveActionFromCatalog(catalog methodology.Catalog, in invocation) (Actio
 		return model.Action{}, actionResolutionError{code: "action_not_found", err: fmt.Errorf("действие %q не найдено в каталоге методик", name)}
 	}
 
-	action, err := executionActionFromMethodology(*entry)
+	operationsByName := map[string]methodology.Operation{}
+	for _, operation := range catalog.Operations {
+		operation = normalizeMethodologyOperation(operation)
+		if operation.Name == "" {
+			continue
+		}
+		operationsByName[operation.Name] = operation
+	}
+
+	action, err := executionActionFromMethodology(*entry, operationsByName)
 	if err != nil {
 		return model.Action{}, actionResolutionError{code: "action_invalid", err: fmt.Errorf("действие %q в каталоге методик невалидно: %w", entry.Name, err)}
 	}
@@ -178,11 +187,11 @@ func findMethodologyAction(actions []methodology.Action, name string) (*methodol
 	return nil, false
 }
 
-func executionActionFromMethodology(action methodology.Action) (model.Action, error) {
+func executionActionFromMethodology(action methodology.Action, operationsByName map[string]methodology.Operation) (model.Action, error) {
 	operations := make([]model.OperationSpec, 0, len(action.Operations))
 	seenOperations := map[string]struct{}{}
 	for _, operation := range action.Operations {
-		spec, err := operationSpecFromMethodology(action, operation)
+		spec, err := operationSpecFromMethodology(action, operation, operationsByName)
 		if err != nil {
 			return model.Action{}, err
 		}
@@ -208,7 +217,7 @@ func executionActionFromMethodology(action methodology.Action) (model.Action, er
 	}, nil
 }
 
-func operationSpecFromMethodology(action methodology.Action, operation methodology.ActionOperation) (model.OperationSpec, error) {
+func operationSpecFromMethodology(action methodology.Action, operation methodology.ActionOperation, operationsByName map[string]methodology.Operation) (model.OperationSpec, error) {
 	name := strings.TrimSpace(operation.Name)
 	kind := strings.TrimSpace(operation.Kind)
 	if name == "" {
@@ -220,7 +229,20 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 	if name == "" || kind == "" {
 		return model.OperationSpec{}, fmt.Errorf("операция должна задавать name или kind")
 	}
-	defaultSpec := defaultOperationSpec(kind)
+	resolvedOperation, ok := operationsByName[name]
+	var defaultSpec model.OperationSpec
+	if ok {
+		resolvedOperation = normalizeMethodologyOperation(resolvedOperation)
+		defaultSpec = model.OperationSpec{
+			Name:     resolvedOperation.Name,
+			Kind:     model.OperationKind(resolvedOperation.Kind),
+			Title:    resolvedOperation.Title,
+			Origin:   resolvedOperation.Origin,
+			Required: resolvedOperation.Required != nil && *resolvedOperation.Required,
+		}
+	} else {
+		defaultSpec = defaultOperationSpec(kind)
+	}
 	if strings.TrimSpace(defaultSpec.Name) == "" {
 		defaultSpec.Name = name
 		defaultSpec.Kind = model.OperationKind(kind)
@@ -242,6 +264,22 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 		defaultSpec.Required = *operation.Required
 	}
 	return defaultSpec, nil
+}
+
+func normalizeMethodologyOperation(operation methodology.Operation) methodology.Operation {
+	operation.Name = strings.TrimSpace(operation.Name)
+	operation.Name = strings.TrimSpace(strings.ToLower(operation.Name))
+	operation.Kind = strings.TrimSpace(operation.Kind)
+	operation.Kind = strings.TrimSpace(strings.ToLower(operation.Kind))
+	if operation.Name == "" {
+		operation.Name = operation.Kind
+	}
+	if operation.Kind == "" {
+		operation.Kind = operation.Name
+	}
+	operation.Title = strings.TrimSpace(operation.Title)
+	operation.Origin = strings.TrimSpace(operation.Origin)
+	return operation
 }
 
 func defaultOperationSpec(kind string) model.OperationSpec {
