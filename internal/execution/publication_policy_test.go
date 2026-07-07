@@ -331,6 +331,38 @@ func TestPolicyForStatePublicationIgnoresSecondaryOperationByKindMatch(t *testin
 	}
 }
 
+func TestPolicyForStatePublicationPrefersSpecificStepOverGeneralPolicy(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{
+			Name: ActionApplyReviewComments,
+			Operations: []model.OperationSpec{
+				{Name: "publish-review-remarks", Kind: OperationKindPublishReviewRemarks},
+			},
+		},
+		policies: []textPublicationPolicy{
+			{
+				Targets:   []string{publicationTargetReviewRemark},
+				NoHeading: true,
+			},
+			{
+				Targets:   []string{publicationTargetReviewRemark},
+				Steps:     []string{"publish-review-remarks"},
+				NoHeading: false,
+			},
+		},
+	}
+
+	policy, ok := policyForStatePublication(state, publicationTargetReviewRemark, "publish-review-remarks")
+	if !ok {
+		t.Fatal("expected policy matched for current operation")
+	}
+	if policy.NoHeading {
+		t.Fatalf("specific operation policy should override general publication policy: %#v", policy)
+	}
+}
+
 func TestLoadTextPublicationPoliciesUsesActionCatalogRoot(t *testing.T) {
 	t.Parallel()
 

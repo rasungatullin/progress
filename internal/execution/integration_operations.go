@@ -969,7 +969,15 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 func policyForPublicationByFirstMatch(policies []textPublicationPolicy, target string, steps ...string) (textPublicationPolicy, bool) {
 	target = strings.TrimSpace(target)
 	normalizedSteps := normalizePolicyList(steps)
-	for _, policy := range policies {
+	for index := len(policies) - 1; index >= 0; index-- {
+		policy := policies[index]
+		if !policyMatchesTarget(policy, target) || len(policy.Steps) == 0 || !policyMatchesAnyStep(policy, normalizedSteps) {
+			continue
+		}
+		return policy, true
+	}
+	for index := len(policies) - 1; index >= 0; index-- {
+		policy := policies[index]
 		if !policyMatchesTarget(policy, target) || !policyMatchesAnyStep(policy, normalizedSteps) {
 			continue
 		}
