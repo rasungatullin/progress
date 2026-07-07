@@ -709,6 +709,31 @@ func TestOperationsCatalogPublishesGitHubTaskSearch(t *testing.T) {
 	}
 }
 
+func TestOperationsCatalogDoesNotPublishLocalTrackerExcludeLabels(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"local": {
+				Type:            "local-tracker",
+				IntegrationType: model.IntegrationTypeTracker,
+				Database:        model.IntegrationDatabaseConfig{Driver: "sqlite", Path: filepath.Join(root, "tasks.sqlite")},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "local", Name: "tracker.task.search"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one operation, got %#v", operations)
+	}
+	for _, field := range operations[0].Input.Optional {
+		if field.Name == "exclude_labels" {
+			t.Fatalf("local tracker must not advertise unsupported exclude_labels field: %#v", operations[0].Input.Optional)
+		}
+	}
+}
+
 func TestOperationsCatalogMarksDisabledSystemUnavailable(t *testing.T) {
 	t.Parallel()
 

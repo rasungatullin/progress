@@ -1151,6 +1151,12 @@ func TestIntegrationGitHubIssueSearchCommandPassesExplicitEmptyRepoToProvider(t 
 	if provider.request.Repository != "" || !provider.request.RepoProvided {
 		t.Fatalf("expected explicit empty repository to reach provider, got %#v", provider.request)
 	}
+	output := stdout.String()
+	for _, fragment := range []string{"failure_kind=invalid-request\n", "failure_message=GitHub repository is required\n"} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("github issue search failure output must include %q, got %q", fragment, output)
+		}
+	}
 }
 
 func TestIntegrationGitHubIssueSearchCommandPrintsJSONResult(t *testing.T) {

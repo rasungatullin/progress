@@ -1547,6 +1547,11 @@ func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 }
 
 func printGitHubIssueSearchResults(cmd *cobra.Command, response integration.Response) {
+	if response.Failure != nil {
+		printFailure(cmd, response)
+		return
+	}
+
 	if response.SearchResults != nil {
 		repository := ""
 		if response.Metadata != nil {

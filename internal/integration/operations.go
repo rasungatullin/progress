@@ -92,7 +92,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 	case "github":
 		return []operationTemplate{
 			trackerTaskGetOperation(),
-			trackerTaskSearchOperation(),
+			trackerTaskSearchOperation(true),
 			trackerTaskCommentListOperation(),
 			trackerTaskCommentCreateOperation(),
 			trackerTaskLabelAddOperation(),
@@ -134,7 +134,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 		return []operationTemplate{
 			trackerTaskCreateOperation(),
 			trackerTaskGetOperation(),
-			trackerTaskSearchOperation(),
+			trackerTaskSearchOperation(false),
 			trackerTaskUpdateOperation(),
 			trackerTaskCommentListOperation(),
 			trackerTaskCommentCreateOperation(),
@@ -360,13 +360,17 @@ func trackerTaskCreateOperation() operationTemplate {
 	}
 }
 
-func trackerTaskSearchOperation() operationTemplate {
+func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
+	optional := optionalFields("query", "state", "labels", "limit")
+	if includeExcludeLabels {
+		optional = append(optional, optionalFields("exclude_labels")...)
+	}
 	return operationTemplate{
 		Name:            "tracker.task.search",
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task",
 		Operation:       "search",
-		Input:           model.OperationInputContract{Optional: optionalFields("query", "state", "labels", "exclude_labels", "limit")},
+		Input:           model.OperationInputContract{Optional: optional},
 		Output:          output("tracker-search-result", "TrackerSearchResult[]"),
 		FailureKinds:    defaultFailureKinds(),
 	}
