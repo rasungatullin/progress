@@ -483,7 +483,7 @@ func hasNonEmptyStructuredField(values ...string) bool {
 }
 
 func hasNonEmptyStructuredRemark(value model.StructuredRemark) bool {
-	return hasNonEmptyStructuredField(value.ID, value.Status, value.Severity, value.Type, value.Title, value.Body, value.Path, value.Side, value.Answer, value.Resolution) || value.Line > 0
+	return hasNonEmptyStructuredField(value.ID, value.Status, value.Severity, value.Type, value.Title, value.Body, value.Answer, value.Resolution)
 }
 
 func decodeJSONStrict(raw string, target any) error {
@@ -1326,6 +1326,9 @@ func buildStructuredOutputInstruction(fields []string) string {
 	if forms := selectedStructuredObjectForms(optionalFields); len(forms) != 0 {
 		parts = append(parts, "Object forms: "+strings.Join(forms, ", ")+".")
 	}
+	if structuredOutputIncludesField(optionalFields, "remarks") {
+		parts = append(parts, "For remarks, path, line and side are optional inline location metadata; line must be a diff line on the selected side, not an arbitrary file line. Omit path or line when no diff location is available.")
+	}
 	parts = append(parts, "Canonical compact JSON example: "+buildStructuredOutputCanonicalExample(optionalFields)+".")
 
 	return strings.Join(parts, " ")
@@ -1358,6 +1361,16 @@ func selectedStructuredObjectForms(fields []string) []string {
 	}
 
 	return forms
+}
+
+func structuredOutputIncludesField(fields []string, target string) bool {
+	for _, field := range fields {
+		if field == target {
+			return true
+		}
+	}
+
+	return false
 }
 
 func buildStructuredOutputCanonicalExample(fields []string) string {

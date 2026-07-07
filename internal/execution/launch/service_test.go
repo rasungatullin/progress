@@ -1497,6 +1497,11 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 			payload:    `{"summary":"Done.","remarks":[{}]}`,
 			expectPart: "structured output remarks[0] must include at least one non-empty field",
 		},
+		{
+			name:       "remark with only inline location metadata",
+			payload:    `{"summary":"Done.","remarks":[{"path":"internal/service.go","line":42,"side":"RIGHT"}]}`,
+			expectPart: "structured output remarks[0] must include at least one non-empty field",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1701,6 +1706,9 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	if !strings.Contains(prompt, "Object forms: remarks[{id,status,severity,type,title,body,path,line,side,answer,resolution}], commands[{name,args,title,body}].") {
 		t.Fatalf("prompt must describe selected object forms: %q", prompt)
 	}
+	if !strings.Contains(prompt, "line must be a diff line on the selected side") {
+		t.Fatalf("prompt must explain remark inline line semantics: %q", prompt)
+	}
 	if !strings.Contains(prompt, "Canonical compact JSON example:") {
 		t.Fatalf("prompt must include canonical compact JSON example: %q", prompt)
 	}
@@ -1795,6 +1803,9 @@ func TestBuildRunnerPromptKeepsFullFieldListWhenSelectionNotConfigured(t *testin
 	}
 	if !strings.Contains(prompt, "Object forms: remarks[{id,status,severity,type,title,body,path,line,side,answer,resolution}], questions[{id,status,title,body,answer}], follow_up_actions[{id,status,type,title,body}], changes[{summary}], commands[{name,args,title,body}], conclusion{status,summary,body}.") {
 		t.Fatalf("prompt must keep full object forms when selection is not configured: %q", prompt)
+	}
+	if !strings.Contains(prompt, "line must be a diff line on the selected side") {
+		t.Fatalf("prompt must explain remark inline line semantics: %q", prompt)
 	}
 }
 
