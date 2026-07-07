@@ -93,6 +93,41 @@ func TestLoadExecutionResourceConfigMergesGitFromLocalLayer(t *testing.T) {
 	}
 }
 
+func TestLoadExecutionResourceConfigLocalEmptyGitOverridesGlobalGit(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/execution/resources.json":
+			return []byte(`{
+				"defaults": {"model-binding": "default"},
+				"runners": ["opencode"],
+				"models": ["openai/gpt-5.4"],
+				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}},
+				"git": {
+					"signing": {"enabled": true, "format": "ssh", "signing-key": "/keys/signing.pub"},
+					"push": {"ssh-identity-file": "/keys/push"}
+				}
+			}`), nil
+		case "/repo/.progress/execution/resources.json":
+			return []byte(`{"git": {}}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load resources config: %v", err)
+	}
+	if config.Config.Git != nil {
+		t.Fatalf("local empty git block must disable global git config: %#v", config.Config.Git)
+	}
+	if config.GitSource != ConfigFileSourceLocal {
+		t.Fatalf("unexpected git source: %q", config.GitSource)
+	}
+}
+
 func TestLoadExecutionResourceConfigRejectsPartialGitIdentity(t *testing.T) {
 	t.Parallel()
 

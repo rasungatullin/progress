@@ -1000,7 +1000,7 @@ func TestLaunchCommitPushAppliesGitOverrideToCommitAndPush(t *testing.T) {
 func TestGitPushEnvWritesPrivateIdentityToTemporaryFile(t *testing.T) {
 	t.Parallel()
 
-	env, cleanup, err := gitPushEnv(&model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivateValue: "PRIVATE KEY", IdentitiesOnly: true}})
+	env, cleanup, err := gitPushEnv(context.Background(), &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivateValue: "PRIVATE KEY", IdentitiesOnly: true}}, model.ResourcePrivateStoreConfig{}, "")
 	if err != nil {
 		t.Fatalf("git push env: %v", err)
 	}
@@ -1029,10 +1029,32 @@ func TestGitPushEnvWritesPrivateIdentityToTemporaryFile(t *testing.T) {
 	}
 }
 
+func TestGitPushEnvResolvesPrivateIdentityFromStore(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "private-values.json")
+	if err := os.WriteFile(storePath, []byte(`{"progress_push_key":"PRIVATE KEY"}`), 0o600); err != nil {
+		t.Fatalf("write private store: %v", err)
+	}
+	config := &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivate: "progress_push_key", IdentitiesOnly: true}}
+
+	env, cleanup, err := gitPushEnv(context.Background(), config, model.ResourcePrivateStoreConfig{Type: "file", Path: storePath}, "")
+	if err != nil {
+		t.Fatalf("git push env: %v", err)
+	}
+	defer cleanup()
+	if len(env) != 1 || !strings.Contains(env[0], "GIT_SSH_COMMAND=ssh -i '") {
+		t.Fatalf("unexpected env: %#v", env)
+	}
+	if config.Push.SSHIdentityPrivateValue != "PRIVATE KEY" {
+		t.Fatalf("private identity was not resolved")
+	}
+}
+
 func TestGitPushEnvRejectsIncompletePushOverride(t *testing.T) {
 	t.Parallel()
 
-	_, _, err := gitPushEnv(&model.GitConfig{Push: &model.GitPushConfig{KnownHostsFile: "/keys/known_hosts", IdentitiesOnly: true}})
+	_, _, err := gitPushEnv(context.Background(), &model.GitConfig{Push: &model.GitPushConfig{KnownHostsFile: "/keys/known_hosts", IdentitiesOnly: true}}, model.ResourcePrivateStoreConfig{}, "")
 	if err == nil {
 		t.Fatal("expected incomplete git push override error")
 	}
@@ -1044,11 +1066,11 @@ func TestGitPushEnvRejectsIncompletePushOverride(t *testing.T) {
 func TestGitPushEnvRejectsUnresolvedPrivateIdentity(t *testing.T) {
 	t.Parallel()
 
-	_, _, err := gitPushEnv(&model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivate: "progress-push-key"}})
+	_, _, err := gitPushEnv(context.Background(), &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivate: "progress-push-key"}}, model.ResourcePrivateStoreConfig{}, "")
 	if err == nil {
 		t.Fatal("expected unresolved private identity error")
 	}
-	if !strings.Contains(err.Error(), "private value is unavailable") {
+	if !strings.Contains(err.Error(), "git.push requires private store") && !strings.Contains(err.Error(), "git.push references missing private value") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

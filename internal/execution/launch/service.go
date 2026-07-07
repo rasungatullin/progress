@@ -16,6 +16,8 @@ import (
 
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/integration/secrets"
 )
 
 const RunnerOpenCode = "opencode"
@@ -798,7 +800,7 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, alloca
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
-	pushEnv, cleanupPushKey, err := gitPushEnv(allocation.Git)
+	pushEnv, cleanupPushKey, err := gitPushEnv(ctx, allocation.Git, allocation.PrivateStore, allocation.ConfigHome)
 	if err != nil {
 		return gitResult{}, err
 	}
@@ -885,10 +887,13 @@ func gitCommitInvocation(config *model.GitConfig, message string) ([]string, []s
 	return args, env
 }
 
-func gitPushEnv(config *model.GitConfig) ([]string, func(), error) {
+func gitPushEnv(ctx context.Context, config *model.GitConfig, privateStore model.ResourcePrivateStoreConfig, configHome string) ([]string, func(), error) {
 	cleanup := func() {}
 	if config == nil || config.Push == nil {
 		return nil, cleanup, nil
+	}
+	if err := resolvePrivateGitPushConfig(ctx, config, privateStore, configHome); err != nil {
+		return nil, cleanup, err
 	}
 	identityFile := strings.TrimSpace(config.Push.SSHIdentityFile)
 	if identityFile == "" && strings.TrimSpace(config.Push.SSHIdentityPrivateValue) != "" {
@@ -916,6 +921,32 @@ func gitPushEnv(config *model.GitConfig) ([]string, func(), error) {
 		parts = append(parts, "-o", "UserKnownHostsFile="+shellQuote(config.Push.KnownHostsFile))
 	}
 	return []string{"GIT_SSH_COMMAND=" + strings.Join(parts, " ")}, cleanup, nil
+}
+
+func resolvePrivateGitPushConfig(ctx context.Context, config *model.GitConfig, privateStore model.ResourcePrivateStoreConfig, configHome string) error {
+	if config == nil || config.Push == nil || strings.TrimSpace(config.Push.SSHIdentityPrivate) == "" || strings.TrimSpace(config.Push.SSHIdentityPrivateValue) != "" {
+		return nil
+	}
+	store, _, err := secrets.NewStore(integrationmodel.IntegrationPrivateStoreConfig{
+		Type:    privateStore.Type,
+		Service: privateStore.Service,
+		Path:    privateStore.Path,
+	}, configHome)
+	if err != nil {
+		return fmt.Errorf("git.push requires private store for ssh-identity-private %q: %w", config.Push.SSHIdentityPrivate, err)
+	}
+	value, err := store.Get(ctx, config.Push.SSHIdentityPrivate)
+	if err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			return fmt.Errorf("git.push references missing private value %q", config.Push.SSHIdentityPrivate)
+		}
+		return fmt.Errorf("git.push cannot read private value %q: %w", config.Push.SSHIdentityPrivate, err)
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("git.push references empty private value %q", config.Push.SSHIdentityPrivate)
+	}
+	config.Push.SSHIdentityPrivateValue = value
+	return nil
 }
 
 func writeTemporaryPrivateKey(value string) (string, error) {

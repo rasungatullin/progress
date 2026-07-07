@@ -389,7 +389,7 @@ func TestAllocateRejectsFallbackWhenDefaultBindingIsNotConfigured(t *testing.T) 
 	}
 }
 
-func TestAllocateResolvesGitPushPrivateIdentity(t *testing.T) {
+func TestAllocateKeepsGitPushPrivateIdentityLazy(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "private-values.json")
 	if err := os.WriteFile(storePath, []byte(`{"progress_push_key":"PRIVATE KEY"}`), 0o600); err != nil {
 		t.Fatalf("write private store: %v", err)
@@ -407,8 +407,14 @@ func TestAllocateResolvesGitPushPrivateIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("allocate: %v", err)
 	}
-	if allocation.Git == nil || allocation.Git.Push == nil || allocation.Git.Push.SSHIdentityPrivateValue != "PRIVATE KEY" {
-		t.Fatalf("private git identity was not resolved: %#v", allocation.Git)
+	if allocation.Git == nil || allocation.Git.Push == nil || allocation.Git.Push.SSHIdentityPrivate != "progress_push_key" {
+		t.Fatalf("private git identity reference was not loaded: %#v", allocation.Git)
+	}
+	if allocation.Git.Push.SSHIdentityPrivateValue != "" {
+		t.Fatalf("private git identity must be resolved lazily: %#v", allocation.Git.Push)
+	}
+	if allocation.PrivateStore.Path != storePath {
+		t.Fatalf("private store config was not preserved: %#v", allocation.PrivateStore)
 	}
 }
 

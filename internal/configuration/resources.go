@@ -42,9 +42,10 @@ const (
 type ReadFileFunc func(string) ([]byte, error)
 
 type ExecutionResourceLayer struct {
-	Source ConfigFileSource
-	Path   string
-	Config model.ResourceConfigFile
+	Source        ConfigFileSource
+	Path          string
+	Config        model.ResourceConfigFile
+	GitConfigured bool
 }
 
 type ExecutionResourceConfig struct {
@@ -284,7 +285,16 @@ func readLayer(path string, source ConfigFileSource, readFile ReadFileFunc) (Exe
 		return ExecutionResourceLayer{}, fmt.Errorf("invalid execution resource config %s: %w", path, err)
 	}
 
-	return ExecutionResourceLayer{Source: source, Path: path, Config: config}, nil
+	return ExecutionResourceLayer{Source: source, Path: path, Config: config, GitConfigured: executionResourceLayerHasGit(content)}, nil
+}
+
+func executionResourceLayerHasGit(content []byte) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(content, &raw); err != nil {
+		return false
+	}
+	_, ok := raw["git"]
+	return ok
 }
 
 func parseExecutionResourceConfig(path string, content []byte) (model.ResourceConfigFile, error) {
@@ -402,7 +412,7 @@ func mergeExecutionResourceLayers(layers []ExecutionResourceLayer) ExecutionReso
 		if strings.TrimSpace(config.PrivateStore.Type) != "" || strings.TrimSpace(config.PrivateStore.Service) != "" || strings.TrimSpace(config.PrivateStore.Path) != "" {
 			merged.PrivateStore = config.PrivateStore
 		}
-		if !isGitConfigEmpty(config.Git) {
+		if layer.GitConfigured {
 			merged.Git = config.Git
 			gitSource = layer.Source
 		}
