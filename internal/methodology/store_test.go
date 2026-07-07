@@ -257,6 +257,32 @@ func TestLoadCatalogRejectsActionReferenceToUnknownOperation(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsUnknownActionOperationFromRootCatalogOperations(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions": [
+					{"name": "implement", "class": "engineering-synthesis", "operations":[{"name":"resolve-action"},{"name":"missing-operation"}]}
+				],
+				"operations": [
+					{"name":"resolve-action","kind":"resolve-action","title":"Разрешение действия","origin":"builtin","required":true}
+				]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected unknown operation error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[1] references unknown operation "missing-operation"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadCatalogAllowsLegacyStringActionOperation(t *testing.T) {
 	t.Parallel()
 
@@ -337,7 +363,7 @@ func TestLoadCatalogRejectsActionOperationBindingConflictRefAndValue(t *testing.
 	if err == nil {
 		t.Fatal("expected action operation binding validation error")
 	}
-	if !strings.Contains(err.Error(), `action "implement" operations[0] in.task_id has both ref and value`) {
+	if !strings.Contains(err.Error(), `action "implement" operations[0] in."task_id" has both ref and value`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

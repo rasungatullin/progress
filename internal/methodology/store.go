@@ -255,6 +255,7 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 		catalog.Routes = append(catalog.Routes, rootCatalog.Routes...)
 		catalog.Actions = append(catalog.Actions, rootCatalog.Actions...)
 		catalog.Instructions = append(catalog.Instructions, rootCatalog.Instructions...)
+		catalog.Operations = append(catalog.Operations, rootCatalog.Operations...)
 		catalog.Entities = append(catalog.Entities, rootCatalog.Entities...)
 	} else if !isNotExistErr(err) {
 		return CatalogLayer{}, false, err
