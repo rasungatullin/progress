@@ -936,6 +936,9 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 		}
 	}
 	if len(specificSteps) > 0 {
+		if policy, ok := policyForPublicationByFirstMatch(state.policies, target, specificSteps...); ok {
+			return policy, true
+		}
 		if policy, ok := policyForPublication(state.policies, target, specificSteps...); ok {
 			return policy, true
 		}
@@ -961,6 +964,19 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 	}
 
 	return policyForPublication(state.policies, target, allSteps...)
+}
+
+func policyForPublicationByFirstMatch(policies []textPublicationPolicy, target string, steps ...string) (textPublicationPolicy, bool) {
+	target = strings.TrimSpace(target)
+	normalizedSteps := normalizePolicyList(steps)
+	for _, policy := range policies {
+		if !policyMatchesTarget(policy, target) || !policyMatchesAnyStep(policy, normalizedSteps) {
+			continue
+		}
+		return policy, true
+	}
+
+	return textPublicationPolicy{}, false
 }
 
 func isResolvedReviewResponse(response StructuredResponse) bool {
