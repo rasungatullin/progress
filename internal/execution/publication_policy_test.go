@@ -35,6 +35,42 @@ func TestSelectTextPublicationPolicyByTargetAndStep(t *testing.T) {
 	}
 }
 
+func TestSelectTextPublicationPolicySkipsAnotherContour(t *testing.T) {
+	t.Parallel()
+
+	catalog := methodology.Catalog{Entities: []methodology.Entity{{
+		Kind:          publicationPolicyEntityKind,
+		Name:          "decision-policy",
+		TargetContour: "decision",
+		Payload:       []byte(`{"targets":["review-response"],"steps":["publish-review-responses"],"exclude":["status"]}`),
+	}}}
+	action := model.Action{Name: ActionApplyReviewComments, Operations: []model.OperationSpec{{Name: OperationKindPublishReviewResponses, Kind: OperationKindPublishReviewResponses}}}
+
+	policies := selectTextPublicationPolicies(catalog, action)
+	if len(policies) != 0 {
+		t.Fatalf("policy for another contour must be ignored: %#v", policies)
+	}
+}
+
+func TestPolicyForStatePublicationMatchesOperationName(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{
+			Name:       ActionApplyReviewComments,
+			Operations: []model.OperationSpec{{Name: "custom-review-response-publication", Kind: OperationKindPublishReviewResponses}},
+		},
+		policies: []textPublicationPolicy{{
+			Targets: []string{publicationTargetReviewResponse},
+			Steps:   []string{"custom-review-response-publication"},
+		}},
+	}
+
+	if _, ok := policyForStatePublication(state, publicationTargetReviewResponse, OperationKindPublishReviewResponses); !ok {
+		t.Fatal("expected policy matched by operation name")
+	}
+}
+
 func TestBuildDirectiveAppendsPublicationPolicyContext(t *testing.T) {
 	t.Parallel()
 
@@ -99,6 +135,29 @@ func TestPullRequestBodyUsesCompactTaskLinkPolicy(t *testing.T) {
 	}
 }
 
+func TestPullRequestBodyForRefAppliesCompactPolicyToExistingBody(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{Name: ActionStartImplementationPR},
+		assignment: &ExecutionAssignment{CanonicalTask: &ObjectRef{
+			Type:       "task",
+			Number:     143,
+			URL:        "https://github.com/rasungatullin/progress/issues/143",
+			Attributes: map[string]string{"body": "Полное описание задачи."},
+		}},
+		policies: []textPublicationPolicy{{Targets: []string{publicationTargetMergeRequestDescription}, Steps: []string{ActionStartImplementationPR, OperationKindPublishMergeRequest}, TaskLinkOnly: true}},
+	}
+
+	body := pullRequestBodyForRef(state, pullRequestRef{Body: "Полное описание задачи."})
+	if strings.Contains(body, "Полное описание задачи") {
+		t.Fatalf("policy must replace existing full body with compact reference, got %q", body)
+	}
+	if !strings.Contains(body, "Задача: #143") || !strings.Contains(body, "Ссылка на задачу: https://github.com/rasungatullin/progress/issues/143") {
+		t.Fatalf("expected compact task reference, got %q", body)
+	}
+}
+
 func TestReviewRemarkUsesPolicyWithoutArtificialHeading(t *testing.T) {
 	t.Parallel()
 
@@ -124,6 +183,30 @@ func TestReviewRemarkUsesPolicyWithoutArtificialHeading(t *testing.T) {
 	}
 }
 
+func TestReviewRemarkConclusionPolicyOmitsStatus(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action:   model.Action{Name: ActionReviewPullRequest},
+		policies: []textPublicationPolicy{{Targets: []string{publicationTargetReviewRemark}, Steps: []string{ActionReviewPullRequest, OperationKindPublishReviewRemarks}, NoHeading: true, HideStatus: true}},
+		result: LaunchResult{StructuredOutput: &StructuredOutput{Conclusion: &StructuredConclusion{
+			Status:  "approve",
+			Summary: "Замечаний нет.",
+		}}},
+	}
+
+	comments := reviewRemarkComments(state)
+	if len(comments) != 1 {
+		t.Fatalf("expected one conclusion comment, got %#v", comments)
+	}
+	if strings.Contains(comments[0].Body, "approve") || strings.Contains(comments[0].Body, "## Заключение") {
+		t.Fatalf("policy must omit service status and heading, got %q", comments[0].Body)
+	}
+	if !strings.Contains(comments[0].Body, "Замечаний нет.") {
+		t.Fatalf("conclusion summary lost: %q", comments[0].Body)
+	}
+}
+
 func TestReviewResponsePolicyOmitsStatusField(t *testing.T) {
 	t.Parallel()
 
@@ -139,5 +222,18 @@ func TestReviewResponsePolicyOmitsStatusField(t *testing.T) {
 	}
 	if !strings.Contains(body, "Исправлено.") || !strings.Contains(body, "Добавлена проверка.") {
 		t.Fatalf("response content lost: %q", body)
+	}
+}
+
+func TestReviewResponsePolicySkipsStatusOnlyBody(t *testing.T) {
+	t.Parallel()
+
+	body := reviewResponseCommentBodyWithPolicy(StructuredResponse{
+		RemarkID: "remark-1",
+		Status:   "resolved",
+	}, textPublicationPolicy{NoHeading: true, HideStatus: true})
+
+	if body != "" {
+		t.Fatalf("status-only response must be skipped after policy cleanup, got %q", body)
 	}
 }

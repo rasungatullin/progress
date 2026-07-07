@@ -113,9 +113,7 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	if strings.TrimSpace(ref.Title) == "" {
 		ref.Title = pullRequestTitle(state)
 	}
-	if strings.TrimSpace(ref.Body) == "" {
-		ref.Body = pullRequestBody(state)
-	}
+	ref.Body = pullRequestBodyForRef(state, ref)
 
 	executor, err := e.integrationExecutor()
 	if err != nil {
@@ -703,6 +701,18 @@ func pullRequestBody(state *operationExecution) string {
 	return strings.Join(parts, "\n\n")
 }
 
+func pullRequestBodyForRef(state *operationExecution, ref pullRequestRef) string {
+	if policy, ok := policyForStatePublication(state, publicationTargetMergeRequestDescription, OperationKindPublishMergeRequest); ok && policy.TaskLinkOnly {
+		if body := compactPullRequestBody(state); body != "" {
+			return body
+		}
+	}
+	if body := strings.TrimSpace(ref.Body); body != "" {
+		return body
+	}
+	return pullRequestBody(state)
+}
+
 func compactPullRequestBody(state *operationExecution) string {
 	if state == nil || state.assignment == nil || state.assignment.CanonicalTask == nil {
 		return ""
@@ -755,9 +765,13 @@ func reviewRemarkComments(state *operationExecution) []reviewRemarkComment {
 		if hasPolicy && policy.NoHeading {
 			heading = ""
 		}
+		status := output.Conclusion.Status
+		if hasPolicy && policy.HideStatus {
+			status = ""
+		}
 		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
 			heading,
-			output.Conclusion.Status,
+			status,
 			output.Conclusion.Summary,
 			output.Conclusion.Body,
 		}), "\n\n"))
@@ -854,6 +868,9 @@ func reviewResponseCommentBodyWithPolicy(response StructuredResponse, policy tex
 	if policy.HideStatus {
 		status = ""
 	}
+	if len(nonEmptyParts([]string{status, response.Summary, response.Body})) == 0 {
+		return ""
+	}
 	return strings.TrimSpace(strings.Join(nonEmptyParts([]string{
 		heading,
 		formatNamedLine("Замечание", response.RemarkID),
@@ -867,7 +884,7 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 	if state == nil {
 		return textPublicationPolicy{}, false
 	}
-	allSteps := append([]string{state.action.Name}, steps...)
+	allSteps := append(actionPolicySteps(state.action), steps...)
 	return policyForPublication(state.policies, target, allSteps...)
 }
 

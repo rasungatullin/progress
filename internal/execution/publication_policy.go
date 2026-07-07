@@ -12,6 +12,7 @@ import (
 
 const (
 	publicationPolicyEntityKind = "text-publication-policy"
+	publicationPolicyContour    = "execution"
 
 	publicationTargetTaskComment             = "task-comment"
 	publicationTargetMergeRequestDescription = "merge-request-description"
@@ -46,12 +47,17 @@ func selectTextPublicationPolicies(catalog methodology.Catalog, action model.Act
 			continue
 		}
 		policy, err := textPublicationPolicyFromEntity(entity)
-		if err != nil || !policyMatchesAnyStep(policy, steps) {
+		if err != nil || !policyMatchesContour(policy) || !policyMatchesAnyStep(policy, steps) {
 			continue
 		}
 		policies = append(policies, policy)
 	}
 	return policies
+}
+
+func policyMatchesContour(policy textPublicationPolicy) bool {
+	contour := strings.TrimSpace(strings.ToLower(policy.TargetContour))
+	return contour == "" || contour == publicationPolicyContour
 }
 
 func textPublicationPolicyFromEntity(entity methodology.Entity) (textPublicationPolicy, error) {
