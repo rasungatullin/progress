@@ -885,13 +885,22 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 		return textPublicationPolicy{}, false
 	}
 	allSteps := normalizePolicyList(append([]string{state.action.Name}, steps...))
+	requestedStepSet := make(map[string]struct{}, len(steps))
+	for _, step := range steps {
+		step = strings.TrimSpace(strings.ToLower(step))
+		if step == "" {
+			continue
+		}
+		requestedStepSet[step] = struct{}{}
+	}
 	requestedSteps := make(map[string]struct{}, len(allSteps))
 	for _, step := range allSteps {
 		requestedSteps[step] = struct{}{}
 	}
 
 	operationNames := make(map[string]struct{}, len(state.action.Operations))
-	operationKinds := make(map[string]struct{}, len(state.action.Operations))
+	operationKindsByAnyMatch := make(map[string]struct{}, len(state.action.Operations))
+	operationKindsByNameMatch := make(map[string]struct{}, len(state.action.Operations))
 	actionName := strings.TrimSpace(strings.ToLower(state.action.Name))
 	if actionName != "" {
 		operationNames[actionName] = struct{}{}
@@ -902,18 +911,19 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 			continue
 		}
 		kind := strings.TrimSpace(strings.ToLower(string(operationKind(operation))))
-		_, requestedByName := requestedSteps[name]
-		_, requestedByKind := requestedSteps[kind]
+		_, requestedByName := requestedStepSet[name]
+		_, requestedByKind := requestedStepSet[kind]
 		if !requestedByName && !requestedByKind {
 			continue
 		}
 		if requestedByKind {
-			operationKinds[kind] = struct{}{}
+			operationKindsByAnyMatch[kind] = struct{}{}
 		}
 		if requestedByName {
 			operationNames[name] = struct{}{}
+			operationKindsByNameMatch[kind] = struct{}{}
 		}
-		operationKinds[kind] = struct{}{}
+		operationKindsByAnyMatch[kind] = struct{}{}
 	}
 
 	specificSteps := make([]string, 0, len(allSteps))
@@ -926,8 +936,12 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 		if policy, ok := policyForPublication(state.policies, target, specificSteps...); ok {
 			return policy, true
 		}
-		specificOperationKinds := make([]string, 0, len(operationKinds))
-		for step := range operationKinds {
+		kindsForFallback := operationKindsByAnyMatch
+		if len(operationKindsByNameMatch) > 0 {
+			kindsForFallback = operationKindsByNameMatch
+		}
+		specificOperationKinds := make([]string, 0, len(kindsForFallback))
+		for step := range kindsForFallback {
 			specificOperationKinds = append(specificOperationKinds, step)
 		}
 		if len(specificOperationKinds) > 0 {
