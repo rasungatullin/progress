@@ -79,6 +79,27 @@ func TestServiceAuthStatusMapsTimeout(t *testing.T) {
 	}
 }
 
+func TestReviewRemarksFromThreadsKeepsUnresolvedOutdatedThreadsBlocking(t *testing.T) {
+	t.Parallel()
+
+	remarks := reviewRemarksFromThreads("owner/name", 17, []ghPRReviewThread{{
+		ID:         "thread-1",
+		IsOutdated: true,
+		Path:       "internal/service.go",
+		Line:       10,
+		Comments: ghPRReviewComments{Nodes: []ghPRReviewComment{{
+			ID:   "comment-1",
+			Body: "Устаревшее замечание",
+		}}},
+	}})
+	if len(remarks) != 1 {
+		t.Fatalf("expected one remark, got %#v", remarks)
+	}
+	if remarks[0].State != "unresolved" {
+		t.Fatalf("expected unresolved state, got %#v", remarks[0])
+	}
+}
+
 func TestServiceAuthStatusMapsGenericRunnerError(t *testing.T) {
 	t.Parallel()
 
@@ -1351,6 +1372,8 @@ func TestServicePRListDefaultsToClosedScopeAll(t *testing.T) {
 			"title": "Add integration",
 			"body": "Body",
 			"state": "MERGED",
+			"mergeable": "CONFLICTING",
+			"mergeStateStatus": "DIRTY",
 			"author": {"login": "alice", "url": "https://github.com/alice"},
 			"reviewDecision": "APPROVED",
 			"baseRefName": "main",
@@ -1386,6 +1409,9 @@ func TestServicePRListDefaultsToClosedScopeAll(t *testing.T) {
 	}
 	if response.MergeRequests[0].ReviewDecision != "APPROVED" {
 		t.Fatalf("unexpected merge request: %#v", response.MergeRequests[0])
+	}
+	if response.MergeRequests[0].Attributes["mergeable"] != "CONFLICTING" || response.MergeRequests[0].Attributes["merge_state_status"] != "DIRTY" {
+		t.Fatalf("merge state attributes were not copied: %#v", response.MergeRequests[0].Attributes)
 	}
 	if len(response.SearchResults) != 1 || response.SearchResults[0].Kind != "merge-request" {
 		t.Fatalf("unexpected search results: %#v", response.SearchResults)

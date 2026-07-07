@@ -90,6 +90,19 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 			Consideration: &consideration,
 		}, err
 	}
+	if consideration.Status == ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil {
+		externalState, err := s.loadMergeRequestExternalState(ctx, mergeRequest)
+		if err != nil {
+			return StartResult{Context: decisionContext, Consideration: &consideration}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, err)
+		}
+		if externalState != nil {
+			decisionContext.MergeRequestExternalState = externalState
+			consideration, err = s.Consider(ctx, ConsiderationInput{Context: decisionContext})
+			if err != nil {
+				return StartResult{Context: decisionContext, Consideration: &consideration}, err
+			}
+		}
+	}
 
 	decision := decisionFromConsideration(consideration)
 	result := StartResult{
@@ -151,7 +164,102 @@ func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.T
 }
 
 func taskLabelsRequireMergeRequest(labels []string) bool {
-	return hasLabel(labels, "Ожидает экспертизы") || hasLabel(labels, "Требует доработки")
+	return hasLabel(labels, "Ожидает экспертизы") || hasLabel(labels, "Требует доработки") || hasLabel(labels, "Экспертиза пройдена")
+}
+
+func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*MergeRequestExternalState, error) {
+	if mergeRequest == nil {
+		return nil, nil
+	}
+
+	state := &MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest)}
+	response, err := s.integration.Execute(ctx, integration.Request{
+		IntegrationType: integrationmodel.IntegrationTypeRepository,
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "comments",
+		Repository:      mergeRequest.Repository,
+		RepoProvided:    strings.TrimSpace(mergeRequest.Repository) != "",
+		Number:          mergeRequest.Number,
+	})
+	if err != nil {
+		if state.HasMergeConflict {
+			return state, nil
+		}
+		return nil, err
+	}
+	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
+	state.HasUnresolvedReviewRemarks = hasUnresolvedExternalReviewRemarks(response.ReviewRemarks)
+	if !state.HasMergeConflict && !state.HasUnresolvedReviewRemarks {
+		return nil, nil
+	}
+	return state, nil
+}
+
+func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
+	for _, remark := range remarks {
+		if strings.TrimSpace(remark.ReplyToID) == "" {
+			continue
+		}
+		state := strings.ToLower(strings.TrimSpace(remark.State))
+		switch state {
+		case "", "resolved", "fixed", "done", "closed", "outdated":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
+	if mergeRequest == nil {
+		return false
+	}
+	for key, value := range mergeRequest.Attributes {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "has_merge_conflict", "merge_conflict", "conflict", "conflicted":
+			if isTruthyExternalState(value) {
+				return true
+			}
+		case "mergeable", "can_merge":
+			if isFalsyExternalState(value) || isConflictMergeState(value) {
+				return true
+			}
+		case "mergeable_state", "merge_state", "merge_state_status":
+			if isConflictMergeState(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isConflictMergeState(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "conflict", "conflicted", "conflicting", "dirty", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTruthyExternalState(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "t", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFalsyExternalState(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "0", "f", "false", "no", "n", "off":
+		return true
+	default:
+		return false
+	}
 }
 
 func hasLabel(labels []string, candidate string) bool {
@@ -191,6 +299,11 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	result.RouteSource = route.RouteSource
 	result.CheckSources = route.CheckSources
 	result.Checks = route.Checks
+	if externalMergeRequestBlocksCompletion(input.Context.MergeRequestExternalState) && strings.TrimSpace(route.Outcome) != "" {
+		route = reworkRouteForExternalMergeRequestState(route, input.Context.MergeRequestExternalState)
+		result.Route = route.Route
+		result.Checks = route.Checks
+	}
 	if strings.TrimSpace(route.Outcome) != "" && strings.TrimSpace(route.Action) == "" {
 		result.Status = ConsiderationStatusCompleted
 		result.Reasons = []DecisionReason{decisionReasonFromRoute(route, "route_completed", "Маршрут обработки завершён; следующая операция не требуется.")}
@@ -209,6 +322,55 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	result.Reasons = append([]DecisionReason(nil), decision.Reasons...)
 	result.ExecutionPlan = decision.ExecutionPlan
 	return result, nil
+}
+
+func externalMergeRequestBlocksCompletion(state *MergeRequestExternalState) bool {
+	return state != nil && (state.HasUnresolvedReviewRemarks || state.HasMergeConflict)
+}
+
+func reworkRouteForExternalMergeRequestState(previous selectedWorkflowRoute, state *MergeRequestExternalState) selectedWorkflowRoute {
+	reasonCode := "external_pr_requires_rework"
+	reasonMessage := "Актуальное внешнее состояние запроса на слияние требует доработки."
+	if state != nil && state.HasUnresolvedReviewRemarks && !state.HasMergeConflict {
+		reasonCode = "external_review_remarks_unresolved"
+		reasonMessage = "В запросе на слияние есть нерешённые внешние замечания ревизии; задача возвращена в доработку."
+	} else if state != nil && state.HasMergeConflict && !state.HasUnresolvedReviewRemarks {
+		reasonCode = "merge_request_conflict"
+		reasonMessage = "Запрос на слияние находится в конфликтном состоянии; задача возвращена в доработку."
+	}
+
+	return selectedWorkflowRoute{
+		Action:         execution.ActionApplyReviewComments,
+		ExpectedResult: "Получить актуальные внешние замечания или состояние конфликта запроса на слияние, доработать ветку и отправить результат на повторную экспертизу.",
+		Constraints: []string{
+			"Работать в отдельном исполнительном рабочем месте.",
+			"Сохранять имя ветки по номеру задачи.",
+			"После доработки задача должна быть повторно направлена на экспертизу.",
+		},
+		ReasonCode:    reasonCode,
+		ReasonMessage: reasonMessage,
+		Route: ProcessingRoute{
+			Name:        "task-processing-external-pr-rework",
+			Title:       "Доработка внешнего состояния запроса на слияние",
+			Description: "Направляет задачу на доработку, если завершённая задача имеет открытые внешние препятствия в запросе на слияние.",
+		},
+		Checks: []RouteCheckResult{externalMergeRequestStateCheck(previous, state, reasonCode, reasonMessage)},
+	}
+}
+
+func externalMergeRequestStateCheck(previous selectedWorkflowRoute, state *MergeRequestExternalState, reasonCode string, reasonMessage string) RouteCheckResult {
+	name := "external-merge-request-state"
+	if strings.TrimSpace(previous.Route.Name) != "" {
+		name = previous.Route.Name + ":external-merge-request-state"
+	}
+	return RouteCheckResult{
+		Name:   name,
+		Status: RouteCheckStatusPassed,
+		Reasons: []DecisionReason{{
+			Code:    reasonCode,
+			Message: reasonMessage,
+		}},
+	}
 }
 
 func (s *Service) validateIssueRepository(ctx context.Context, issue *integration.TrackerIssue) error {

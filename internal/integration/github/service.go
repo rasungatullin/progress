@@ -82,6 +82,8 @@ type ghPRView struct {
 	Title          string         `json:"title"`
 	Body           string         `json:"body"`
 	State          string         `json:"state"`
+	Mergeable      any            `json:"mergeable"`
+	MergeState     string         `json:"mergeStateStatus"`
 	Author         *ghIssueUser   `json:"author"`
 	Labels         []ghIssueLabel `json:"labels"`
 	ReviewDecision string         `json:"reviewDecision"`
@@ -1267,22 +1269,8 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 		CreatedAt:      strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:      strings.TrimSpace(raw.UpdatedAt),
 	}
-	response.MergeRequest = &model.MergeRequest{
-		System:         "github",
-		Repository:     response.PullRequest.Repository,
-		Number:         response.PullRequest.Number,
-		Title:          response.PullRequest.Title,
-		Body:           response.PullRequest.Body,
-		State:          response.PullRequest.State,
-		Traits:         append([]string(nil), response.PullRequest.Labels...),
-		Author:         userFromTrackerUser(response.PullRequest.Author),
-		ReviewDecision: response.PullRequest.ReviewDecision,
-		BaseRef:        response.PullRequest.BaseRef,
-		HeadRef:        response.PullRequest.HeadRef,
-		URL:            response.PullRequest.URL,
-		CreatedAt:      response.PullRequest.CreatedAt,
-		UpdatedAt:      response.PullRequest.UpdatedAt,
-	}
+	mergeRequest := mergeRequestFromGHPR(repository, raw)
+	response.MergeRequest = &mergeRequest
 	response.Status = model.ResponseStatusOK
 	return response, nil
 }
@@ -1398,6 +1386,7 @@ func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {
 	if raw.Author != nil {
 		author = userFromTrackerUser(normalizeTrackerUser(*raw.Author))
 	}
+	attributes := mergeRequestAttributesFromGHPR(raw)
 	return model.MergeRequest{
 		System:         "github",
 		Repository:     repository,
@@ -1407,6 +1396,7 @@ func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {
 		Body:           raw.Body,
 		State:          strings.TrimSpace(raw.State),
 		Traits:         normalizeTrackerLabels(raw.Labels),
+		Attributes:     attributes,
 		Author:         author,
 		ReviewDecision: strings.TrimSpace(raw.ReviewDecision),
 		BaseRef:        strings.TrimSpace(raw.BaseRefName),
@@ -1414,6 +1404,33 @@ func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {
 		URL:            strings.TrimSpace(raw.URL),
 		CreatedAt:      strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:      strings.TrimSpace(raw.UpdatedAt),
+	}
+}
+
+func mergeRequestAttributesFromGHPR(raw ghPRView) map[string]string {
+	attributes := make(map[string]string, 2)
+	if value := normalizedExternalValue(raw.Mergeable); value != "" {
+		attributes["mergeable"] = value
+	}
+	if value := strings.TrimSpace(raw.MergeState); value != "" {
+		attributes["merge_state_status"] = value
+	}
+	if len(attributes) == 0 {
+		return nil
+	}
+	return attributes
+}
+
+func normalizedExternalValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case bool:
+		return strconv.FormatBool(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
 	}
 }
 
@@ -1891,7 +1908,7 @@ func prGetErrorStatus(config resolvedConfig, result CommandResult, repository st
 	if number > 0 {
 		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("number=%d", number))
 	}
-	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s pr view %d --repo %s --json number,title,body,state,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt", status.Command, number, repository))
+	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s pr view %d --repo %s --json number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt", status.Command, number, repository))
 	return status
 }
 

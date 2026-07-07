@@ -815,6 +815,94 @@ func TestServiceConsiderCompletesWhenReviewPassed(t *testing.T) {
 	}
 }
 
+func TestServiceConsiderRoutesReviewPassedTaskToReworkForExternalRemarks(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     123,
+			Title:      "Completed task",
+			Labels:     []string{"Экспертиза пройдена"},
+		},
+		MergeRequest: &integration.MergeRequest{
+			System:     "github",
+			Repository: "owner/name",
+			Number:     17,
+			Title:      "Completed task",
+			BaseRef:    "main",
+			HeadRef:    "123",
+		},
+		MergeRequestExternalState: &MergeRequestExternalState{HasUnresolvedReviewRemarks: true},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.Status != ConsiderationStatusExecution {
+		t.Fatalf("unexpected status: %q", result.Status)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected rework execution plan, got %#v", result.ExecutionPlan)
+	}
+	if result.Route.Name != "task-processing-external-pr-rework" {
+		t.Fatalf("unexpected route: %#v", result.Route)
+	}
+	if len(result.Reasons) != 1 || result.Reasons[0].Code != "external_review_remarks_unresolved" {
+		t.Fatalf("unexpected reasons: %#v", result.Reasons)
+	}
+}
+
+func TestServiceConsiderRoutesReviewPassedTaskToReworkForMergeConflict(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			Number:     123,
+			Title:      "Completed task",
+			Labels:     []string{"Экспертиза пройдена"},
+		},
+		MergeRequest: &integration.MergeRequest{
+			System:     "github",
+			Repository: "owner/name",
+			Number:     17,
+			Title:      "Completed task",
+			BaseRef:    "main",
+			HeadRef:    "123",
+		},
+		MergeRequestExternalState: &MergeRequestExternalState{HasMergeConflict: true},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected rework execution plan, got %#v", result.ExecutionPlan)
+	}
+	if len(result.Reasons) != 1 || result.Reasons[0].Code != "merge_request_conflict" {
+		t.Fatalf("unexpected reasons: %#v", result.Reasons)
+	}
+}
+
+func TestMergeRequestHasConflictIgnoresNonConflictGitHubStatesAndLabels(t *testing.T) {
+	t.Parallel()
+
+	for _, state := range []string{"BEHIND", "BLOCKED"} {
+		mergeRequest := &integration.MergeRequest{Attributes: map[string]string{"merge_state_status": state}}
+		if mergeRequestHasConflict(mergeRequest) {
+			t.Fatalf("merge_state_status=%s must not be treated as conflict", state)
+		}
+	}
+
+	mergeRequest := &integration.MergeRequest{Traits: []string{"blocked", "behind", "conflict"}}
+	if mergeRequestHasConflict(mergeRequest) {
+		t.Fatal("PR labels must not be treated as merge conflicts")
+	}
+}
+
 func TestServiceConsiderRequiresMergeRequestForReview(t *testing.T) {
 	t.Parallel()
 
@@ -1098,6 +1186,55 @@ func TestServiceStartPassesExternalRepositoryToExecution(t *testing.T) {
 	}
 	if executionStub.request.Assignment == nil || executionStub.request.Assignment.CanonicalTask == nil || executionStub.request.Assignment.CanonicalTask.Repository != "owner/name" {
 		t.Fatalf("execution must receive issue repository, got %#v", executionStub.request)
+	}
+}
+
+func TestServiceStartRoutesReviewPassedTaskToReworkForExternalRemarks(t *testing.T) {
+	t.Parallel()
+
+	integrationStub := &stubIntegrationExecutor{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     123,
+				Title:      "Completed task",
+				State:      "OPEN",
+				Labels:     []string{"Экспертиза пройдена"},
+			},
+			MergeRequests: []integration.MergeRequest{{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     17,
+				Title:      "Completed task",
+				State:      "OPEN",
+				BaseRef:    "main",
+				HeadRef:    "123",
+			}},
+			ReviewRemarks: []integration.ReviewRemark{{ExternalID: "comment-1", ReplyToID: "thread-1", State: "unresolved", Body: "Исправить обработку"}},
+		},
+	}
+	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
+	service := &Service{logger: log.Default(), integration: integrationStub, execution: executionStub, resolveRepo: func(context.Context) (string, error) { return "owner/name", nil }}
+
+	result, err := service.Start(context.Background(), StartInput{TaskNumber: 123})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if result.Context.MergeRequestExternalState == nil || !result.Context.MergeRequestExternalState.HasUnresolvedReviewRemarks {
+		t.Fatalf("expected external state in decision context: %#v", result.Context.MergeRequestExternalState)
+	}
+	if result.Decision == nil || result.Decision.ExecutionPlan == nil || result.Decision.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments decision, got %#v", result.Decision)
+	}
+	foundCommentsRequest := false
+	for _, request := range integrationStub.requests {
+		if request.Operation == "comments" {
+			foundCommentsRequest = true
+		}
+	}
+	if !foundCommentsRequest {
+		t.Fatalf("expected comments request, got %#v", integrationStub.requests)
 	}
 }
 
