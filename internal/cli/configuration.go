@@ -469,7 +469,7 @@ func mutateExecutionResourceLayer(cmd *cobra.Command, flags *configurationResour
 		return "", err
 	}
 
-	config, err := loadExecutionResourceLayerForWrite(path)
+	config, preserveEmptyGit, err := loadExecutionResourceLayerForWrite(path)
 	if err != nil {
 		return "", err
 	}
@@ -477,6 +477,9 @@ func mutateExecutionResourceLayer(cmd *cobra.Command, flags *configurationResour
 		return "", err
 	}
 	config = configcontour.NormalizeExecutionResourceLayerConfig(config)
+	if preserveEmptyGit && config.Git == nil {
+		config.Git = &model.GitConfig{}
+	}
 	if err := writeExecutionResourceLayer(path, config); err != nil {
 		return "", err
 	}
@@ -484,15 +487,30 @@ func mutateExecutionResourceLayer(cmd *cobra.Command, flags *configurationResour
 	return path, nil
 }
 
-func loadExecutionResourceLayerForWrite(path string) (model.ResourceConfigFile, error) {
-	config, err := configcontour.LoadExecutionResourceConfigFile(path, os.ReadFile)
+func loadExecutionResourceLayerForWrite(path string) (model.ResourceConfigFile, bool, error) {
+	content, readErr := os.ReadFile(path)
+	if readErr != nil {
+		if errors.Is(readErr, fs.ErrNotExist) {
+			return configcontour.NewExecutionResourceConfigFile(), false, nil
+		}
+		return model.ResourceConfigFile{}, false, readErr
+	}
+
+	preserveEmptyGit := jsonObjectHasKey(content, "git")
+	config, err := configcontour.LoadExecutionResourceConfigFile(path, func(string) ([]byte, error) { return content, nil })
 	if err == nil {
-		return config, nil
+		return config, preserveEmptyGit, nil
 	}
-	if errors.Is(err, fs.ErrNotExist) {
-		return configcontour.NewExecutionResourceConfigFile(), nil
+	return model.ResourceConfigFile{}, false, err
+}
+
+func jsonObjectHasKey(content []byte, key string) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(content, &raw); err != nil {
+		return false
 	}
-	return model.ResourceConfigFile{}, err
+	_, ok := raw[key]
+	return ok
 }
 
 func loadExecutionResourceParentLayerForWrite(flags *configurationResourceFlags) (model.ResourceConfigFile, bool, error) {
@@ -538,10 +556,26 @@ func writeExecutionResourceLayer(path string, config model.ResourceConfigFile) e
 func printConfigurationResourcesText(cmd *cobra.Command, loaded configcontour.ExecutionResourceConfig) {
 	cmd.Printf("defaults.model-binding=%s\n", loaded.Config.Defaults.ModelBinding)
 	cmd.Printf("defaults.environment=%s\n", loaded.Config.Defaults.Environment)
+	printConfigurationGitSummary(cmd, loaded)
 	printConfigurationEnvironmentTable(cmd, loaded)
 	printConfigurationToolTable(cmd, loaded)
 	printConfigurationResourceTable(cmd, loaded)
 	printConfigurationBindingTable(cmd, loaded)
+}
+
+func printConfigurationGitSummary(cmd *cobra.Command, loaded configcontour.ExecutionResourceConfig) {
+	git := loaded.Config.Git
+	identity := false
+	signing := false
+	push := false
+	if git != nil {
+		identity = git.Identity != nil && strings.TrimSpace(git.Identity.AuthorName) != ""
+		signing = git.Signing != nil && git.Signing.Enabled
+		push = git.Push != nil && (strings.TrimSpace(git.Push.SSHIdentityFile) != "" || strings.TrimSpace(git.Push.SSHIdentityPrivate) != "")
+	}
+	cmd.Printf("git.identity=%t\n", identity)
+	cmd.Printf("git.signing=%t\n", signing)
+	cmd.Printf("git.push-key=%t\n", push)
 }
 
 func printConfigurationEnvironmentTable(cmd *cobra.Command, loaded configcontour.ExecutionResourceConfig) {

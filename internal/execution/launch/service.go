@@ -16,6 +16,8 @@ import (
 
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/integration/secrets"
 )
 
 const RunnerOpenCode = "opencode"
@@ -46,6 +48,7 @@ type Service struct {
 	runRunner        func(context.Context, model.Invocation) (string, error)
 	extractSessionID func(model.Invocation, string) string
 	runGitOutput     func(context.Context, string, ...string) (string, error)
+	runGitOutputEnv  func(context.Context, string, []string, ...string) (string, error)
 }
 
 type runnerMetadata struct {
@@ -70,6 +73,7 @@ func NewService() *Service {
 		runRunner:        runRunner,
 		extractSessionID: extractRunnerSessionID,
 		runGitOutput:     runGitOutput,
+		runGitOutputEnv:  runGitOutputEnv,
 	}
 }
 
@@ -138,7 +142,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 
 	gitSummary := "git=disabled"
 	if in.Launch.CommitPush {
-		result, err := s.commitAndPush(ctx, in, workplace, structuredOutput)
+		result, err := s.commitAndPush(ctx, in, allocation, workplace, structuredOutput)
 		if err != nil {
 			launchResult := model.LaunchResult{
 				Status:              "failed",
@@ -772,7 +776,7 @@ func fallbackHistoryValue(value string) string {
 	return value
 }
 
-func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) (gitResult, error) {
+func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) (gitResult, error) {
 	if !s.isGitRepository(ctx, in.Launch.Directory) {
 		return gitResult{}, fmt.Errorf("launch directory is not a git repository")
 	}
@@ -796,6 +800,12 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
+	pushEnv, cleanupPushKey, err := gitPushEnv(ctx, allocation.Git, allocation.PrivateStore, allocation.ConfigHome)
+	if err != nil {
+		return gitResult{}, err
+	}
+	defer cleanupPushKey()
+
 	addArgs := append([]string{"add", "-A", "--"}, changedPaths...)
 	if _, err := s.runGitOutput(ctx, gitRoot, addArgs...); err != nil {
 		return gitResult{}, fmt.Errorf("git add failed: %w", err)
@@ -811,8 +821,9 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 	}
 
 	commitMessage := resolveCommitMessage(in, workplace, output)
+	commitArgs, commitEnv := gitCommitInvocation(allocation.Git, commitMessage)
 
-	if _, err := s.runGitOutput(ctx, in.Launch.Directory, "commit", "-m", commitMessage); err != nil {
+	if _, err := s.runGitOutputWithEnv(ctx, in.Launch.Directory, commitEnv, commitArgs...); err != nil {
 		if isNoChangesAfterAddError(err) {
 			return gitResult{status: "no-changes", branch: branch}, nil
 		}
@@ -830,19 +841,137 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, workpl
 		pushArgs = append(pushArgs, "-u", "origin", branch)
 	}
 
-	if _, err := s.runGitOutput(ctx, in.Launch.Directory, pushArgs...); err != nil {
+	if _, err := s.runGitOutputWithEnv(ctx, in.Launch.Directory, pushEnv, pushArgs...); err != nil {
 		return gitResult{}, fmt.Errorf("git push failed: %w", err)
 	}
 
 	return gitResult{status: "committed+pushed", branch: branch}, nil
 }
 
-func (s *Service) CommitAndPush(ctx context.Context, in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
-	result, err := s.commitAndPush(ctx, in, workplace, output)
+func (s *Service) CommitAndPush(ctx context.Context, in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
+	result, err := s.commitAndPush(ctx, in, allocation, workplace, output)
 	if err != nil {
 		return "", err
 	}
 	return result.summary(), nil
+}
+
+func (s *Service) runGitOutputWithEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	if len(env) == 0 || s.runGitOutputEnv == nil {
+		return s.runGitOutput(ctx, dir, args...)
+	}
+	return s.runGitOutputEnv(ctx, dir, env, args...)
+}
+
+func gitCommitInvocation(config *model.GitConfig, message string) ([]string, []string) {
+	args := []string{"commit", "-m", message}
+	var env []string
+	if config == nil {
+		return args, env
+	}
+	if identity := config.Identity; identity != nil && strings.TrimSpace(identity.AuthorName) != "" {
+		env = append(env,
+			"GIT_AUTHOR_NAME="+identity.AuthorName,
+			"GIT_AUTHOR_EMAIL="+identity.AuthorEmail,
+			"GIT_COMMITTER_NAME="+identity.CommitterName,
+			"GIT_COMMITTER_EMAIL="+identity.CommitterEmail,
+		)
+	}
+	if signing := config.Signing; signing != nil && signing.Enabled {
+		prefix := []string{"-c", "commit.gpgsign=true", "-c", "gpg.format=" + signing.Format, "-c", "user.signingkey=" + signing.SigningKey}
+		if strings.TrimSpace(signing.Program) != "" {
+			prefix = append(prefix, "-c", "gpg."+signing.Format+".program="+signing.Program)
+		}
+		args = append(prefix, args...)
+	}
+	return args, env
+}
+
+func gitPushEnv(ctx context.Context, config *model.GitConfig, privateStore model.ResourcePrivateStoreConfig, configHome string) ([]string, func(), error) {
+	cleanup := func() {}
+	if config == nil || config.Push == nil {
+		return nil, cleanup, nil
+	}
+	if err := resolvePrivateGitPushConfig(ctx, config, privateStore, configHome); err != nil {
+		return nil, cleanup, err
+	}
+	identityFile := strings.TrimSpace(config.Push.SSHIdentityFile)
+	if identityFile == "" && strings.TrimSpace(config.Push.SSHIdentityPrivateValue) != "" {
+		path, err := writeTemporaryPrivateKey(config.Push.SSHIdentityPrivateValue)
+		if err != nil {
+			return nil, cleanup, err
+		}
+		identityFile = path
+		cleanup = func() { _ = os.Remove(path) }
+	}
+	if identityFile == "" && strings.TrimSpace(config.Push.SSHIdentityPrivate) != "" {
+		return nil, cleanup, fmt.Errorf("git.push.ssh-identity-private is configured but private value is unavailable")
+	}
+	if identityFile == "" && (strings.TrimSpace(config.Push.KnownHostsFile) != "" || config.Push.IdentitiesOnly) {
+		return nil, cleanup, fmt.Errorf("git.push must define ssh-identity-file or ssh-identity-private when known-hosts-file or identities-only is set")
+	}
+	if identityFile == "" {
+		return nil, cleanup, nil
+	}
+	parts := []string{"ssh", "-i", shellQuote(identityFile)}
+	parts = append(parts, "-o", "IdentitiesOnly=yes")
+	if strings.TrimSpace(config.Push.KnownHostsFile) != "" {
+		parts = append(parts, "-o", "UserKnownHostsFile="+shellQuote(config.Push.KnownHostsFile))
+	}
+	return []string{"GIT_SSH_COMMAND=" + strings.Join(parts, " ")}, cleanup, nil
+}
+
+func resolvePrivateGitPushConfig(ctx context.Context, config *model.GitConfig, privateStore model.ResourcePrivateStoreConfig, configHome string) error {
+	if config == nil || config.Push == nil || strings.TrimSpace(config.Push.SSHIdentityPrivate) == "" || strings.TrimSpace(config.Push.SSHIdentityPrivateValue) != "" {
+		return nil
+	}
+	store, _, err := secrets.NewStore(integrationmodel.IntegrationPrivateStoreConfig{
+		Type:    privateStore.Type,
+		Service: privateStore.Service,
+		Path:    privateStore.Path,
+	}, configHome)
+	if err != nil {
+		return fmt.Errorf("git.push requires private store for ssh-identity-private %q: %w", config.Push.SSHIdentityPrivate, err)
+	}
+	value, err := store.Get(ctx, config.Push.SSHIdentityPrivate)
+	if err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			return fmt.Errorf("git.push references missing private value %q", config.Push.SSHIdentityPrivate)
+		}
+		return fmt.Errorf("git.push cannot read private value %q: %w", config.Push.SSHIdentityPrivate, err)
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("git.push references empty private value %q", config.Push.SSHIdentityPrivate)
+	}
+	config.Push.SSHIdentityPrivateValue = value
+	return nil
+}
+
+func writeTemporaryPrivateKey(value string) (string, error) {
+	file, err := os.CreateTemp("", "progress-git-ssh-key-*")
+	if err != nil {
+		return "", fmt.Errorf("create temporary git ssh identity file: %w", err)
+	}
+	path := file.Name()
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", fmt.Errorf("restrict temporary git ssh identity file: %w", err)
+	}
+	if _, err := file.WriteString(value); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", fmt.Errorf("write temporary git ssh identity file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("close temporary git ssh identity file: %w", err)
+	}
+	return path, nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func (s *Service) isGitRepository(ctx context.Context, dir string) bool {
@@ -1501,6 +1630,18 @@ func normalizeStructuredOutputInstructionFields(fields []string) ([]string, erro
 func runGitOutput(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w\n%s", err, strings.TrimSpace(string(output)))
+	}
+
+	return string(output), nil
+}
+
+func runGitOutputEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%w\n%s", err, strings.TrimSpace(string(output)))

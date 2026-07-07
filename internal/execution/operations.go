@@ -31,7 +31,7 @@ type builtinOperationExecutor struct {
 }
 
 type commitPusher interface {
-	CommitAndPush(context.Context, model.Invocation, model.Workplace, *model.StructuredOutput) (string, error)
+	CommitAndPush(context.Context, model.Invocation, model.Allocation, model.Workplace, *model.StructuredOutput) (string, error)
 }
 
 func (s *Service) runActionOperations(ctx context.Context, state *operationExecution) error {
@@ -285,7 +285,7 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 		return err
 	}
 
-	summary, err := pusher.CommitAndPush(ctx, state.in, state.workplace, state.result.StructuredOutput)
+	summary, err := pusher.CommitAndPush(ctx, state.in, state.allocation, state.workplace, state.result.StructuredOutput)
 	if err != nil {
 		state.result.Status = "failed"
 		if strings.TrimSpace(state.result.Summary) == "" {

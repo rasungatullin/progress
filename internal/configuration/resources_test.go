@@ -56,6 +56,137 @@ func TestLoadExecutionResourceConfigMergesGlobalAndLocalLayersAndSetsBindingSour
 	}
 }
 
+func TestLoadExecutionResourceConfigMergesGitFromLocalLayer(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/execution/resources.json":
+			return []byte(`{
+				"defaults": {"model-binding": "default"},
+				"runners": ["opencode"],
+				"models": ["openai/gpt-5.4"],
+				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}},
+				"git": {"identity": {"author-name": "Global", "author-email": "global@example.com", "committer-name": "Global", "committer-email": "global@example.com"}}
+			}`), nil
+		case "/repo/.progress/execution/resources.json":
+			return []byte(`{
+				"git": {"identity": {"author-name": "Local", "author-email": "local@example.com", "committer-name": "Local", "committer-email": "local@example.com"}}
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load resources config: %v", err)
+	}
+	if config.Config.Git == nil || config.Config.Git.Identity == nil {
+		t.Fatalf("git identity must be loaded: %#v", config.Config.Git)
+	}
+	if config.Config.Git.Identity.AuthorName != "Local" {
+		t.Fatalf("local git identity must override global: %#v", config.Config.Git.Identity)
+	}
+	if config.GitSource != ConfigFileSourceLocal {
+		t.Fatalf("unexpected git source: %q", config.GitSource)
+	}
+}
+
+func TestLoadExecutionResourceConfigLocalEmptyGitOverridesGlobalGit(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/execution/resources.json":
+			return []byte(`{
+				"defaults": {"model-binding": "default"},
+				"runners": ["opencode"],
+				"models": ["openai/gpt-5.4"],
+				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}},
+				"git": {
+					"signing": {"enabled": true, "format": "ssh", "signing-key": "/keys/signing.pub"},
+					"push": {"ssh-identity-file": "/keys/push"}
+				}
+			}`), nil
+		case "/repo/.progress/execution/resources.json":
+			return []byte(`{"git": {}}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load resources config: %v", err)
+	}
+	if config.Config.Git != nil {
+		t.Fatalf("local empty git block must disable global git config: %#v", config.Config.Git)
+	}
+	if config.GitSource != ConfigFileSourceLocal {
+		t.Fatalf("unexpected git source: %q", config.GitSource)
+	}
+}
+
+func TestLoadExecutionResourceConfigMergesPrivateStoreByFields(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/execution/resources.json":
+			return []byte(`{
+				"defaults": {"model-binding": "default"},
+				"runners": ["opencode"],
+				"models": ["openai/gpt-5.4"],
+				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}},
+				"private_store": {"type": "file", "service": "progress-global"}
+			}`), nil
+		case "/repo/.progress/execution/resources.json":
+			return []byte(`{
+				"private_store": {"path": "private/local.json"}
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load resources config: %v", err)
+	}
+	if config.Config.PrivateStore.Type != "file" {
+		t.Fatalf("private_store.type must be inherited: %#v", config.Config.PrivateStore)
+	}
+	if config.Config.PrivateStore.Service != "progress-global" {
+		t.Fatalf("private_store.service must be inherited: %#v", config.Config.PrivateStore)
+	}
+	if config.Config.PrivateStore.Path != "private/local.json" {
+		t.Fatalf("private_store.path must be overridden: %#v", config.Config.PrivateStore)
+	}
+}
+
+func TestLoadExecutionResourceConfigRejectsPartialGitIdentity(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path != "/config-home/execution/resources.json" {
+			return nil, fs.ErrNotExist
+		}
+		return []byte(`{
+			"defaults": {"model-binding": "default"},
+			"runners": ["opencode"],
+			"models": ["openai/gpt-5.4"],
+			"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}},
+			"git": {"identity": {"author-name": "Progress"}}
+		}`), nil
+	}
+
+	_, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil || !strings.Contains(err.Error(), "git.identity") {
+		t.Fatalf("expected git identity validation error, got: %v", err)
+	}
+}
+
 func TestLoadExecutionResourceConfigUsesGlobalLayerOnly(t *testing.T) {
 	t.Parallel()
 

@@ -3,6 +3,8 @@ package resources
 import (
 	"context"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -384,6 +386,35 @@ func TestAllocateRejectsFallbackWhenDefaultBindingIsNotConfigured(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "defaults.model-binding is required for fallback but is not configured") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAllocateKeepsGitPushPrivateIdentityLazy(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "private-values.json")
+	if err := os.WriteFile(storePath, []byte(`{"progress_push_key":"PRIVATE KEY"}`), 0o600); err != nil {
+		t.Fatalf("write private store: %v", err)
+	}
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"private_store": {"type": "file", "path": "` + storePath + `"},
+		"runners": ["opencode"],
+		"models": ["openai/gpt-5.4"],
+		"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}},
+		"git": {"push": {"ssh-identity-private": "progress_push_key"}}
+	}`)
+
+	allocation, err := service.Allocate(context.Background(), model.Invocation{}, model.Profile{AllowModelFallback: true})
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if allocation.Git == nil || allocation.Git.Push == nil || allocation.Git.Push.SSHIdentityPrivate != "progress_push_key" {
+		t.Fatalf("private git identity reference was not loaded: %#v", allocation.Git)
+	}
+	if allocation.Git.Push.SSHIdentityPrivateValue != "" {
+		t.Fatalf("private git identity must be resolved lazily: %#v", allocation.Git.Push)
+	}
+	if allocation.PrivateStore.Path != storePath {
+		t.Fatalf("private store config was not preserved: %#v", allocation.PrivateStore)
 	}
 }
 

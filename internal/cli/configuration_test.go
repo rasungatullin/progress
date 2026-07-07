@@ -146,6 +146,54 @@ func TestConfigurationResourcesCLIPreservesGlobalResourceToolsOnLocalPartialUpda
 	}
 }
 
+func TestPrintConfigurationGitSummaryReportsPrivatePushKey(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	loaded := configcontour.ExecutionResourceConfig{
+		Config: model.ResourceConfigFile{
+			Git: &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivate: "progress-push-key"}},
+		},
+	}
+
+	printConfigurationGitSummary(cmd, loaded)
+
+	if !strings.Contains(stdout.String(), "git.push-key=true") {
+		t.Fatalf("git summary must report private push key presence: %q", stdout.String())
+	}
+}
+
+func TestConfigurationResourcesCLIPreservesEmptyGitBlock(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, ".progress", "execution", "resources.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{
+		"git": {}
+	}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	runConfigurationCommand(t, "configuration", "resources", "--repo-root", root, "tool", "set", "opencode")
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(content, &raw); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	if _, ok := raw["git"]; !ok {
+		t.Fatalf("empty git block must be preserved: %s", string(content))
+	}
+}
+
 func runConfigurationCommand(t *testing.T, args ...string) string {
 	t.Helper()
 

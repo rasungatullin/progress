@@ -210,29 +210,68 @@ type ProfileConfig struct {
 }
 
 type Allocation struct {
-	Resource         string `json:"resource,omitempty"`
-	Reserved         bool   `json:"reserved,omitempty"`
-	Runner           string `json:"runner,omitempty"`
-	Model            string `json:"model,omitempty"`
-	ModelBinding     string `json:"model_binding,omitempty"`
-	Environment      string `json:"environment,omitempty"`
-	EnvironmentType  string `json:"environment_type,omitempty"`
-	BindingSource    string `json:"binding_source,omitempty"`
-	Source           string `json:"source,omitempty"`
-	FallbackUsed     bool   `json:"fallback_used,omitempty"`
-	GlobalConfigPath string `json:"global_config_path,omitempty"`
-	LocalConfigPath  string `json:"local_config_path,omitempty"`
+	Resource         string                     `json:"resource,omitempty"`
+	Reserved         bool                       `json:"reserved,omitempty"`
+	Runner           string                     `json:"runner,omitempty"`
+	Model            string                     `json:"model,omitempty"`
+	ModelBinding     string                     `json:"model_binding,omitempty"`
+	Environment      string                     `json:"environment,omitempty"`
+	EnvironmentType  string                     `json:"environment_type,omitempty"`
+	BindingSource    string                     `json:"binding_source,omitempty"`
+	Source           string                     `json:"source,omitempty"`
+	FallbackUsed     bool                       `json:"fallback_used,omitempty"`
+	GlobalConfigPath string                     `json:"global_config_path,omitempty"`
+	LocalConfigPath  string                     `json:"local_config_path,omitempty"`
+	ConfigHome       string                     `json:"-"`
+	PrivateStore     ResourcePrivateStoreConfig `json:"-"`
+	Git              *GitConfig                 `json:"-"`
 }
 
 type ResourceConfigFile struct {
-	Defaults ResourceDefaultsConfig           `json:"defaults"`
-	Runners  []string                         `json:"runners,omitempty"`
-	Models   []string                         `json:"models,omitempty"`
-	Bindings map[string]ResourceBindingConfig `json:"bindings,omitempty"`
+	Defaults     ResourceDefaultsConfig           `json:"defaults"`
+	PrivateStore ResourcePrivateStoreConfig       `json:"private_store,omitempty"`
+	Runners      []string                         `json:"runners,omitempty"`
+	Models       []string                         `json:"models,omitempty"`
+	Bindings     map[string]ResourceBindingConfig `json:"bindings,omitempty"`
+	Git          *GitConfig                       `json:"git,omitempty"`
 
 	Environments map[string]EnvironmentConfig `json:"environments,omitempty"`
 	Tools        map[string]ToolConfig        `json:"tools,omitempty"`
 	Resources    map[string]ResourceConfig    `json:"resources,omitempty"`
+}
+
+type ResourcePrivateStoreConfig struct {
+	Type    string `json:"type,omitempty"`
+	Service string `json:"service,omitempty"`
+	Path    string `json:"path,omitempty"`
+}
+
+type GitConfig struct {
+	Identity *GitIdentityConfig `json:"identity,omitempty"`
+	Signing  *GitSigningConfig  `json:"signing,omitempty"`
+	Push     *GitPushConfig     `json:"push,omitempty"`
+}
+
+type GitIdentityConfig struct {
+	AuthorName     string `json:"author-name,omitempty"`
+	AuthorEmail    string `json:"author-email,omitempty"`
+	CommitterName  string `json:"committer-name,omitempty"`
+	CommitterEmail string `json:"committer-email,omitempty"`
+}
+
+type GitSigningConfig struct {
+	Enabled    bool   `json:"enabled,omitempty"`
+	Format     string `json:"format,omitempty"`
+	SigningKey string `json:"signing-key,omitempty"`
+	Program    string `json:"program,omitempty"`
+}
+
+type GitPushConfig struct {
+	SSHIdentityFile         string `json:"ssh-identity-file,omitempty"`
+	SSHIdentityPrivate      string `json:"ssh-identity-private,omitempty"`
+	SSHIdentityPrivateValue string `json:"-"`
+	KnownHostsFile          string `json:"known-hosts-file,omitempty"`
+	IdentitiesOnly          bool   `json:"identities-only,omitempty"`
 }
 
 type ResourceBindingConfig struct {

@@ -65,7 +65,8 @@
 - `environments` — окружения исполнения. В текущей реализации поддержаны типы `local` и `worktree`;
 - `tools` — инструменты исполнения. Базовый тип `agentic-system` является временным literal-значением для инструментальной подсистемы;
 - `resources` — ресурсы исполнения. Сейчас ресурсом типа `model` является имя модели;
-- `bindings` — привязки ресурсов, связывающие инструмент, ресурс и опциональное окружение.
+- `bindings` — привязки ресурсов, связывающие инструмент, ресурс и опциональное окружение;
+- `git` — опциональные параметры git-операций контура исполнения: идентичность коммита, подпись коммита и SSH-ключ отправки ветки.
 
 Пример:
 
@@ -90,11 +91,31 @@
   "bindings": {
     "default": {"tool": "opencode", "resource": "qwen", "environment": "worktree"},
     "review": {"tool": "codex", "resource": "gpt-5.5"}
+  },
+  "git": {
+    "identity": {
+      "author-name": "Progress Execution",
+      "author-email": "progress@example.com",
+      "committer-name": "Progress Execution",
+      "committer-email": "progress@example.com"
+    },
+    "signing": {
+      "enabled": true,
+      "format": "ssh",
+      "signing-key": "/Users/example/.ssh/progress_signing_key.pub"
+    },
+    "push": {
+      "ssh-identity-file": "/Users/example/.ssh/progress_push_key",
+      "known-hosts-file": "/Users/example/.ssh/known_hosts",
+      "identities-only": true
+    }
   }
 }
 ```
 
 Для совместимости загрузчик принимает старые поля `runners`, `models` и `bindings` с полями `runner` и `model`. При нормализации они преобразуются в инструменты исполнения, ресурсы исполнения и привязки ресурсов.
+
+Локальный слой переопределяет глобальный блок `git` целиком. Неполная идентичность коммита отклоняется: поля `author-name`, `author-email`, `committer-name` и `committer-email` должны задаваться вместе. CLI-снимок показывает только наличие идентичности, подписи и ключа отправки, не раскрывая приватный материал.
 
 ## 5. CLI
 

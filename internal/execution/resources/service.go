@@ -31,6 +31,7 @@ type resourceConfig struct {
 	BindingSources     map[string]configuration.ConfigFileSource
 	GlobalConfigPath   string
 	LocalConfigPath    string
+	ConfigHome         string
 }
 
 func NewService() *Service {
@@ -53,6 +54,9 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		}
 		allocation.GlobalConfigPath = config.GlobalConfigPath
 		allocation.LocalConfigPath = config.LocalConfigPath
+		allocation.ConfigHome = config.ConfigHome
+		allocation.PrivateStore = config.Config.PrivateStore
+		allocation.Git = config.Config.Git
 		return allocation, nil
 	}
 
@@ -85,7 +89,10 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			Source:           allocationSourceExplicitRunnerModel,
 			GlobalConfigPath: config.GlobalConfigPath,
 			LocalConfigPath:  config.LocalConfigPath,
+			ConfigHome:       config.ConfigHome,
+			PrivateStore:     config.Config.PrivateStore,
 			FallbackUsed:     false,
+			Git:              config.Config.Git,
 		}, nil
 	}
 
@@ -95,6 +102,9 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		if err == nil {
 			allocation.GlobalConfigPath = config.GlobalConfigPath
 			allocation.LocalConfigPath = config.LocalConfigPath
+			allocation.ConfigHome = config.ConfigHome
+			allocation.PrivateStore = config.Config.PrivateStore
+			allocation.Git = config.Config.Git
 			return allocation, nil
 		}
 		if !profile.AllowModelFallback {
@@ -109,6 +119,9 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		fallback.FallbackUsed = true
 		fallback.GlobalConfigPath = config.GlobalConfigPath
 		fallback.LocalConfigPath = config.LocalConfigPath
+		fallback.ConfigHome = config.ConfigHome
+		fallback.PrivateStore = config.Config.PrivateStore
+		fallback.Git = config.Config.Git
 		return fallback, nil
 	}
 
@@ -124,6 +137,9 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 	allocation.FallbackUsed = true
 	allocation.GlobalConfigPath = config.GlobalConfigPath
 	allocation.LocalConfigPath = config.LocalConfigPath
+	allocation.ConfigHome = config.ConfigHome
+	allocation.PrivateStore = config.Config.PrivateStore
+	allocation.Git = config.Config.Git
 	return allocation, nil
 }
 
@@ -137,7 +153,6 @@ func (s *Service) loadConfig(ctx context.Context) (resourceConfig, error) {
 	if err != nil {
 		return resourceConfig{}, err
 	}
-
 	return resourceConfig{
 		Config:             loaded.Config,
 		EnvironmentSources: loaded.EnvironmentSources,
@@ -146,6 +161,7 @@ func (s *Service) loadConfig(ctx context.Context) (resourceConfig, error) {
 		BindingSources:     loaded.BindingSources,
 		GlobalConfigPath:   getLayerPath(loaded.Layers, configuration.ConfigFileSourceGlobal),
 		LocalConfigPath:    getLayerPath(loaded.Layers, configuration.ConfigFileSourceLocal),
+		ConfigHome:         loaded.ConfigHome,
 	}, nil
 }
 
