@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -177,13 +178,13 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
-	bodies := reviewRemarkCommentBodies(state.result.StructuredOutput)
-	if len(bodies) == 0 {
+	comments := reviewRemarkComments(state.result.StructuredOutput)
+	if len(comments) == 0 {
 		state.tracker.skip(name, "Структурированный вывод не содержит замечаний или заключения для записи.")
 		return nil
 	}
 
-	count, err := e.publishPullRequestComments(ctx, state, ref, bodies)
+	count, err := e.publishPullRequestComments(ctx, state, ref, comments)
 	if err != nil {
 		return e.failIntegrationOperation(ctx, state, name, "Замечания ревизии не записаны.", err, "review_remarks_publish_failed")
 	}
@@ -224,17 +225,41 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 	return nil
 }
 
-func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context, state *operationExecution, ref pullRequestRef, bodies []string) (int, error) {
+type reviewRemarkComment struct {
+	Body string
+	Path string
+	Line int
+	Side string
+}
+
+func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context, state *operationExecution, ref pullRequestRef, comments []reviewRemarkComment) (int, error) {
 	executor, err := e.integrationExecutor()
 	if err != nil {
 		return 0, err
 	}
 
 	count := 0
-	for _, body := range bodies {
-		body = strings.TrimSpace(body)
+	var failures []error
+	for _, comment := range comments {
+		body := strings.TrimSpace(comment.Body)
 		if body == "" {
 			continue
+		}
+		path := strings.TrimSpace(comment.Path)
+		side := strings.TrimSpace(comment.Side)
+		line := 0
+		if comment.Line < 0 {
+			failures = append(failures, fmt.Errorf("publish review remark comment %s: inline line must be positive or omitted, got %d", reviewRemarkCommentTarget(comment), comment.Line))
+			continue
+		}
+		if path != "" && comment.Line > 0 {
+			line = comment.Line
+			if side == "" {
+				side = "RIGHT"
+			}
+		} else {
+			path = ""
+			side = ""
 		}
 		_, err := executor.Execute(ctx, integration.Request{
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
@@ -246,14 +271,18 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 			Number:          ref.Number,
 			Body:            body,
 			Text:            body,
+			Path:            path,
+			Line:            line,
+			Side:            side,
 		})
 		if err != nil {
-			return count, err
+			failures = append(failures, fmt.Errorf("publish review remark comment %s: %w", reviewRemarkCommentTarget(comment), err))
+			continue
 		}
 		count++
 	}
 
-	return count, nil
+	return count, errors.Join(failures...)
 }
 
 func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, state *operationExecution, ref pullRequestRef, responses []StructuredResponse) (int, error) {
@@ -577,6 +606,9 @@ func structuredRemarksFromIntegration(remarks []integration.ReviewRemark) []Stru
 			Type:     "review-remark",
 			Title:    title,
 			Body:     body,
+			Path:     strings.TrimSpace(remark.Path),
+			Line:     remark.Line,
+			Side:     strings.TrimSpace(remark.Side),
 			Severity: "",
 		})
 	}
@@ -685,7 +717,7 @@ func pullRequestPublishSummary(response integration.Response) string {
 	return "pull-request=published"
 }
 
-func reviewRemarkCommentBodies(output *StructuredOutput) []string {
+func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 	if output == nil {
 		return nil
 	}
@@ -702,10 +734,10 @@ func reviewRemarkCommentBodies(output *StructuredOutput) []string {
 		if body == "## Заключение ревизии" {
 			return nil
 		}
-		return []string{body}
+		return []reviewRemarkComment{{Body: body}}
 	}
 
-	bodies := make([]string, 0, len(output.Remarks))
+	comments := make([]reviewRemarkComment, 0, len(output.Remarks))
 	for _, remark := range output.Remarks {
 		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
 			"## Замечание ревизии",
@@ -716,10 +748,30 @@ func reviewRemarkCommentBodies(output *StructuredOutput) []string {
 			remark.Body,
 		}), "\n\n"))
 		if body != "" {
-			bodies = append(bodies, body)
+			comments = append(comments, reviewRemarkComment{
+				Body: body,
+				Path: strings.TrimSpace(remark.Path),
+				Line: remark.Line,
+				Side: strings.TrimSpace(remark.Side),
+			})
 		}
 	}
-	return bodies
+	return comments
+}
+
+func reviewRemarkCommentTarget(comment reviewRemarkComment) string {
+	path := strings.TrimSpace(comment.Path)
+	side := strings.TrimSpace(comment.Side)
+	if side == "" {
+		side = "RIGHT"
+	}
+	if path != "" && comment.Line != 0 {
+		return fmt.Sprintf("%s:%d:%s", path, comment.Line, side)
+	}
+	if path == "" || comment.Line <= 0 {
+		return "pull-request"
+	}
+	return fmt.Sprintf("%s:%d:%s", path, comment.Line, side)
 }
 
 func reviewResponsesFromOutput(output *StructuredOutput) []StructuredResponse {

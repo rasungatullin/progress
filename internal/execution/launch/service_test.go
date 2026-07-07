@@ -980,7 +980,7 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 			return strings.Join([]string{
 				"Applied the requested changes.",
 				structuredOutputStart,
-				`{"summary":"Main result.","commit_message":"Document deploy checklist","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps."}],"review_responses":[{"remark_id":"remark-1","status":"resolved","summary":"Rollback steps documented."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
+				`{"summary":"Main result.","commit_message":"Document deploy checklist","remarks":[{"id":"remark-1","severity":"critical","title":"Rollback plan","body":"Document rollback steps.","path":"docs/deploy.md","line":7,"side":"RIGHT"}],"review_responses":[{"remark_id":"remark-1","status":"resolved","summary":"Rollback steps documented."}],"questions":[{"id":"question-1","title":"Integration coverage","body":"Should we add an integration test?"}],"follow_up_actions":[{"id":"action-1","status":"pending","type":"docs","title":"Update release checklist"}],"changes":[{"summary":"Touched deploy docs."}],"commands":[{"name":"open-pr","args":["--draft"]}],"conclusion":{"status":"needs-follow-up","summary":"Ship after docs update"},"extensions":{"custom":{"owner":"release"}}}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -1019,7 +1019,7 @@ func TestLaunchStructuredOutputPresent(t *testing.T) {
 	if result.StructuredOutput.CommitMessage != "Document deploy checklist" {
 		t.Fatalf("unexpected structured commit message: %#v", result.StructuredOutput)
 	}
-	if len(result.StructuredOutput.Remarks) != 1 || result.StructuredOutput.Remarks[0].Body != "Document rollback steps." {
+	if len(result.StructuredOutput.Remarks) != 1 || result.StructuredOutput.Remarks[0].Body != "Document rollback steps." || result.StructuredOutput.Remarks[0].Path != "docs/deploy.md" || result.StructuredOutput.Remarks[0].Line != 7 || result.StructuredOutput.Remarks[0].Side != "RIGHT" {
 		t.Fatalf("unexpected remarks: %#v", result.StructuredOutput.Remarks)
 	}
 	if len(result.StructuredOutput.ReviewResponses) != 1 || result.StructuredOutput.ReviewResponses[0].RemarkID != "remark-1" {
@@ -1470,12 +1470,12 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 		{
 			name:       "remarks string type mismatch",
 			payload:    `{"summary":"Done.","remarks":"not-an-array"}`,
-			expectPart: "type mismatch at remarks: expected array of objects with id/status/severity/type/title/body/answer/resolution but got string",
+			expectPart: "type mismatch at remarks: expected array of objects with id/status/severity/type/title/body/path/line/side/answer/resolution but got string",
 		},
 		{
 			name:       "remarks array of strings mismatch",
 			payload:    `{"summary":"Done.","remarks":["bad-item"]}`,
-			expectPart: "type mismatch at remarks: expected array of objects with id/status/severity/type/title/body/answer/resolution but got string",
+			expectPart: "type mismatch at remarks: expected array of objects with id/status/severity/type/title/body/path/line/side/answer/resolution but got string",
 		},
 		{
 			name:       "commands string type mismatch",
@@ -1495,6 +1495,11 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 		{
 			name:       "meaningless remark object",
 			payload:    `{"summary":"Done.","remarks":[{}]}`,
+			expectPart: "structured output remarks[0] must include at least one non-empty field",
+		},
+		{
+			name:       "remark with only inline location metadata",
+			payload:    `{"summary":"Done.","remarks":[{"path":"internal/service.go","line":42,"side":"RIGHT"}]}`,
 			expectPart: "structured output remarks[0] must include at least one non-empty field",
 		},
 	}
@@ -1698,8 +1703,11 @@ func TestBuildRunnerPromptAppendsProgrammaticStructuredInputAndOutputInstruction
 	if !strings.Contains(prompt, "Include remarks, commands when they are applicable.") {
 		t.Fatalf("prompt must mention selected structured output fields: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Object forms: remarks[{id,status,severity,type,title,body,answer,resolution}], commands[{name,args,title,body}].") {
+	if !strings.Contains(prompt, "Object forms: remarks[{id,status,severity,type,title,body,path,line,side,answer,resolution}], commands[{name,args,title,body}].") {
 		t.Fatalf("prompt must describe selected object forms: %q", prompt)
+	}
+	if !strings.Contains(prompt, "line must be a diff line on the selected side") {
+		t.Fatalf("prompt must explain remark inline line semantics: %q", prompt)
 	}
 	if !strings.Contains(prompt, "Canonical compact JSON example:") {
 		t.Fatalf("prompt must include canonical compact JSON example: %q", prompt)
@@ -1793,8 +1801,11 @@ func TestBuildRunnerPromptKeepsFullFieldListWhenSelectionNotConfigured(t *testin
 	if !strings.Contains(prompt, "Include commit_message, remarks, questions, follow_up_actions, changes, commands, conclusion, extensions when they are applicable.") {
 		t.Fatalf("prompt must keep full optional field list by default: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Object forms: remarks[{id,status,severity,type,title,body,answer,resolution}], questions[{id,status,title,body,answer}], follow_up_actions[{id,status,type,title,body}], changes[{summary}], commands[{name,args,title,body}], conclusion{status,summary,body}.") {
+	if !strings.Contains(prompt, "Object forms: remarks[{id,status,severity,type,title,body,path,line,side,answer,resolution}], questions[{id,status,title,body,answer}], follow_up_actions[{id,status,type,title,body}], changes[{summary}], commands[{name,args,title,body}], conclusion{status,summary,body}.") {
 		t.Fatalf("prompt must keep full object forms when selection is not configured: %q", prompt)
+	}
+	if !strings.Contains(prompt, "line must be a diff line on the selected side") {
+		t.Fatalf("prompt must explain remark inline line semantics: %q", prompt)
 	}
 }
 

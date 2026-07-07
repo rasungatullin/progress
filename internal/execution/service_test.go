@@ -963,6 +963,22 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 					Severity: "major",
 					Title:    "Не хватает проверки",
 					Body:     "Добавьте проверку отказа интеграционной операции.",
+					Path:     "internal/execution/integration_operations.go",
+					Line:     42,
+				}, {
+					ID:    "remark-2",
+					Title: "Общее замечание",
+					Body:  "Проверьте описание результата.",
+				}, {
+					ID:    "remark-3",
+					Title: "Неполная привязка без строки",
+					Body:  "Публикуется как общий комментарий.",
+					Path:  "internal/execution/integration_operations.go",
+				}, {
+					ID:    "remark-4",
+					Title: "Неполная привязка без пути",
+					Body:  "Публикуется как общий комментарий.",
+					Line:  42,
 				}},
 			},
 		},
@@ -1023,15 +1039,59 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	if workplaces.invocation.Workplace.Name != "feature-review" || workplaces.invocation.Workplace.HeadRef != "feature/review" || workplaces.invocation.Workplace.BaseRef != "main" {
 		t.Fatalf("review action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
 	}
-	if len(integrations.calls) != 3 {
+	if len(integrations.calls) != 6 {
 		t.Fatalf("expected get, comments and create integration calls, got %#v", integrations.calls)
 	}
 	if integrations.calls[2].Number != 17 || integrations.calls[2].Repository != "owner/name" {
 		t.Fatalf("unexpected review remark target: %#v", integrations.calls[2])
 	}
+	if integrations.calls[2].Path != "internal/execution/integration_operations.go" || integrations.calls[2].Line != 42 || integrations.calls[2].Side != "RIGHT" {
+		t.Fatalf("inline review remark must keep diff location with default side: %#v", integrations.calls[2])
+	}
+	if integrations.calls[3].Path != "" || integrations.calls[3].Line != 0 || integrations.calls[3].Side != "" {
+		t.Fatalf("review remark without location must stay pull request comment: %#v", integrations.calls[3])
+	}
+	if integrations.calls[4].Path != "" || integrations.calls[4].Line != 0 || integrations.calls[4].Side != "" {
+		t.Fatalf("review remark without line must stay pull request comment: %#v", integrations.calls[4])
+	}
+	if integrations.calls[5].Path != "" || integrations.calls[5].Line != 0 || integrations.calls[5].Side != "" {
+		t.Fatalf("review remark without path must stay pull request comment: %#v", integrations.calls[5])
+	}
 	operation := findOperationResult(result.Operations, OperationKindPublishReviewRemarks)
 	if operation == nil || operation.Status != OperationStatusCompleted {
 		t.Fatalf("review remark operation must be completed: %#v", result.Operations)
+	}
+}
+
+func TestPublishPullRequestCommentsRejectsNegativeInlineLine(t *testing.T) {
+	integrations := &stubIntegrationExecutor{}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body: "## Замечание ревизии\n\nНекорректная строка.",
+		Path: "internal/execution/integration_operations.go",
+		Line: -1,
+		Side: "RIGHT",
+	}, {
+		Body: "## Замечание ревизии\n\nКорректная строка.",
+		Path: "internal/execution/integration_operations.go",
+		Line: 42,
+		Side: "RIGHT",
+	}})
+	if err == nil {
+		t.Fatal("expected negative inline line error")
+	}
+	if !strings.Contains(err.Error(), "inline line must be positive or omitted, got -1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("valid review remark must still be published, got count=%d", count)
+	}
+	if len(integrations.calls) != 1 {
+		t.Fatalf("negative line must not be sent to integration executor: %#v", integrations.calls)
+	}
+	if integrations.calls[0].Path != "internal/execution/integration_operations.go" || integrations.calls[0].Line != 42 || integrations.calls[0].Side != "RIGHT" {
+		t.Fatalf("valid inline remark must keep location: %#v", integrations.calls[0])
 	}
 }
 
