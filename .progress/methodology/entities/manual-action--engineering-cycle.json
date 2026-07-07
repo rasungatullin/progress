@@ -1,0 +1,16 @@
+{
+  "kind": "manual-action",
+  "name": "engineering-cycle",
+  "target_contour": "execution",
+  "title": "Ручные действия инженерного цикла",
+  "description": "Набор ручных действий для реализации задачи, ревизии запроса на слияние и доработки по замечаниям.",
+  "payload": {
+    "routes": [
+      "start-implementation-pr",
+      "review-pull-request",
+      "apply-review-comments"
+    ],
+    "branch_name": "task_number",
+    "workplace": "worktree"
+  }
+}

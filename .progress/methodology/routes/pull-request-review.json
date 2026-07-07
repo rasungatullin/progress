@@ -1,0 +1,36 @@
+{
+  "name": "pull-request-review",
+  "title": "Ревизия чужой реализации",
+  "description": "Изолированный маршрут ревизии открытого запроса на слияние без первичного запуска реализации задачи.",
+  "checks": [
+    {
+      "name": "pull-request-review-completed",
+      "title": "Экспертиза пройдена",
+      "outcome": "completed",
+      "has_labels": [
+        "экспертиза пройдена"
+      ],
+      "reason_code": "review_already_passed",
+      "reason_message": "У задачи зафиксирован признак пройденной экспертизы; следующая операция не требуется."
+    },
+    {
+      "name": "pull-request-review-run",
+      "title": "Ревизия открытого запроса на слияние",
+      "action": "review-pull-request",
+      "profile": "review",
+      "description": "Направляет открытый запрос на слияние на ревизию.",
+      "step": "review-pull-request",
+      "missing_labels": [
+        "требует доработки"
+      ],
+      "expected_result": "Проверить открытый запрос на слияние и записать заключение ревизии.",
+      "constraints": [
+        "Работать в отдельном исполнительном рабочем месте.",
+        "Не изменять код в ходе ревизии.",
+        "Замечания и заключение записывать через контур интеграции."
+      ],
+      "reason_code": "explicit_pull_request_review",
+      "reason_message": "Задача явно направлена на маршрут ревизии чужой реализации."
+    }
+  ]
+}

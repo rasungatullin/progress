@@ -125,9 +125,9 @@ func TestMethodologyCLIUpdateActionPreservesConfiguredFields(t *testing.T) {
 		t.Fatalf("update action: %v\n%s", err, output)
 	}
 
-	content, err := os.ReadFile(catalogPath)
+	content, err := os.ReadFile(filepath.Join(catalogDir, "actions", "engineering-synthesis.json"))
 	if err != nil {
-		t.Fatalf("read catalog: %v", err)
+		t.Fatalf("read action: %v", err)
 	}
 	for _, fragment := range []string{
 		`"aliases":`,
@@ -138,7 +138,7 @@ func TestMethodologyCLIUpdateActionPreservesConfiguredFields(t *testing.T) {
 		`"description": "Новое описание."`,
 	} {
 		if !strings.Contains(string(content), fragment) {
-			t.Fatalf("updated catalog must include %q, got %s", fragment, string(content))
+			t.Fatalf("updated action must include %q, got %s", fragment, string(content))
 		}
 	}
 }
@@ -188,9 +188,9 @@ func TestMethodologyCLIUpdateGlobalActionIgnoresLocalOverride(t *testing.T) {
 		t.Fatalf("update global action: %v\n%s", err, output)
 	}
 
-	content, err := os.ReadFile(globalPath)
+	content, err := os.ReadFile(filepath.Join(globalDir, "actions", "engineering-synthesis.json"))
 	if err != nil {
-		t.Fatalf("read global catalog: %v", err)
+		t.Fatalf("read global action: %v", err)
 	}
 	for _, fragment := range []string{
 		`"implement"`,
@@ -198,12 +198,12 @@ func TestMethodologyCLIUpdateGlobalActionIgnoresLocalOverride(t *testing.T) {
 		`"description": "Новое глобальное описание."`,
 	} {
 		if !strings.Contains(string(content), fragment) {
-			t.Fatalf("global catalog must include %q, got %s", fragment, string(content))
+			t.Fatalf("global action must include %q, got %s", fragment, string(content))
 		}
 	}
 	for _, fragment := range []string{`"local-implement"`, `"local-operation"`} {
 		if strings.Contains(string(content), fragment) {
-			t.Fatalf("global catalog must not inherit local fragment %q: %s", fragment, string(content))
+			t.Fatalf("global action must not inherit local fragment %q: %s", fragment, string(content))
 		}
 	}
 }

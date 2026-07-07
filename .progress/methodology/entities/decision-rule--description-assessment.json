@@ -1,0 +1,12 @@
+{
+  "kind": "decision-rule",
+  "name": "description-assessment",
+  "target_contour": "decision",
+  "title": "Правило оценки описания задачи",
+  "description": "Расширяемая модель правила для контура принятия решения.",
+  "payload": {
+    "has_label": "description-assessment",
+    "missing_label": "description-assessed",
+    "route": "description-assessment"
+  }
+}

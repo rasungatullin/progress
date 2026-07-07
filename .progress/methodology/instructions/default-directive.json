@@ -1,0 +1,8 @@
+{
+  "name": "default-directive",
+  "profile": "default",
+  "action": "engineering-synthesis",
+  "target_contour": "execution",
+  "title": "Базовая исполнительная директива",
+  "body": "Сформировать результат выполнения задачи в нормализованной форме с указанием выполненных изменений, проверок и дальнейших действий."
+}

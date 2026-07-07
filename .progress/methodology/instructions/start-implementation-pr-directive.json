@@ -1,0 +1,8 @@
+{
+  "name": "start-implementation-pr-directive",
+  "profile": "coder",
+  "action": "start-implementation-pr",
+  "target_contour": "execution",
+  "title": "Реализация задачи с запросом на слияние",
+  "body": "Выполнить задачу в подготовленном рабочем месте. Сохранять имя ветки по номеру задачи. Вернуть структурированный вывод с summary, commit_message, changes, commands и conclusion. Открытие запроса на слияние выполняется отдельной операцией контура исполнения через контур интеграции."
+}

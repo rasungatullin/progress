@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/configuration"
@@ -25,6 +26,8 @@ const (
 type ReadFileFunc = configuration.ReadFileFunc
 type WriteFileFunc func(string, []byte, fs.FileMode) error
 type MkdirAllFunc func(string, fs.FileMode) error
+type ReadDirFunc func(string) ([]fs.DirEntry, error)
+type RemoveAllFunc func(string) error
 
 type CatalogRequest struct {
 	RepoRoot   string
@@ -72,6 +75,16 @@ func LoadCatalogWithHome(repoRoot, configHome string, readFile ReadFileFunc) (Ca
 	if readFile == nil {
 		readFile = os.ReadFile
 	}
+	return loadCatalogWithHome(repoRoot, configHome, readFile, os.ReadDir)
+}
+
+func loadCatalogWithHome(repoRoot, configHome string, readFile ReadFileFunc, readDir ReadDirFunc) (CatalogSnapshot, error) {
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+	if readDir == nil {
+		readDir = os.ReadDir
+	}
 
 	home, globalHomeErr := resolveConfigHome(configHome)
 	globalPath := ""
@@ -88,7 +101,7 @@ func LoadCatalogWithHome(repoRoot, configHome string, readFile ReadFileFunc) (Ca
 
 	layers := make([]CatalogLayer, 0, 2)
 	if useGlobalLayer {
-		if layer, err := readCatalogLayer(globalPath, configuration.ConfigFileSourceGlobal, readFile); err == nil {
+		if layer, err := readCatalogLayer(globalPath, configuration.ConfigFileSourceGlobal, readFile, readDir); err == nil {
 			layers = append(layers, layer)
 		} else if !isNotExistErr(err) {
 			return CatalogSnapshot{}, err
@@ -96,7 +109,7 @@ func LoadCatalogWithHome(repoRoot, configHome string, readFile ReadFileFunc) (Ca
 	}
 
 	if useLocalLayer {
-		if layer, err := readCatalogLayer(localPath, configuration.ConfigFileSourceLocal, readFile); err == nil {
+		if layer, err := readCatalogLayer(localPath, configuration.ConfigFileSourceLocal, readFile, readDir); err == nil {
 			layers = append(layers, layer)
 		} else if !isNotExistErr(err) {
 			return CatalogSnapshot{}, err
@@ -120,6 +133,10 @@ func LoadCatalogWithHome(repoRoot, configHome string, readFile ReadFileFunc) (Ca
 }
 
 func SaveCatalogWithHome(repoRoot, configHome string, scope configuration.ConfigFileSource, catalog Catalog, readFile ReadFileFunc, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) (CatalogWriteResult, error) {
+	return SaveCatalogWithHomeFS(repoRoot, configHome, scope, catalog, readFile, writeFile, mkdirAll, os.RemoveAll, os.ReadDir)
+}
+
+func SaveCatalogWithHomeFS(repoRoot, configHome string, scope configuration.ConfigFileSource, catalog Catalog, readFile ReadFileFunc, writeFile WriteFileFunc, mkdirAll MkdirAllFunc, removeAll RemoveAllFunc, readDir ReadDirFunc) (CatalogWriteResult, error) {
 	if readFile == nil {
 		readFile = os.ReadFile
 	}
@@ -128,6 +145,12 @@ func SaveCatalogWithHome(repoRoot, configHome string, scope configuration.Config
 	}
 	if mkdirAll == nil {
 		mkdirAll = os.MkdirAll
+	}
+	if removeAll == nil {
+		removeAll = os.RemoveAll
+	}
+	if readDir == nil {
+		readDir = os.ReadDir
 	}
 	if scope == "" {
 		scope = CatalogWriteScopeLocal
@@ -142,11 +165,11 @@ func SaveCatalogWithHome(repoRoot, configHome string, scope configuration.Config
 		return CatalogWriteResult{}, fmt.Errorf("invalid methodology catalog: %w", err)
 	}
 	catalog = normalizeCatalog(catalog)
-	if err := writeCatalog(path, catalog, writeFile, mkdirAll); err != nil {
+	if err := writeCatalogFiles(path, catalog, writeFile, mkdirAll, removeAll); err != nil {
 		return CatalogWriteResult{}, err
 	}
 
-	snapshot, err := LoadCatalogWithHome(repoRoot, configHome, readFile)
+	snapshot, err := loadCatalogWithHome(repoRoot, configHome, readFile, readDir)
 	if err != nil {
 		return CatalogWriteResult{Scope: scope, Path: path, Catalog: catalog}, nil
 	}
@@ -154,6 +177,10 @@ func SaveCatalogWithHome(repoRoot, configHome string, scope configuration.Config
 }
 
 func UpsertCatalogElementWithHome(repoRoot, configHome string, scope configuration.ConfigFileSource, element ElementUpsert, readFile ReadFileFunc, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) (CatalogWriteResult, error) {
+	return UpsertCatalogElementWithHomeFS(repoRoot, configHome, scope, element, readFile, writeFile, mkdirAll, os.ReadDir, os.RemoveAll)
+}
+
+func UpsertCatalogElementWithHomeFS(repoRoot, configHome string, scope configuration.ConfigFileSource, element ElementUpsert, readFile ReadFileFunc, writeFile WriteFileFunc, mkdirAll MkdirAllFunc, readDir ReadDirFunc, removeAll RemoveAllFunc) (CatalogWriteResult, error) {
 	if readFile == nil {
 		readFile = os.ReadFile
 	}
@@ -162,6 +189,12 @@ func UpsertCatalogElementWithHome(repoRoot, configHome string, scope configurati
 	}
 	if mkdirAll == nil {
 		mkdirAll = os.MkdirAll
+	}
+	if readDir == nil {
+		readDir = os.ReadDir
+	}
+	if removeAll == nil {
+		removeAll = os.RemoveAll
 	}
 	if scope == "" {
 		scope = CatalogWriteScopeLocal
@@ -172,60 +205,165 @@ func UpsertCatalogElementWithHome(repoRoot, configHome string, scope configurati
 		return CatalogWriteResult{}, err
 	}
 
-	catalog, err := readOptionalCatalog(path, readFile)
+	layer, legacy, err := readOptionalCatalogLayer(path, scope, readFile, readDir)
 	if err != nil {
 		return CatalogWriteResult{}, err
 	}
+	catalog := layer.Catalog
 	catalog, err = applyElementUpsert(catalog, element)
 	if err != nil {
 		return CatalogWriteResult{}, err
 	}
-	if err := writeCatalog(path, catalog, writeFile, mkdirAll); err != nil {
+	if legacy {
+		err = writeCatalogFiles(path, catalog, writeFile, mkdirAll, removeAll)
+	} else {
+		err = writeCatalogConfig(path, catalog, writeFile, mkdirAll)
+		if err == nil {
+			err = writeCatalogElement(path, element, writeFile, mkdirAll)
+		}
+	}
+	if err != nil {
 		return CatalogWriteResult{}, err
 	}
 
-	snapshot, err := LoadCatalogWithHome(repoRoot, configHome, readFile)
+	snapshot, err := loadCatalogWithHome(repoRoot, configHome, readFile, readDir)
 	if err != nil {
 		return CatalogWriteResult{Scope: scope, Path: path, Catalog: catalog}, nil
 	}
 	return CatalogWriteResult{Scope: scope, Path: path, Catalog: catalog, Snapshot: snapshot}, nil
 }
 
-func readCatalogLayer(path string, source configuration.ConfigFileSource, readFile ReadFileFunc) (CatalogLayer, error) {
+func readCatalogLayer(path string, source configuration.ConfigFileSource, readFile ReadFileFunc, readDir ReadDirFunc) (CatalogLayer, error) {
+	layer, _, err := readCatalogLayerDetailed(path, source, readFile, readDir)
+	return layer, err
+}
+
+func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource, readFile ReadFileFunc, readDir ReadDirFunc) (CatalogLayer, bool, error) {
+	catalog := Catalog{}
+	legacy := false
+	rootFound := false
+
 	content, err := readFile(path)
-	if err != nil {
-		return CatalogLayer{}, err
+	if err == nil {
+		rootFound = true
+		rootCatalog, err := decodeCatalog(content)
+		if err != nil {
+			return CatalogLayer{}, false, fmt.Errorf("parse methodology catalog %s: %w", path, err)
+		}
+		legacy = catalogHasObjects(rootCatalog)
+		catalog.DefaultRoute = rootCatalog.DefaultRoute
+		catalog.Routes = append(catalog.Routes, rootCatalog.Routes...)
+		catalog.Actions = append(catalog.Actions, rootCatalog.Actions...)
+		catalog.Instructions = append(catalog.Instructions, rootCatalog.Instructions...)
+		catalog.Entities = append(catalog.Entities, rootCatalog.Entities...)
+	} else if !isNotExistErr(err) {
+		return CatalogLayer{}, false, err
 	}
 
-	catalog, err := decodeCatalog(content)
+	registryCatalog, registryFound, err := readCatalogRegistries(filepath.Dir(path), readFile, readDir)
 	if err != nil {
-		return CatalogLayer{}, fmt.Errorf("parse methodology catalog %s: %w", path, err)
+		return CatalogLayer{}, false, err
 	}
+	if !rootFound && !registryFound {
+		return CatalogLayer{}, false, fs.ErrNotExist
+	}
+	catalog.Routes = append(catalog.Routes, registryCatalog.Routes...)
+	catalog.Actions = append(catalog.Actions, registryCatalog.Actions...)
+	catalog.Instructions = append(catalog.Instructions, registryCatalog.Instructions...)
+	catalog.Entities = append(catalog.Entities, registryCatalog.Entities...)
+
 	if err := validateCatalog(catalog); err != nil {
-		return CatalogLayer{}, fmt.Errorf("invalid methodology catalog %s: %w", path, err)
+		return CatalogLayer{}, false, fmt.Errorf("invalid methodology catalog %s: %w", path, err)
 	}
 	catalog = normalizeCatalog(catalog)
 
-	return CatalogLayer{Source: source, Path: path, Catalog: catalog}, nil
+	return CatalogLayer{Source: source, Path: path, Catalog: catalog}, legacy, nil
 }
 
-func readOptionalCatalog(path string, readFile ReadFileFunc) (Catalog, error) {
-	content, err := readFile(path)
+func readOptionalCatalogLayer(path string, source configuration.ConfigFileSource, readFile ReadFileFunc, readDir ReadDirFunc) (CatalogLayer, bool, error) {
+	layer, legacy, err := readCatalogLayerDetailed(path, source, readFile, readDir)
 	if err != nil {
 		if isNotExistErr(err) {
-			return Catalog{}, nil
+			return CatalogLayer{Source: source, Path: path}, false, nil
 		}
-		return Catalog{}, err
+		return CatalogLayer{}, false, err
+	}
+	return layer, legacy, nil
+}
+
+func readCatalogRegistries(root string, readFile ReadFileFunc, readDir ReadDirFunc) (Catalog, bool, error) {
+	catalog := Catalog{}
+	found := false
+
+	routes, ok, err := readRegistryFiles[Route](root, "routes", readFile, readDir, routeRegistryKey)
+	if err != nil {
+		return Catalog{}, false, err
+	}
+	found = found || ok
+	catalog.Routes = routes
+
+	actions, ok, err := readRegistryFiles[Action](root, "actions", readFile, readDir, actionRegistryKey)
+	if err != nil {
+		return Catalog{}, false, err
+	}
+	found = found || ok
+	catalog.Actions = actions
+
+	instructions, ok, err := readRegistryFiles[Instruction](root, "instructions", readFile, readDir, instructionRegistryKey)
+	if err != nil {
+		return Catalog{}, false, err
+	}
+	found = found || ok
+	catalog.Instructions = instructions
+
+	entities, ok, err := readRegistryFiles[Entity](root, "entities", readFile, readDir, entityRegistryKey)
+	if err != nil {
+		return Catalog{}, false, err
+	}
+	found = found || ok
+	catalog.Entities = entities
+
+	return catalog, found, nil
+}
+
+func readRegistryFiles[T any](root string, dir string, readFile ReadFileFunc, readDir ReadDirFunc, keyFunc func(T) string) ([]T, bool, error) {
+	dirPath := filepath.Join(root, dir)
+	entries, err := readDir(dirPath)
+	if err != nil {
+		if isNotExistErr(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("read methodology registry directory %s: %w", dirPath, err)
 	}
 
-	catalog, err := decodeCatalog(content)
-	if err != nil {
-		return Catalog{}, fmt.Errorf("parse methodology catalog %s: %w", path, err)
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		files = append(files, entry.Name())
 	}
-	if err := validateCatalog(catalog); err != nil {
-		return Catalog{}, fmt.Errorf("invalid methodology catalog %s: %w", path, err)
+	sort.Strings(files)
+
+	items := make([]T, 0, len(files))
+	for _, file := range files {
+		path := filepath.Join(dirPath, file)
+		content, err := readFile(path)
+		if err != nil {
+			return nil, false, err
+		}
+		var item T
+		if err := json.Unmarshal(content, &item); err != nil {
+			return nil, false, fmt.Errorf("parse methodology registry file %s: %w", path, err)
+		}
+		key := keyFunc(item)
+		fileKey := strings.TrimSuffix(file, ".json")
+		if key == "" || key != fileKey {
+			return nil, false, fmt.Errorf("methodology registry file %s key %q must match file name %q", path, key, fileKey)
+		}
+		items = append(items, item)
 	}
-	return normalizeCatalog(catalog), nil
+	return items, true, nil
 }
 
 func decodeCatalog(content []byte) (Catalog, error) {
@@ -248,6 +386,118 @@ func writeCatalog(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAl
 	}
 	if err := writeFile(path, content, 0o600); err != nil {
 		return fmt.Errorf("write methodology catalog %s: %w", path, err)
+	}
+	return nil
+}
+
+func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc, removeAll RemoveAllFunc) error {
+	root := filepath.Dir(path)
+	for _, dir := range []string{"routes", "actions", "instructions", "entities"} {
+		dirPath := filepath.Join(root, dir)
+		if err := removeAll(dirPath); err != nil {
+			return fmt.Errorf("remove methodology registry directory %s: %w", dirPath, err)
+		}
+	}
+	if err := writeCatalogConfig(path, catalog, writeFile, mkdirAll); err != nil {
+		return err
+	}
+	for _, route := range catalog.Routes {
+		path, err := registryFilePath(root, "routes", routeRegistryKey(route))
+		if err != nil {
+			return err
+		}
+		if err := writeRegistryObject(path, route, writeFile, mkdirAll); err != nil {
+			return err
+		}
+	}
+	for _, action := range catalog.Actions {
+		path, err := registryFilePath(root, "actions", actionRegistryKey(action))
+		if err != nil {
+			return err
+		}
+		if err := writeRegistryObject(path, action, writeFile, mkdirAll); err != nil {
+			return err
+		}
+	}
+	for _, instruction := range catalog.Instructions {
+		path, err := registryFilePath(root, "instructions", instructionRegistryKey(instruction))
+		if err != nil {
+			return err
+		}
+		if err := writeRegistryObject(path, instruction, writeFile, mkdirAll); err != nil {
+			return err
+		}
+	}
+	for _, entity := range catalog.Entities {
+		path, err := registryFilePath(root, "entities", entityRegistryKey(entity))
+		if err != nil {
+			return err
+		}
+		if err := writeRegistryObject(path, entity, writeFile, mkdirAll); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeCatalogConfig(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) error {
+	return writeCatalog(path, Catalog{DefaultRoute: catalog.DefaultRoute}, writeFile, mkdirAll)
+}
+
+func writeCatalogElement(path string, element ElementUpsert, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) error {
+	root := filepath.Dir(path)
+	switch {
+	case element.Route != nil:
+		route := normalizeRoute(*element.Route)
+		path, err := registryFilePath(root, "routes", routeRegistryKey(route))
+		if err != nil {
+			return err
+		}
+		return writeRegistryObject(path, route, writeFile, mkdirAll)
+	case element.Action != nil:
+		action := normalizeAction(*element.Action)
+		path, err := registryFilePath(root, "actions", actionRegistryKey(action))
+		if err != nil {
+			return err
+		}
+		return writeRegistryObject(path, action, writeFile, mkdirAll)
+	case element.Instruction != nil:
+		instruction := normalizeInstruction(*element.Instruction)
+		path, err := registryFilePath(root, "instructions", instructionRegistryKey(instruction))
+		if err != nil {
+			return err
+		}
+		return writeRegistryObject(path, instruction, writeFile, mkdirAll)
+	case element.Entity != nil:
+		entity := normalizeEntity(*element.Entity)
+		path, err := registryFilePath(root, "entities", entityRegistryKey(entity))
+		if err != nil {
+			return err
+		}
+		return writeRegistryObject(path, entity, writeFile, mkdirAll)
+	default:
+		return fmt.Errorf("должна быть задана ровно одна сущность методики")
+	}
+}
+
+func registryFilePath(root string, dir string, key string) (string, error) {
+	if key == "" || key == "." || key == ".." || strings.ContainsAny(key, `/\`) {
+		return "", fmt.Errorf("methodology registry key %q is not safe for file name", key)
+	}
+	return filepath.Join(root, dir, key+".json"), nil
+}
+
+func writeRegistryObject(path string, value any, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) error {
+	if err := mkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create methodology registry directory %s: %w", filepath.Dir(path), err)
+	}
+	content, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal methodology registry file %s: %w", path, err)
+	}
+	content = append(content, '\n')
+	if err := writeFile(path, content, 0o600); err != nil {
+		return fmt.Errorf("write methodology registry file %s: %w", path, err)
 	}
 	return nil
 }
@@ -342,6 +592,31 @@ func indexEntities(entities []Entity) map[string]int {
 		indexes[entitySourceKey(entity.Kind, entity.Name)] = index
 	}
 	return indexes
+}
+
+func catalogHasObjects(catalog Catalog) bool {
+	return len(catalog.Routes) > 0 || len(catalog.Actions) > 0 || len(catalog.Instructions) > 0 || len(catalog.Entities) > 0
+}
+
+func routeRegistryKey(route Route) string {
+	return normalizeName(route.Name)
+}
+
+func actionRegistryKey(action Action) string {
+	return normalizeName(action.Name)
+}
+
+func instructionRegistryKey(instruction Instruction) string {
+	return normalizeName(instruction.Name)
+}
+
+func entityRegistryKey(entity Entity) string {
+	kind := normalizeKind(entity.Kind)
+	name := normalizeName(entity.Name)
+	if kind == "" || name == "" {
+		return ""
+	}
+	return kind + "--" + name
 }
 
 func catalogPathForScope(repoRoot, configHome string, scope configuration.ConfigFileSource) (string, error) {

@@ -10,8 +10,8 @@
 
 Каталог читается из двух мест:
 
-- глобальный слой: `<progress-config-home>/methodology/catalog.json`;
-- локальный слой: `.progress/methodology/catalog.json`.
+- глобальный слой: `<progress-config-home>/methodology/`;
+- локальный слой: `.progress/methodology/`.
 
 `<progress-config-home>` по умолчанию равен `${HOME}/.config/progress`. Значение можно переопределить переменной окружения `PROGRESS_CONFIG_HOME` или флагом `--config-home`.
 
@@ -21,59 +21,79 @@
 
 ## Формат каталога
 
-Минимальный файл:
+Минимальный корневой файл `catalog.json`:
 
 ```json
 {
-  "default_route": "task-processing",
-  "routes": [
+  "default_route": "task-processing"
+}
+```
+
+Объекты каталога хранятся в отдельных файлах:
+
+```text
+methodology/
+  catalog.json
+  routes/task-processing.json
+  actions/implement.json
+  instructions/default-directive.json
+  entities/decision-rule--description-assessment.json
+```
+
+Пример `routes/task-processing.json`:
+
+```json
+{
+  "name": "task-processing",
+  "title": "Реализация задачи и саморевизия результата",
+  "checks": [
     {
-      "name": "task-processing",
-      "title": "Реализация задачи и саморевизия результата",
-      "checks": [
-        {
-          "name": "task-processing-start",
-          "action": "start-implementation-pr",
-          "missing_labels": ["Ожидает экспертизы"],
-          "reason_code": "task_processing_not_started",
-          "reason_message": "Требуется начать выполнение."
-        },
-        {
-          "name": "task-processing-completed",
-          "outcome": "completed",
-          "has_labels": ["Экспертиза пройдена"],
-          "reason_code": "review_already_passed",
-          "reason_message": "Экспертиза уже пройдена."
-        }
-      ]
-    }
-  ],
-  "actions": [
-    {
-      "name": "implement",
-      "class": "engineering-synthesis",
-      "profile": "default"
-    }
-  ],
-  "instructions": [
-    {
-      "name": "default-directive",
-      "profile": "default",
-      "body": "Сформировать результат выполнения."
-    }
-  ],
-  "entities": [
-    {
-      "kind": "decision-rule",
-      "name": "description-assessment",
-      "target_contour": "decision",
-      "payload": {
-        "has_label": "description-assessment"
-      }
+      "name": "task-processing-start",
+      "action": "start-implementation-pr",
+      "missing_labels": ["Ожидает экспертизы"],
+      "reason_code": "task_processing_not_started",
+      "reason_message": "Требуется начать выполнение."
     }
   ]
 }
 ```
+
+Пример `actions/implement.json`:
+
+```json
+{
+  "name": "implement",
+  "class": "engineering-synthesis",
+  "profile": "default"
+}
+```
+
+Пример `instructions/default-directive.json`:
+
+```json
+{
+  "name": "default-directive",
+  "profile": "default",
+  "body": "Сформировать результат выполнения."
+}
+```
+
+Пример `entities/decision-rule--description-assessment.json`:
+
+```json
+{
+  "kind": "decision-rule",
+  "name": "description-assessment",
+  "target_contour": "decision",
+  "payload": {
+    "has_label": "description-assessment"
+  }
+}
+```
+
+Имя файла должно совпадать с ключом объекта. Для `routes`, `actions` и `instructions` ключом является `name`. Для `entities` ключ задаётся как `<kind>--<name>`.
+
+Монолитный файл `catalog.json` со старыми массивами остаётся входным миграционным форматом. После сохранения слой записывается в файловые реестры.
 
 ## Просмотр
 
@@ -124,19 +144,19 @@ progress methodology select --route task-processing --action implement --profile
 
 ## Сохранение каталога
 
-Сохранить полный файл каталога в локальный слой:
+Сохранить полный файл каталога в локальный слой и разнести объекты по файловым реестрам:
 
 ```bash
 progress methodology save --file ./catalog.json --scope local
 ```
 
-Сохранить полный файл каталога в глобальный слой:
+Сохранить полный файл каталога в глобальный слой и разнести объекты по файловым реестрам:
 
 ```bash
 progress methodology save --file ./catalog.json --scope global
 ```
 
-Команда заменяет содержимое выбранного слоя после проверки структуры каталога.
+Команда заменяет содержимое выбранного слоя после проверки структуры каталога. Старый монолитный файл можно передать этой же команде для миграции.
 
 ## Добавление экземпляров
 
@@ -194,4 +214,4 @@ progress methodology add entity \
   --payload '{"has_label":"description-assessment","missing_label":"description-assessed"}'
 ```
 
-По умолчанию команды `add` записывают локальный слой. Для записи в глобальный слой используется `--scope global`.
+По умолчанию команды `add` записывают локальный слой. Для записи в глобальный слой используется `--scope global`. Команда обновляет JSON-файл соответствующего объекта; если выбранный слой ещё хранится монолитным `catalog.json`, первый запуск переносит все объекты слоя в новый файловый формат.
