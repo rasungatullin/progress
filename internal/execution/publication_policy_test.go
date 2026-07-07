@@ -238,7 +238,7 @@ func TestReviewRemarkUsesMeaningfulTitleOnlyWithOptionalHeading(t *testing.T) {
 	firstFound := false
 	secondFound := false
 	for _, comment := range comments {
-		if strings.Contains(comment.Body, "Замечание: remark-1") {
+		if strings.Contains(comment.Body, "Идентификатор: remark-1") {
 			if strings.Contains(comment.Body, "Проверить граничный кейс") {
 				t.Fatalf("generic title was not filtered as meaningful-only marker: %q", comment.Body)
 			}
@@ -247,7 +247,7 @@ func TestReviewRemarkUsesMeaningfulTitleOnlyWithOptionalHeading(t *testing.T) {
 			}
 			firstFound = true
 		}
-		if strings.Contains(comment.Body, "Замечание: remark-2") {
+		if strings.Contains(comment.Body, "Идентификатор: remark-2") {
 			if !strings.Contains(comment.Body, "Проверить граничный кейс") {
 				t.Fatalf("meaningful title should be kept: %q", comment.Body)
 			}
