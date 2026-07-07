@@ -1063,6 +1063,38 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	}
 }
 
+func TestPublishPullRequestCommentsRejectsNegativeInlineLine(t *testing.T) {
+	integrations := &stubIntegrationExecutor{}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body: "## Замечание ревизии\n\nНекорректная строка.",
+		Path: "internal/execution/integration_operations.go",
+		Line: -1,
+		Side: "RIGHT",
+	}, {
+		Body: "## Замечание ревизии\n\nКорректная строка.",
+		Path: "internal/execution/integration_operations.go",
+		Line: 42,
+		Side: "RIGHT",
+	}})
+	if err == nil {
+		t.Fatal("expected negative inline line error")
+	}
+	if !strings.Contains(err.Error(), "inline line must be positive or omitted, got -1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("valid review remark must still be published, got count=%d", count)
+	}
+	if len(integrations.calls) != 1 {
+		t.Fatalf("negative line must not be sent to integration executor: %#v", integrations.calls)
+	}
+	if integrations.calls[0].Path != "internal/execution/integration_operations.go" || integrations.calls[0].Line != 42 || integrations.calls[0].Side != "RIGHT" {
+		t.Fatalf("valid inline remark must keep location: %#v", integrations.calls[0])
+	}
+}
+
 func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)

@@ -248,6 +248,10 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 		path := strings.TrimSpace(comment.Path)
 		side := strings.TrimSpace(comment.Side)
 		line := 0
+		if comment.Line < 0 {
+			failures = append(failures, fmt.Errorf("publish review remark comment %s: inline line must be positive or omitted, got %d", reviewRemarkCommentTarget(comment), comment.Line))
+			continue
+		}
 		if path != "" && comment.Line > 0 {
 			line = comment.Line
 			if side == "" {
@@ -757,12 +761,15 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 
 func reviewRemarkCommentTarget(comment reviewRemarkComment) string {
 	path := strings.TrimSpace(comment.Path)
-	if path == "" || comment.Line <= 0 {
-		return "pull-request"
-	}
 	side := strings.TrimSpace(comment.Side)
 	if side == "" {
 		side = "RIGHT"
+	}
+	if path != "" && comment.Line != 0 {
+		return fmt.Sprintf("%s:%d:%s", path, comment.Line, side)
+	}
+	if path == "" || comment.Line <= 0 {
+		return "pull-request"
 	}
 	return fmt.Sprintf("%s:%d:%s", path, comment.Line, side)
 }
