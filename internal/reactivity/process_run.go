@@ -200,10 +200,25 @@ func validateReactionProcess(process ReactionProcess) error {
 	if process.Payload.Source.Type != ReactionProcessSourceTracker {
 		return fmt.Errorf("процесс реакции %q имеет неподдержанный источник %q", process.Name, process.Payload.Source.Type)
 	}
-	if len(process.Payload.Source.Labels) == 0 {
+	if countNonEmptyStrings(process.Payload.Source.Labels) == 0 {
 		return fmt.Errorf("процесс реакции %q должен задавать хотя бы одну включающую метку источника", process.Name)
 	}
+	if minDurationText := strings.TrimSpace(process.Payload.Cycle.MinDuration); minDurationText != "" {
+		if _, err := time.ParseDuration(minDurationText); err != nil {
+			return fmt.Errorf("разобрать cycle.min_duration процесса реакции %q: %w", process.Name, err)
+		}
+	}
 	return nil
+}
+
+func countNonEmptyStrings(values []string) int {
+	count := 0
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *Service) searchProcessTasks(ctx context.Context, source ProcessTaskSource) ([]int, error) {

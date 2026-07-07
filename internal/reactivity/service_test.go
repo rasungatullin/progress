@@ -212,6 +212,58 @@ func TestServiceRunProcessStopsOnTaskError(t *testing.T) {
 	}
 }
 
+func TestServiceRunProcessValidatesMinDurationBeforeSearch(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	process := testReactionProcess(t)
+	process.Payload = marshalReactionProcessPayload(t, ReactionProcessPayload{
+		Enabled: true,
+		Source: ProcessTaskSource{
+			Type:   ReactionProcessSourceTracker,
+			Labels: []string{"Готово к реализации"},
+		},
+		Cycle: ReactionProcessCycleSpec{MinDuration: "ten minutes"},
+	})
+	service := NewService(nil)
+	service.integration = integrations
+	service.methodology = methodologyProcessStub{process: process}
+
+	_, err := service.RunProcess(context.Background(), ProcessRunInput{Name: "ready-implementation-cycle", Once: true})
+	if err == nil || !strings.Contains(err.Error(), "cycle.min_duration") {
+		t.Fatalf("expected min_duration validation error, got %v", err)
+	}
+	if len(integrations.requests) != 0 {
+		t.Fatalf("process must validate cycle before search, got requests %#v", integrations.requests)
+	}
+}
+
+func TestServiceRunProcessRejectsBlankNormalizedLabelsBeforeSearch(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	process := testReactionProcess(t)
+	process.Payload = marshalReactionProcessPayload(t, ReactionProcessPayload{
+		Enabled: true,
+		Source: ProcessTaskSource{
+			Type:   ReactionProcessSourceTracker,
+			Labels: []string{" "},
+		},
+		Cycle: ReactionProcessCycleSpec{MinDuration: "10m"},
+	})
+	service := NewService(nil)
+	service.integration = integrations
+	service.methodology = methodologyProcessStub{process: process}
+
+	_, err := service.RunProcess(context.Background(), ProcessRunInput{Name: "ready-implementation-cycle", Once: true})
+	if err == nil || !strings.Contains(err.Error(), "включающую метку") {
+		t.Fatalf("expected label validation error, got %v", err)
+	}
+	if len(integrations.requests) != 0 {
+		t.Fatalf("process must validate labels before search, got requests %#v", integrations.requests)
+	}
+}
+
 func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) {
 	t.Parallel()
 
@@ -802,7 +854,7 @@ func (s methodologyProcessStub) Get(_ context.Context, request methodology.Eleme
 
 func testReactionProcess(t *testing.T) methodology.Entity {
 	t.Helper()
-	payload, err := json.Marshal(ReactionProcessPayload{
+	payload := marshalReactionProcessPayload(t, ReactionProcessPayload{
 		Enabled: true,
 		Source: ProcessTaskSource{
 			Type:          ReactionProcessSourceTracker,
@@ -815,9 +867,6 @@ func testReactionProcess(t *testing.T) methodology.Entity {
 		TaskProcessing: ProcessTaskProcessing{Route: "task-processing", MaxCycles: 20},
 		Cycle:          ReactionProcessCycleSpec{MinDuration: "10m"},
 	})
-	if err != nil {
-		t.Fatalf("marshal process payload: %v", err)
-	}
 	return methodology.Entity{
 		Kind:          ReactionProcessKind,
 		Name:          "ready-implementation-cycle",
@@ -825,6 +874,15 @@ func testReactionProcess(t *testing.T) methodology.Entity {
 		Title:         "Цикл обработки готовых к реализации задач",
 		Payload:       payload,
 	}
+}
+
+func marshalReactionProcessPayload(t *testing.T, payload ReactionProcessPayload) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal process payload: %v", err)
+	}
+	return data
 }
 
 func intsToStrings(values []int) []string {
