@@ -887,6 +887,22 @@ func TestServiceConsiderRoutesReviewPassedTaskToReworkForMergeConflict(t *testin
 	}
 }
 
+func TestMergeRequestHasConflictIgnoresNonConflictGitHubStatesAndLabels(t *testing.T) {
+	t.Parallel()
+
+	for _, state := range []string{"BEHIND", "BLOCKED"} {
+		mergeRequest := &integration.MergeRequest{Attributes: map[string]string{"merge_state_status": state}}
+		if mergeRequestHasConflict(mergeRequest) {
+			t.Fatalf("merge_state_status=%s must not be treated as conflict", state)
+		}
+	}
+
+	mergeRequest := &integration.MergeRequest{Traits: []string{"blocked", "behind", "conflict"}}
+	if mergeRequestHasConflict(mergeRequest) {
+		t.Fatal("PR labels must not be treated as merge conflicts")
+	}
+}
+
 func TestServiceConsiderRequiresMergeRequestForReview(t *testing.T) {
 	t.Parallel()
 

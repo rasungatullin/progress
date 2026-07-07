@@ -241,15 +241,15 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 		Number:          taskNumber,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if response.Issue == nil {
-		return nil, nil, nil, fmt.Errorf("контур интеграции не вернул задачу %d", taskNumber)
+		return nil, nil, nil, nil, fmt.Errorf("контур интеграции не вернул задачу %d", taskNumber)
 	}
 
 	mergeRequest, err := s.findTaskMergeRequest(ctx, response.Issue)
 	if err != nil {
-		if requireMergeRequest || taskLabelsRequireMergeRequest(response.Issue.Labels) {
+		if requireMergeRequest || taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) {
 			return nil, nil, nil, err, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, err)
 		}
 		s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%d ошибка=%v", taskNumber, err)
@@ -308,9 +308,6 @@ func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
 	if mergeRequest == nil {
 		return false
 	}
-	if hasConflictMarker(mergeRequest.Traits) {
-		return true
-	}
 	for key, value := range mergeRequest.Attributes {
 		switch strings.ToLower(strings.TrimSpace(key)) {
 		case "has_merge_conflict", "merge_conflict", "conflict", "conflicted":
@@ -330,18 +327,9 @@ func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
 	return false
 }
 
-func hasConflictMarker(values []string) bool {
-	for _, value := range values {
-		if isConflictMergeState(value) {
-			return true
-		}
-	}
-	return false
-}
-
 func isConflictMergeState(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "conflict", "conflicted", "conflicting", "dirty", "blocked", "behind", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
+	case "conflict", "conflicted", "conflicting", "dirty", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
 		return true
 	default:
 		return false
@@ -661,6 +649,11 @@ func taskLabelsRequireMergeRequest(labels []string) bool {
 	_, needsRework := findLabel(labels, LabelNeedsRework)
 	_, reviewPassed := findLabel(labels, LabelReviewPassed)
 	return awaitingReview || needsRework || reviewPassed
+}
+
+func taskLabelsRequireCompletionMergeRequest(labels []string) bool {
+	_, reviewPassed := findLabel(labels, LabelReviewPassed)
+	return reviewPassed
 }
 
 func removeLabels(existing []string, removed []string) []string {

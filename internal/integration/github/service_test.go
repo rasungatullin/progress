@@ -79,7 +79,7 @@ func TestServiceAuthStatusMapsTimeout(t *testing.T) {
 	}
 }
 
-func TestReviewRemarksFromThreadsMarksOutdatedThreads(t *testing.T) {
+func TestReviewRemarksFromThreadsKeepsUnresolvedOutdatedThreadsBlocking(t *testing.T) {
 	t.Parallel()
 
 	remarks := reviewRemarksFromThreads("owner/name", 17, []ghPRReviewThread{{
@@ -95,8 +95,8 @@ func TestReviewRemarksFromThreadsMarksOutdatedThreads(t *testing.T) {
 	if len(remarks) != 1 {
 		t.Fatalf("expected one remark, got %#v", remarks)
 	}
-	if remarks[0].State != "outdated" {
-		t.Fatalf("expected outdated state, got %#v", remarks[0])
+	if remarks[0].State != "unresolved" {
+		t.Fatalf("expected unresolved state, got %#v", remarks[0])
 	}
 }
 

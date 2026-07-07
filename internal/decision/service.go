@@ -216,9 +216,6 @@ func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
 	if mergeRequest == nil {
 		return false
 	}
-	if hasConflictMarker(mergeRequest.Traits) {
-		return true
-	}
 	for key, value := range mergeRequest.Attributes {
 		switch strings.ToLower(strings.TrimSpace(key)) {
 		case "has_merge_conflict", "merge_conflict", "conflict", "conflicted":
@@ -238,18 +235,9 @@ func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
 	return false
 }
 
-func hasConflictMarker(values []string) bool {
-	for _, value := range values {
-		if isConflictMergeState(value) {
-			return true
-		}
-	}
-	return false
-}
-
 func isConflictMergeState(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "conflict", "conflicted", "conflicting", "dirty", "blocked", "behind", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
+	case "conflict", "conflicted", "conflicting", "dirty", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
 		return true
 	default:
 		return false
