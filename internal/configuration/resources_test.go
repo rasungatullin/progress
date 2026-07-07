@@ -128,6 +128,43 @@ func TestLoadExecutionResourceConfigLocalEmptyGitOverridesGlobalGit(t *testing.T
 	}
 }
 
+func TestLoadExecutionResourceConfigMergesPrivateStoreByFields(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/config-home/execution/resources.json":
+			return []byte(`{
+				"defaults": {"model-binding": "default"},
+				"runners": ["opencode"],
+				"models": ["openai/gpt-5.4"],
+				"bindings": {"default": {"runner": "opencode", "model": "openai/gpt-5.4"}},
+				"private_store": {"type": "file", "service": "progress-global"}
+			}`), nil
+		case "/repo/.progress/execution/resources.json":
+			return []byte(`{
+				"private_store": {"path": "private/local.json"}
+			}`), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	config, err := LoadExecutionResourceConfigWithHome("/repo", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load resources config: %v", err)
+	}
+	if config.Config.PrivateStore.Type != "file" {
+		t.Fatalf("private_store.type must be inherited: %#v", config.Config.PrivateStore)
+	}
+	if config.Config.PrivateStore.Service != "progress-global" {
+		t.Fatalf("private_store.service must be inherited: %#v", config.Config.PrivateStore)
+	}
+	if config.Config.PrivateStore.Path != "private/local.json" {
+		t.Fatalf("private_store.path must be overridden: %#v", config.Config.PrivateStore)
+	}
+}
+
 func TestLoadExecutionResourceConfigRejectsPartialGitIdentity(t *testing.T) {
 	t.Parallel()
 

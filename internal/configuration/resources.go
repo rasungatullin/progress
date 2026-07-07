@@ -409,8 +409,8 @@ func mergeExecutionResourceLayers(layers []ExecutionResourceLayer) ExecutionReso
 		if strings.TrimSpace(config.Defaults.Environment) != "" {
 			merged.Defaults.Environment = config.Defaults.Environment
 		}
-		if strings.TrimSpace(config.PrivateStore.Type) != "" || strings.TrimSpace(config.PrivateStore.Service) != "" || strings.TrimSpace(config.PrivateStore.Path) != "" {
-			merged.PrivateStore = config.PrivateStore
+		if hasPrivateStoreConfig(config.PrivateStore) {
+			merged.PrivateStore = mergePrivateStoreConfig(merged.PrivateStore, config.PrivateStore)
 		}
 		if layer.GitConfigured {
 			merged.Git = config.Git
@@ -429,6 +429,24 @@ func mergeExecutionResourceLayers(layers []ExecutionResourceLayer) ExecutionReso
 		BindingSources:     bindingSources,
 		GitSource:          gitSource,
 	}
+}
+
+func hasPrivateStoreConfig(config model.ResourcePrivateStoreConfig) bool {
+	return strings.TrimSpace(config.Type) != "" || strings.TrimSpace(config.Service) != "" || strings.TrimSpace(config.Path) != ""
+}
+
+func mergePrivateStoreConfig(base, override model.ResourcePrivateStoreConfig) model.ResourcePrivateStoreConfig {
+	merged := base
+	if strings.TrimSpace(override.Type) != "" {
+		merged.Type = override.Type
+	}
+	if strings.TrimSpace(override.Service) != "" {
+		merged.Service = override.Service
+	}
+	if strings.TrimSpace(override.Path) != "" {
+		merged.Path = override.Path
+	}
+	return merged
 }
 
 func normalizeExecutionResourceConfig(config model.ResourceConfigFile, addDefaultEnvironments bool) model.ResourceConfigFile {

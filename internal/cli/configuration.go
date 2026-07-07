@@ -469,7 +469,7 @@ func mutateExecutionResourceLayer(cmd *cobra.Command, flags *configurationResour
 		return "", err
 	}
 
-	config, err := loadExecutionResourceLayerForWrite(path)
+	config, preserveEmptyGit, err := loadExecutionResourceLayerForWrite(path)
 	if err != nil {
 		return "", err
 	}
@@ -477,6 +477,9 @@ func mutateExecutionResourceLayer(cmd *cobra.Command, flags *configurationResour
 		return "", err
 	}
 	config = configcontour.NormalizeExecutionResourceLayerConfig(config)
+	if preserveEmptyGit && config.Git == nil {
+		config.Git = &model.GitConfig{}
+	}
 	if err := writeExecutionResourceLayer(path, config); err != nil {
 		return "", err
 	}
@@ -484,15 +487,30 @@ func mutateExecutionResourceLayer(cmd *cobra.Command, flags *configurationResour
 	return path, nil
 }
 
-func loadExecutionResourceLayerForWrite(path string) (model.ResourceConfigFile, error) {
-	config, err := configcontour.LoadExecutionResourceConfigFile(path, os.ReadFile)
+func loadExecutionResourceLayerForWrite(path string) (model.ResourceConfigFile, bool, error) {
+	content, readErr := os.ReadFile(path)
+	if readErr != nil {
+		if errors.Is(readErr, fs.ErrNotExist) {
+			return configcontour.NewExecutionResourceConfigFile(), false, nil
+		}
+		return model.ResourceConfigFile{}, false, readErr
+	}
+
+	preserveEmptyGit := jsonObjectHasKey(content, "git")
+	config, err := configcontour.LoadExecutionResourceConfigFile(path, func(string) ([]byte, error) { return content, nil })
 	if err == nil {
-		return config, nil
+		return config, preserveEmptyGit, nil
 	}
-	if errors.Is(err, fs.ErrNotExist) {
-		return configcontour.NewExecutionResourceConfigFile(), nil
+	return model.ResourceConfigFile{}, false, err
+}
+
+func jsonObjectHasKey(content []byte, key string) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(content, &raw); err != nil {
+		return false
 	}
-	return model.ResourceConfigFile{}, err
+	_, ok := raw[key]
+	return ok
 }
 
 func loadExecutionResourceParentLayerForWrite(flags *configurationResourceFlags) (model.ResourceConfigFile, bool, error) {
