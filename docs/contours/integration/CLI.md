@@ -379,20 +379,37 @@ gh issue edit 123 --repo owner/name --remove-label bug
 
 ### 7.10 `progress integration github issue search`
 
-Команда выполняет поиск issue в репозитории или во всём доступном GitHub-пространстве.
+Команда получает список задач GitHub с фильтрами по состоянию, строке поиска и меткам.
 
 Вариант вызова:
 
 ```bash
-gh issue list --repo owner/name --search "is:open label:bug" --json number,title,state,labels,assignees,url,updatedAt
+progress integration github issue search \
+  --repo owner/name \
+  --label "Готово к реализации" \
+  --exclude-label "Требует проработки" \
+  --state open
 ```
 
-Команда должна поддерживать:
+Вариант системного вызова:
 
-- фильтр по репозиторию;
-- строку поиска GitHub;
-- ограничение количества результатов;
-- режим краткого и подробного вывода.
+```bash
+gh issue list --repo owner/name --state open --limit 30 --json number,title,state,labels,assignees,author,url,createdAt,updatedAt --search 'label:"Готово к реализации" -label:"Требует проработки"'
+```
+
+Команда поддерживает:
+
+- `--repo` — репозиторий GitHub в формате `owner/name`; если флаг не передан, адаптер может использовать `default_repo` из конфигурации; если пользователь явно передал пустой `--repo=`, резервный выбор не применяется и запрос отклоняется как `invalid-request`;
+- `--state` — состояние задач: `open`, `closed`, `all`; по умолчанию `open`;
+- `--label` — включающая метка, флаг можно повторять; несколько меток задают пересечение;
+- `--exclude-label` — исключающая метка, флаг можно повторять; несколько меток исключают задачи, у которых есть любая из этих меток;
+- `--query` — дополнительная строка поиска GitHub, добавляется к сформированным фильтрам по меткам;
+- `--limit` — предельное число задач;
+- `--format json` — машинно-читаемый вывод без потери меток.
+
+Поля `--label` и `--exclude-label` принимают канонические названия меток задачи. Перед вызовом GitHub контур интеграции переводит их во внешние имена по `task_label_mapping`. Если сопоставление не задано, используется то же название.
+
+Текстовый вывод содержит количество найденных задач и основные поля каждой задачи: номер, заголовок, состояние, метки, автор, назначенные исполнители, URL и время изменения.
 
 ### 7.11 `progress integration github pr get`
 
@@ -865,7 +882,7 @@ PROGRESS_INTEGRATION_REQUEST_FILE
 PROGRESS_INTEGRATION_TIMEOUT
 ```
 
-Файл `PROGRESS_INTEGRATION_REQUEST_FILE` содержит `system`, `integration_type`, `operation_name`, `object_type`, `operation`, `request` и `settings`. Поле `settings` содержит только явно настроенные несекретные значения. `token` и значение из `token_env` в JSON-файл не записываются.
+Файл `PROGRESS_INTEGRATION_REQUEST_FILE` содержит `system`, `integration_type`, `operation_name`, `object_type`, `operation`, `request` и `settings`. Для `tracker.task.search` поле `request` может содержать `query`, `state`, `labels`, `exclude_labels` и `limit`. Поле `settings` содержит только явно настроенные несекретные значения. `token` и значение из `token_env` в JSON-файл не записываются.
 
 Успешный ответ сценария:
 

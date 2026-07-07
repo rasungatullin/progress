@@ -168,6 +168,47 @@ func (r *Runner) RunIssueView(ctx context.Context, repository string, number int
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"issue", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,labels,assignees,author,url,createdAt,updatedAt"})
 }
 
+func (r *Runner) RunIssueList(ctx context.Context, repository string, request IssueListRequest) (CommandResult, resolvedConfig, error) {
+	request, err := normalizeIssueListRequest(request)
+	if err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{
+			Code:    ErrorCodeInvalidRequest,
+			Message: err.Error(),
+			Result:  result,
+		}
+	}
+
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+
+	repository = firstNonEmpty(repository, config.DefaultRepo)
+	if repository != "" {
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			result := CommandResult{Command: config.Command, ExitCode: -1}
+			return result, config, &Error{
+				Code:    ErrorCodeInvalidRequest,
+				Message: err.Error(),
+				Result:  result,
+			}
+		}
+	}
+
+	args := []string{"issue", "list"}
+	if repository != "" {
+		args = append(args, "--repo", repository)
+	}
+	args = append(args, "--state", request.State, "--limit", strconv.Itoa(request.Limit), "--json", "number,title,state,labels,assignees,author,url,createdAt,updatedAt")
+	if search := issueListSearchQuery(request); search != "" {
+		args = append(args, "--search", search)
+	}
+
+	return r.runCommandWithResolvedConfig(ctx, config, args)
+}
+
 func (r *Runner) RunIssueComments(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
 	number, err := normalizeIssueNumber(number)
 	if err != nil {
@@ -645,6 +686,14 @@ type PRCreateRequest struct {
 	Draft bool
 }
 
+type IssueListRequest struct {
+	State         string
+	Query         string
+	Labels        []string
+	ExcludeLabels []string
+	Limit         int
+}
+
 type PRListRequest struct {
 	State string
 	Scope string
@@ -716,6 +765,41 @@ func normalizeIssueLabels(labels []string) []string {
 		result = append(result, label)
 	}
 	return result
+}
+
+func normalizeIssueListRequest(request IssueListRequest) (IssueListRequest, error) {
+	request.State = strings.TrimSpace(strings.ToLower(request.State))
+	request.Query = strings.TrimSpace(request.Query)
+	request.Labels = normalizeIssueLabels(request.Labels)
+	request.ExcludeLabels = normalizeIssueLabels(request.ExcludeLabels)
+
+	switch request.State {
+	case "":
+		request.State = "open"
+	case "open", "closed", "all":
+	default:
+		return IssueListRequest{}, fmt.Errorf("GitHub issue state must be one of open, closed or all")
+	}
+
+	if request.Limit <= 0 {
+		request.Limit = 30
+	}
+
+	return request, nil
+}
+
+func issueListSearchQuery(request IssueListRequest) string {
+	parts := make([]string, 0, 1+len(request.Labels)+len(request.ExcludeLabels))
+	if request.Query != "" {
+		parts = append(parts, request.Query)
+	}
+	for _, label := range request.Labels {
+		parts = append(parts, fmt.Sprintf("label:%q", label))
+	}
+	for _, label := range request.ExcludeLabels {
+		parts = append(parts, fmt.Sprintf("-label:%q", label))
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
 func normalizePullRequestNumber(number int) (int, error) {

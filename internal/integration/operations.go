@@ -92,6 +92,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 	case "github":
 		return []operationTemplate{
 			trackerTaskGetOperation(),
+			trackerTaskSearchOperation(true),
 			trackerTaskCommentListOperation(),
 			trackerTaskCommentCreateOperation(),
 			trackerTaskLabelAddOperation(),
@@ -133,7 +134,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 		return []operationTemplate{
 			trackerTaskCreateOperation(),
 			trackerTaskGetOperation(),
-			trackerTaskSearchOperation(),
+			trackerTaskSearchOperation(false),
 			trackerTaskUpdateOperation(),
 			trackerTaskCommentListOperation(),
 			trackerTaskCommentCreateOperation(),
@@ -232,7 +233,7 @@ func operationFields(names []string, defaults map[string]string) []model.Operati
 		if defaults != nil {
 			field.Default = strings.TrimSpace(defaults[name])
 		}
-		if name == "labels" || name == "fields" {
+		if isRepeatedOperationField(name) {
 			field.Repeated = true
 		}
 		result = append(result, field)
@@ -246,7 +247,7 @@ func operationFieldType(name string) string {
 		return "integer"
 	case "draft", "dry_run":
 		return "boolean"
-	case "labels", "fields":
+	case "labels", "exclude_labels", "fields":
 		return "string[]"
 	default:
 		return "string"
@@ -359,13 +360,17 @@ func trackerTaskCreateOperation() operationTemplate {
 	}
 }
 
-func trackerTaskSearchOperation() operationTemplate {
+func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
+	optional := optionalFields("query", "state", "labels", "limit")
+	if includeExcludeLabels {
+		optional = append(optional, optionalFields("exclude_labels")...)
+	}
 	return operationTemplate{
 		Name:            "tracker.task.search",
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task",
 		Operation:       "search",
-		Input:           model.OperationInputContract{Optional: optionalFields("query", "state", "labels", "limit")},
+		Input:           model.OperationInputContract{Optional: optional},
 		Output:          output("tracker-search-result", "TrackerSearchResult[]"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -614,9 +619,18 @@ func optionalField(name string, fieldType string) model.OperationField {
 func optionalFields(names ...string) []model.OperationField {
 	fields := make([]model.OperationField, 0, len(names))
 	for _, name := range names {
-		fields = append(fields, model.OperationField{Name: name, Type: operationFieldType(name), Repeated: name == "fields" || name == "labels"})
+		fields = append(fields, model.OperationField{Name: name, Type: operationFieldType(name), Repeated: isRepeatedOperationField(name)})
 	}
 	return fields
+}
+
+func isRepeatedOperationField(name string) bool {
+	switch strings.TrimSpace(strings.ToLower(name)) {
+	case "fields", "labels", "exclude_labels":
+		return true
+	default:
+		return false
+	}
 }
 
 func output(resource string, shape string) model.OperationOutputContract {

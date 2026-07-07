@@ -277,6 +277,9 @@ func requestMap(req model.ProviderRequest) map[string]any {
 	if len(req.Labels) > 0 {
 		request["labels"] = append([]string(nil), req.Labels...)
 	}
+	if len(req.ExcludeLabels) > 0 {
+		request["exclude_labels"] = append([]string(nil), req.ExcludeLabels...)
+	}
 	return request
 }
 

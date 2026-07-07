@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -981,6 +982,70 @@ func TestAPITransportFiltersMergedPullRequestsFromClosedState(t *testing.T) {
 	}
 	if pulls[0].State != "closed" {
 		t.Fatalf("closed pull request must be exposed as closed, got %q", pulls[0].State)
+	}
+}
+
+func TestAPITransportIssueListReadsPagesUntilLimit(t *testing.T) {
+	t.Parallel()
+
+	var requestedPagesMu sync.Mutex
+	requestedPages := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("per_page") != "100" {
+			t.Fatalf("unexpected per_page: %s", r.URL.Query().Get("per_page"))
+		}
+		requestedPagesMu.Lock()
+		requestedPages = append(requestedPages, r.URL.Query().Get("page"))
+		requestedPagesMu.Unlock()
+
+		page := r.URL.Query().Get("page")
+		start := 1
+		if page == "2" {
+			start = 101
+		}
+		items := make([]map[string]any, 0, 100)
+		for i := start; i < start+100; i++ {
+			items = append(items, map[string]any{
+				"number":   i,
+				"title":    fmt.Sprintf("issue %d", i),
+				"state":    "open",
+				"html_url": fmt.Sprintf("https://github.com/owner/name/issues/%d", i),
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:    server.URL,
+			Token:      "secret",
+			Repository: "owner/name",
+		},
+		client: server.Client(),
+	}
+
+	result, _, err := runner.RunIssueList(context.Background(), "", IssueListRequest{State: "open", Limit: 150})
+	if err != nil {
+		t.Fatalf("list issues: %v", err)
+	}
+	requestedPagesMu.Lock()
+	defer requestedPagesMu.Unlock()
+	if strings.Join(requestedPages, ",") != "1,2" {
+		t.Fatalf("unexpected requested pages: %#v", requestedPages)
+	}
+	var issues []ghIssueView
+	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
+		t.Fatalf("decode issues: %v", err)
+	}
+	if len(issues) != 150 {
+		t.Fatalf("expected 150 issues, got %d", len(issues))
+	}
+	if issues[0].Number != 1 || issues[149].Number != 150 {
+		t.Fatalf("unexpected issue range: first=%d last=%d", issues[0].Number, issues[149].Number)
 	}
 }
 

@@ -45,6 +45,7 @@ type integrationFlags struct {
 	line            int
 	limit           int
 	labels          []string
+	excludeLabels   []string
 }
 
 type integrationPrivateFlags struct {
@@ -321,6 +322,7 @@ func newIntegrationGitHubIssueCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newIntegrationGitHubIssueGetCommand())
+	cmd.AddCommand(newIntegrationGitHubIssueSearchCommand())
 	cmd.AddCommand(newIntegrationGitHubIssueCommentsCommand())
 	cmd.AddCommand(newIntegrationGitHubIssueCommentCommand())
 	cmd.AddCommand(newIntegrationGitHubIssueLabelCommand())
@@ -1013,6 +1015,53 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 	return cmd
 }
 
+func newIntegrationGitHubIssueSearchCommand() *cobra.Command {
+	flags := &integrationFlags{state: "open"}
+
+	cmd := &cobra.Command{
+		Use:   "search",
+		Short: "Поиск задач GitHub",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := integrationOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
+			service := newIntegrationService(cmd)
+			response, err := service.Execute(cmd.Context(), integration.Request{
+				IntegrationType: "tracker",
+				System:          "github",
+				Resource:        "issue",
+				ObjectType:      "task",
+				Operation:       "search",
+				Repository:      flags.repo,
+				RepoProvided:    cmd.Flags().Changed("repo"),
+				Query:           flags.query,
+				State:           flags.state,
+				Limit:           flags.limit,
+				Labels:          flags.labels,
+				ExcludeLabels:   flags.excludeLabels,
+			})
+			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssueSearchResults); printErr != nil {
+				return printErr
+			}
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
+	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние задач: open, closed или all")
+	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Каноническое название включающей метки задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-label", nil, "Каноническое название исключающей метки задачи")
+	cmd.Flags().StringVar(&flags.query, "query", "", "Дополнительная строка поиска GitHub")
+	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число задач")
+	return cmd
+}
+
 func newIntegrationGitHubIssueCommentsCommand() *cobra.Command {
 	flags := &integrationFlags{}
 
@@ -1490,6 +1539,54 @@ func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 	}
 
 	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	for _, diagnostic := range status.Diagnostics {
+		cmd.Printf("diagnostic=%s\n", diagnostic)
+	}
+	printMultilineField(cmd, "stdout", status.Stdout)
+	printMultilineField(cmd, "stderr", status.Stderr)
+}
+
+func printGitHubIssueSearchResults(cmd *cobra.Command, response integration.Response) {
+	if response.Failure != nil {
+		printFailure(cmd, response)
+		return
+	}
+
+	if response.SearchResults != nil {
+		repository := ""
+		if response.Metadata != nil {
+			repository = response.Metadata["repository"]
+		}
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nissue_count=%d\n", response.System, response.Resource, response.Operation, repository, len(response.SearchResults))
+		for _, issue := range response.SearchResults {
+			cmd.Printf("number=%d\ntitle=%s\nstate=%s\n", issue.Number, issue.Title, issue.State)
+			for _, label := range issue.Labels {
+				cmd.Printf("label=%s\n", label)
+			}
+			if issue.Author.Login != "" || issue.Author.Name != "" || issue.Author.URL != "" {
+				cmd.Printf("author_login=%s\nauthor_name=%s\nauthor_url=%s\n", issue.Author.Login, issue.Author.Name, issue.Author.URL)
+			}
+			for _, assignee := range issue.Assignees {
+				cmd.Printf("assignee_login=%s\n", assignee.Login)
+				if assignee.Name != "" {
+					cmd.Printf("assignee_name=%s\n", assignee.Name)
+				}
+				if assignee.URL != "" {
+					cmd.Printf("assignee_url=%s\n", assignee.URL)
+				}
+			}
+			cmd.Printf("url=%s\ncreated_at=%s\nupdated_at=%s\n", issue.URL, issue.CreatedAt, issue.UpdatedAt)
+		}
+		return
+	}
+
+	status := response.IssueStatus
+	if status == nil {
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nmessage=GitHub issue search did not return normalized results\n", response.System, response.Resource, response.Operation)
+		return
+	}
+
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.State, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}

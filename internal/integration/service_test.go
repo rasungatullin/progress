@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -430,6 +431,42 @@ func TestExecuteMapsCanonicalTaskLabelsToExternal(t *testing.T) {
 	}
 }
 
+func TestExecuteMapsCanonicalTaskSearchExcludeLabelsToExternal(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {
+				Type: "github",
+				TaskLabelMapping: map[string]string{
+					"external-ready":   "ready",
+					"external-blocked": "blocked",
+				},
+			},
+		},
+	})
+	provider := &capturingProvider{}
+	service.RegisterProvider("github", provider)
+
+	_, err := service.Execute(context.Background(), Request{
+		IntegrationType: "tracker",
+		System:          "github",
+		Resource:        "issue",
+		Operation:       "search",
+		Labels:          []string{"ready"},
+		ExcludeLabels:   []string{"blocked", "plain"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if fmt.Sprint(provider.seen.Labels) != "[external-ready]" {
+		t.Fatalf("unexpected provider labels: %#v", provider.seen.Labels)
+	}
+	if fmt.Sprint(provider.seen.ExcludeLabels) != "[external-blocked plain]" {
+		t.Fatalf("unexpected provider exclude labels: %#v", provider.seen.ExcludeLabels)
+	}
+}
+
 func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 	t.Parallel()
 
@@ -456,8 +493,12 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 			RepositoryRef: &TrackerRepository{
 				System: "github",
 			},
-			SearchResults: []TrackerSearchResult{{System: "github"}},
-			Artifacts:     []Artifact{{System: "github"}},
+			SearchResults: []TrackerSearchResult{{
+				System:    "github",
+				Author:    TrackerUser{System: "github"},
+				Assignees: []TrackerUser{{System: "github"}},
+			}},
+			Artifacts: []Artifact{{System: "github"}},
 		},
 	})
 
@@ -484,7 +525,7 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 	if result.RepositoryRef == nil || result.RepositoryRef.System != "enterprise" {
 		t.Fatalf("expected repository payload system to use route name, got %#v", result.RepositoryRef)
 	}
-	if result.SearchResults[0].System != "enterprise" || result.Artifacts[0].System != "enterprise" {
+	if result.SearchResults[0].System != "enterprise" || result.SearchResults[0].Author.System != "enterprise" || result.SearchResults[0].Assignees[0].System != "enterprise" || result.Artifacts[0].System != "enterprise" {
 		t.Fatalf("expected search results and artifacts to use route name, got %#v %#v", result.SearchResults, result.Artifacts)
 	}
 }
@@ -640,6 +681,56 @@ func TestOperationsCatalogPublishesExecutableGitHubTaskCommentsRead(t *testing.T
 	}
 	if operation.Output.Resource != "task-comment" || operation.Output.Shape != "TaskComment[]" {
 		t.Fatalf("unexpected comment output contract: %#v", operation.Output)
+	}
+}
+
+func TestOperationsCatalogPublishesGitHubTaskSearch(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	operations := service.Operations(context.Background(), OperationFilter{System: "github", Name: "tracker.task.search"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one operation, got %#v", operations)
+	}
+	operation := operations[0]
+	if operation.Output.Shape != "TrackerSearchResult[]" {
+		t.Fatalf("unexpected search output contract: %#v", operation.Output)
+	}
+	optional := map[string]model.OperationField{}
+	for _, field := range operation.Input.Optional {
+		optional[field.Name] = field
+	}
+	for _, name := range []string{"labels", "exclude_labels"} {
+		field, ok := optional[name]
+		if !ok || field.Type != "string[]" || !field.Repeated {
+			t.Fatalf("expected repeated string list field %q, got %#v", name, field)
+		}
+	}
+}
+
+func TestOperationsCatalogDoesNotPublishLocalTrackerExcludeLabels(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"local": {
+				Type:            "local-tracker",
+				IntegrationType: model.IntegrationTypeTracker,
+				Database:        model.IntegrationDatabaseConfig{Driver: "sqlite", Path: filepath.Join(root, "tasks.sqlite")},
+			},
+		},
+	})
+	operations := service.Operations(context.Background(), OperationFilter{System: "local", Name: "tracker.task.search"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one operation, got %#v", operations)
+	}
+	for _, field := range operations[0].Input.Optional {
+		if field.Name == "exclude_labels" {
+			t.Fatalf("local tracker must not advertise unsupported exclude_labels field: %#v", operations[0].Input.Optional)
+		}
 	}
 }
 

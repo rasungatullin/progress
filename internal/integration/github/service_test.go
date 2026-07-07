@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -132,13 +133,50 @@ func TestServiceRejectsUnsupportedOperation(t *testing.T) {
 	t.Parallel()
 
 	service := NewService()
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "search"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "unknown", Operation: "search"})
 	assertGitHubErrorCode(t, err, ErrorCodeUnsupportedOperation)
-	if response.Resource != "issue" {
+	if response.Resource != "unknown" {
 		t.Fatalf("unexpected resource: %q", response.Resource)
 	}
 	if response.Failure == nil || response.Failure.Kind != model.FailureKindUnsupportedOperation {
 		t.Fatalf("unexpected failure: %#v", response.Failure)
+	}
+}
+
+func TestServiceIssueSearchReturnsNormalizedResults(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `[{"number":123,"title":"Fix integration","state":"OPEN","labels":[{"name":"ready"}],"assignees":[{"login":"alice","name":"Alice","url":"https://github.com/alice"}],"author":{"login":"bob","name":"Bob","url":"https://github.com/bob"},"url":"https://github.com/owner/name/issues/123","createdAt":"2026-05-01T10:00:00Z","updatedAt":"2026-05-02T10:00:00Z"}]`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "owner/name"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "search", Repository: "owner/name", State: "open", Query: "author:@me", Labels: []string{"ready"}, ExcludeLabels: []string{"blocked"}, Limit: 10})
+	if err != nil {
+		t.Fatalf("execute issue search: %v", err)
+	}
+	if stub.issueListCalls != 1 {
+		t.Fatalf("expected issue list call, got %d", stub.issueListCalls)
+	}
+	if stub.issueListRequest.Query != "author:@me" || fmt.Sprint(stub.issueListRequest.Labels) != "[ready]" || fmt.Sprint(stub.issueListRequest.ExcludeLabels) != "[blocked]" {
+		t.Fatalf("unexpected issue list request: %#v", stub.issueListRequest)
+	}
+	if len(response.SearchResults) != 1 {
+		t.Fatalf("unexpected search results: %#v", response.SearchResults)
+	}
+	result := response.SearchResults[0]
+	if result.Kind != "issue" || result.Number != 123 || result.Title != "Fix integration" || result.Labels[0] != "ready" {
+		t.Fatalf("unexpected search result: %#v", result)
+	}
+	if result.Author.Login != "bob" || len(result.Assignees) != 1 || result.Assignees[0].Login != "alice" {
+		t.Fatalf("unexpected users: %#v", result)
 	}
 }
 
@@ -1800,6 +1838,7 @@ type stubRunner struct {
 	repo              string
 	repoCalls         int
 	issueCalls        int
+	issueListCalls    int
 	issueCommentCalls int
 	issueLabelCalls   int
 	prViewCalls       int
@@ -1815,6 +1854,7 @@ type stubRunner struct {
 	body              string
 	labels            []string
 	draft             bool
+	issueListRequest  IssueListRequest
 	prListRequest     PRListRequest
 	prCommentRequest  PRCommentCreateRequest
 	prReplyRequest    PRReviewThreadReplyRequest
@@ -1836,6 +1876,13 @@ func (r *stubRunner) RunIssueView(_ context.Context, repository string, number i
 	r.issueCalls++
 	r.repo = repository
 	r.number = number
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunIssueList(_ context.Context, repository string, request IssueListRequest) (CommandResult, resolvedConfig, error) {
+	r.issueListCalls++
+	r.repo = repository
+	r.issueListRequest = request
 	return r.result, r.config, r.err
 }
 

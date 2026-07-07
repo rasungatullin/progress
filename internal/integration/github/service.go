@@ -15,6 +15,7 @@ type ghRunner interface {
 	RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error)
 	RunRepoView(context.Context, string) (CommandResult, resolvedConfig, error)
 	RunIssueView(context.Context, string, int) (CommandResult, resolvedConfig, error)
+	RunIssueList(context.Context, string, IssueListRequest) (CommandResult, resolvedConfig, error)
 	RunIssueComments(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunIssueCommentCreate(context.Context, string, int, string) (CommandResult, resolvedConfig, error)
 	RunIssueLabelsAdd(context.Context, string, int, []string) (CommandResult, resolvedConfig, error)
@@ -188,6 +189,8 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executeRepoGet(ctx, response, req)
 	case isIssueRequest(req) && req.Operation == "get":
 		return s.executeIssueGet(ctx, response, req)
+	case isIssueRequest(req) && (req.Operation == "list" || req.Operation == "search"):
+		return s.executeIssueList(ctx, response, req)
 	case isIssueRequest(req) && req.Operation == "comments":
 		return s.executeIssueComments(ctx, response, req)
 	case isIssueCommentRequest(req) && req.Operation == "create":
@@ -588,6 +591,74 @@ func (s *Service) executePRCommentResolve(ctx context.Context, response model.Re
 		Method:     methodFromConfig(config),
 		Endpoint:   "resolveReviewThread",
 		Message:    fmt.Sprintf("GitHub pull request review thread resolved: %s", resolvedThreadID),
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executeIssueList(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	repository := strings.TrimSpace(req.Repository)
+	if req.RepoProvided {
+		var err error
+		repository, err = normalizeRepository(repository)
+		if err != nil {
+			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "issue list request rejected before invoking gh")
+		}
+	}
+
+	listRequest, err := normalizeIssueListRequest(IssueListRequest{State: req.State, Query: req.Query, Labels: req.Labels, ExcludeLabels: req.ExcludeLabels, Limit: req.Limit})
+	if err != nil {
+		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "issue list request rejected before invoking gh")
+	}
+
+	result, config, err := s.runner.RunIssueList(ctx, repository, listRequest)
+	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
+	if err != nil {
+		return responseWithGitHubFailure(response, result, err, "gh issue list failed before returning an issue payload")
+	}
+	if result.ExitCode != 0 {
+		return responseWithGitHubExitFailure(response, result, repository, 0, "gh issue list exited with a non-zero code")
+	}
+
+	var raw []ghIssueView
+	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}, "gh issue list returned malformed JSON")
+	}
+
+	response.SearchResults = make([]model.TrackerSearchResult, 0, len(raw))
+	for _, item := range raw {
+		assignees := make([]model.TrackerUser, 0, len(item.Assignees))
+		for _, assignee := range item.Assignees {
+			assignees = append(assignees, normalizeTrackerUser(assignee))
+		}
+
+		author := model.TrackerUser{System: "github"}
+		if item.Author != nil {
+			author = normalizeTrackerUser(*item.Author)
+		}
+
+		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
+			System:     "github",
+			Repository: repository,
+			Kind:       "issue",
+			Number:     item.Number,
+			Title:      strings.TrimSpace(item.Title),
+			State:      strings.TrimSpace(item.State),
+			Labels:     normalizeTrackerLabels(item.Labels),
+			Author:     author,
+			Assignees:  assignees,
+			URL:        strings.TrimSpace(item.URL),
+			CreatedAt:  strings.TrimSpace(item.CreatedAt),
+			UpdatedAt:  strings.TrimSpace(item.UpdatedAt),
+		})
+	}
+	response.Metadata = map[string]string{
+		"repository": repository,
+		"state":      listRequest.State,
+		"limit":      strconv.Itoa(listRequest.Limit),
+	}
+	if listRequest.Query != "" {
+		response.Metadata["query"] = listRequest.Query
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
