@@ -375,6 +375,52 @@ func TestServiceProcessTaskReworksReviewPassedTaskWithMergeConflict(t *testing.T
 	}
 }
 
+func TestServiceProcessTaskKeepsMergeConflictWhenReviewRemarksFail(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.mergeRequest.Attributes = map[string]string{"mergeable_state": "dirty"}
+	integrations.commentsErr = errors.New("comments unavailable")
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{results: []execution.ExecutionResult{{Status: "completed", Launch: &execution.LaunchResult{Status: "completed"}}}}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	cycle := result.Cycles[0]
+	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasMergeConflict {
+		t.Fatalf("expected merge conflict state: %#v", cycle.MergeRequestExternalState)
+	}
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	}
+}
+
+func TestServiceProcessTaskDoesNotLoadExternalRemarksBeforeNonCompletedRoute(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.commentsErr = errors.New("comments must not be loaded")
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{results: []decision.ConsiderationResult{
+		processingConsideration(execution.ActionStartImplementationPR),
+	}}
+	service.execution = &processingExecutionStub{results: []execution.ExecutionResult{{Status: "completed", Launch: &execution.LaunchResult{Status: "completed"}}}}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	for _, request := range integrations.requests {
+		if request.Operation == "comments" {
+			t.Fatalf("comments must not be loaded for non-completed route: %#v", integrations.requests)
+		}
+	}
+}
+
 func TestMergeRequestHasConflictUsesGitHubMergeStateAttributes(t *testing.T) {
 	t.Parallel()
 
@@ -433,6 +479,24 @@ func TestServiceProcessTaskReturnsMergeRequestSearchErrorForExplicitReviewRoute(
 	service.execution = &processingExecutionStub{}
 
 	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Route: "pull-request-review", Once: true})
+	if err == nil {
+		t.Fatal("expected merge request search error")
+	}
+	if !strings.Contains(err.Error(), "search unavailable") {
+		t.Fatalf("expected original search error, got: %v", err)
+	}
+}
+
+func TestServiceProcessTaskReturnsMergeRequestSearchErrorForReviewPassedLabel(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.searchErr = errors.New("search unavailable")
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
 	if err == nil {
 		t.Fatal("expected merge request search error")
 	}
@@ -527,6 +591,7 @@ type processingIntegrationStub struct {
 	labels        []string
 	requests      []integration.Request
 	searchErr     error
+	commentsErr   error
 }
 
 func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
@@ -572,6 +637,9 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 		}
 		return integration.Response{MergeRequests: []integration.MergeRequest{mergeRequest}}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "comments":
+		if s.commentsErr != nil {
+			return integration.Response{}, s.commentsErr
+		}
 		return integration.Response{ReviewRemarks: append([]integration.ReviewRemark(nil), s.reviewRemarks...)}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeTracker && request.Operation == "add":
 		s.labels = append(s.labels, "add:"+strings.Join(request.Labels, ","))

@@ -166,6 +166,25 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route st
 		}
 		return cycle, err
 	}
+	if consideration.Status == decision.ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil && externalState == nil {
+		externalState, err = s.loadMergeRequestExternalState(ctx, mergeRequest)
+		if err != nil {
+			return cycle, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", taskNumber, err)
+		}
+		if externalState != nil {
+			cycle.MergeRequestExternalState = externalState
+			consideration, err = s.decision.Consider(ctx, decision.ConsiderationInput{Route: route, Context: decision.DecisionContext{
+				Signal:                    decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: taskNumber},
+				Issue:                     issue,
+				MergeRequest:              mergeRequest,
+				MergeRequestExternalState: externalState,
+			}})
+			cycle.Consideration = &consideration
+			if err != nil {
+				return cycle, err
+			}
+		}
+	}
 	if consideration.ExecutionPlan == nil {
 		return cycle, nil
 	}
@@ -235,11 +254,7 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 		}
 		s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%d ошибка=%v", taskNumber, err)
 	}
-	externalState, err := s.loadMergeRequestExternalState(ctx, mergeRequest)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", taskNumber, err)
-	}
-	return response.Issue, mergeRequest, externalState, err, nil
+	return response.Issue, mergeRequest, nil, err, nil
 }
 
 func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*decision.MergeRequestExternalState, error) {
@@ -260,6 +275,9 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		Number:          mergeRequest.Number,
 	})
 	if err != nil {
+		if state.HasMergeConflict {
+			return state, nil
+		}
 		return nil, err
 	}
 	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
@@ -641,7 +659,8 @@ func labelsMissing(existing []string, candidates []string) []string {
 func taskLabelsRequireMergeRequest(labels []string) bool {
 	_, awaitingReview := findLabel(labels, LabelAwaitingReview)
 	_, needsRework := findLabel(labels, LabelNeedsRework)
-	return awaitingReview || needsRework
+	_, reviewPassed := findLabel(labels, LabelReviewPassed)
+	return awaitingReview || needsRework || reviewPassed
 }
 
 func removeLabels(existing []string, removed []string) []string {

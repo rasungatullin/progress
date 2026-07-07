@@ -1464,6 +1464,8 @@ func reviewRemarksFromThreads(repository string, number int, threads []ghPRRevie
 		state := "unresolved"
 		if thread.IsResolved {
 			state = "resolved"
+		} else if thread.IsOutdated {
+			state = "outdated"
 		}
 		if len(thread.Comments.Nodes) == 0 {
 			remarks = append(remarks, model.ReviewRemark{

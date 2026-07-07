@@ -79,6 +79,27 @@ func TestServiceAuthStatusMapsTimeout(t *testing.T) {
 	}
 }
 
+func TestReviewRemarksFromThreadsMarksOutdatedThreads(t *testing.T) {
+	t.Parallel()
+
+	remarks := reviewRemarksFromThreads("owner/name", 17, []ghPRReviewThread{{
+		ID:         "thread-1",
+		IsOutdated: true,
+		Path:       "internal/service.go",
+		Line:       10,
+		Comments: ghPRReviewComments{Nodes: []ghPRReviewComment{{
+			ID:   "comment-1",
+			Body: "Устаревшее замечание",
+		}}},
+	}})
+	if len(remarks) != 1 {
+		t.Fatalf("expected one remark, got %#v", remarks)
+	}
+	if remarks[0].State != "outdated" {
+		t.Fatalf("expected outdated state, got %#v", remarks[0])
+	}
+}
+
 func TestServiceAuthStatusMapsGenericRunnerError(t *testing.T) {
 	t.Parallel()
 

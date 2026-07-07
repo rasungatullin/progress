@@ -1173,6 +1173,55 @@ func TestServiceStartPassesExternalRepositoryToExecution(t *testing.T) {
 	}
 }
 
+func TestServiceStartRoutesReviewPassedTaskToReworkForExternalRemarks(t *testing.T) {
+	t.Parallel()
+
+	integrationStub := &stubIntegrationExecutor{
+		response: integration.Response{
+			Issue: &integration.TrackerIssue{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     123,
+				Title:      "Completed task",
+				State:      "OPEN",
+				Labels:     []string{"Экспертиза пройдена"},
+			},
+			MergeRequests: []integration.MergeRequest{{
+				System:     "github",
+				Repository: "owner/name",
+				Number:     17,
+				Title:      "Completed task",
+				State:      "OPEN",
+				BaseRef:    "main",
+				HeadRef:    "123",
+			}},
+			ReviewRemarks: []integration.ReviewRemark{{ExternalID: "comment-1", ReplyToID: "thread-1", State: "unresolved", Body: "Исправить обработку"}},
+		},
+	}
+	executionStub := &stubExecutionStarter{result: execution.LaunchResult{Status: "completed", Summary: "execution launched"}}
+	service := &Service{logger: log.Default(), integration: integrationStub, execution: executionStub, resolveRepo: func(context.Context) (string, error) { return "owner/name", nil }}
+
+	result, err := service.Start(context.Background(), StartInput{TaskNumber: 123})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if result.Context.MergeRequestExternalState == nil || !result.Context.MergeRequestExternalState.HasUnresolvedReviewRemarks {
+		t.Fatalf("expected external state in decision context: %#v", result.Context.MergeRequestExternalState)
+	}
+	if result.Decision == nil || result.Decision.ExecutionPlan == nil || result.Decision.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments decision, got %#v", result.Decision)
+	}
+	foundCommentsRequest := false
+	for _, request := range integrationStub.requests {
+		if request.Operation == "comments" {
+			foundCommentsRequest = true
+		}
+	}
+	if !foundCommentsRequest {
+		t.Fatalf("expected comments request, got %#v", integrationStub.requests)
+	}
+}
+
 func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *testing.T) {
 	t.Parallel()
 

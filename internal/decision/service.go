@@ -90,6 +90,19 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 			Consideration: &consideration,
 		}, err
 	}
+	if consideration.Status == ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil {
+		externalState, err := s.loadMergeRequestExternalState(ctx, mergeRequest)
+		if err != nil {
+			return StartResult{Context: decisionContext, Consideration: &consideration}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, err)
+		}
+		if externalState != nil {
+			decisionContext.MergeRequestExternalState = externalState
+			consideration, err = s.Consider(ctx, ConsiderationInput{Context: decisionContext})
+			if err != nil {
+				return StartResult{Context: decisionContext, Consideration: &consideration}, err
+			}
+		}
+	}
 
 	decision := decisionFromConsideration(consideration)
 	result := StartResult{
@@ -151,7 +164,114 @@ func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.T
 }
 
 func taskLabelsRequireMergeRequest(labels []string) bool {
-	return hasLabel(labels, "Ожидает экспертизы") || hasLabel(labels, "Требует доработки")
+	return hasLabel(labels, "Ожидает экспертизы") || hasLabel(labels, "Требует доработки") || hasLabel(labels, "Экспертиза пройдена")
+}
+
+func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*MergeRequestExternalState, error) {
+	if mergeRequest == nil {
+		return nil, nil
+	}
+
+	state := &MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest)}
+	response, err := s.integration.Execute(ctx, integration.Request{
+		IntegrationType: integrationmodel.IntegrationTypeRepository,
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "comments",
+		Repository:      mergeRequest.Repository,
+		RepoProvided:    strings.TrimSpace(mergeRequest.Repository) != "",
+		Number:          mergeRequest.Number,
+	})
+	if err != nil {
+		if state.HasMergeConflict {
+			return state, nil
+		}
+		return nil, err
+	}
+	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
+	state.HasUnresolvedReviewRemarks = hasUnresolvedExternalReviewRemarks(response.ReviewRemarks)
+	if !state.HasMergeConflict && !state.HasUnresolvedReviewRemarks {
+		return nil, nil
+	}
+	return state, nil
+}
+
+func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
+	for _, remark := range remarks {
+		if strings.TrimSpace(remark.ReplyToID) == "" {
+			continue
+		}
+		state := strings.ToLower(strings.TrimSpace(remark.State))
+		switch state {
+		case "", "resolved", "fixed", "done", "closed", "outdated":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
+	if mergeRequest == nil {
+		return false
+	}
+	if hasConflictMarker(mergeRequest.Traits) {
+		return true
+	}
+	for key, value := range mergeRequest.Attributes {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "has_merge_conflict", "merge_conflict", "conflict", "conflicted":
+			if isTruthyExternalState(value) {
+				return true
+			}
+		case "mergeable", "can_merge":
+			if isFalsyExternalState(value) || isConflictMergeState(value) {
+				return true
+			}
+		case "mergeable_state", "merge_state", "merge_state_status":
+			if isConflictMergeState(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasConflictMarker(values []string) bool {
+	for _, value := range values {
+		if isConflictMergeState(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func isConflictMergeState(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "conflict", "conflicted", "conflicting", "dirty", "blocked", "behind", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTruthyExternalState(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "t", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFalsyExternalState(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "0", "f", "false", "no", "n", "off":
+		return true
+	default:
+		return false
+	}
 }
 
 func hasLabel(labels []string, candidate string) bool {
