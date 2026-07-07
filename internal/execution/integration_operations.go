@@ -806,7 +806,6 @@ func reviewRemarkComments(state *operationExecution, operationName string) []rev
 				heading = ""
 			}
 		}
-		}
 		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
 			heading,
 			formatNamedLine("Идентификатор", remark.ID),
