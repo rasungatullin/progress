@@ -914,9 +914,7 @@ func gitPushEnv(ctx context.Context, config *model.GitConfig, privateStore model
 		return nil, cleanup, nil
 	}
 	parts := []string{"ssh", "-i", shellQuote(identityFile)}
-	if config.Push.IdentitiesOnly {
-		parts = append(parts, "-o", "IdentitiesOnly=yes")
-	}
+	parts = append(parts, "-o", "IdentitiesOnly=yes")
 	if strings.TrimSpace(config.Push.KnownHostsFile) != "" {
 		parts = append(parts, "-o", "UserKnownHostsFile="+shellQuote(config.Push.KnownHostsFile))
 	}

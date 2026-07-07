@@ -1029,6 +1029,19 @@ func TestGitPushEnvWritesPrivateIdentityToTemporaryFile(t *testing.T) {
 	}
 }
 
+func TestGitPushEnvForcesIdentitiesOnlyWithIdentityFile(t *testing.T) {
+	t.Parallel()
+
+	env, cleanup, err := gitPushEnv(context.Background(), &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityFile: "/keys/push"}}, model.ResourcePrivateStoreConfig{}, "")
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("git push env: %v", err)
+	}
+	if len(env) != 1 || !strings.Contains(env[0], "GIT_SSH_COMMAND=ssh -i '/keys/push'") || !strings.Contains(env[0], "IdentitiesOnly=yes") {
+		t.Fatalf("unexpected env: %#v", env)
+	}
+}
+
 func TestGitPushEnvResolvesPrivateIdentityFromStore(t *testing.T) {
 	t.Parallel()
 
