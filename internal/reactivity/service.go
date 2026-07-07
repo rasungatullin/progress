@@ -12,6 +12,7 @@ import (
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/integration"
 	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/methodology"
 )
 
 const (
@@ -63,9 +64,11 @@ type Result struct {
 type Service struct {
 	logger      *log.Logger
 	now         func() time.Time
+	wait        func(context.Context, time.Duration) error
 	integration integrationExecutor
 	decision    decisionConsiderer
 	execution   executionStarter
+	methodology methodologyGetter
 }
 
 func NewService(logger *log.Logger) *Service {
@@ -76,9 +79,11 @@ func NewService(logger *log.Logger) *Service {
 	return &Service{
 		logger:      logger,
 		now:         time.Now,
+		wait:        waitContext,
 		integration: integration.NewConfiguredService(logger),
 		decision:    decision.NewService(logger),
 		execution:   execution.NewService(logger),
+		methodology: methodology.NewService(logger),
 	}
 }
 
@@ -92,6 +97,10 @@ type decisionConsiderer interface {
 
 type executionStarter interface {
 	ExecuteAction(context.Context, execution.ActionInvocation) (execution.ExecutionResult, error)
+}
+
+type methodologyGetter interface {
+	Get(context.Context, methodology.ElementRequest) (methodology.ListedElement, error)
 }
 
 const (
@@ -170,6 +179,20 @@ func (s *Service) Normalize(ctx context.Context, event Event, process Process) (
 			Message: "Внешнее событие приведено к нормализованному сигналу.",
 		}},
 	}, nil
+}
+
+func waitContext(ctx context.Context, duration time.Duration) error {
+	if duration <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func ignored(code string, message string) Result {

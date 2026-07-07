@@ -429,6 +429,32 @@
         "branch_name": "task_number",
         "workplace": "worktree"
       }
+    },
+    {
+      "kind": "reactivity-process",
+      "name": "ready-implementation-cycle",
+      "target_contour": "reactivity",
+      "title": "Цикл обработки готовых к реализации задач",
+      "description": "Автономно выбирает задачи, готовые к реализации, и запускает их обработку.",
+      "payload": {
+        "enabled": true,
+        "source": {
+          "type": "tracker-task-search",
+          "system": "github",
+          "state": "open",
+          "labels": ["Готово к реализации"],
+          "exclude_labels": [],
+          "limit": 20
+        },
+        "task_processing": {
+          "route": "task-processing",
+          "once": false,
+          "max_cycles": 20
+        },
+        "cycle": {
+          "min_duration": "10m"
+        }
+      }
     }
   ]
 }

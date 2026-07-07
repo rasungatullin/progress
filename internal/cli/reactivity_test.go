@@ -86,6 +86,47 @@ func TestReactivityProcessCommandPassesExplicitRoute(t *testing.T) {
 	}
 }
 
+func TestReactivityProcessRunCommandPassesNameAndOnce(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"reactivity", "process", "run", "--name", "ready-implementation-cycle", "--once"})
+
+	stub := &stubReactivityService{runResult: reactivity.ProcessRunResult{
+		ProcessName: "ready-implementation-cycle",
+		Completed:   true,
+		StopReason:  reactivity.ProcessStopReasonSingleCycle,
+		Cycles: []reactivity.ProcessRunCycleResult{{
+			Index:          1,
+			FoundTasks:     []int{123, 124},
+			ProcessedTasks: []reactivity.TaskProcessingResult{{TaskNumber: 123}, {TaskNumber: 124}},
+		}},
+	}}
+	setReactivityServiceFactory(cmd, func(*cobra.Command) reactivityCommandService { return stub })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute reactivity process run: %v", err)
+	}
+	if stub.runInput.Name != "ready-implementation-cycle" || !stub.runInput.Once || stub.runInput.WaitOnce {
+		t.Fatalf("unexpected run input: %#v", stub.runInput)
+	}
+	for _, fragment := range []string{
+		"process=ready-implementation-cycle\n",
+		"stop-reason=single-cycle\n",
+		"process-cycle=1\n",
+		"process-cycle-found-tasks=2\n",
+		"process-cycle-task-numbers=123,124\n",
+		"process-cycle-processed-task-numbers=123,124\n",
+	} {
+		if !strings.Contains(stdout.String(), fragment) {
+			t.Fatalf("process run output must include %q, got %q", fragment, stdout.String())
+		}
+	}
+}
+
 func TestReactivityActionCommandPassesExplicitAction(t *testing.T) {
 	t.Parallel()
 
@@ -157,12 +198,16 @@ func TestReactivityCommandsPassCommandContext(t *testing.T) {
 type stubReactivityService struct {
 	processResult reactivity.TaskProcessingResult
 	actionResult  reactivity.TaskProcessingResult
+	runResult     reactivity.ProcessRunResult
 	processErr    error
 	actionErr     error
+	runErr        error
 	processInput  reactivity.TaskProcessingInput
 	actionInput   reactivity.TaskActionInput
+	runInput      reactivity.ProcessRunInput
 	processCtx    context.Context
 	actionCtx     context.Context
+	runCtx        context.Context
 }
 
 func (s *stubReactivityService) ProcessTask(ctx context.Context, input reactivity.TaskProcessingInput) (reactivity.TaskProcessingResult, error) {
@@ -175,4 +220,10 @@ func (s *stubReactivityService) RunTaskAction(ctx context.Context, input reactiv
 	s.actionCtx = ctx
 	s.actionInput = input
 	return s.actionResult, s.actionErr
+}
+
+func (s *stubReactivityService) RunProcess(ctx context.Context, input reactivity.ProcessRunInput) (reactivity.ProcessRunResult, error) {
+	s.runCtx = ctx
+	s.runInput = input
+	return s.runResult, s.runErr
 }

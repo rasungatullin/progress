@@ -2,7 +2,9 @@ package reactivity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/integration"
 	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/methodology"
 )
 
 func TestServiceNormalizeBuildsSignal(t *testing.T) {
@@ -99,6 +102,113 @@ func TestServiceNormalizeIgnoresForeignEventBeforeObjectValidation(t *testing.T)
 	}
 	if len(result.Reasons) == 0 || result.Reasons[0].Code != "source_mismatch" {
 		t.Fatalf("unexpected reasons: %#v", result.Reasons)
+	}
+}
+
+func TestServiceRunProcessSearchesAndProcessesTasksSequentially(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.searchResults = []integration.TrackerSearchResult{{Number: 123}, {Number: 124}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.methodology = methodologyProcessStub{process: testReactionProcess(t)}
+	service.decision = &processingDecisionStub{}
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.RunProcess(context.Background(), ProcessRunInput{Name: "ready-implementation-cycle", Once: true})
+	if err != nil {
+		t.Fatalf("run process: %v", err)
+	}
+	if result.ProcessName != "ready-implementation-cycle" || result.StopReason != ProcessStopReasonSingleCycle {
+		t.Fatalf("unexpected process result: %#v", result)
+	}
+	if len(result.Cycles) != 1 || strings.Join(intsToStrings(result.Cycles[0].FoundTasks), ",") != "123,124" {
+		t.Fatalf("unexpected found tasks: %#v", result.Cycles)
+	}
+	if len(result.Cycles[0].ProcessedTasks) != 2 || result.Cycles[0].ProcessedTasks[0].TaskNumber != 123 || result.Cycles[0].ProcessedTasks[1].TaskNumber != 124 {
+		t.Fatalf("tasks must be processed sequentially, got %#v", result.Cycles[0].ProcessedTasks)
+	}
+
+	search := integrations.requests[0]
+	if search.IntegrationType != integrationmodel.IntegrationTypeTracker || search.Operation != "search" || search.System != "github" || !search.SystemProvided {
+		t.Fatalf("unexpected search request: %#v", search)
+	}
+	if strings.Join(search.Labels, ",") != "Готово к реализации" || strings.Join(search.ExcludeLabels, ",") != "blocked" || search.Limit != 20 {
+		t.Fatalf("unexpected search filters: %#v", search)
+	}
+}
+
+func TestServiceRunProcessWaitsCycleRemainder(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	service := NewService(nil)
+	service.integration = integrations
+	service.methodology = methodologyProcessStub{process: testReactionProcess(t)}
+	service.decision = &processingDecisionStub{}
+	service.execution = &processingExecutionStub{}
+	current := time.Unix(100, 0)
+	service.now = func() time.Time { return current }
+	var waited time.Duration
+	service.wait = func(_ context.Context, duration time.Duration) error {
+		waited = duration
+		current = current.Add(duration)
+		return nil
+	}
+
+	result, err := service.RunProcess(context.Background(), ProcessRunInput{Name: "ready-implementation-cycle", Once: true, WaitOnce: true})
+	if err != nil {
+		t.Fatalf("run process: %v", err)
+	}
+	if waited != 10*time.Minute {
+		t.Fatalf("unexpected wait duration: %s", waited)
+	}
+	if len(result.Cycles) != 1 || result.Cycles[0].WaitDuration != 10*time.Minute {
+		t.Fatalf("unexpected cycle wait: %#v", result.Cycles)
+	}
+}
+
+func TestServiceRunProcessWaitStopsOnContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	service := NewService(nil)
+	service.integration = integrations
+	service.methodology = methodologyProcessStub{process: testReactionProcess(t)}
+	service.decision = &processingDecisionStub{}
+	service.execution = &processingExecutionStub{}
+	service.now = func() time.Time { return time.Unix(100, 0) }
+	service.wait = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := service.RunProcess(ctx, ProcessRunInput{Name: "ready-implementation-cycle", Once: true, WaitOnce: true})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if len(result.Cycles) != 1 || result.Cycles[0].WaitDuration != 10*time.Minute || result.Cycles[0].Error == "" {
+		t.Fatalf("unexpected cancelled wait result: %#v", result.Cycles)
+	}
+}
+
+func TestServiceRunProcessStopsOnTaskError(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.searchResults = []integration.TrackerSearchResult{{Number: 123}, {Number: 124}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.methodology = methodologyProcessStub{process: testReactionProcess(t)}
+	service.decision = &processingDecisionStub{err: errors.New("decision failed")}
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.RunProcess(context.Background(), ProcessRunInput{Name: "ready-implementation-cycle", Once: true})
+	if err == nil {
+		t.Fatal("expected task processing error")
+	}
+	if len(result.Cycles) != 1 || len(result.Cycles[0].ProcessedTasks) != 1 || result.Cycles[0].ProcessedTasks[0].TaskNumber != 123 {
+		t.Fatalf("process must stop on first task error, got %#v", result.Cycles)
 	}
 }
 
@@ -603,6 +713,7 @@ func processingConsideration(action string) decision.ConsiderationResult {
 type processingIntegrationStub struct {
 	issue         integration.TrackerIssue
 	mergeRequest  integration.MergeRequest
+	searchResults []integration.TrackerSearchResult
 	reviewRemarks []integration.ReviewRemark
 	labels        []string
 	requests      []integration.Request
@@ -635,8 +746,11 @@ func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
 func (s *processingIntegrationStub) Execute(_ context.Context, request integration.Request) (integration.Response, error) {
 	s.requests = append(s.requests, request)
 	switch {
+	case request.IntegrationType == integrationmodel.IntegrationTypeTracker && request.Operation == "search":
+		return integration.Response{SearchResults: append([]integration.TrackerSearchResult(nil), s.searchResults...)}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeTracker && request.Operation == "get":
 		issue := s.issue
+		issue.Number = request.Number
 		issue.Labels = append([]string(nil), s.issue.Labels...)
 		return integration.Response{Issue: &issue}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "search":
@@ -668,6 +782,57 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 	default:
 		return integration.Response{}, nil
 	}
+}
+
+type methodologyProcessStub struct {
+	process methodology.Entity
+	err     error
+}
+
+func (s methodologyProcessStub) Get(_ context.Context, request methodology.ElementRequest) (methodology.ListedElement, error) {
+	if s.err != nil {
+		return methodology.ListedElement{}, s.err
+	}
+	if request.Name != s.process.Name || request.EntityKind != s.process.Kind {
+		return methodology.ListedElement{}, errors.New("not found")
+	}
+	process := s.process
+	return methodology.ListedElement{Kind: methodology.ElementKindEntity, Name: process.Name, EntityKind: process.Kind, TargetContour: process.TargetContour, Title: process.Title, Entity: &process}, nil
+}
+
+func testReactionProcess(t *testing.T) methodology.Entity {
+	t.Helper()
+	payload, err := json.Marshal(ReactionProcessPayload{
+		Enabled: true,
+		Source: ProcessTaskSource{
+			Type:          ReactionProcessSourceTracker,
+			System:        "github",
+			State:         "open",
+			Labels:        []string{"Готово к реализации"},
+			ExcludeLabels: []string{"blocked"},
+			Limit:         20,
+		},
+		TaskProcessing: ProcessTaskProcessing{Route: "task-processing", MaxCycles: 20},
+		Cycle:          ReactionProcessCycleSpec{MinDuration: "10m"},
+	})
+	if err != nil {
+		t.Fatalf("marshal process payload: %v", err)
+	}
+	return methodology.Entity{
+		Kind:          ReactionProcessKind,
+		Name:          "ready-implementation-cycle",
+		TargetContour: ReactionProcessTargetContour,
+		Title:         "Цикл обработки готовых к реализации задач",
+		Payload:       payload,
+	}
+}
+
+func intsToStrings(values []int) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, strconv.Itoa(value))
+	}
+	return result
 }
 
 type processingDecisionStub struct {

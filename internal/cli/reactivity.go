@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/logging"
@@ -13,13 +14,16 @@ type reactivityFlags struct {
 	task      int
 	route     string
 	action    string
+	name      string
 	once      bool
+	wait      bool
 	maxCycles int
 }
 
 type reactivityCommandService interface {
 	ProcessTask(context.Context, reactivity.TaskProcessingInput) (reactivity.TaskProcessingResult, error)
 	RunTaskAction(context.Context, reactivity.TaskActionInput) (reactivity.TaskProcessingResult, error)
+	RunProcess(context.Context, reactivity.ProcessRunInput) (reactivity.ProcessRunResult, error)
 }
 
 type reactivityServiceFactoryFunc func(*cobra.Command) reactivityCommandService
@@ -74,12 +78,42 @@ func newReactivityProcessCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.AddCommand(newReactivityProcessRunCommand())
 
 	cmd.Flags().IntVar(&flags.task, "task", 0, "Номер задачи для обработки")
 	cmd.Flags().StringVar(&flags.route, "route", "", "Имя маршрута обработки")
 	cmd.Flags().BoolVar(&flags.once, "once", false, "Выполнить только один цикл обработки")
 	cmd.Flags().IntVar(&flags.maxCycles, "max-cycles", 0, "Максимальное число циклов обработки")
 	_ = cmd.MarkFlagRequired("task")
+	return cmd
+}
+
+func newReactivityProcessRunCommand() *cobra.Command {
+	flags := &reactivityFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "run",
+		Short: "Запуск автономного процесса реакции",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			service := newReactivityService(cmd)
+			result, err := service.RunProcess(cmd.Context(), reactivity.ProcessRunInput{
+				Name:     flags.name,
+				Once:     flags.once,
+				WaitOnce: flags.wait,
+			})
+			if err != nil {
+				printReactivityProcessRunResultOnError(cmd, result)
+				return err
+			}
+			printReactivityProcessRunResult(cmd, result)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.name, "name", "", "Имя автономного процесса реакции")
+	cmd.Flags().BoolVar(&flags.once, "once", false, "Выполнить один цикл процесса и завершить запуск")
+	cmd.Flags().BoolVar(&flags.wait, "wait", false, "В режиме --once дождаться cycle.min_duration")
+	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
 
@@ -176,4 +210,49 @@ func printReactivityResult(cmd *cobra.Command, result reactivity.TaskProcessingR
 			cmd.Printf("final-issue-labels=%s\n", strings.Join(result.FinalIssue.Labels, ","))
 		}
 	}
+}
+
+func printReactivityProcessRunResultOnError(cmd *cobra.Command, result reactivity.ProcessRunResult) {
+	if result.ProcessName == "" && len(result.Cycles) == 0 && result.StopReason == "" {
+		return
+	}
+	printReactivityProcessRunResult(cmd, result)
+}
+
+func printReactivityProcessRunResult(cmd *cobra.Command, result reactivity.ProcessRunResult) {
+	cmd.Printf("process=%s\ncompleted=%t\n", result.ProcessName, result.Completed)
+	if result.Title != "" {
+		cmd.Printf("process-title=%s\n", result.Title)
+	}
+	if result.StopReason != "" {
+		cmd.Printf("stop-reason=%s\n", result.StopReason)
+	}
+	for _, cycle := range result.Cycles {
+		cmd.Printf("process-cycle=%d\n", cycle.Index)
+		cmd.Printf("process-cycle-found-tasks=%d\n", len(cycle.FoundTasks))
+		if len(cycle.FoundTasks) != 0 {
+			cmd.Printf("process-cycle-task-numbers=%s\n", joinInts(cycle.FoundTasks))
+		}
+		processed := make([]int, 0, len(cycle.ProcessedTasks))
+		for _, task := range cycle.ProcessedTasks {
+			processed = append(processed, task.TaskNumber)
+		}
+		cmd.Printf("process-cycle-processed-tasks=%d\n", len(processed))
+		if len(processed) != 0 {
+			cmd.Printf("process-cycle-processed-task-numbers=%s\n", joinInts(processed))
+		}
+		cmd.Printf("process-cycle-duration=%s\n", cycle.Duration)
+		cmd.Printf("process-cycle-wait=%s\n", cycle.WaitDuration)
+		if cycle.Error != "" {
+			cmd.Printf("process-cycle-error=%s\n", cycle.Error)
+		}
+	}
+}
+
+func joinInts(values []int) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strconv.Itoa(value))
+	}
+	return strings.Join(parts, ",")
 }
