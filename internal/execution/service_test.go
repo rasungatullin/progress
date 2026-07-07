@@ -642,6 +642,8 @@ func TestActionResolutionMakesReviewRemarksRequiredForApplyReviewComments(t *tes
 func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
+	gitConfig := &model.GitConfig{Identity: &model.GitIdentityConfig{AuthorName: "Progress", AuthorEmail: "progress@example.com", CommitterName: "Progress", CommitterEmail: "progress@example.com"}}
+	allocation := model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder", Git: gitConfig}
 	launcher := &stubLauncher{
 		result:        model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}},
 		commitSummary: "git=committed+pushed branch=task-97",
@@ -650,7 +652,7 @@ func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 		logger:     log.Default(),
 		actions:    newMethodologyActionResolver(),
 		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
-		resources:  &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Reserved: true, Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}},
+		resources:  &stubResourceProvider{allocation: allocation},
 		workplaces: &stubWorkplaceManager{workplace: model.Workplace{Name: root, Ready: true}},
 		launcher:   launcher,
 	}
@@ -671,6 +673,9 @@ func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 	if !launcher.commitCalled {
 		t.Fatal("commit-push operation must call launcher commit stage")
 	}
+	if launcher.commitAllocation.Git != gitConfig {
+		t.Fatalf("commit-push operation must pass allocated git config: %#v", launcher.commitAllocation.Git)
+	}
 	if launcher.invocation.Launch.CommitPush {
 		t.Fatalf("launch synthesis must not receive hidden commit-push flag: %#v", launcher.invocation.Launch)
 	}
@@ -689,7 +694,7 @@ func TestServiceExecuteRecordsCommitPushCancellationInHistory(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	launcher := &stubLauncher{
 		result: model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}},
-		commit: func(context.Context, model.Invocation, model.Workplace, *model.StructuredOutput) (string, error) {
+		commit: func(context.Context, model.Invocation, model.Allocation, model.Workplace, *model.StructuredOutput) (string, error) {
 			cancel()
 			return "", context.Canceled
 		},
@@ -1337,15 +1342,16 @@ func TestServiceLaunchReturnsResumeUnsupportedForUnsupportedRunner(t *testing.T)
 }
 
 type stubLauncher struct {
-	invocation    model.Invocation
-	profile       model.Profile
-	result        model.LaunchResult
-	err           error
-	beforeReturn  func()
-	commitCalled  bool
-	commitSummary string
-	commitErr     error
-	commit        func(context.Context, model.Invocation, model.Workplace, *model.StructuredOutput) (string, error)
+	invocation       model.Invocation
+	profile          model.Profile
+	result           model.LaunchResult
+	err              error
+	beforeReturn     func()
+	commitCalled     bool
+	commitAllocation model.Allocation
+	commitSummary    string
+	commitErr        error
+	commit           func(context.Context, model.Invocation, model.Allocation, model.Workplace, *model.StructuredOutput) (string, error)
 }
 
 type stubIntegrationExecutor struct {
@@ -1373,10 +1379,11 @@ func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, profile mo
 	return s.result, s.err
 }
 
-func (s *stubLauncher) CommitAndPush(ctx context.Context, in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
+func (s *stubLauncher) CommitAndPush(ctx context.Context, in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
 	s.commitCalled = true
+	s.commitAllocation = allocation
 	if s.commit != nil {
-		return s.commit(ctx, in, workplace, output)
+		return s.commit(ctx, in, allocation, workplace, output)
 	}
 	if s.commitErr != nil {
 		return "", s.commitErr

@@ -1029,6 +1029,30 @@ func TestGitPushEnvWritesPrivateIdentityToTemporaryFile(t *testing.T) {
 	}
 }
 
+func TestGitPushEnvRejectsIncompletePushOverride(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := gitPushEnv(&model.GitConfig{Push: &model.GitPushConfig{KnownHostsFile: "/keys/known_hosts", IdentitiesOnly: true}})
+	if err == nil {
+		t.Fatal("expected incomplete git push override error")
+	}
+	if !strings.Contains(err.Error(), "git.push must define ssh-identity-file or ssh-identity-private") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGitPushEnvRejectsUnresolvedPrivateIdentity(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := gitPushEnv(&model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivate: "progress-push-key"}})
+	if err == nil {
+		t.Fatal("expected unresolved private identity error")
+	}
+	if !strings.Contains(err.Error(), "private value is unavailable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLaunchRunnerErrorReturned(t *testing.T) {
 	t.Parallel()
 

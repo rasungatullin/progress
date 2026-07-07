@@ -845,8 +845,8 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, alloca
 	return gitResult{status: "committed+pushed", branch: branch}, nil
 }
 
-func (s *Service) CommitAndPush(ctx context.Context, in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
-	result, err := s.commitAndPush(ctx, in, model.Allocation{}, workplace, output)
+func (s *Service) CommitAndPush(ctx context.Context, in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
+	result, err := s.commitAndPush(ctx, in, allocation, workplace, output)
 	if err != nil {
 		return "", err
 	}
@@ -897,6 +897,12 @@ func gitPushEnv(config *model.GitConfig) ([]string, func(), error) {
 		}
 		identityFile = path
 		cleanup = func() { _ = os.Remove(path) }
+	}
+	if identityFile == "" && strings.TrimSpace(config.Push.SSHIdentityPrivate) != "" {
+		return nil, cleanup, fmt.Errorf("git.push.ssh-identity-private is configured but private value is unavailable")
+	}
+	if identityFile == "" && (strings.TrimSpace(config.Push.KnownHostsFile) != "" || config.Push.IdentitiesOnly) {
+		return nil, cleanup, fmt.Errorf("git.push must define ssh-identity-file or ssh-identity-private when known-hosts-file or identities-only is set")
 	}
 	if identityFile == "" {
 		return nil, cleanup, nil
