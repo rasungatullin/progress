@@ -182,6 +182,31 @@ func TestServiceProcessTaskOnceStopsAfterFirstCycle(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskPassesExplicitRouteToDecision(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelAwaitingReview})
+	integrations.searchErr = errors.New("search unavailable")
+	decisions := &processingDecisionStub{results: []decision.ConsiderationResult{
+		processingConsideration("task-description-assessment"),
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = decisions
+	service.execution = &processingExecutionStub{results: []execution.ExecutionResult{{Status: "completed", Launch: &execution.LaunchResult{Status: "completed"}}}}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Route: "task-description", Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(decisions.inputs) != 1 || decisions.inputs[0].Route != "task-description" {
+		t.Fatalf("unexpected decision inputs: %#v", decisions.inputs)
+	}
+	if len(service.execution.(*processingExecutionStub).requests) != 1 {
+		t.Fatalf("expected execution after deferred merge request search error")
+	}
+}
+
 func TestServiceRunTaskActionSkipsDecisionAndMarksRework(t *testing.T) {
 	t.Parallel()
 
@@ -274,8 +299,11 @@ func TestServiceProcessTaskReturnsMergeRequestSearchErrorForReviewLabel(t *testi
 	service := NewService(nil)
 	service.integration = integrations
 	service.decision = &processingDecisionStub{results: []decision.ConsiderationResult{
-		processingConsideration(execution.ActionReviewPullRequest),
-	}}
+		{
+			Status:  decision.ConsiderationStatusManualIntervention,
+			Failure: &decision.DecisionFailure{Code: "merge_request_missing"},
+		},
+	}, err: errors.New("merge request is required for action \"review-pull-request\"")}
 	service.execution = &processingExecutionStub{}
 
 	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
@@ -285,8 +313,33 @@ func TestServiceProcessTaskReturnsMergeRequestSearchErrorForReviewLabel(t *testi
 	if !strings.Contains(err.Error(), "search unavailable") {
 		t.Fatalf("expected original search error, got: %v", err)
 	}
-	if service.decision.(*processingDecisionStub).calls != 0 {
-		t.Fatal("decision must not run after merge request restoration failure")
+	if service.decision.(*processingDecisionStub).calls != 1 {
+		t.Fatal("decision must run before merge request restoration failure is returned")
+	}
+}
+
+func TestServiceProcessTaskReturnsMergeRequestSearchErrorForExplicitReviewRoute(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.searchErr = errors.New("search unavailable")
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{
+		results: []decision.ConsiderationResult{{
+			Status:  decision.ConsiderationStatusManualIntervention,
+			Failure: &decision.DecisionFailure{Code: "merge_request_missing"},
+		}},
+		err: errors.New("merge request is required for action \"review-pull-request\""),
+	}
+	service.execution = &processingExecutionStub{}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Route: "pull-request-review", Once: true})
+	if err == nil {
+		t.Fatal("expected merge request search error")
+	}
+	if !strings.Contains(err.Error(), "search unavailable") {
+		t.Fatalf("expected original search error, got: %v", err)
 	}
 }
 
@@ -426,11 +479,18 @@ type processingDecisionStub struct {
 	results []decision.ConsiderationResult
 	err     error
 	calls   int
+	inputs  []decision.ConsiderationInput
 }
 
-func (s *processingDecisionStub) Consider(_ context.Context, _ decision.ConsiderationInput) (decision.ConsiderationResult, error) {
+func (s *processingDecisionStub) Consider(_ context.Context, input decision.ConsiderationInput) (decision.ConsiderationResult, error) {
+	s.inputs = append(s.inputs, input)
 	if s.err != nil {
-		return decision.ConsiderationResult{}, s.err
+		if s.calls >= len(s.results) {
+			return decision.ConsiderationResult{}, s.err
+		}
+		result := s.results[s.calls]
+		s.calls++
+		return result, s.err
 	}
 	if s.calls >= len(s.results) {
 		return decision.ConsiderationResult{Status: decision.ConsiderationStatusCompleted}, nil

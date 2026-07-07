@@ -245,7 +245,7 @@ func newMethodologyAddRouteCommand(parent *methodologyFlags) *cobra.Command {
 					Outcome:         flags.outcome,
 					Profile:         flags.profile,
 					Description:     flags.description,
-					Checks:          flags.checks,
+					Checks:          methodologyRouteChecksFromNames(flags.checks),
 					Step:            flags.step,
 					HasFeatures:     flags.hasFeatures,
 					MissingFeatures: flags.missingFeatures,
@@ -283,6 +283,21 @@ func newMethodologyAddRouteCommand(parent *methodologyFlags) *cobra.Command {
 	cmd.Flags().StringVar(&flags.reasonMessage, "reason-message", "", "Описание основания выбора")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
+}
+
+func methodologyRouteChecksFromNames(names []string) []methodology.RouteCheck {
+	checks := make([]methodology.RouteCheck, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		checks = append(checks, methodology.RouteCheck{Name: name})
+	}
+	if len(checks) == 0 {
+		return nil
+	}
+	return checks
 }
 
 func newMethodologyAddActionCommand(parent *methodologyFlags) *cobra.Command {

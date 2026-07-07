@@ -31,6 +31,7 @@ type Signal struct {
 
 type StartInput struct {
 	TaskNumber int
+	Route      string
 }
 
 type DecisionContext struct {
@@ -94,12 +95,15 @@ type Decision struct {
 
 type ConsiderationInput struct {
 	Context DecisionContext
+	Route   string
 }
 
 type ConsiderationResult struct {
 	Context       DecisionContext
 	Status        ConsiderationStatus
 	Route         ProcessingRoute
+	RouteSource   string
+	CheckSources  map[string]string
 	Checks        []RouteCheckResult
 	Reasons       []DecisionReason
 	ExecutionPlan *ExecutionPlan

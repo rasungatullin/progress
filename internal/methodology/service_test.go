@@ -14,7 +14,7 @@ func TestServiceSelectsRouteActionAndInstruction(t *testing.T) {
 			Title:   "Маршрут исполнения",
 			Action:  "engineering-synthesis",
 			Profile: "default",
-			Checks:  []string{"task-ready"},
+			Checks:  []RouteCheck{{Name: "task-ready", Action: "engineering-synthesis"}},
 		}},
 		Actions: []Action{{
 			Name:       "engineering-synthesis",
@@ -68,6 +68,40 @@ func TestServiceSelectsDefaultRouteWhenRouteNameIsEmpty(t *testing.T) {
 	}
 	if result.Route.Name != "default" {
 		t.Fatalf("expected default route, got %#v", result.Route)
+	}
+}
+
+func TestServiceSelectsConfiguredDefaultRouteWhenRouteNameIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewService(nil).Select(context.Background(), Catalog{
+		DefaultRoute: "task-processing",
+		Routes: []Route{
+			{Name: "pull-request-review", Action: "review-pull-request"},
+			{Name: "task-processing", Action: "engineering-synthesis"},
+		},
+		Actions: []Action{
+			{Name: "engineering-synthesis"},
+			{Name: "review-pull-request"},
+		},
+	}, SelectionRequest{})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if result.Route.Name != "task-processing" {
+		t.Fatalf("expected configured default route, got %#v", result.Route)
+	}
+}
+
+func TestValidateCatalogAllowsRouteCheckReference(t *testing.T) {
+	t.Parallel()
+
+	err := validateCatalog(Catalog{Routes: []Route{
+		{Name: "task-processing", Checks: []RouteCheck{{Name: "task-processing-start"}}},
+		{Name: "task-processing-start", Action: "engineering-synthesis"},
+	}})
+	if err != nil {
+		t.Fatalf("validate catalog with check reference: %v", err)
 	}
 }
 

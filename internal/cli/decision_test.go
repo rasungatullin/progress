@@ -23,7 +23,7 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 	cmd.SetArgs([]string{"decision", "start", "--task", "123"})
 
 	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter {
-		return stubDecisionStarter{result: decision.StartResult{
+		return &stubDecisionStarter{result: decision.StartResult{
 			Ready: true,
 			Context: decision.DecisionContext{
 				Signal: decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: 123},
@@ -93,6 +93,25 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 	}
 }
 
+func TestDecisionStartCommandPassesExplicitRoute(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"decision", "start", "--task", "123", "--route", "task-description"})
+
+	stub := &stubDecisionStarter{result: decision.StartResult{Ready: true}}
+	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter { return stub })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute decision start: %v", err)
+	}
+	if stub.input.TaskNumber != 123 || stub.input.Route != "task-description" {
+		t.Fatalf("unexpected start input: %#v", stub.input)
+	}
+}
+
 func TestDecisionStartCommandCallsServiceWithCommandContext(t *testing.T) {
 	t.Parallel()
 
@@ -107,7 +126,7 @@ func TestDecisionStartCommandCallsServiceWithCommandContext(t *testing.T) {
 	cmd.SetArgs([]string{"decision", "start", "--task", "123"})
 
 	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter {
-		return stubDecisionStarter{start: func(ctx context.Context, _ decision.StartInput) (decision.StartResult, error) {
+		return &stubDecisionStarter{start: func(ctx context.Context, _ decision.StartInput) (decision.StartResult, error) {
 			if got := ctx.Value(contextKey{}); got != "command-context" {
 				t.Fatalf("decision start must receive command context, got %#v", got)
 			}
@@ -150,7 +169,7 @@ func TestDecisionStartCommandPropagatesServiceError(t *testing.T) {
 	cmd.SetArgs([]string{"decision", "start", "--task", "42"})
 
 	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter {
-		return stubDecisionStarter{err: assertErr("decision start failed")}
+		return &stubDecisionStarter{err: assertErr("decision start failed")}
 	})
 
 	err := cmd.Execute()
@@ -176,7 +195,7 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 	cmd.SetArgs([]string{"decision", "start", "--task", "77"})
 
 	setDecisionServiceFactory(cmd, func(*cobra.Command) decisionStarter {
-		return stubDecisionStarter{
+		return &stubDecisionStarter{
 			result: decision.StartResult{
 				Context: decision.DecisionContext{
 					Signal: decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: 77},
@@ -231,12 +250,14 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 type stubDecisionStarter struct {
 	result decision.StartResult
 	err    error
+	input  decision.StartInput
 	start  func(context.Context, decision.StartInput) (decision.StartResult, error)
 }
 
-func (s stubDecisionStarter) Start(ctx context.Context, in decision.StartInput) (decision.StartResult, error) {
+func (s *stubDecisionStarter) Start(ctx context.Context, input decision.StartInput) (decision.StartResult, error) {
+	s.input = input
 	if s.start != nil {
-		return s.start(ctx, in)
+		return s.start(ctx, input)
 	}
 	return s.result, s.err
 }

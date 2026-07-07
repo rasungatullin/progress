@@ -157,7 +157,11 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 	}
 
 	catalog = normalizeCatalog(catalog)
-	route, err := selectRoute(catalog.Routes, request.Route)
+	routeName := request.Route
+	if strings.TrimSpace(routeName) == "" && catalog.DefaultRoute != "" {
+		routeName = catalog.DefaultRoute
+	}
+	route, err := selectRoute(catalog.Routes, routeName)
 	if err != nil {
 		return SelectionResult{}, err
 	}

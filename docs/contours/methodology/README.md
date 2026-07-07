@@ -49,7 +49,9 @@
 
 Начальный каркас расположен в пакете `internal/methodology`.
 
-Пакет содержит типы `Catalog`, `Route`, `Action`, `Instruction`, `Entity`, `CatalogSnapshot`, `SelectionRequest` и сервис `Service`.
+Пакет содержит типы `Catalog`, `Route`, `RouteCheck`, `Action`, `Instruction`, `Entity`, `CatalogSnapshot`, `SelectionRequest` и сервис `Service`.
+
+Поле `Catalog.DefaultRoute` хранит ссылку `default_route` на маршрут обработки по умолчанию. Поле `Route.Checks` хранит переносимую форму проверок маршрута; интерпретация условий, исходов и действий этих проверок принадлежит контуру принятия решения.
 
 Тип `methodology.Action` является хранилищной формой сохранённого действия. Он не задаёт самостоятельную семантику исполнения: контур исполнения декодирует эту запись в собственный тип `execution.Action`, нормализует операции и выполняет их по своим правилам.
 
