@@ -1,0 +1,7 @@
+{
+  "name": "prepare-data",
+  "kind": "prepare-data",
+  "title": "Подготовка данных",
+  "origin": "builtin",
+  "required": true
+}

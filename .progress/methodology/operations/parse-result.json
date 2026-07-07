@@ -1,0 +1,7 @@
+{
+  "name": "parse-result",
+  "kind": "parse-result",
+  "title": "Разбор результата",
+  "origin": "builtin",
+  "required": true
+}

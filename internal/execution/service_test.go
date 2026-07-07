@@ -521,7 +521,7 @@ func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
-	action, err := resolveActionFromCatalog(testExecutionMethodologyCatalog(), invocation{Action: "review"})
+	action, err := resolveActionFromCatalog(testExecutionMethodologyCatalog(), nil, invocation{Action: "review"})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
 				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
 			},
 		},
-	}, invocation{Action: "implement"})
+	}, nil, invocation{Action: "implement"})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestActionResolutionPrefersLaterAlias(t *testing.T) {
 				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
 			},
 		},
-	}, invocation{Action: "implement"})
+	}, nil, invocation{Action: "implement"})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestActionResolutionRejectsDuplicateOperations(t *testing.T) {
 			RequiresSynthesis: boolRef(false),
 			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindResolveAction),
 		}},
-	}, invocation{Action: "diagnostic"})
+	}, nil, invocation{Action: "diagnostic"})
 	if err == nil {
 		t.Fatal("expected duplicate operation error")
 	}
@@ -629,13 +629,90 @@ func TestActionResolutionMakesReviewRemarksRequiredForApplyReviewComments(t *tes
 			RequiresSynthesis: boolRef(true),
 			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindLoadReviewRemarks, OperationKindFinalize),
 		}},
-	}, invocation{Action: ActionApplyReviewComments})
+	}, nil, invocation{Action: ActionApplyReviewComments})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
 	operation := findOperationSpec(action, OperationKindLoadReviewRemarks)
 	if operation == nil || !operation.Required {
 		t.Fatalf("load-review-remarks must be required for apply-review-comments legacy operation: %#v", action.Operations)
+	}
+}
+
+func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              ActionApplyReviewComments,
+			Class:             ActionClassEngineeringSynthesis,
+			RequiresWorkplace: boolRef(true),
+			RequiresSynthesis: boolRef(true),
+			Operations: []methodology.ActionOperation{
+				{Name: OperationKindResolveAction},
+				{Name: OperationKindPrepareData},
+				{Name: OperationKindLoadPullRequest},
+				{Name: OperationKindLoadReviewRemarks},
+				{Name: OperationKindResolveProfile},
+				{Name: OperationKindAllocateResources},
+				{Name: OperationKindPrepareWorkplace},
+				{Name: OperationKindBuildDirective},
+				{Name: OperationKindLaunchSynthesis},
+				{Name: OperationKindParseResult},
+				{Name: OperationKindCommitPush},
+				{Name: OperationKindPublishReviewResponses},
+				{Name: OperationKindFinalize},
+			},
+		}},
+		Operations: []methodology.Operation{
+			{Name: OperationKindResolveAction, Kind: OperationKindResolveAction, Title: "Разрешение действия", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindPrepareData, Kind: OperationKindPrepareData, Title: "Подготовка данных", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindLoadPullRequest, Kind: OperationKindLoadPullRequest, Title: "Получение запроса на слияние", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindLoadReviewRemarks, Kind: OperationKindLoadReviewRemarks, Title: "Получение замечаний ревизии", Origin: OperationOriginBuiltin},
+			{Name: OperationKindResolveProfile, Kind: OperationKindResolveProfile, Title: "Выбор исполнительного профиля", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindAllocateResources, Kind: OperationKindAllocateResources, Title: "Ресурсное снабжение", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindPrepareWorkplace, Kind: OperationKindPrepareWorkplace, Title: "Подготовка рабочего места", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindBuildDirective, Kind: OperationKindBuildDirective, Title: "Сборка исполнительной директивы", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindLaunchSynthesis, Kind: OperationKindLaunchSynthesis, Title: "Запуск синтеза", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindParseResult, Kind: OperationKindParseResult, Title: "Разбор результата", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindCommitPush, Kind: OperationKindCommitPush, Title: "Создание коммита и отправка ветки", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindPublishReviewResponses, Kind: OperationKindPublishReviewResponses, Title: "Запись ответов на замечания", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+			{Name: OperationKindFinalize, Kind: OperationKindFinalize, Title: "Завершающая фиксация", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+		},
+	}, nil, invocation{Action: ActionApplyReviewComments})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+
+	expected := []struct {
+		name     string
+		required bool
+	}{
+		{OperationKindResolveAction, true},
+		{OperationKindPrepareData, true},
+		{OperationKindLoadPullRequest, true},
+		{OperationKindLoadReviewRemarks, true},
+		{OperationKindResolveProfile, true},
+		{OperationKindAllocateResources, true},
+		{OperationKindPrepareWorkplace, true},
+		{OperationKindBuildDirective, true},
+		{OperationKindLaunchSynthesis, true},
+		{OperationKindParseResult, true},
+		{OperationKindCommitPush, true},
+		{OperationKindPublishReviewResponses, true},
+		{OperationKindFinalize, true},
+	}
+	if len(action.Operations) != len(expected) {
+		t.Fatalf("unexpected operation count: %#v", action.Operations)
+	}
+	for index, expectation := range expected {
+		operation := action.Operations[index]
+		if operation.Name != expectation.name {
+			t.Fatalf("unexpected operation at %d: %#v", index, action.Operations)
+		}
+		if operation.Required != expectation.required {
+			t.Fatalf("unexpected required flag for %q: %#v", expectation.name, operation)
+		}
 	}
 }
 

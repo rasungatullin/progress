@@ -1,0 +1,7 @@
+{
+  "name": "publish-review-remarks",
+  "kind": "publish-review-remarks",
+  "title": "Запись замечаний ревизии",
+  "origin": "builtin",
+  "required": true
+}

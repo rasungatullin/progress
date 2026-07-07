@@ -1,0 +1,7 @@
+{
+  "name": "prepare-workplace",
+  "kind": "prepare-workplace",
+  "title": "Подготовка рабочего места",
+  "origin": "builtin",
+  "required": true
+}

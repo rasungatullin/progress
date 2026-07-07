@@ -270,6 +270,7 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 	catalog.Routes = append(catalog.Routes, registryCatalog.Routes...)
 	catalog.Actions = append(catalog.Actions, registryCatalog.Actions...)
 	catalog.Instructions = append(catalog.Instructions, registryCatalog.Instructions...)
+	catalog.Operations = append(catalog.Operations, registryCatalog.Operations...)
 	catalog.Entities = append(catalog.Entities, registryCatalog.Entities...)
 
 	if err := validateCatalog(catalog); err != nil {
@@ -322,6 +323,13 @@ func readCatalogRegistries(root string, readFile ReadFileFunc, readDir ReadDirFu
 	}
 	found = found || ok
 	catalog.Entities = entities
+
+	operations, ok, err := readRegistryFiles[Operation](root, "operations", readFile, readDir, operationRegistryKey)
+	if err != nil {
+		return Catalog{}, false, err
+	}
+	found = found || ok
+	catalog.Operations = operations
 
 	return catalog, found, nil
 }
@@ -392,7 +400,7 @@ func writeCatalog(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAl
 
 func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc, removeAll RemoveAllFunc) error {
 	root := filepath.Dir(path)
-	for _, dir := range []string{"routes", "actions", "instructions", "entities"} {
+	for _, dir := range []string{"routes", "actions", "instructions", "operations", "entities"} {
 		dirPath := filepath.Join(root, dir)
 		if err := removeAll(dirPath); err != nil {
 			return fmt.Errorf("remove methodology registry directory %s: %w", dirPath, err)
@@ -434,6 +442,15 @@ func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mk
 			return err
 		}
 		if err := writeRegistryObject(path, entity, writeFile, mkdirAll); err != nil {
+			return err
+		}
+	}
+	for _, operation := range catalog.Operations {
+		path, err := registryFilePath(root, "operations", operationRegistryKey(operation))
+		if err != nil {
+			return err
+		}
+		if err := writeRegistryObject(path, operation, writeFile, mkdirAll); err != nil {
 			return err
 		}
 	}
@@ -595,7 +612,7 @@ func indexEntities(entities []Entity) map[string]int {
 }
 
 func catalogHasObjects(catalog Catalog) bool {
-	return len(catalog.Routes) > 0 || len(catalog.Actions) > 0 || len(catalog.Instructions) > 0 || len(catalog.Entities) > 0
+	return len(catalog.Routes) > 0 || len(catalog.Actions) > 0 || len(catalog.Operations) > 0 || len(catalog.Instructions) > 0 || len(catalog.Entities) > 0
 }
 
 func routeRegistryKey(route Route) string {
@@ -608,6 +625,10 @@ func actionRegistryKey(action Action) string {
 
 func instructionRegistryKey(instruction Instruction) string {
 	return normalizeName(instruction.Name)
+}
+
+func operationRegistryKey(operation Operation) string {
+	return operationSourceKey(operation.Name)
 }
 
 func entityRegistryKey(entity Entity) string {

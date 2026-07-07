@@ -10,88 +10,40 @@
   "requires_synthesis": true,
   "operations": [
     {
-      "name": "resolve-action",
-      "kind": "resolve-action",
-      "title": "Разрешение действия",
-      "origin": "builtin",
-      "required": true
+      "name": "resolve-action"
     },
     {
-      "name": "prepare-data",
-      "kind": "prepare-data",
-      "title": "Подготовка данных",
-      "origin": "builtin",
-      "required": true
+      "name": "prepare-data"
     },
     {
-      "name": "load-pull-request",
-      "kind": "load-pull-request",
-      "title": "Получение запроса на слияние",
-      "origin": "builtin",
-      "required": true
+      "name": "load-pull-request"
     },
     {
-      "name": "load-review-remarks",
-      "kind": "load-review-remarks",
-      "title": "Получение замечаний ревизии",
-      "origin": "builtin",
-      "required": false
+      "name": "load-review-remarks"
     },
     {
-      "name": "resolve-profile",
-      "kind": "resolve-profile",
-      "title": "Выбор исполнительного профиля",
-      "origin": "builtin",
-      "required": true
+      "name": "resolve-profile"
     },
     {
-      "name": "allocate-resources",
-      "kind": "allocate-resources",
-      "title": "Ресурсное снабжение",
-      "origin": "builtin",
-      "required": true
+      "name": "allocate-resources"
     },
     {
-      "name": "prepare-workplace",
-      "kind": "prepare-workplace",
-      "title": "Подготовка рабочего места",
-      "origin": "builtin",
-      "required": true
+      "name": "prepare-workplace"
     },
     {
-      "name": "build-directive",
-      "kind": "build-directive",
-      "title": "Сборка исполнительной директивы",
-      "origin": "builtin",
-      "required": true
+      "name": "build-directive"
     },
     {
-      "name": "launch-synthesis",
-      "kind": "launch-synthesis",
-      "title": "Запуск ревизии",
-      "origin": "builtin",
-      "required": true
+      "name": "launch-synthesis"
     },
     {
-      "name": "parse-result",
-      "kind": "parse-result",
-      "title": "Разбор результата",
-      "origin": "builtin",
-      "required": true
+      "name": "parse-result"
     },
     {
-      "name": "publish-review-remarks",
-      "kind": "publish-review-remarks",
-      "title": "Запись замечаний ревизии",
-      "origin": "builtin",
-      "required": true
+      "name": "publish-review-remarks"
     },
     {
-      "name": "finalize",
-      "kind": "finalize",
-      "title": "Завершающая фиксация",
-      "origin": "builtin",
-      "required": true
+      "name": "finalize"
     }
   ],
   "description": "Ревизия открытого запроса на слияние с записью замечаний.",

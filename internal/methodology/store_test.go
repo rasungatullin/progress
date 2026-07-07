@@ -239,6 +239,23 @@ func TestLoadCatalogRejectsInvalidActionOperations(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsActionReferenceToUnknownOperation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"actions":[{"name":"implement","class":"engineering-synthesis","operations":[{"name":"resolve-action"},{"name":"missing-operation"}]}]}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "operations", "resolve-action.json"), `{"name":"resolve-action","kind":"resolve-action","title":"Разрешение действия","origin":"builtin","required":true}`)
+
+	_, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err == nil {
+		t.Fatal("expected unknown operation error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[1] references unknown operation "missing-operation"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSaveCatalogRejectsDuplicateRoutesBeforeNormalization(t *testing.T) {
 	t.Parallel()
 
@@ -307,6 +324,7 @@ func TestLoadCatalogReadsFileRegistries(t *testing.T) {
 	writeTestFile(t, filepath.Join(methodologyDir, "routes", "task-processing.json"), `{"name":"task-processing","action":"implement"}`)
 	writeTestFile(t, filepath.Join(methodologyDir, "actions", "implement.json"), `{"name":"implement","profile":"coder"}`)
 	writeTestFile(t, filepath.Join(methodologyDir, "instructions", "implement-directive.json"), `{"name":"implement-directive","action":"implement","profile":"coder","body":"Сформировать изменение."}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "operations", "prepare-data.json"), `{"name":"prepare-data","kind":"prepare-data","title":"Подготовка данных","origin":"builtin","required":true}`)
 	writeTestFile(t, filepath.Join(methodologyDir, "entities", "decision-rule--description-assessment.json"), `{"kind":"decision-rule","name":"description-assessment","target_contour":"decision","payload":{"label":"description-assessment"}}`)
 
 	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
@@ -318,6 +336,9 @@ func TestLoadCatalogReadsFileRegistries(t *testing.T) {
 	}
 	if len(snapshot.Catalog.Routes) != 1 || snapshot.Catalog.Routes[0].Name != "task-processing" {
 		t.Fatalf("unexpected routes: %#v", snapshot.Catalog.Routes)
+	}
+	if len(snapshot.Catalog.Operations) != 1 || snapshot.Catalog.Operations[0].Name != "prepare-data" {
+		t.Fatalf("unexpected operations: %#v", snapshot.Catalog.Operations)
 	}
 	if len(snapshot.Catalog.Entities) != 1 || entitySourceKey(snapshot.Catalog.Entities[0].Kind, snapshot.Catalog.Entities[0].Name) != "decision-rule/description-assessment" {
 		t.Fatalf("unexpected entities: %#v", snapshot.Catalog.Entities)

@@ -1,0 +1,7 @@
+{
+  "name": "build-directive",
+  "kind": "build-directive",
+  "title": "Сборка исполнительной директивы",
+  "origin": "builtin",
+  "required": true
+}

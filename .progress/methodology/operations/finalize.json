@@ -1,0 +1,7 @@
+{
+  "name": "finalize",
+  "kind": "finalize",
+  "title": "Завершающая фиксация",
+  "origin": "builtin",
+  "required": true
+}
