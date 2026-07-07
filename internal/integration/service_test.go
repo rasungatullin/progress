@@ -493,8 +493,12 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 			RepositoryRef: &TrackerRepository{
 				System: "github",
 			},
-			SearchResults: []TrackerSearchResult{{System: "github"}},
-			Artifacts:     []Artifact{{System: "github"}},
+			SearchResults: []TrackerSearchResult{{
+				System:    "github",
+				Author:    TrackerUser{System: "github"},
+				Assignees: []TrackerUser{{System: "github"}},
+			}},
+			Artifacts: []Artifact{{System: "github"}},
 		},
 	})
 
@@ -521,7 +525,7 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 	if result.RepositoryRef == nil || result.RepositoryRef.System != "enterprise" {
 		t.Fatalf("expected repository payload system to use route name, got %#v", result.RepositoryRef)
 	}
-	if result.SearchResults[0].System != "enterprise" || result.Artifacts[0].System != "enterprise" {
+	if result.SearchResults[0].System != "enterprise" || result.SearchResults[0].Author.System != "enterprise" || result.SearchResults[0].Assignees[0].System != "enterprise" || result.Artifacts[0].System != "enterprise" {
 		t.Fatalf("expected search results and artifacts to use route name, got %#v %#v", result.SearchResults, result.Artifacts)
 	}
 }
@@ -677,6 +681,31 @@ func TestOperationsCatalogPublishesExecutableGitHubTaskCommentsRead(t *testing.T
 	}
 	if operation.Output.Resource != "task-comment" || operation.Output.Shape != "TaskComment[]" {
 		t.Fatalf("unexpected comment output contract: %#v", operation.Output)
+	}
+}
+
+func TestOperationsCatalogPublishesGitHubTaskSearch(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	operations := service.Operations(context.Background(), OperationFilter{System: "github", Name: "tracker.task.search"})
+
+	if len(operations) != 1 {
+		t.Fatalf("expected one operation, got %#v", operations)
+	}
+	operation := operations[0]
+	if operation.Output.Shape != "TrackerSearchResult[]" {
+		t.Fatalf("unexpected search output contract: %#v", operation.Output)
+	}
+	optional := map[string]model.OperationField{}
+	for _, field := range operation.Input.Optional {
+		optional[field.Name] = field
+	}
+	for _, name := range []string{"labels", "exclude_labels"} {
+		field, ok := optional[name]
+		if !ok || field.Type != "string[]" || !field.Repeated {
+			t.Fatalf("expected repeated string list field %q, got %#v", name, field)
+		}
 	}
 }
 

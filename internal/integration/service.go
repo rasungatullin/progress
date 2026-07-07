@@ -940,6 +940,10 @@ func applyResponseSystem(result *Response, system string) {
 	}
 	for i := range result.SearchResults {
 		result.SearchResults[i].System = system
+		result.SearchResults[i].Author.System = system
+		for j := range result.SearchResults[i].Assignees {
+			result.SearchResults[i].Assignees[j].System = system
+		}
 	}
 	for i := range result.Artifacts {
 		result.Artifacts[i].System = system
