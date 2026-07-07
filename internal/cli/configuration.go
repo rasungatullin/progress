@@ -553,7 +553,7 @@ func printConfigurationGitSummary(cmd *cobra.Command, loaded configcontour.Execu
 	if git != nil {
 		identity = git.Identity != nil && strings.TrimSpace(git.Identity.AuthorName) != ""
 		signing = git.Signing != nil && git.Signing.Enabled
-		push = git.Push != nil && strings.TrimSpace(git.Push.SSHIdentityFile) != ""
+		push = git.Push != nil && (strings.TrimSpace(git.Push.SSHIdentityFile) != "" || strings.TrimSpace(git.Push.SSHIdentityPrivate) != "")
 	}
 	cmd.Printf("git.identity=%t\n", identity)
 	cmd.Printf("git.signing=%t\n", signing)

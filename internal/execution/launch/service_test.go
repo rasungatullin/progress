@@ -1053,6 +1053,47 @@ func TestGitPushEnvRejectsUnresolvedPrivateIdentity(t *testing.T) {
 	}
 }
 
+func TestCommitAndPushRejectsIncompletePushOverrideBeforeGitAdd(t *testing.T) {
+	t.Parallel()
+
+	var addCalled bool
+	service := &Service{
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain -z -uall":
+				return "M  file.txt\x00", nil
+			case "add -A -- file.txt":
+				addCalled = true
+				return "", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+		runGitOutputEnv: func(_ context.Context, _ string, _ []string, args ...string) (string, error) {
+			return "", fmt.Errorf("git command with env must not be called: %v", args)
+		},
+	}
+	allocation := validAllocation()
+	allocation.Git = &model.GitConfig{Push: &model.GitPushConfig{KnownHostsFile: "/keys/known_hosts", IdentitiesOnly: true}}
+
+	_, err := service.commitAndPush(context.Background(), validInvocation(t, true), allocation, validWorkplace(t), nil)
+	if err == nil {
+		t.Fatal("expected incomplete git push override error")
+	}
+	if !strings.Contains(err.Error(), "git.push must define ssh-identity-file or ssh-identity-private") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if addCalled {
+		t.Fatal("git add must not run after incomplete git push override")
+	}
+}
+
 func TestLaunchRunnerErrorReturned(t *testing.T) {
 	t.Parallel()
 

@@ -146,6 +146,25 @@ func TestConfigurationResourcesCLIPreservesGlobalResourceToolsOnLocalPartialUpda
 	}
 }
 
+func TestPrintConfigurationGitSummaryReportsPrivatePushKey(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	loaded := configcontour.ExecutionResourceConfig{
+		Config: model.ResourceConfigFile{
+			Git: &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivate: "progress-push-key"}},
+		},
+	}
+
+	printConfigurationGitSummary(cmd, loaded)
+
+	if !strings.Contains(stdout.String(), "git.push-key=true") {
+		t.Fatalf("git summary must report private push key presence: %q", stdout.String())
+	}
+}
+
 func runConfigurationCommand(t *testing.T, args ...string) string {
 	t.Helper()
 

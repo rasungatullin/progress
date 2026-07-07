@@ -798,6 +798,12 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, alloca
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
+	pushEnv, cleanupPushKey, err := gitPushEnv(allocation.Git)
+	if err != nil {
+		return gitResult{}, err
+	}
+	defer cleanupPushKey()
+
 	addArgs := append([]string{"add", "-A", "--"}, changedPaths...)
 	if _, err := s.runGitOutput(ctx, gitRoot, addArgs...); err != nil {
 		return gitResult{}, fmt.Errorf("git add failed: %w", err)
@@ -832,11 +838,6 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, alloca
 	if upstream != "origin/"+branch {
 		pushArgs = append(pushArgs, "-u", "origin", branch)
 	}
-	pushEnv, cleanupPushKey, err := gitPushEnv(allocation.Git)
-	if err != nil {
-		return gitResult{}, err
-	}
-	defer cleanupPushKey()
 
 	if _, err := s.runGitOutputWithEnv(ctx, in.Launch.Directory, pushEnv, pushArgs...); err != nil {
 		return gitResult{}, fmt.Errorf("git push failed: %w", err)
