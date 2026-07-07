@@ -900,6 +900,7 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 
 	operationNames := make(map[string]struct{}, len(state.action.Operations))
 	operationKindsByAnyMatch := make(map[string]struct{}, len(state.action.Operations))
+	operationKindMatchCounts := make(map[string]int, len(state.action.Operations))
 	operationKindsByNameMatch := make(map[string]struct{}, len(state.action.Operations))
 	actionName := strings.TrimSpace(strings.ToLower(state.action.Name))
 	if actionName != "" {
@@ -919,11 +920,13 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 		if requestedByKind {
 			operationKindsByAnyMatch[kind] = struct{}{}
 		}
+		if kind != "" {
+			operationKindMatchCounts[kind]++
+		}
 		if requestedByName {
 			operationNames[name] = struct{}{}
 			operationKindsByNameMatch[kind] = struct{}{}
 		}
-		operationKindsByAnyMatch[kind] = struct{}{}
 	}
 
 	specificSteps := make([]string, 0, len(allSteps))
@@ -938,7 +941,12 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 		}
 		kindsForFallback := operationKindsByAnyMatch
 		if len(operationKindsByNameMatch) > 0 {
-			kindsForFallback = operationKindsByNameMatch
+			kindsForFallback = make(map[string]struct{}, len(operationKindsByNameMatch))
+			for kind := range operationKindsByNameMatch {
+				if operationKindMatchCounts[kind] == 1 {
+					kindsForFallback[kind] = struct{}{}
+				}
+			}
 		}
 		specificOperationKinds := make([]string, 0, len(kindsForFallback))
 		for step := range kindsForFallback {
