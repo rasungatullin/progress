@@ -978,7 +978,7 @@ func policyForPublicationByFirstMatch(policies []textPublicationPolicy, target s
 	}
 	for index := 0; index < len(policies); index++ {
 		policy := policies[index]
-		if !policyMatchesTarget(policy, target) || !policyMatchesAnyStep(policy, normalizedSteps) {
+		if len(policy.Steps) != 0 || !policyMatchesTarget(policy, target) {
 			continue
 		}
 		return policy, true
