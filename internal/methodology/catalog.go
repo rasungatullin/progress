@@ -124,7 +124,7 @@ type ActionContractField struct {
 }
 
 type ActionMapping struct {
-	Ref   string           `json:"ref,omitempty"`
+	Ref   *string          `json:"ref,omitempty"`
 	Value *json.RawMessage `json:"value,omitempty"`
 }
 
@@ -786,8 +786,8 @@ func normalizeActionContract(contract ActionContract) ActionContract {
 
 func normalizeOperationContract(contract OperationContract) OperationContract {
 	return OperationContract{
-		In:  normalizeActionContractFields(contract.In),
-		Out: normalizeActionContractFields(contract.Out),
+		In:  normalizeOperationContractFields(contract.In),
+		Out: normalizeOperationContractFields(contract.Out),
 	}
 }
 
@@ -809,7 +809,10 @@ func normalizeActionOperationMapping(mappings map[string]ActionMapping) map[stri
 	result := make(map[string]ActionMapping, len(mappings))
 	for fieldName, mapping := range mappings {
 		fieldName = strings.TrimSpace(fieldName)
-		mapping.Ref = strings.TrimSpace(mapping.Ref)
+		if mapping.Ref != nil {
+			ref := strings.TrimSpace(*mapping.Ref)
+			mapping.Ref = &ref
+		}
 		result[fieldName] = mapping
 	}
 	if len(result) == 0 {
@@ -831,17 +834,43 @@ func validateActionContract(contract ActionContract, actionName string) error {
 	return nil
 }
 
+func normalizeOperationContractFields(fields map[string]OperationContractField) map[string]OperationContractField {
+	result := make(map[string]OperationContractField, len(fields))
+	for fieldName, field := range fields {
+		fieldName = strings.TrimSpace(fieldName)
+		field.Type = strings.TrimSpace(field.Type)
+		field.Description = strings.TrimSpace(field.Description)
+		result[fieldName] = field
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func validateOperationContract(contract OperationContract, operationName string) error {
-	if err := validateContractFields(operationName, "contract.in", contract.In); err != nil {
+	if err := validateOperationContractFields(operationName, "contract.in", contract.In); err != nil {
 		return err
 	}
-	if err := validateContractFields(operationName, "contract.out", contract.Out); err != nil {
+	if err := validateOperationContractFields(operationName, "contract.out", contract.Out); err != nil {
 		return err
 	}
 	return nil
 }
 
 func validateContractFields(entityName string, section string, fields map[string]ActionContractField) error {
+	for fieldName, field := range fields {
+		if strings.TrimSpace(fieldName) == "" {
+			return fmt.Errorf("%s.%s field name must be non-empty", entityName, section)
+		}
+		if strings.TrimSpace(field.Type) == "" {
+			return fmt.Errorf("%s.%s.%s.type must be non-empty", entityName, section, fieldName)
+		}
+	}
+	return nil
+}
+
+func validateOperationContractFields(entityName string, section string, fields map[string]OperationContractField) error {
 	for fieldName, field := range fields {
 		if strings.TrimSpace(fieldName) == "" {
 			return fmt.Errorf("%s.%s field name must be non-empty", entityName, section)
@@ -869,7 +898,7 @@ func validateActionMapping(path string, mappings map[string]ActionMapping) error
 		if fieldName == "" {
 			return fmt.Errorf("%s field name must be non-empty", path)
 		}
-		hasRef := strings.TrimSpace(mapping.Ref) != ""
+		hasRef := mapping.Ref != nil
 		hasValue := mapping.Value != nil
 		if hasRef && hasValue {
 			return fmt.Errorf("%s.%s has both ref and value", path, fieldName)
@@ -877,7 +906,7 @@ func validateActionMapping(path string, mappings map[string]ActionMapping) error
 		if !hasRef && !hasValue {
 			return fmt.Errorf("%s.%s must contain either ref or value", path, fieldName)
 		}
-		if hasRef && strings.TrimSpace(mapping.Ref) == "" {
+		if hasRef && strings.TrimSpace(*mapping.Ref) == "" {
 			return fmt.Errorf("%s.%s.ref must be non-empty", path, fieldName)
 		}
 	}
