@@ -347,7 +347,7 @@ func TestLoadCatalogAcceptsActionOperationBindingByNullValue(t *testing.T) {
 					},
 				},
 				"operations": []any{
-					{"name": "resolve-action"},
+					map[string]any{"name": "resolve-action"},
 				},
 			})), nil
 		}
@@ -426,7 +426,7 @@ func TestLoadCatalogRejectsConflictingActionOperationBindingWithNullValue(t *tes
 					},
 				},
 				"operations": []any{
-					{"name": "resolve-action"},
+					map[string]any{"name": "resolve-action"},
 				},
 			})), nil
 		}
@@ -573,7 +573,7 @@ func TestLoadCatalogRejectsInvalidActionContractRequiredType(t *testing.T) {
 					},
 				},
 				"operations": []any{
-					{"name": "resolve-action"},
+					map[string]any{"name": "resolve-action"},
 				},
 			})), nil
 		}
