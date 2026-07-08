@@ -332,10 +332,10 @@ func TestLoadCatalogAcceptsActionOperationBindingByNullValue(t *testing.T) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(mustMarshalCatalogJSON(t, map[string]any{
 				"actions": []any{
-					{
+					map[string]any{
 						"name": "implement",
 						"operations": []any{
-							{
+							map[string]any{
 								"name": "resolve-action",
 								"in": map[string]any{
 									"task_id": map[string]any{
@@ -410,10 +410,10 @@ func TestLoadCatalogRejectsConflictingActionOperationBindingWithNullValue(t *tes
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(mustMarshalCatalogJSON(t, map[string]any{
 				"actions": []any{
-					{
+					map[string]any{
 						"name": "implement",
 						"operations": []any{
-							{
+							map[string]any{
 								"name": "resolve-action",
 								"in": map[string]any{
 									"task_id": map[string]any{
@@ -560,7 +560,7 @@ func TestLoadCatalogRejectsInvalidActionContractRequiredType(t *testing.T) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(mustMarshalCatalogJSON(t, map[string]any{
 				"actions": []any{
-					{
+					map[string]any{
 						"name": "implement",
 						"contract": map[string]any{
 							"in": map[string]any{
