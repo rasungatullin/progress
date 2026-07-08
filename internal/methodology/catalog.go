@@ -919,16 +919,26 @@ func normalizeOperation(operation Operation) Operation {
 
 func normalizeActionContract(contract ActionContract) ActionContract {
 	return ActionContract{
-		In:   normalizeActionContractFields(contract.In),
-		Data: normalizeActionContractFields(contract.Data),
-		Out:  normalizeActionContractFields(contract.Out),
+		In:      normalizeActionContractFields(contract.In),
+		Data:    normalizeActionContractFields(contract.Data),
+		Out:     normalizeActionContractFields(contract.Out),
+		hasIn:   contract.hasIn,
+		hasData: contract.hasData,
+		hasOut:  contract.hasOut,
+		inNull:  contract.inNull,
+		dataNull: contract.dataNull,
+		outNull: contract.outNull,
 	}
 }
 
 func normalizeOperationContract(contract OperationContract) OperationContract {
 	return OperationContract{
-		In:  normalizeOperationContractFields(contract.In),
-		Out: normalizeOperationContractFields(contract.Out),
+		In:      normalizeOperationContractFields(contract.In),
+		Out:     normalizeOperationContractFields(contract.Out),
+		hasIn:   contract.hasIn,
+		hasOut:  contract.hasOut,
+		inNull:  contract.inNull,
+		outNull: contract.outNull,
 	}
 }
 

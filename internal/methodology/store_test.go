@@ -449,7 +449,7 @@ func TestLoadCatalogRejectsOperationContractRequiredTypeError(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]},
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
 				"operations":[{"name":"resolve-action","contract":{"out":{"workspace":{"type":"string","required":"yes"}}}}
 				]
 			}`), nil
