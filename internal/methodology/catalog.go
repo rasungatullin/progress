@@ -115,12 +115,74 @@ type ActionContract struct {
 	In   map[string]ActionContractField `json:"in,omitempty"`
 	Data map[string]ActionContractField `json:"data,omitempty"`
 	Out  map[string]ActionContractField `json:"out,omitempty"`
+	hasIn   bool
+	hasData bool
+	hasOut  bool
+	inNull  bool
+	dataNull bool
+	outNull bool
 }
 
 type ActionContractField struct {
 	Type        string `json:"type,omitempty"`
 	Required    *bool  `json:"required,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+func (contract *ActionContract) UnmarshalJSON(data []byte) error {
+	rawFields := strings.TrimSpace(string(data))
+	if rawFields == "" || rawFields == "null" {
+		*contract = ActionContract{}
+		return nil
+	}
+
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	result := ActionContract{}
+	if rawIn, ok := raw["in"]; ok {
+		result.hasIn = true
+		rawInBytes := bytes.TrimSpace(rawIn)
+		if bytes.Equal(rawInBytes, []byte("null")) {
+			result.inNull = true
+		} else {
+			var fields map[string]ActionContractField
+			if err := json.Unmarshal(rawIn, &fields); err != nil {
+				return err
+			}
+			result.In = normalizeActionContractFields(fields)
+		}
+	}
+	if rawData, ok := raw["data"]; ok {
+		result.hasData = true
+		rawDataBytes := bytes.TrimSpace(rawData)
+		if bytes.Equal(rawDataBytes, []byte("null")) {
+			result.dataNull = true
+		} else {
+			var fields map[string]ActionContractField
+			if err := json.Unmarshal(rawData, &fields); err != nil {
+				return err
+			}
+			result.Data = normalizeActionContractFields(fields)
+		}
+	}
+	if rawOut, ok := raw["out"]; ok {
+		result.hasOut = true
+		rawOutBytes := bytes.TrimSpace(rawOut)
+		if bytes.Equal(rawOutBytes, []byte("null")) {
+			result.outNull = true
+		} else {
+			var fields map[string]ActionContractField
+			if err := json.Unmarshal(rawOut, &fields); err != nil {
+				return err
+			}
+			result.Out = normalizeActionContractFields(fields)
+		}
+	}
+	*contract = result
+	return nil
 }
 
 type ActionMapping struct {
@@ -206,6 +268,53 @@ type Operation struct {
 type OperationContract struct {
 	In  map[string]OperationContractField `json:"in,omitempty"`
 	Out map[string]OperationContractField `json:"out,omitempty"`
+	hasIn  bool
+	hasOut bool
+	inNull bool
+	outNull bool
+}
+
+func (contract *OperationContract) UnmarshalJSON(data []byte) error {
+	rawFields := strings.TrimSpace(string(data))
+	if rawFields == "" || rawFields == "null" {
+		*contract = OperationContract{}
+		return nil
+	}
+
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	result := OperationContract{}
+	if rawIn, ok := raw["in"]; ok {
+		result.hasIn = true
+		rawInBytes := bytes.TrimSpace(rawIn)
+		if bytes.Equal(rawInBytes, []byte("null")) {
+			result.inNull = true
+		} else {
+			var fields map[string]OperationContractField
+			if err := json.Unmarshal(rawIn, &fields); err != nil {
+				return err
+			}
+			result.In = normalizeOperationContractFields(fields)
+		}
+	}
+	if rawOut, ok := raw["out"]; ok {
+		result.hasOut = true
+		rawOutBytes := bytes.TrimSpace(rawOut)
+		if bytes.Equal(rawOutBytes, []byte("null")) {
+			result.outNull = true
+		} else {
+			var fields map[string]OperationContractField
+			if err := json.Unmarshal(rawOut, &fields); err != nil {
+				return err
+			}
+			result.Out = normalizeOperationContractFields(fields)
+		}
+	}
+	*contract = result
+	return nil
 }
 
 type OperationContractField struct {
@@ -854,6 +963,15 @@ func normalizeActionOperationMapping(mappings map[string]ActionMapping) map[stri
 }
 
 func validateActionContract(contract ActionContract, actionName string) error {
+	if contract.hasIn && contract.inNull {
+		return fmt.Errorf("%s.contract.in must be an object", actionName)
+	}
+	if contract.hasData && contract.dataNull {
+		return fmt.Errorf("%s.contract.data must be an object", actionName)
+	}
+	if contract.hasOut && contract.outNull {
+		return fmt.Errorf("%s.contract.out must be an object", actionName)
+	}
 	if err := validateContractFields(actionName, "contract.in", contract.In); err != nil {
 		return err
 	}
@@ -881,6 +999,12 @@ func normalizeOperationContractFields(fields map[string]OperationContractField) 
 }
 
 func validateOperationContract(contract OperationContract, operationName string) error {
+	if contract.hasIn && contract.inNull {
+		return fmt.Errorf("%s.contract.in must be an object", operationName)
+	}
+	if contract.hasOut && contract.outNull {
+		return fmt.Errorf("%s.contract.out must be an object", operationName)
+	}
 	if err := validateOperationContractFields(operationName, "contract.in", contract.In); err != nil {
 		return err
 	}

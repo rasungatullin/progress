@@ -282,7 +282,7 @@ func TestLoadCatalogRejectsInvalidActionContractFieldType(t *testing.T) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
 				"actions":[{"name":"implement","contract":{"in":{"task_id":{}}}}],
-				"operations":[{"name":"resolve-action","contract":{"out":{"workspace":{}}}}]
+				"operations":[{"name":"resolve-action"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -488,6 +488,28 @@ func TestLoadCatalogRejectsActionContractSectionType(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsActionContractInNullSection(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","contract":{"in":null}}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected contract section type error")
+	}
+	if !strings.Contains(err.Error(), "implement.contract.in must be an object") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadCatalogRejectsInvalidActionContractRequiredType(t *testing.T) {
 	t.Parallel()
 
@@ -506,6 +528,28 @@ func TestLoadCatalogRejectsInvalidActionContractRequiredType(t *testing.T) {
 		t.Fatal("expected required type error")
 	}
 	if !strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsOperationContractOutNullSection(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
+				"operations":[{"name":"resolve-action","contract":{"out":null}}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected contract section type error")
+	}
+	if !strings.Contains(err.Error(), "resolve-action.contract.out must be an object") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
