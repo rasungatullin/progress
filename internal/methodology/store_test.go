@@ -2,6 +2,7 @@ package methodology
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -11,6 +12,15 @@ import (
 
 	"github.com/rasungatullin/progress/internal/configuration"
 )
+
+func mustMarshalCatalogJSON(t *testing.T, value any) string {
+	t.Helper()
+	b, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("build catalog json: %v", err)
+	}
+	return string(b)
+}
 
 func TestLoadCatalogMergesGlobalAndLocalLayersWithLocalPriority(t *testing.T) {
 	t.Parallel()
@@ -320,10 +330,26 @@ func TestLoadCatalogAcceptsActionOperationBindingByNullValue(t *testing.T) {
 
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
-			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"value":null}}]}],
-				"operations":[{"name":"resolve-action"}]
-			}`), nil
+			return []byte(mustMarshalCatalogJSON(t, map[string]any{
+				"actions": []any{
+					{
+						"name": "implement",
+						"operations": []any{
+							{
+								"name": "resolve-action",
+								"in": map[string]any{
+									"task_id": map[string]any{
+										"value": nil,
+									},
+								},
+							},
+						},
+					},
+				},
+				"operations": []any{
+					{"name": "resolve-action"},
+				},
+			})), nil
 		}
 		return nil, fs.ErrNotExist
 	}
@@ -382,10 +408,27 @@ func TestLoadCatalogRejectsConflictingActionOperationBindingWithNullValue(t *tes
 
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
-			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":"in.task_id","value":null}}]}],
-				"operations":[{"name":"resolve-action"}]
-			}`), nil
+			return []byte(mustMarshalCatalogJSON(t, map[string]any{
+				"actions": []any{
+					{
+						"name": "implement",
+						"operations": []any{
+							{
+								"name": "resolve-action",
+								"in": map[string]any{
+									"task_id": map[string]any{
+										"ref":   "in.task_id",
+										"value": nil,
+									},
+								},
+							},
+						},
+					},
+				},
+				"operations": []any{
+					{"name": "resolve-action"},
+				},
+			})), nil
 		}
 		return nil, fs.ErrNotExist
 	}
@@ -515,10 +558,24 @@ func TestLoadCatalogRejectsInvalidActionContractRequiredType(t *testing.T) {
 
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
-			return []byte(`{
-				"actions":[{"name":"implement","contract":{"in":{"task_id":{"type":"string","required":"yes"}}}],
-				"operations":[{"name":"resolve-action"}]
-			}`), nil
+			return []byte(mustMarshalCatalogJSON(t, map[string]any{
+				"actions": []any{
+					{
+						"name": "implement",
+						"contract": map[string]any{
+							"in": map[string]any{
+								"task_id": map[string]any{
+									"type":     "string",
+									"required": "yes",
+								},
+							},
+						},
+					},
+				},
+				"operations": []any{
+					{"name": "resolve-action"},
+				},
+			})), nil
 		}
 		return nil, fs.ErrNotExist
 	}
