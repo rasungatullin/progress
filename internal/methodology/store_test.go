@@ -303,7 +303,7 @@ func TestLoadCatalogAcceptsActionOperationBindingByValue(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"value":"task-123"}}]}],
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"value":"task-123"}}}]}],
 				"operations":[{"name":"resolve-action"}]
 			}`), nil
 		}
@@ -315,13 +315,31 @@ func TestLoadCatalogAcceptsActionOperationBindingByValue(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogAcceptsActionOperationBindingByNullValue(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"value":null}}]}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	if _, err := LoadCatalogWithHome("/repo", "/config-home", readFile); err != nil {
+		t.Fatalf("load catalog with null value binding: %v", err)
+	}
+}
+
 func TestLoadCatalogRejectsActionOperationBindingWithoutRefOrValue(t *testing.T) {
 	t.Parallel()
 
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{}}]}],
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{}}}]}],
 				"operations":[{"name":"resolve-action"}]
 			}`), nil
 		}
@@ -343,7 +361,29 @@ func TestLoadCatalogRejectsConflictingActionOperationBinding(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":"in.task_id","value":"abc"}}]}],
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":"in.task_id","value":"abc"}}}]}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected conflicting binding error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[0].in.task_id has both ref and value`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsConflictingActionOperationBindingWithNullValue(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":"in.task_id","value":null}}]}],
 				"operations":[{"name":"resolve-action"}]
 			}`), nil
 		}
@@ -365,7 +405,7 @@ func TestLoadCatalogRejectsConflictingActionOperationBindingWithEmptyRef(t *test
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":" ","value":"abc"}}]}],
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":" ","value":"abc"}}}]}],
 				"operations":[{"name":"resolve-action"}]
 			}`), nil
 		}
@@ -387,7 +427,7 @@ func TestLoadCatalogRejectsEmptyOperationContractFieldType(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]},
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
 				"operations":[{"name":"resolve-action","contract":{"in":{"task_id":{}}}}]
 			}`), nil
 		}

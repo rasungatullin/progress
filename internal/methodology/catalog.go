@@ -124,8 +124,40 @@ type ActionContractField struct {
 }
 
 type ActionMapping struct {
-	Ref   *string          `json:"ref,omitempty"`
-	Value *json.RawMessage `json:"value,omitempty"`
+	Ref      *string          `json:"ref,omitempty"`
+	Value    *json.RawMessage `json:"value,omitempty"`
+	hasRef   bool
+	hasValue bool
+}
+
+func (m *ActionMapping) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*m = ActionMapping{}
+		return nil
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return err
+	}
+
+	mapped := ActionMapping{}
+	if rawRef, ok := raw["ref"]; ok {
+		mapped.hasRef = true
+		var ref *string
+		if err := json.Unmarshal(rawRef, &ref); err != nil {
+			return err
+		}
+		mapped.Ref = ref
+	}
+	if rawValue, ok := raw["value"]; ok {
+		mapped.hasValue = true
+		value := json.RawMessage(rawValue)
+		mapped.Value = &value
+	}
+	*m = mapped
+	return nil
 }
 
 func (o *ActionOperation) UnmarshalJSON(data []byte) error {
@@ -898,15 +930,15 @@ func validateActionMapping(path string, mappings map[string]ActionMapping) error
 		if fieldName == "" {
 			return fmt.Errorf("%s field name must be non-empty", path)
 		}
-		hasRef := mapping.Ref != nil
-		hasValue := mapping.Value != nil
+		hasRef := mapping.hasRef
+		hasValue := mapping.hasValue
 		if hasRef && hasValue {
 			return fmt.Errorf("%s.%s has both ref and value", path, fieldName)
 		}
 		if !hasRef && !hasValue {
 			return fmt.Errorf("%s.%s must contain either ref or value", path, fieldName)
 		}
-		if hasRef && strings.TrimSpace(*mapping.Ref) == "" {
+		if hasRef && (mapping.Ref == nil || strings.TrimSpace(*mapping.Ref) == "") {
 			return fmt.Errorf("%s.%s.ref must be non-empty", path, fieldName)
 		}
 	}
