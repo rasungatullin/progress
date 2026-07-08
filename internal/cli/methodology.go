@@ -639,7 +639,49 @@ func findMethodologyActionByExactName(actions []methodology.Action, name string)
 func cloneMethodologyAction(action methodology.Action) methodology.Action {
 	cloned := action
 	cloned.Aliases = append([]string(nil), action.Aliases...)
-	cloned.Operations = append([]methodology.ActionOperation(nil), action.Operations...)
+	cloned.Operations = make([]methodology.ActionOperation, len(action.Operations))
+	for index, operation := range action.Operations {
+		cloned.Operations[index] = methodology.ActionOperation{
+			Name:     operation.Name,
+			Kind:     operation.Kind,
+			Title:    operation.Title,
+			Origin:   operation.Origin,
+			In:       cloneMethodologyActionMapping(operation.In),
+			Out:      cloneMethodologyActionMapping(operation.Out),
+			Required: operation.Required,
+		}
+	}
+	cloned.Contract = cloneMethodologyActionContract(action.Contract)
+	return cloned
+}
+
+func cloneMethodologyActionContract(contract methodology.ActionContract) methodology.ActionContract {
+	return methodology.ActionContract{
+		In:   cloneMethodologyActionContractFields(contract.In),
+		Data: cloneMethodologyActionContractFields(contract.Data),
+		Out:  cloneMethodologyActionContractFields(contract.Out),
+	}
+}
+
+func cloneMethodologyActionContractFields(fields map[string]methodology.ActionContractField) map[string]methodology.ActionContractField {
+	cloned := make(map[string]methodology.ActionContractField, len(fields))
+	for key, field := range fields {
+		cloned[key] = field
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func cloneMethodologyActionMapping(mappings map[string]methodology.ActionMapping) map[string]methodology.ActionMapping {
+	cloned := make(map[string]methodology.ActionMapping, len(mappings))
+	for key, mapping := range mappings {
+		cloned[key] = mapping
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
 	return cloned
 }
 

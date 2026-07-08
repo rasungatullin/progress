@@ -95,17 +95,37 @@ type Action struct {
 	Aliases           []string          `json:"aliases,omitempty"`
 	RequiresWorkplace *bool             `json:"requires_workplace,omitempty"`
 	RequiresSynthesis *bool             `json:"requires_synthesis,omitempty"`
+	Contract          ActionContract    `json:"contract,omitempty"`
 	Operations        []ActionOperation `json:"operations,omitempty"`
 	Description       string            `json:"description,omitempty"`
 	ExpectedResult    string            `json:"expected_result,omitempty"`
 }
 
 type ActionOperation struct {
-	Name     string `json:"name,omitempty"`
-	Kind     string `json:"kind,omitempty"`
-	Title    string `json:"title,omitempty"`
-	Origin   string `json:"origin,omitempty"`
-	Required *bool  `json:"required,omitempty"`
+	Name     string                   `json:"name,omitempty"`
+	Kind     string                   `json:"kind,omitempty"`
+	Title    string                   `json:"title,omitempty"`
+	Origin   string                   `json:"origin,omitempty"`
+	In       map[string]ActionMapping `json:"in,omitempty"`
+	Out      map[string]ActionMapping `json:"out,omitempty"`
+	Required *bool                    `json:"required,omitempty"`
+}
+
+type ActionContract struct {
+	In   map[string]ActionContractField `json:"in,omitempty"`
+	Data map[string]ActionContractField `json:"data,omitempty"`
+	Out  map[string]ActionContractField `json:"out,omitempty"`
+}
+
+type ActionContractField struct {
+	Type        string `json:"type,omitempty"`
+	Required    *bool  `json:"required,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type ActionMapping struct {
+	Ref   string           `json:"ref,omitempty"`
+	Value *json.RawMessage `json:"value,omitempty"`
 }
 
 func (o *ActionOperation) UnmarshalJSON(data []byte) error {
@@ -143,11 +163,23 @@ type Instruction struct {
 }
 
 type Operation struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind,omitempty"`
-	Title    string `json:"title,omitempty"`
-	Origin   string `json:"origin,omitempty"`
-	Required *bool  `json:"required,omitempty"`
+	Name     string            `json:"name"`
+	Kind     string            `json:"kind,omitempty"`
+	Title    string            `json:"title,omitempty"`
+	Origin   string            `json:"origin,omitempty"`
+	Contract OperationContract `json:"contract,omitempty"`
+	Required *bool             `json:"required,omitempty"`
+}
+
+type OperationContract struct {
+	In  map[string]OperationContractField `json:"in,omitempty"`
+	Out map[string]OperationContractField `json:"out,omitempty"`
+}
+
+type OperationContractField struct {
+	Type        string `json:"type,omitempty"`
+	Required    *bool  `json:"required,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type Entity struct {
@@ -471,6 +503,9 @@ func validateCatalog(catalog Catalog) error {
 			return fmt.Errorf("operations contains duplicate name %q", operation.Name)
 		}
 		seenOperations[operation.Name] = struct{}{}
+		if err := validateOperationContract(operation.Contract, operation.Name); err != nil {
+			return err
+		}
 	}
 	hasOperationRegistry := len(seenOperations) > 0
 
@@ -491,10 +526,16 @@ func validateCatalog(catalog Catalog) error {
 	for actionIndex, action := range normalizedActions {
 		seenAliases := map[string]struct{}{}
 		seenOperationRefs := map[string]struct{}{}
+		if err := validateActionContract(action.Contract, action.Name); err != nil {
+			return err
+		}
 		for operationIndex, operation := range catalog.Actions[actionIndex].Operations {
 			operation = normalizeActionOperation(operation)
 			if operation.Name == "" && operation.Kind == "" {
 				return fmt.Errorf("action %q operations[%d] must define name or kind", action.Name, operationIndex)
+			}
+			if err := validateActionOperationBinding(action.Name, operationIndex, operation); err != nil {
+				return err
 			}
 			if _, ok := seenOperationRefs[operation.Name]; ok {
 				return fmt.Errorf("action %q operations contains duplicate name %q", action.Name, operation.Name)
@@ -682,6 +723,7 @@ func normalizeAction(action Action) Action {
 	action.Class = strings.TrimSpace(action.Class)
 	action.Profile = strings.TrimSpace(action.Profile)
 	action.Aliases = normalizeNameList(action.Aliases)
+	action.Contract = normalizeActionContract(action.Contract)
 	action.Operations = normalizeActionOperations(action.Operations)
 	action.Description = strings.TrimSpace(action.Description)
 	action.ExpectedResult = strings.TrimSpace(action.ExpectedResult)
@@ -714,6 +756,8 @@ func normalizeActionOperation(operation ActionOperation) ActionOperation {
 	}
 	operation.Title = strings.TrimSpace(operation.Title)
 	operation.Origin = strings.TrimSpace(operation.Origin)
+	operation.In = normalizeActionOperationMapping(operation.In)
+	operation.Out = normalizeActionOperationMapping(operation.Out)
 	return operation
 }
 
@@ -728,7 +772,116 @@ func normalizeOperation(operation Operation) Operation {
 	}
 	operation.Title = strings.TrimSpace(operation.Title)
 	operation.Origin = strings.TrimSpace(operation.Origin)
+	operation.Contract = normalizeOperationContract(operation.Contract)
 	return operation
+}
+
+func normalizeActionContract(contract ActionContract) ActionContract {
+	return ActionContract{
+		In:   normalizeActionContractFields(contract.In),
+		Data: normalizeActionContractFields(contract.Data),
+		Out:  normalizeActionContractFields(contract.Out),
+	}
+}
+
+func normalizeOperationContract(contract OperationContract) OperationContract {
+	return OperationContract{
+		In:  normalizeActionContractFields(contract.In),
+		Out: normalizeActionContractFields(contract.Out),
+	}
+}
+
+func normalizeActionContractFields(fields map[string]ActionContractField) map[string]ActionContractField {
+	result := make(map[string]ActionContractField, len(fields))
+	for fieldName, field := range fields {
+		fieldName = strings.TrimSpace(fieldName)
+		field.Type = strings.TrimSpace(field.Type)
+		field.Description = strings.TrimSpace(field.Description)
+		result[fieldName] = field
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func normalizeActionOperationMapping(mappings map[string]ActionMapping) map[string]ActionMapping {
+	result := make(map[string]ActionMapping, len(mappings))
+	for fieldName, mapping := range mappings {
+		fieldName = strings.TrimSpace(fieldName)
+		mapping.Ref = strings.TrimSpace(mapping.Ref)
+		result[fieldName] = mapping
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func validateActionContract(contract ActionContract, actionName string) error {
+	if err := validateContractFields(actionName, "contract.in", contract.In); err != nil {
+		return err
+	}
+	if err := validateContractFields(actionName, "contract.data", contract.Data); err != nil {
+		return err
+	}
+	if err := validateContractFields(actionName, "contract.out", contract.Out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateOperationContract(contract OperationContract, operationName string) error {
+	if err := validateContractFields(operationName, "contract.in", contract.In); err != nil {
+		return err
+	}
+	if err := validateContractFields(operationName, "contract.out", contract.Out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateContractFields(entityName string, section string, fields map[string]ActionContractField) error {
+	for fieldName, field := range fields {
+		if strings.TrimSpace(fieldName) == "" {
+			return fmt.Errorf("%s.%s field name must be non-empty", entityName, section)
+		}
+		if strings.TrimSpace(field.Type) == "" {
+			return fmt.Errorf("%s.%s.%s.type must be non-empty", entityName, section, fieldName)
+		}
+	}
+	return nil
+}
+
+func validateActionOperationBinding(actionName string, operationIndex int, operation ActionOperation) error {
+	if err := validateActionMapping(fmt.Sprintf("action %q operations[%d].in", actionName, operationIndex), operation.In); err != nil {
+		return err
+	}
+	if err := validateActionMapping(fmt.Sprintf("action %q operations[%d].out", actionName, operationIndex), operation.Out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateActionMapping(path string, mappings map[string]ActionMapping) error {
+	for fieldName, mapping := range mappings {
+		fieldName = strings.TrimSpace(fieldName)
+		if fieldName == "" {
+			return fmt.Errorf("%s field name must be non-empty", path)
+		}
+		hasRef := strings.TrimSpace(mapping.Ref) != ""
+		hasValue := mapping.Value != nil
+		if hasRef && hasValue {
+			return fmt.Errorf("%s.%s has both ref and value", path, fieldName)
+		}
+		if !hasRef && !hasValue {
+			return fmt.Errorf("%s.%s must contain either ref or value", path, fieldName)
+		}
+		if hasRef && strings.TrimSpace(mapping.Ref) == "" {
+			return fmt.Errorf("%s.%s.ref must be non-empty", path, fieldName)
+		}
+	}
+	return nil
 }
 
 func normalizeInstruction(instruction Instruction) Instruction {
