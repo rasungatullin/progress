@@ -50,7 +50,7 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 			Status:  "completed",
 			Summary: fmt.Sprintf("action=%s class=%s operations=completed", state.action.Name, state.action.Class),
 		}
-		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, nil)
+		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
 	}
 
 	return nil
@@ -368,6 +368,16 @@ func allocationFromExecutionData(state *operationExecution) allocation {
 	return state.allocation
 }
 
+func workplaceFromExecutionData(state *operationExecution) workplace {
+	if state == nil {
+		return workplace{}
+	}
+	if value, ok := state.data["workplace"].(workplace); ok {
+		return value
+	}
+	return state.workplace
+}
+
 func resolveProfileInputSummary(profileName string, operation OperationSpec) string {
 	profileName = strings.TrimSpace(profileName)
 	if profileName == "" {
@@ -672,9 +682,9 @@ func profileSummary(profile profile) string {
 func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := prepareWorkplaceInputFromOperation(state, operation)
 	if !input.requiresWorkplace {
-		state.workplace = workplace{Name: strings.TrimSpace(input.invocation.Launch.Directory), Ready: true}
-		writeOperationData(state, operation.Out, "workplace", state.workplace)
-		state.tracker.skipIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(state.workplace, operation), "Рабочее место не требуется для разрешённого действия.")
+		workplace := workplace{Name: strings.TrimSpace(input.invocation.Launch.Directory), Ready: true}
+		writePrepareWorkplaceData(state, operation, workplace)
+		state.tracker.skipIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), "Рабочее место не требуется для разрешённого действия.")
 		return nil
 	}
 
@@ -686,13 +696,20 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 		return err
 	}
 
-	state.workplace = workplace
 	if strings.TrimSpace(state.in.Launch.Directory) == "" {
 		state.in.Launch.Directory = workplace.Name
 	}
-	writeOperationData(state, operation.Out, "workplace", workplace)
+	writePrepareWorkplaceData(state, operation, workplace)
 	state.tracker.completeIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
 	return nil
+}
+
+func writePrepareWorkplaceData(state *operationExecution, operation OperationSpec, workplace workplace) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"workplace": {Ref: "data.workplace"}}
+	}
+	writeOperationData(state, out, "workplace", workplace)
 }
 
 type prepareWorkplaceInput struct {
@@ -881,7 +898,7 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	state.in = directiveInvocation
 	writeOperationData(state, operation.Out, "directive", state.in.Launch)
 	state.tracker.completeIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(state.in.Launch, operation), "Исполнительная директива подготовлена к запуску.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), input.allocation, state.workplace, LaunchResult{Status: "running"}, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), input.allocation, workplaceFromExecutionData(state), LaunchResult{Status: "running"}, nil)
 	return nil
 }
 
@@ -1059,7 +1076,7 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 		input.directive = state.in.Launch
 		input.profile = profileFromExecutionData(state)
 		input.allocation = allocationFromExecutionData(state)
-		input.workplace = state.workplace
+		input.workplace = workplaceFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -1457,7 +1474,7 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 		input.invocation = state.in
 		input.profile = profileFromExecutionData(state)
 		input.allocation = allocationFromExecutionData(state)
-		input.workplace = state.workplace
+		input.workplace = workplaceFromExecutionData(state)
 		input.result = state.result
 		input.structuredOutput = state.result.StructuredOutput
 	}
@@ -1561,7 +1578,7 @@ func (e builtinOperationExecutor) finalize(ctx context.Context, state *operation
 		}
 		writeOperationData(state, operation.Out, "result", state.result)
 		state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(state.result, operation), finalizeSummary(state.result))
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, nil)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
 		return nil
 	}
 
@@ -1689,7 +1706,7 @@ func (e builtinOperationExecutor) unsupported(ctx context.Context, state *operat
 	err := fmt.Errorf("operation %q is unsupported", name)
 	state.result = failedStartResult(err)
 	state.tracker.fail(name, "Операция не поддержана текущей реализацией.", err, "operation_unsupported", false, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, err)
 	return err
 }
 

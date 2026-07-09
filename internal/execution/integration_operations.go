@@ -291,7 +291,7 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	writeOperationData(state, operation.Out, "publish_summary", summary)
 	writeOperationData(state, operation.Out, "result", state.result)
 	state.tracker.completeIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, summary, state.result, operation), "Запрос на слияние зафиксирован через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
 	return nil
 }
 
@@ -306,7 +306,7 @@ func publishMergeRequestInputFromOperation(state *operationExecution, operation 
 	input := publishMergeRequestInput{}
 	if state != nil {
 		input.invocation = state.in
-		input.workplace = state.workplace
+		input.workplace = workplaceFromExecutionData(state)
 		input.result = state.result
 		input.structuredOutput = state.result.StructuredOutput
 	}
@@ -343,7 +343,6 @@ func applyPublishMergeRequestInputToState(state *operationExecution, input publi
 	}
 	state.in = input.invocation
 	state.assignment = assignmentFromInvocation(input.invocation)
-	state.workplace = input.workplace
 	state.result = input.result
 	state.result.StructuredOutput = input.structuredOutput
 }
@@ -377,9 +376,10 @@ func publishMergeRequestOutputSummary(mergeRequest integration.MergeRequest, sum
 func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, state *operationExecution) (string, error) {
 	repoRoot := ""
 	if state != nil {
-		repoRoot = strings.TrimSpace(state.workplace.RepositoryRoot)
+		workplace := workplaceFromExecutionData(state)
+		repoRoot = strings.TrimSpace(workplace.RepositoryRoot)
 		if repoRoot == "" {
-			repoRoot = strings.TrimSpace(state.workplace.Name)
+			repoRoot = strings.TrimSpace(workplace.Name)
 		}
 	}
 	if repoRoot == "" {
@@ -426,7 +426,7 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 	writeOperationData(state, operation.Out, "review_remarks_summary", summary)
 	writeOperationData(state, operation.Out, "result", state.result)
 	state.tracker.completeIO(name, publishReviewRemarksInputSummary(input, operation), publishReviewRemarksOutputSummary(summary, state.result, operation), "Замечания ревизии записаны через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
 	return nil
 }
 
@@ -480,7 +480,7 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 	writeOperationData(state, operation.Out, "review_responses_summary", summary)
 	writeOperationData(state, operation.Out, "result", state.result)
 	state.tracker.completeIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary(summary, state.result, operation), "Ответы на замечания записаны через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
 	return nil
 }
 
@@ -733,7 +733,7 @@ func (e builtinOperationExecutor) failIntegrationOperation(ctx context.Context, 
 		state.result.Summary = joinExecutionSummaries(state.result.Summary, strings.TrimSpace(err.Error()))
 	}
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, err)
 	return err
 }
 
@@ -743,7 +743,7 @@ func (e builtinOperationExecutor) failOrSkipIntegrationOperation(ctx context.Con
 	}
 
 	state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
 	return nil
 }
 

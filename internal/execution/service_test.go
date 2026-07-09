@@ -842,8 +842,8 @@ func TestPrepareWorkplaceFillsActionDataAndKeepsStateWorkplace(t *testing.T) {
 	if dataWorkplace.Name != "/tmp/task-42" || !dataWorkplace.Ready {
 		t.Fatalf("unexpected data workplace: %#v", dataWorkplace)
 	}
-	if state.workplace.Name != "/tmp/task-42" || !state.workplace.Ready {
-		t.Fatalf("state workplace must keep compatibility copy: %#v", state.workplace)
+	if state.workplace.Name != "" || state.workplace.Ready {
+		t.Fatalf("prepare-workplace must not write implicit state workplace: %#v", state.workplace)
 	}
 	if state.in.Launch.Directory != "/tmp/task-42" {
 		t.Fatalf("state invocation must keep launch directory compatibility copy: %#v", state.in.Launch)
@@ -884,8 +884,8 @@ func TestPrepareWorkplaceWritesLocalReadyWorkplaceForActionWithoutWorkplace(t *t
 	if !ok || dataWorkplace.Name != "/repo" || !dataWorkplace.Ready {
 		t.Fatalf("prepare-workplace must write skipped workplace to data.workplace: %#v", state.data)
 	}
-	if state.workplace.Name != "/repo" || !state.workplace.Ready {
-		t.Fatalf("state workplace must keep skipped compatibility copy: %#v", state.workplace)
+	if state.workplace.Name != "" || state.workplace.Ready {
+		t.Fatalf("prepare-workplace must not write skipped implicit state workplace: %#v", state.workplace)
 	}
 	result := findOperationResult(state.tracker.snapshot(), OperationKindPrepareWorkplace)
 	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
