@@ -62,7 +62,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindPrepareData:
 		return e.prepareData(ctx, state, operation, name)
 	case OperationKindLoadPullRequest:
-		return e.loadPullRequest(ctx, state, name)
+		return e.loadPullRequest(ctx, state, operation, name)
 	case OperationKindLoadReviewRemarks:
 		return e.loadReviewRemarks(ctx, state, name, operation.Required)
 	case OperationKindResolveProfile:
@@ -535,6 +535,12 @@ func invocationValueFromAllocateResourcesMapping(state *operationExecution, mapp
 			return invocation{}, false
 		}
 		return state.in, true
+	case "data.invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		value, ok := state.data["invocation"].(invocation)
+		return value, ok
 	default:
 		return invocation{}, false
 	}

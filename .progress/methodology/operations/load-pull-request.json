@@ -3,5 +3,26 @@
   "kind": "load-pull-request",
   "title": "Получение запроса на слияние",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения со связанным запросом на слияние."
+      }
+    },
+    "out": {
+      "pull_request": {
+        "type": "object",
+        "required": true,
+        "description": "Загруженный запрос на слияние из контура интеграции."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Ввод контура исполнения, синхронизированный с параметрами запроса на слияние."
+      }
+    }
+  }
 }

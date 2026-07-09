@@ -1227,6 +1227,67 @@ func TestCommitPushWritesResultForActionWithoutSynthesis(t *testing.T) {
 	}
 }
 
+func TestLoadPullRequestFillsActionDataAndKeepsState(t *testing.T) {
+	t.Parallel()
+
+	operation := loadPullRequestOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Assignment: &ExecutionAssignment{
+				CanonicalTask: &ObjectRef{Type: "task", Number: 112},
+				RelatedObjects: []ObjectRef{{
+					Type:       "merge-request",
+					Repository: "owner/name",
+					Number:     17,
+				}},
+			},
+		},
+		action:  model.Action{Operations: []model.OperationSpec{operation}},
+		data:    map[string]any{},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	integrations := &stubIntegrationExecutor{
+		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			if req.Operation != "get" || req.Repository != "owner/name" || req.Number != 17 {
+				t.Fatalf("unexpected integration request: %#v", req)
+			}
+			return integration.Response{MergeRequest: &integration.MergeRequest{
+				Repository: "owner/name",
+				Number:     17,
+				State:      "OPEN",
+				BaseRef:    "main",
+				HeadRef:    "feature/review",
+				Title:      "Исправить обработку",
+				URL:        "https://github.com/owner/name/pull/17",
+			}}, nil
+		},
+	}
+	service := &Service{logger: log.Default(), integrations: integrations}
+
+	err := builtinOperationExecutor{service: service}.loadPullRequest(context.Background(), state, operation, OperationKindLoadPullRequest)
+	if err != nil {
+		t.Fatalf("load pull request: %v", err)
+	}
+	dataPullRequest, ok := state.data["pull_request"].(integration.MergeRequest)
+	if !ok || dataPullRequest.Number != 17 || dataPullRequest.HeadRef != "feature/review" {
+		t.Fatalf("load-pull-request must fill data.pull_request: %#v", state.data)
+	}
+	dataInvocation, ok := state.data["invocation"].(model.Invocation)
+	if !ok || dataInvocation.Workplace.HeadRef != "feature/review" || dataInvocation.Workplace.BaseRef != "main" {
+		t.Fatalf("load-pull-request must fill synchronized data.invocation: %#v", state.data)
+	}
+	if state.pullRequest == nil || state.pullRequest.Number != dataPullRequest.Number {
+		t.Fatalf("state pull request must keep compatibility copy: state=%#v data=%#v", state.pullRequest, dataPullRequest)
+	}
+	if state.in.Workplace.HeadRef != dataInvocation.Workplace.HeadRef || state.assignment == nil || len(state.assignment.RelatedObjects) != 1 || state.assignment.RelatedObjects[0].Number != 17 {
+		t.Fatalf("state invocation and assignment must keep compatibility copy: state=%#v assignment=%#v data=%#v", state.in, state.assignment, dataInvocation)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindLoadPullRequest)
+	if result == nil || result.Status != OperationStatusCompleted || result.Input == "" || result.Output == "" {
+		t.Fatalf("load-pull-request must keep contract diagnostics: %#v", result)
+	}
+}
+
 func TestPublishMergeRequestFillsActionDataAndKeepsStateResult(t *testing.T) {
 	t.Parallel()
 
@@ -1949,6 +2010,42 @@ func TestActionResolutionKeepsPublishMergeRequestMapping(t *testing.T) {
 	}
 	if operation.In["structured_output"].Ref != "data.structured_output" || operation.Out["merge_request"].Ref != "data.merge_request" || operation.Out["result"].Ref != "data.result" {
 		t.Fatalf("publish-merge-request must keep action data mapping: %#v", operation)
+	}
+}
+
+func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              ActionReviewPullRequest,
+			Class:             ActionClassReview,
+			RequiresWorkplace: boolRef(true),
+			RequiresSynthesis: boolRef(true),
+			Operations: []methodology.ActionOperation{{
+				Name: OperationKindLoadPullRequest,
+				In: map[string]methodology.ActionMapping{
+					"invocation": mappingRef("in"),
+				},
+				Out: map[string]methodology.ActionMapping{
+					"pull_request": mappingRef("data.pull_request"),
+					"invocation":   mappingRef("data.invocation"),
+				},
+			}},
+		}},
+		Operations: []methodology.Operation{
+			{Name: OperationKindLoadPullRequest, Kind: OperationKindLoadPullRequest, Title: "Получение запроса на слияние", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+		},
+	}, invocation{Action: ActionReviewPullRequest})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	operation := findOperationSpec(action, OperationKindLoadPullRequest)
+	if operation == nil {
+		t.Fatalf("load-pull-request operation must be present: %#v", action.Operations)
+	}
+	if operation.In["invocation"].Ref != "in" || operation.Out["pull_request"].Ref != "data.pull_request" || operation.Out["invocation"].Ref != "data.invocation" {
+		t.Fatalf("load-pull-request must keep action data mapping: %#v", operation)
 	}
 }
 
@@ -3025,6 +3122,21 @@ func commitPushOperationSpec() model.OperationSpec {
 		Out: model.OperationMap{
 			"commit_summary": {Ref: "data.commit_summary"},
 			"result":         {Ref: "data.result"},
+		},
+	}
+}
+
+func loadPullRequestOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindLoadPullRequest,
+		Kind:   OperationKindLoadPullRequest,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"invocation": {Ref: "in"},
+		},
+		Out: model.OperationMap{
+			"pull_request": {Ref: "data.pull_request"},
+			"invocation":   {Ref: "data.invocation"},
 		},
 	}
 }

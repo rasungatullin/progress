@@ -41,6 +41,14 @@
       }
     },
     "data": {
+      "invocation": {
+        "type": "object",
+        "description": "Ввод контура исполнения, синхронизированный с параметрами запроса на слияние."
+      },
+      "pull_request": {
+        "type": "object",
+        "description": "Загруженный запрос на слияние для последующих операций действия."
+      },
       "profile": {
         "type": "object",
         "description": "Разрешённый исполнительный профиль для последующих операций действия."
@@ -108,7 +116,20 @@
       }
     },
     {
-      "name": "load-pull-request"
+      "name": "load-pull-request",
+      "in": {
+        "invocation": {
+          "ref": "in"
+        }
+      },
+      "out": {
+        "pull_request": {
+          "ref": "data.pull_request"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        }
+      }
     },
     {
       "name": "load-review-remarks"

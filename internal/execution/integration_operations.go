@@ -23,7 +23,9 @@ type pullRequestRef struct {
 	Draft      bool
 }
 
-func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *operationExecution, name string) error {
+func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := loadPullRequestInputFromOperation(state, operation)
+	applyLoadPullRequestInputToState(state, input)
 	ref := pullRequestRefFromState(state)
 	if ref.Number <= 0 {
 		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
@@ -54,8 +56,52 @@ func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *op
 
 	state.pullRequest = &mergeRequest
 	applyPullRequestToState(state, mergeRequest)
-	state.tracker.completeIO(name, fmt.Sprintf("repository=%s number=%d", mergeRequest.Repository, mergeRequest.Number), mergeRequestSummary(mergeRequest), "Запрос на слияние получен через контур интеграции.")
+	writeOperationData(state, operation.Out, "pull_request", mergeRequest)
+	writeOperationData(state, operation.Out, "invocation", state.in)
+	state.tracker.completeIO(name, loadPullRequestInputSummary(input, operation), loadPullRequestOutputSummary(mergeRequest, state.in, operation), "Запрос на слияние получен через контур интеграции.")
 	return nil
+}
+
+type loadPullRequestInput struct {
+	invocation invocation
+}
+
+func loadPullRequestInputFromOperation(state *operationExecution, operation OperationSpec) loadPullRequestInput {
+	input := loadPullRequestInput{}
+	if state != nil {
+		input.invocation = state.in
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	return input
+}
+
+func applyLoadPullRequestInputToState(state *operationExecution, input loadPullRequestInput) {
+	if state == nil {
+		return
+	}
+	state.in = input.invocation
+	state.assignment = assignmentFromInvocation(input.invocation)
+}
+
+func loadPullRequestInputSummary(input loadPullRequestInput, operation OperationSpec) string {
+	ref := pullRequestRefFromAssignment(input.invocation.Assignment)
+	return operationIOSummary(operation.In, map[string]string{
+		"invocation": fmt.Sprintf("repository=%s number=%d", ref.Repository, ref.Number),
+	})
+}
+
+func loadPullRequestOutputSummary(pr integration.MergeRequest, in invocation, operation OperationSpec) string {
+	return operationIOSummary(operation.Out, map[string]string{
+		"pull_request": mergeRequestSummary(pr),
+		"invocation":   invocationSummary(in),
+	})
 }
 
 func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *operationExecution, name string, required bool) error {
