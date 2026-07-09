@@ -1225,17 +1225,6 @@ func workplaceNameFromRef(ref string) string {
 	return stableIdentifier(ref)
 }
 
-func ensureExecutionStructuredInput(state *operationExecution) *StructuredInput {
-	if state.assignment == nil {
-		state.assignment = &ExecutionAssignment{}
-	}
-	if state.assignment.StructuredInput == nil {
-		state.assignment.StructuredInput = &StructuredInput{}
-	}
-	state.in.Launch.StructuredInput = state.assignment.StructuredInput
-	return state.assignment.StructuredInput
-}
-
 func structuredRemarksFromIntegration(remarks []integration.ReviewRemark) []StructuredRemark {
 	result := make([]StructuredRemark, 0, len(remarks))
 	for index, remark := range remarks {
