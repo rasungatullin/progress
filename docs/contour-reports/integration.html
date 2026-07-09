@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур интеграции</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур интеграции</h1>
+      <p class="lead">Отчёт о контуре унификации доступа к внешним системам, его моделях, адаптерах, операциях и текущих ограничениях.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/integration</code></span>
+        <span class="pill">Документация: <code>docs/contours/integration</code></span>
+        <span class="pill">Класс: основной контур</span>
+      </div>
+      <nav class="nav">
+        <a href="../project-structure-report.html">К основному отчёту</a>
+        <a href="../contours/integration/README.md">К каноническому описанию</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур интеграции скрывает неоднородность внешних систем за внутренними запросами, маршрутами, адаптерами и каноническими объектами. Он читает задачи, запросы на слияние, комментарии, страницы документации и сообщения, а также выполняет операции записи через согласованные интерфейсы.</p>
+    </section>
+
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="330" viewBox="0 0 940 330" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="35" y="80" width="160" height="64" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="55" y="108" font-size="15" font-weight="700">Request</text><text x="55" y="128" font-size="12" fill="#5d6875">операция контура</text>
+          <rect x="260" y="80" width="160" height="64" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="280" y="108" font-size="15" font-weight="700">Route</text><text x="280" y="128" font-size="12" fill="#5d6875">система и адаптер</text>
+          <rect x="485" y="80" width="160" height="64" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="505" y="108" font-size="15" font-weight="700">Provider</text><text x="505" y="128" font-size="12" fill="#5d6875">GitHub, Bitbucket...</text>
+          <rect x="710" y="80" width="180" height="64" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="730" y="108" font-size="15" font-weight="700">Response</text><text x="730" y="128" font-size="12" fill="#5d6875">канонический ответ</text>
+          <path d="M195 112 L260 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M420 112 L485 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M645 112 L710 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="135" y="220" width="170" height="58" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="155" y="246" font-size="15" font-weight="700">Configuration</text><text x="155" y="266" font-size="12" fill="#5d6875">системы и секреты</text>
+          <rect x="400" y="220" width="170" height="58" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="420" y="246" font-size="15" font-weight="700">Operations</text><text x="420" y="266" font-size="12" fill="#5d6875">каталог возможностей</text>
+          <rect x="665" y="220" width="170" height="58" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="685" y="246" font-size="15" font-weight="700">Canonical models</text><text x="685" y="266" font-size="12" fill="#5d6875">задачи, PR, wiki</text>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>Request</code>, <code>ProviderRequest</code></td><td>Вход общего диспетчера и адаптера интеграции.</td></tr>
+        <tr><td><code>Route</code></td><td>Результат выбора интегрируемой системы, адаптера и операции.</td></tr>
+        <tr><td><code>Response</code>, <code>Failure</code></td><td>Нормализованный успешный или отказной результат.</td></tr>
+        <tr><td><code>CanonicalTask</code>, <code>MergeRequest</code>, <code>ReviewRemark</code>, <code>WikiPage</code></td><td>Канонические объекты, передаваемые другим контурам.</td></tr>
+        <tr><td><code>TrackerIssue</code>, <code>TrackerPullRequest</code>, <code>TrackerComment</code></td><td>Нормализованные модели внешнего трекера.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li>Сервис принимает <code>Request</code>, применяет настройки систем и выбирает адаптер.</li>
+        <li>Адаптер выполняет операцию чтения или записи во внешней системе.</li>
+        <li>Результат приводится к <code>Response</code>, при необходимости заполняются канонические и трекерные модели.</li>
+        <li>Другие контуры используют интеграцию для восстановления задачи, публикации комментариев, создания запроса на слияние и изменения меток.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>Контур принятия решения пока частично зависит от <code>TrackerIssue</code>, хотя целевая модель требует работы с каноническими объектами.</li>
+        <li>Нужно формализовать неполные ответы: где допустим <code>partial</code>, а где нужен отказ с диагностикой.</li>
+        <li>Список операций растёт; требуется единый контракт публикации операций для исполнения и диагностики.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

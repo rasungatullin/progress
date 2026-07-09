@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур аналитики и статистики</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур аналитики и статистики</h1>
+      <p class="lead">Отчёт о контуре расчёта показателей по запускам, событиям, маршрутам, действиям, профилям и ресурсам.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/analytics</code></span>
+        <span class="pill">Документация: <code>docs/contours/analytics</code></span>
+        <span class="pill">Класс: исследовательский контур</span>
+      </div>
+      <nav class="nav"><a href="../project-structure-report.html">К основному отчёту</a><a href="../contours/analytics/README.md">К каноническому описанию</a></nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур аналитики и статистики должен рассчитывать измеримые показатели работы комплекса. Он нужен не для оценки отдельного запуска, а для накопленного сравнения маршрутов, действий, профилей, ресурсов и изменений методик.</p>
+    </section>
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="260" viewBox="0 0 940 260" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="75" y="80" width="170" height="60" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="95" y="108" font-size="15" font-weight="700">RunSample</text><text x="95" y="128" font-size="12" fill="#5d6875">выборка запуска</text>
+          <rect x="335" y="80" width="170" height="60" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="355" y="108" font-size="15" font-weight="700">Measurement</text><text x="355" y="128" font-size="12" fill="#5d6875">измерение</text>
+          <rect x="595" y="80" width="170" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="615" y="108" font-size="15" font-weight="700">Report</text><text x="615" y="128" font-size="12" fill="#5d6875">отчёт показателей</text>
+          <path d="M245 110 L335 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M505 110 L595 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+        </svg>
+      </div>
+    </section>
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>RunSample</code></td><td>Выборка данных запуска или события для расчёта.</td></tr>
+        <tr><td><code>Measurement</code></td><td>Отдельный показатель с именем и значением.</td></tr>
+        <tr><td><code>Report</code></td><td>Набор измерений по выборке.</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li>Сервис принимает выборку запусков и строит отчёт показателей.</li>
+        <li>Каркас покрыт тестами, но не подключён к реальному журналу наблюдаемости.</li>
+        <li>Контракт с методиками представлен в реестре как отчёт показателей без автоматического изменения методики.</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>Нет устойчивого источника данных до переноса истории запусков в наблюдаемость.</li>
+        <li>Не определены основные метрики эффективности маршрутов и действий.</li>
+        <li>Нужна связь отчётов с изменениями каталога методик и исследовательскими экспериментами.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур принятия решения</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур принятия решения</h1>
+      <p class="lead">Отчёт о контуре, который применяет маршрут обработки, фиксирует основания и формирует задание на выполнение.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/decision</code></span>
+        <span class="pill">Документация: <code>docs/contours/decision</code></span>
+        <span class="pill">Класс: основной контур</span>
+      </div>
+      <nav class="nav">
+        <a href="../project-structure-report.html">К основному отчёту</a>
+        <a href="../contours/decision/README.md">К каноническому описанию</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур принятия решения определяет следующий допустимый шаг по сигналу, канонической задаче, связанным объектам и маршруту обработки. Он не выполняет содержательную работу и не должен становиться долговременным хранилищем состояния задачи.</p>
+    </section>
+
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="330" viewBox="0 0 940 330" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="35" y="80" width="170" height="64" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="55" y="108" font-size="15" font-weight="700">DecisionContext</text><text x="55" y="128" font-size="12" fill="#5d6875">сигнал и данные</text>
+          <rect x="270" y="80" width="170" height="64" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="290" y="108" font-size="15" font-weight="700">RouteCheck</text><text x="290" y="128" font-size="12" fill="#5d6875">проверки методики</text>
+          <rect x="505" y="80" width="170" height="64" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="525" y="108" font-size="15" font-weight="700">Consideration</text><text x="525" y="128" font-size="12" fill="#5d6875">исход рассмотрения</text>
+          <rect x="740" y="80" width="170" height="64" rx="8" fill="#fff6e9" stroke="#b85c00"/><text x="760" y="108" font-size="15" font-weight="700">ExecutionPlan</text><text x="760" y="128" font-size="12" fill="#5d6875">переходная модель</text>
+          <path d="M205 112 L270 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M440 112 L505 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M675 112 L740 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="270" y="220" width="170" height="58" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="290" y="246" font-size="15" font-weight="700">Methodology</text><text x="290" y="266" font-size="12" fill="#5d6875">маршруты и действия</text>
+          <rect x="505" y="220" width="170" height="58" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="525" y="246" font-size="15" font-weight="700">ExecutionAssignment</text><text x="525" y="266" font-size="12" fill="#5d6875">межконтурное задание</text>
+          <path d="M355 220 C380 170 470 155 555 144" stroke="#9aa9b8" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#a)" fill="none"/><path d="M825 144 C780 205 680 225 675 249" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)" fill="none"/>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>DecisionContext</code></td><td>Сигнал, каноническая задача, задача трекера, связанный запрос на слияние и внешнее состояние.</td></tr>
+        <tr><td><code>ConsiderationInput</code>, <code>ConsiderationResult</code></td><td>Вход и результат применения маршрута обработки.</td></tr>
+        <tr><td><code>ProcessingRoute</code>, <code>RouteCheckResult</code></td><td>Выбранный маршрут и диагностические результаты проверок.</td></tr>
+        <tr><td><code>ExecutionPlan</code></td><td>Практическая модель первого среза, из которой строится вызов исполнения.</td></tr>
+        <tr><td><code>DecisionFailure</code></td><td>Диагностируемый отказ маршрута.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li><code>Start</code> получает задачу через интеграцию и ищет связанный запрос на слияние.</li>
+        <li><code>Consider</code> загружает маршрут из каталога методик или совместимого файла рабочих циклов.</li>
+        <li>Проверки маршрута выбирают действие или завершают цикл без следующей операции.</li>
+        <li>При выбранном действии формируется <code>ExecutionPlan</code> и вложенный <code>ExecutionAssignment</code>.</li>
+        <li><code>Start</code> может сразу вызвать контур исполнения, а <code>Consider</code> остаётся чистым диагностическим входом.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>Нужно развести <code>ExecutionPlan</code> и <code>ExecutionAssignment</code>: публичным межконтурным заданием должен быть <code>ExecutionAssignment</code>.</li>
+        <li>Решение пока использует <code>TrackerIssue</code> наряду с <code>CanonicalTask</code>.</li>
+        <li>Слой <code>workflow*</code> и файл <code>.progress/decision/workflows.json</code> остаются переходным механизмом.</li>
+        <li>Фактический CLI ветки <code>decision</code> уже документации: реализована команда <code>start</code>, целевые диагностические команды ещё отсутствуют.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

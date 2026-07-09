@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур настроек и ресурсов</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур настроек и ресурсов</h1>
+      <p class="lead">Отчёт о контуре, который собирает настройки интеграций, окружений, инструментов, ресурсов и привязок ресурсов.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/configuration</code></span>
+        <span class="pill">Документация: <code>docs/contours/settings-resources</code></span>
+        <span class="pill">Класс: обеспечивающий контур</span>
+      </div>
+      <nav class="nav"><a href="../project-structure-report.html">К основному отчёту</a><a href="../contours/settings-resources/README.md">К каноническому описанию</a></nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур настроек и ресурсов формирует нормализованный снимок доступных интегрируемых систем, окружений исполнения, инструментов исполнения, ресурсов исполнения и правил выбора. Он отделяет проектную конфигурацию от локальных и глобальных переопределений.</p>
+    </section>
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="300" viewBox="0 0 940 300" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="40" y="70" width="170" height="60" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="60" y="98" font-size="15" font-weight="700">project/local/global</text><text x="60" y="118" font-size="12" fill="#5d6875">слои файлов</text>
+          <rect x="280" y="70" width="170" height="60" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="300" y="98" font-size="15" font-weight="700">Snapshot</text><text x="300" y="118" font-size="12" fill="#5d6875">сводка настроек</text>
+          <rect x="520" y="70" width="170" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="540" y="98" font-size="15" font-weight="700">IntegrationConfig</text><text x="540" y="118" font-size="12" fill="#5d6875">внешние системы</text>
+          <rect x="740" y="70" width="170" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="760" y="98" font-size="15" font-weight="700">ResourceConfig</text><text x="760" y="118" font-size="12" fill="#5d6875">ресурсы исполнения</text>
+          <path d="M210 100 L280 100" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M450 100 L520 100" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M690 100 L740 100" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="280" y="205" width="170" height="58" rx="8" fill="#fff6e9" stroke="#b85c00"/><text x="300" y="231" font-size="15" font-weight="700">legacy fields</text><text x="300" y="251" font-size="12" fill="#5d6875">runners/models</text>
+          <rect x="520" y="205" width="170" height="58" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="540" y="231" font-size="15" font-weight="700">Bindings</text><text x="540" y="251" font-size="12" fill="#5d6875">выбор ресурса</text>
+        </svg>
+      </div>
+    </section>
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>Snapshot</code></td><td>Сводка статуса настроек интеграции и ресурсов.</td></tr>
+        <tr><td><code>IntegrationConfig</code></td><td>Нормализованные настройки интегрируемых систем.</td></tr>
+        <tr><td><code>ExecutionResourceConfig</code></td><td>Сводка ресурсов исполнения.</td></tr>
+        <tr><td><code>ResourceConfigFile</code></td><td>JSON-модель слоя <code>resources.json</code>.</td></tr>
+        <tr><td><code>EnvironmentConfig</code>, <code>ToolConfig</code>, <code>ResourceBindingConfig</code></td><td>Окружения, инструменты и правила выбора ресурсов.</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li>Загрузчики читают проектные, локальные и глобальные слои конфигурации.</li>
+        <li>Значения нормализуются и сливаются по приоритету.</li>
+        <li>Контур исполнения использует ресурсный снимок для выбора инструмента, ресурса и окружения.</li>
+        <li>Контур интеграции использует настройки систем и приватных значений.</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>Тест <code>internal/configuration/contour_test.go</code> сейчас видит внешнюю интеграционную конфигурацию и падает.</li>
+        <li>Старые поля <code>runners</code>, <code>models</code>, <code>runner</code>, <code>model</code> всё ещё находятся в модели совместимости.</li>
+        <li>Нужна явная команда миграции в новый формат ресурсов.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур реакции на внешние события</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур реакции на внешние события</h1>
+      <p class="lead">Отдельный отчёт о роли, сущностях, связях, фактической реализации, проблемах и вопросах контура реакции.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/reactivity</code></span>
+        <span class="pill">Документация: <code>docs/contours/reactivity</code></span>
+        <span class="pill">Класс: основной контур</span>
+      </div>
+      <nav class="nav">
+        <a href="../project-structure-report.html">К основному отчёту</a>
+        <a href="../contours/reactivity/README.md">К каноническому описанию</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур реакции принимает внешнее событие, сопоставляет его с процессом реакции и формирует нормализованный сигнал для дальнейшей обработки. Целевая граница ограничивает контур входом в комплекс: он не должен выбирать инженерный шаг, восстанавливать полную задачу или выполнять действие.</p>
+      <div class="warn-box">Фактический практический слой шире целевой границы: <code>Service.ProcessTask</code> и <code>Service.RunTaskAction</code> выполняют роль координатора прикладного цикла.</div>
+    </section>
+
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="310" viewBox="0 0 940 310" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="35" y="70" width="160" height="64" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="55" y="98" font-size="15" font-weight="700">Event</text><text x="55" y="118" font-size="12" fill="#5d6875">внешнее событие</text>
+          <rect x="260" y="70" width="160" height="64" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="280" y="98" font-size="15" font-weight="700">Process</text><text x="280" y="118" font-size="12" fill="#5d6875">правила реакции</text>
+          <rect x="485" y="70" width="160" height="64" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="505" y="98" font-size="15" font-weight="700">Signal</text><text x="505" y="118" font-size="12" fill="#5d6875">нормализованный вход</text>
+          <rect x="710" y="70" width="180" height="64" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="730" y="98" font-size="15" font-weight="700">Decision / Integration</text><text x="730" y="118" font-size="12" fill="#5d6875">следующие контуры</text>
+          <path d="M195 102 L260 102" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M420 102 L485 102" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M645 102 L710 102" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="260" y="200" width="385" height="64" rx="8" fill="#fff6e9" stroke="#b85c00"/><text x="280" y="228" font-size="15" font-weight="700">ProcessTask / RunTaskAction</text><text x="280" y="248" font-size="12" fill="#5d6875">переходный координатор полного цикла</text>
+          <path d="M452 200 C440 160 495 150 565 134" stroke="#9aa9b8" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#a)" fill="none"/>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>Event</code></td><td>Сырые сведения о внешнем событии: источник, вид, объект и метаданные.</td></tr>
+        <tr><td><code>Process</code></td><td>Описание реакции: какие события интересуют комплекс и какой сигнал должен быть сформирован.</td></tr>
+        <tr><td><code>Signal</code></td><td>Нормализованный межконтурный вход для восстановления данных и рассмотрения.</td></tr>
+        <tr><td><code>TaskProcessingInput</code>, <code>TaskProcessingResult</code></td><td>Практические модели полного цикла обработки задачи.</td></tr>
+        <tr><td><code>LabelChange</code></td><td>Изменение стадийных меток после выполненного действия.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li><code>Service.Normalize</code> сверяет событие с процессом и возвращает <code>Signal</code> или состояние <code>ignored</code>.</li>
+        <li><code>ProcessTask</code> по номеру задачи загружает карточку и запрос на слияние через интеграцию.</li>
+        <li>Сервис вызывает <code>decision.Consider</code>, получает следующий шаг и запускает <code>execution.ExecuteAction</code>.</li>
+        <li>После действия контур меняет метки задачи через интеграционный запрос и при необходимости повторяет цикл.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>Нужно решить, является ли практический обработчик временным слоем или будущим координатором полного цикла.</li>
+        <li>Смена меток после действия должна быть закреплена за владельцем: реакция, решение, исполнение или явная операция методики.</li>
+        <li>Целевая документация и практический README описывают разные границы ответственности.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

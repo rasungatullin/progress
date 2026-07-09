@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур пользовательского интерфейса</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур пользовательского интерфейса</h1>
+      <p class="lead">Отчёт о контуре эксплуатационного просмотра настроек, маршрутов, задач, запусков и диагностических сведений.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/ui</code></span>
+        <span class="pill">Документация: <code>docs/contours/user-interface</code></span>
+        <span class="pill">Класс: обеспечивающий контур</span>
+      </div>
+      <nav class="nav"><a href="../project-structure-report.html">К основному отчёту</a><a href="../contours/user-interface/README.md">К каноническому описанию</a></nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур пользовательского интерфейса должен показывать состояние комплекса, диагностические записи и доступные эксплуатационные действия. Он не должен содержать собственную логику принятия решения по задаче.</p>
+    </section>
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="270" viewBox="0 0 940 270" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="55" y="80" width="170" height="60" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="75" y="108" font-size="15" font-weight="700">ViewRequest</text><text x="75" y="128" font-size="12" fill="#5d6875">раздел и фильтр</text>
+          <rect x="315" y="80" width="170" height="60" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="335" y="108" font-size="15" font-weight="700">ViewModel</text><text x="335" y="128" font-size="12" fill="#5d6875">модель представления</text>
+          <rect x="575" y="80" width="170" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="595" y="108" font-size="15" font-weight="700">Panel / Action</text><text x="595" y="128" font-size="12" fill="#5d6875">панели и операции</text>
+          <path d="M225 110 L315 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M485 110 L575 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="315" y="190" width="280" height="50" rx="8" fill="#fff6e9" stroke="#b85c00"/><text x="335" y="220" font-size="15" font-weight="700">Локальный web сейчас читает execution runs</text>
+        </svg>
+      </div>
+    </section>
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>ViewRequest</code></td><td>Запрос представления по разделу и фильтру.</td></tr>
+        <tr><td><code>ViewModel</code></td><td>Заголовок, панели и действия эксплуатационного представления.</td></tr>
+        <tr><td><code>Panel</code></td><td>Блок данных пользовательского интерфейса.</td></tr>
+        <tr><td><code>Action</code></td><td>Доступная эксплуатационная операция.</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li><code>internal/ui</code> содержит минимальный сервис построения модели представления.</li>
+        <li><code>progress web</code> запускает локальный интерфейс на основе активов <code>internal/cli/web_assets</code>.</li>
+        <li>Фактический web-интерфейс ориентирован на просмотр записей запусков исполнения.</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>В UI-материалах есть раздел «Верификация», которого нет в реестре контуров.</li>
+        <li>Есть устаревшие ссылки на <code>Profile.commit_push</code>.</li>
+        <li>Нужно связать интерфейс с наблюдаемостью, а не напрямую с переходной историей исполнения.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

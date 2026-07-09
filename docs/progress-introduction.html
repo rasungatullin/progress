@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Введение в комплекс «Прогресс»</title>
+  <style>
+    :root {
+      --bg: #f6f8fa;
+      --paper: #ffffff;
+      --ink: #1f2933;
+      --muted: #5d6875;
+      --line: #d7dde5;
+      --soft: #edf2f6;
+      --accent: #1f6f8b;
+      --green: #4f7d3a;
+      --amber: #b85c00;
+      --risk: #a12a2a;
+      --code: #102033;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #e7edf3;
+      color: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+    }
+
+    header {
+      background: #203040;
+      color: #fff;
+      padding: 46px 24px 38px;
+    }
+
+    header .inner,
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    main {
+      padding: 26px 24px 54px;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: 38px;
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 25px;
+      line-height: 1.24;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 20px 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    section {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 24px;
+      margin: 0 0 20px;
+      box-shadow: 0 1px 2px rgba(16, 32, 51, 0.04);
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 0 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 4px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: var(--soft);
+      font-weight: 650;
+    }
+
+    .lead {
+      max-width: 900px;
+      color: #d9e2ea;
+      font-size: 17px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #eef4f8;
+      font-size: 13px;
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .toc a {
+      display: block;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--soft);
+      color: var(--ink);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfd;
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e2eef5;
+      color: #184f68;
+      font-size: 12px;
+      margin: 0 4px 6px 0;
+    }
+
+    .tag.green {
+      background: #e2f4e8;
+      color: #23714d;
+    }
+
+    .tag.amber {
+      background: #fff0dc;
+      color: var(--amber);
+    }
+
+    .tag.risk {
+      background: #fbe4e4;
+      color: var(--risk);
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      padding: 10px 12px;
+      background: #edf6fa;
+      color: #234252;
+      margin: 12px 0;
+    }
+
+    .warn {
+      border-left: 4px solid var(--amber);
+      padding: 10px 12px;
+      background: #fff6e9;
+      color: #5a3300;
+      margin: 12px 0;
+    }
+
+    .diagram {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+      padding: 12px;
+      margin: 12px 0 18px;
+    }
+
+    svg {
+      max-width: 100%;
+      height: auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .path {
+      counter-reset: step;
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .path-item {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 12px 12px 48px;
+      background: #fbfcfd;
+    }
+
+    .path-item::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 12px;
+      top: 13px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 720px) {
+      h1 {
+        font-size: 29px;
+      }
+
+      section {
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Введение в комплекс «Прогресс»</h1>
+      <p class="lead">Этот документ вводит нового участника в назначение комплекса, основные идеи, устройство контуров, ход обработки задачи и расположение ключевого кода. Он рассчитан на первое чтение без предварительного знания проекта.</p>
+      <div class="meta">
+        <span class="pill">Дата среза: 2026-07-09</span>
+        <span class="pill">Коммит: <code>8fc6c3c</code></span>
+        <span class="pill">Формат: вводный HTML</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="contents">
+      <h2>Маршрут чтения</h2>
+      <ul class="toc">
+        <li><a href="#purpose">Зачем существует комплекс</a></li>
+        <li><a href="#ideas">Базовые идеи</a></li>
+        <li><a href="#contours">Как он организован</a></li>
+        <li><a href="#task-flow">Как проходит задача</a></li>
+        <li><a href="#models">Ключевые модели</a></li>
+        <li><a href="#configuration">Настройки и методики</a></li>
+        <li><a href="#code">Где смотреть код</a></li>
+        <li><a href="#state">Текущее состояние</a></li>
+        <li><a href="#next-reading">Куда читать дальше</a></li>
+      </ul>
+    </section>
+
+    <section id="purpose">
+      <h2>Зачем существует комплекс</h2>
+      <p>«Прогресс» — комплекс инженерного синтеза и координации вычислительных контуров. Его задача состоит в том, чтобы проводить инженерную задачу через управляемый маршрут: восстановить контекст из внешних систем, определить следующий допустимый шаг, выполнить выбранное действие и зафиксировать результат в наблюдаемой форме.</p>
+      <p>Ключевая проблема, которую решает комплекс, — разделить содержательный синтез и управление процессом. Синтез изменения, ревизия, анализ замечаний или подготовка артефакта выполняются внутри уже выбранного шага. А выбор шага, подготовка окружения, интеграционные операции, запись внешнего состояния и диагностика должны быть формализованы в контурах комплекса.</p>
+      <div class="note">Главная единица обработки — задача. Вокруг неё собираются внешние сведения, маршрут обработки, задание на выполнение, результат запуска и диагностические записи.</div>
+    </section>
+
+    <section id="ideas">
+      <h2>Базовые идеи</h2>
+      <div class="grid">
+        <div class="card">
+          <span class="tag">управляемый маршрут</span>
+          <h3>Следующий шаг выбирается правилами</h3>
+          <p>Комплекс не передаёт весь маршрут одному универсальному механизму. Маршрут выражается проверками, действиями и операциями, которые можно просмотреть, изменить и проверить.</p>
+        </div>
+        <div class="card">
+          <span class="tag green">формализованный обмен</span>
+          <h3>Контуры общаются моделями</h3>
+          <p>Между контурами передаются сигналы, канонические задачи, задания на выполнение и результаты, а не произвольный текстовый поток.</p>
+        </div>
+        <div class="card">
+          <span class="tag">инверсия инструментальных действий</span>
+          <h3>Простые действия выносятся из синтеза</h3>
+          <p>Создание ветки, коммит, публикация запроса на слияние, комментарии и смена меток выражаются операциями комплекса и интеграций.</p>
+        </div>
+        <div class="card">
+          <span class="tag green">наблюдаемость</span>
+          <h3>Каждый шаг должен быть разборчивым</h3>
+          <p>Важны не только итоговые изменения, но и основания выбора маршрута, входные данные, операции, ресурсное выделение, ошибки и внешние действия.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="contours">
+      <h2>Как он организован</h2>
+      <p>Архитектура строится из контуров. Основные контуры обрабатывают задачу, обеспечивающие дают методики, настройки, наблюдаемость и интерфейс, исследовательские помогают измерять и улучшать работу комплекса.</p>
+
+      <div class="diagram" aria-label="Общая организация комплекса">
+        <svg width="1060" height="520" viewBox="0 0 1060 520" role="img">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker>
+            <style>
+              .box{fill:#fff;stroke:#9aa9b8;stroke-width:1.5}
+              .main{fill:#e9f4f8;stroke:#1f6f8b}
+              .support{fill:#eef4ea;stroke:#4f7d3a}
+              .research{fill:#fff6e9;stroke:#b85c00}
+              .t{font-size:15px;font-weight:700;fill:#1f2933}
+              .d{font-size:12px;fill:#5d6875}
+              .a{stroke:#65758a;stroke-width:1.5;fill:none;marker-end:url(#arrow)}
+              .s{stroke:#9aa9b8;stroke-width:1.2;stroke-dasharray:5 4;fill:none;marker-end:url(#arrow)}
+            </style>
+          </defs>
+          <rect class="box main" x="40" y="55" width="180" height="68" rx="8"/><text class="t" x="60" y="84">Реакция</text><text class="d" x="60" y="104">событие в сигнал</text>
+          <rect class="box main" x="300" y="55" width="180" height="68" rx="8"/><text class="t" x="320" y="84">Интеграция</text><text class="d" x="320" y="104">внешние системы</text>
+          <rect class="box main" x="560" y="55" width="180" height="68" rx="8"/><text class="t" x="580" y="84">Решение</text><text class="d" x="580" y="104">маршрут и задание</text>
+          <rect class="box main" x="820" y="55" width="180" height="68" rx="8"/><text class="t" x="840" y="84">Исполнение</text><text class="d" x="840" y="104">действия и операции</text>
+          <path class="a" d="M220 89 L300 89"/><path class="a" d="M480 89 L560 89"/><path class="a" d="M740 89 L820 89"/>
+
+          <rect class="box support" x="95" y="220" width="190" height="68" rx="8"/><text class="t" x="115" y="249">Методики</text><text class="d" x="115" y="269">маршруты, действия</text>
+          <rect class="box support" x="335" y="220" width="190" height="68" rx="8"/><text class="t" x="355" y="249">Настройки и ресурсы</text><text class="d" x="355" y="269">системы, привязки</text>
+          <rect class="box support" x="575" y="220" width="190" height="68" rx="8"/><text class="t" x="595" y="249">Наблюдаемость</text><text class="d" x="595" y="269">события, история</text>
+          <rect class="box support" x="815" y="220" width="190" height="68" rx="8"/><text class="t" x="835" y="249">Интерфейс</text><text class="d" x="835" y="269">просмотр и запуск</text>
+          <path class="s" d="M190 220 C260 160 570 160 650 123"/><path class="s" d="M190 220 C300 170 800 170 910 123"/><path class="s" d="M430 220 C500 160 820 160 910 123"/><path class="s" d="M670 220 L670 123"/><path class="s" d="M765 254 L815 254"/>
+
+          <rect class="box support" x="95" y="370" width="190" height="68" rx="8"/><text class="t" x="115" y="399">Авторизация</text><text class="d" x="115" y="419">допуск к операциям</text>
+          <rect class="box support" x="335" y="370" width="190" height="68" rx="8"/><text class="t" x="355" y="399">Очередь исполнения</text><text class="d" x="355" y="419">отложенные задания</text>
+          <rect class="box research" x="575" y="370" width="130" height="68" rx="8"/><text class="t" x="595" y="399">Банк задач</text><text class="d" x="595" y="419">наборы</text>
+          <rect class="box research" x="745" y="370" width="130" height="68" rx="8"/><text class="t" x="765" y="399">Исследования</text><text class="d" x="765" y="419">гипотезы</text>
+          <rect class="box research" x="915" y="370" width="110" height="68" rx="8"/><text class="t" x="935" y="399">Аналитика</text><text class="d" x="935" y="419">метрики</text>
+          <path class="s" d="M525 404 L575 404"/><path class="s" d="M705 404 L745 404"/><path class="s" d="M875 404 L915 404"/><path class="s" d="M970 370 C930 315 735 315 670 288"/>
+        </svg>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Группа</th>
+            <th>Контуры</th>
+            <th>Что важно запомнить</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Основные</td>
+            <td>Реакция, интеграция, принятие решения, исполнение</td>
+            <td>Это путь задачи от входного сигнала до выполненного действия и результата.</td>
+          </tr>
+          <tr>
+            <td>Обеспечивающие</td>
+            <td>Методики, настройки и ресурсы, наблюдаемость, интерфейс, авторизация, очередь исполнения</td>
+            <td>Они задают правила, доступные возможности, диагностику, доступ и эксплуатационную поверхность.</td>
+          </tr>
+          <tr>
+            <td>Исследовательские</td>
+            <td>Аналитика, банк задач, исследования</td>
+            <td>Они нужны для измерения качества и безопасной проверки улучшений.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="task-flow">
+      <h2>Как проходит задача</h2>
+      <p>В первом прикладном треке комплекс ориентирован на задачу разработки: получить номер задачи, восстановить её состояние, выбрать действие, выполнить изменение или ревизию, опубликовать внешние результаты и перейти к следующей стадии.</p>
+
+      <div class="diagram" aria-label="Жизненный цикл задачи">
+        <svg width="1060" height="390" viewBox="0 0 1060 390" role="img">
+          <defs>
+            <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker>
+            <style>
+              .node{fill:#fff;stroke:#9aa9b8;stroke-width:1.5}
+              .main{fill:#e9f4f8;stroke:#1f6f8b}
+              .op{fill:#eef4ea;stroke:#4f7d3a}
+              .warn{fill:#fff6e9;stroke:#b85c00}
+              .t{font-size:14px;font-weight:700;fill:#1f2933}
+              .d{font-size:12px;fill:#5d6875}
+              .a{stroke:#65758a;stroke-width:1.5;fill:none;marker-end:url(#arrow2)}
+            </style>
+          </defs>
+          <rect class="node main" x="40" y="70" width="150" height="62" rx="8"/><text class="t" x="58" y="97">Сигнал</text><text class="d" x="58" y="117">номер задачи</text>
+          <rect class="node main" x="250" y="70" width="150" height="62" rx="8"/><text class="t" x="268" y="97">Контекст</text><text class="d" x="268" y="117">задача и связи</text>
+          <rect class="node main" x="460" y="70" width="150" height="62" rx="8"/><text class="t" x="478" y="97">Рассмотрение</text><text class="d" x="478" y="117">маршрут</text>
+          <rect class="node main" x="670" y="70" width="150" height="62" rx="8"/><text class="t" x="688" y="97">Задание</text><text class="d" x="688" y="117">действие</text>
+          <rect class="node main" x="880" y="70" width="150" height="62" rx="8"/><text class="t" x="898" y="97">Результат</text><text class="d" x="898" y="117">операции</text>
+          <path class="a" d="M190 101 L250 101"/><path class="a" d="M400 101 L460 101"/><path class="a" d="M610 101 L670 101"/><path class="a" d="M820 101 L880 101"/>
+
+          <rect class="node op" x="250" y="215" width="150" height="62" rx="8"/><text class="t" x="268" y="242">Интеграции</text><text class="d" x="268" y="262">issue, PR, review</text>
+          <rect class="node op" x="460" y="215" width="150" height="62" rx="8"/><text class="t" x="478" y="242">Методика</text><text class="d" x="478" y="262">checks -> action</text>
+          <rect class="node op" x="670" y="215" width="150" height="62" rx="8"/><text class="t" x="688" y="242">Исполнение</text><text class="d" x="688" y="262">profile, resource</text>
+          <rect class="node warn" x="880" y="215" width="150" height="62" rx="8"/><text class="t" x="898" y="242">Следующий цикл</text><text class="d" x="898" y="262">после обновления</text>
+          <path class="a" d="M325 215 L325 132"/><path class="a" d="M535 215 L535 132"/><path class="a" d="M745 215 L745 132"/><path class="a" d="M955 132 L955 215"/>
+          <path class="a" d="M880 246 C755 335 355 335 190 132"/>
+        </svg>
+      </div>
+
+      <div class="path">
+        <div class="path-item"><strong>Поступает вход.</strong> Это может быть ручной CLI-вызов или внешний сигнал, сведённый к задаче и первичным признакам.</div>
+        <div class="path-item"><strong>Восстанавливается контекст.</strong> Контур интеграции получает данные из трекера, репозитория, запроса на слияние, обсуждений и других источников.</div>
+        <div class="path-item"><strong>Выбирается следующий шаг.</strong> Контур принятия решения применяет маршрут из каталога методик и формирует задание на выполнение.</div>
+        <div class="path-item"><strong>Выполняется действие.</strong> Контур исполнения разрешает действие, готовит данные и рабочее место, запускает операции и возвращает результат.</div>
+        <div class="path-item"><strong>Фиксируется внешний эффект.</strong> Через интеграции публикуются комментарии, запросы на слияние, ответы на замечания или другие разрешённые изменения.</div>
+        <div class="path-item"><strong>Цикл повторяется.</strong> Следующий шаг определяется только после повторного восстановления актуального внешнего состояния.</div>
+      </div>
+    </section>
+
+    <section id="models">
+      <h2>Ключевые модели, которые стоит знать</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Модель</th>
+            <th>Документационное имя</th>
+            <th>Зачем нужна</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>reactivity.Signal</code></td>
+            <td>сигнал</td>
+            <td>Короткий нормализованный вход, который объясняет, что нужно рассмотреть.</td>
+          </tr>
+          <tr>
+            <td><code>integration.CanonicalTask</code></td>
+            <td>каноническая задача</td>
+            <td>Нормализованное представление рабочей задачи, независимое от конкретной внешней системы.</td>
+          </tr>
+          <tr>
+            <td><code>decision.DecisionContext</code></td>
+            <td>контекст решения</td>
+            <td>Сигнал, задача и связанные данные, по которым выбирается следующий шаг.</td>
+          </tr>
+          <tr>
+            <td><code>decision.ConsiderationResult</code></td>
+            <td>результат рассмотрения</td>
+            <td>Исход применения маршрута: выполненное действие, завершение, ожидание, отказ или ручное вмешательство.</td>
+          </tr>
+          <tr>
+            <td><code>execution.ExecutionAssignment</code></td>
+            <td>задание на выполнение</td>
+            <td>Межконтурное поручение от решения к исполнению: действие, задача, ограничения и основания выбора.</td>
+          </tr>
+          <tr>
+            <td><code>execution.ExecutionResult</code></td>
+            <td>результат выполнения</td>
+            <td>Итог действия с операциями, отказами, артефактами и результатом запуска.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="configuration">
+      <h2>Настройки и методики</h2>
+      <p>Поведение комплекса задаётся не только кодом. Значительная часть маршрута вынесена в конфигурационные слои, которые можно просмотреть и постепенно переносить между проектами.</p>
+      <div class="grid">
+        <div class="card">
+          <h3><code>.progress/methodology</code></h3>
+          <p>Каталог маршрутов, действий, операций, инструкций и расширяемых сущностей. Здесь описывается, какие проверки выбирают какие действия.</p>
+        </div>
+        <div class="card">
+          <h3><code>.progress/integration</code></h3>
+          <p>Настройки интегрируемых систем: трекеры, репозитории, мессенджеры, wiki и пользовательские интеграции.</p>
+        </div>
+        <div class="card">
+          <h3><code>.progress/execution</code></h3>
+          <p>Профили, ресурсы, окружения, инструменты исполнения и привязки ресурсов к действиям.</p>
+        </div>
+        <div class="card">
+          <h3><code>.progress/execution-runs</code></h3>
+          <p>Переходное локальное хранилище истории запусков. Целевой владелец этих сведений — контур журналирования и наблюдаемости.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="code">
+      <h2>Где смотреть код</h2>
+      <p>Проект реализован как Go-модуль. Точка входа находится в <code>cmd/progress</code>, CLI-команды собраны в <code>internal/cli</code>, а контуры разнесены по пакетам <code>internal/*</code>.</p>
+
+      <div class="diagram" aria-label="Кодовая карта">
+        <svg width="1060" height="360" viewBox="0 0 1060 360" role="img">
+          <defs>
+            <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker>
+            <style>
+              .box{fill:#fff;stroke:#9aa9b8;stroke-width:1.5}
+              .entry{fill:#e9f4f8;stroke:#1f6f8b}
+              .domain{fill:#eef4ea;stroke:#4f7d3a}
+              .t{font-size:14px;font-weight:700;fill:#1f2933}
+              .d{font-size:12px;fill:#5d6875}
+              .a{stroke:#65758a;stroke-width:1.5;fill:none;marker-end:url(#arrow3)}
+            </style>
+          </defs>
+          <rect class="box entry" x="440" y="30" width="180" height="58" rx="8"/><text class="t" x="460" y="56">cmd/progress</text><text class="d" x="460" y="74">запуск CLI</text>
+          <rect class="box entry" x="440" y="120" width="180" height="58" rx="8"/><text class="t" x="460" y="146">internal/cli</text><text class="d" x="460" y="164">команды и флаги</text>
+          <path class="a" d="M530 88 L530 120"/>
+          <rect class="box domain" x="40" y="245" width="145" height="58" rx="8"/><text class="t" x="60" y="271">reactivity</text><text class="d" x="60" y="289">вход</text>
+          <rect class="box domain" x="220" y="245" width="145" height="58" rx="8"/><text class="t" x="240" y="271">integration</text><text class="d" x="240" y="289">адаптеры</text>
+          <rect class="box domain" x="400" y="245" width="145" height="58" rx="8"/><text class="t" x="420" y="271">decision</text><text class="d" x="420" y="289">выбор шага</text>
+          <rect class="box domain" x="580" y="245" width="145" height="58" rx="8"/><text class="t" x="600" y="271">execution</text><text class="d" x="600" y="289">действия</text>
+          <rect class="box domain" x="760" y="245" width="145" height="58" rx="8"/><text class="t" x="780" y="271">methodology</text><text class="d" x="780" y="289">каталог</text>
+          <path class="a" d="M440 164 C330 205 180 205 112 245"/><path class="a" d="M485 178 C420 210 320 215 292 245"/><path class="a" d="M530 178 C510 210 485 220 472 245"/><path class="a" d="M575 178 C610 210 640 220 652 245"/><path class="a" d="M620 164 C720 205 800 215 832 245"/>
+        </svg>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Путь</th>
+            <th>Что в нём искать</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>internal/contours</code></td><td>Проверяемая карта контуров и межконтурных контрактов.</td></tr>
+          <tr><td><code>internal/reactivity</code></td><td>Нормализация событий и практический обработчик задачи.</td></tr>
+          <tr><td><code>internal/integration</code></td><td>Единый диспетчер интеграций, модели внешних объектов и адаптеры.</td></tr>
+          <tr><td><code>internal/decision</code></td><td>Контекст решения, применение маршрута и построение задания.</td></tr>
+          <tr><td><code>internal/execution</code></td><td>Действия, операции, запуск, ресурсы, рабочие места и история запусков.</td></tr>
+          <tr><td><code>internal/methodology</code></td><td>Чтение и запись каталога методик.</td></tr>
+          <tr><td><code>internal/configuration</code></td><td>Снимки настроек интеграций и ресурсов исполнения.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="state">
+      <h2>Текущее состояние и важные оговорки</h2>
+      <p>Комплекс уже имеет рабочие контуры и прикладной путь, но часть архитектуры находится в переходном состоянии. Это важно понимать перед чтением кода: не всё, что реализовано, является целевым устройством, и не всё, что описано в целевых документах, уже полностью реализовано.</p>
+      <div class="grid">
+        <div class="card">
+          <span class="tag green">готово к изучению</span>
+          <h3>Реестр и основные контуры</h3>
+          <p>В коде есть реестр 13 контуров, основные пакеты, каталог методик и интеграционные адаптеры.</p>
+        </div>
+        <div class="card">
+          <span class="tag amber">переходное состояние</span>
+          <h3>Координация цикла</h3>
+          <p>Практический полный цикл сейчас находится в контуре реакции, хотя целевая граница этого контура уже другой.</p>
+        </div>
+        <div class="card">
+          <span class="tag amber">совместимость</span>
+          <h3>Старые форматы</h3>
+          <p>Сохраняются <code>.progress/decision/workflows.json</code> и старые ресурсные поля <code>runners</code>, <code>models</code>, <code>runner</code>, <code>model</code>.</p>
+        </div>
+        <div class="card">
+          <span class="tag risk">технический риск</span>
+          <h3>Тесты не полностью зелёные</h3>
+          <p><code>go test ./...</code> сейчас падает в <code>internal/execution</code> и <code>internal/configuration</code>; это отражено в подробном отчёте.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="next-reading">
+      <h2>Куда читать дальше</h2>
+      <p>После этого вводного документа удобно перейти к материалам разной глубины.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>Для общей картины</h3>
+          <ul>
+            <li><a href="project-structure-report.html">Подробный отчёт о структуре проекта</a></li>
+            <li><a href="TARGET_ARCHITECTURE.md">Целевая архитектура комплекса</a></li>
+            <li><a href="OPERATING_MODEL.md">Модель работы комплекса</a></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Для изучения контуров</h3>
+          <ul>
+            <li><a href="contour-reports/reactivity.html">Контур реакции</a></li>
+            <li><a href="contour-reports/integration.html">Контур интеграции</a></li>
+            <li><a href="contour-reports/decision.html">Контур принятия решения</a></li>
+            <li><a href="contour-reports/execution.html">Контур исполнения</a></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Для работы с терминами</h3>
+          <ul>
+            <li><a href="styleguide/public-models.md">Публичные модели</a></li>
+            <li><a href="styleguide/terminology.md">Терминология</a></li>
+            <li><a href="styleguide/code-terms.md">Кодовые термины</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="warn">Если цель — менять код, сначала стоит открыть <code>internal/contours/registry.go</code>, затем соответствующий пакет контура и только после этого документы целевой архитектуры. Это помогает отличать фактическое состояние от проектируемого.</div>
+    </section>
+  </main>
+</body>
+</html>

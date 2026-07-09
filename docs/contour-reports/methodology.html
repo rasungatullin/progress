@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур методик</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур методик</h1>
+      <p class="lead">Отчёт о контуре, который хранит переносимые маршруты, действия, операции, инструкции и расширяемые сущности.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/methodology</code></span>
+        <span class="pill">Документация: <code>docs/contours/methodology</code></span>
+        <span class="pill">Класс: обеспечивающий контур</span>
+      </div>
+      <nav class="nav"><a href="../project-structure-report.html">К основному отчёту</a><a href="../contours/methodology/README.md">К каноническому описанию</a></nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур методик отделяет правила обработки от кода: маршрут выбирает проверку, проверка выбирает действие, действие задаёт операции и инструкцию. Это основной механизм переноса прикладного поведения из жёсткой логики в конфигурационный каталог.</p>
+    </section>
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="300" viewBox="0 0 940 300" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="40" y="70" width="150" height="60" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="60" y="98" font-size="15" font-weight="700">Catalog</text><text x="60" y="118" font-size="12" fill="#5d6875">точка входа</text>
+          <rect x="250" y="70" width="150" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="270" y="98" font-size="15" font-weight="700">Route</text><text x="270" y="118" font-size="12" fill="#5d6875">маршрут</text>
+          <rect x="460" y="70" width="150" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="480" y="98" font-size="15" font-weight="700">Action</text><text x="480" y="118" font-size="12" fill="#5d6875">действие</text>
+          <rect x="670" y="70" width="150" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="690" y="98" font-size="15" font-weight="700">Operation</text><text x="690" y="118" font-size="12" fill="#5d6875">операция</text>
+          <path d="M190 100 L250 100" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M400 100 L460 100" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M610 100 L670 100" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="250" y="200" width="150" height="58" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="270" y="226" font-size="15" font-weight="700">Instruction</text><text x="270" y="246" font-size="12" fill="#5d6875">директива</text>
+          <rect x="460" y="200" width="150" height="58" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="480" y="226" font-size="15" font-weight="700">Entity</text><text x="480" y="246" font-size="12" fill="#5d6875">расширение</text>
+          <path d="M535 130 L335 200" stroke="#9aa9b8" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#a)" fill="none"/>
+        </svg>
+      </div>
+    </section>
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>Catalog</code>, <code>CatalogSnapshot</code></td><td>Собранный каталог и сведения об источниках слоёв.</td></tr>
+        <tr><td><code>Route</code>, <code>RouteCheck</code></td><td>Маршрут обработки и переносимые проверки.</td></tr>
+        <tr><td><code>Action</code>, <code>ActionOperation</code></td><td>Выбранное действие и последовательность его операций.</td></tr>
+        <tr><td><code>Instruction</code></td><td>Содержательная директива для действия.</td></tr>
+        <tr><td><code>Entity</code></td><td>Расширяемая методическая сущность с произвольным JSON <code>payload</code>.</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li>Слой хранения читает <code>.progress/methodology/catalog.json</code> и каталоги <code>routes</code>, <code>actions</code>, <code>operations</code>, <code>instructions</code>, <code>entities</code>.</li>
+        <li>Контур принятия решения использует маршруты и проверки для выбора действия.</li>
+        <li>Контур исполнения разрешает действие и операции из методики перед запуском.</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>Нужно завершить миграцию от <code>.progress/decision/workflows.json</code> к единому каталогу методик.</li>
+        <li>Требуется валидатор совместимости маршрута, действия, инструкции и операций до запуска.</li>
+        <li>Содержательные инструкции из профилей исполнения стоит перенести в <code>Instruction</code>.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

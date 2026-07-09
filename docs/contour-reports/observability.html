@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур журналирования и наблюдаемости</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур журналирования и наблюдаемости</h1>
+      <p class="lead">Отчёт о контуре, который должен фиксировать события, решения, запуски, операции, результаты и отказные состояния.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/observability</code></span>
+        <span class="pill">Документация: <code>docs/contours/observability</code></span>
+        <span class="pill">Класс: обеспечивающий контур</span>
+      </div>
+      <nav class="nav"><a href="../project-structure-report.html">К основному отчёту</a><a href="../contours/observability/README.md">К каноническому описанию</a></nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур наблюдаемости должен делать работу комплекса проверяемой: фиксировать входы, выборы, операции, результаты, отказы и диагностические сведения. Он не является источником текущего состояния задачи и не принимает решения о следующем шаге.</p>
+    </section>
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="280" viewBox="0 0 940 280" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="40" y="80" width="170" height="60" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="60" y="108" font-size="15" font-weight="700">RecordInput</text><text x="60" y="128" font-size="12" fill="#5d6875">запись события</text>
+          <rect x="280" y="80" width="170" height="60" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="300" y="108" font-size="15" font-weight="700">Event</text><text x="300" y="128" font-size="12" fill="#5d6875">диагностическая запись</text>
+          <rect x="520" y="80" width="170" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="540" y="108" font-size="15" font-weight="700">Filter</text><text x="540" y="128" font-size="12" fill="#5d6875">выборка событий</text>
+          <rect x="740" y="80" width="160" height="60" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="760" y="108" font-size="15" font-weight="700">UI / Analytics</text><text x="760" y="128" font-size="12" fill="#5d6875">потребители</text>
+          <path d="M210 110 L280 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M450 110 L520 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M690 110 L740 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="380" y="200" width="220" height="50" rx="8" fill="#fff6e9" stroke="#b85c00"/><text x="400" y="230" font-size="15" font-weight="700">История запусков пока в execution/history</text>
+        </svg>
+      </div>
+    </section>
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>RecordInput</code></td><td>Вход записи события с контуром, модулем, операцией, статусом и метаданными.</td></tr>
+        <tr><td><code>Event</code></td><td>Диагностическое событие с идентификатором и временем.</td></tr>
+        <tr><td><code>Filter</code></td><td>Параметры выборки по контуру, статусу и лимиту.</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li><code>Service.Record</code> проверяет контур и операцию, присваивает идентификатор и время.</li>
+        <li><code>Service.List</code> возвращает события из памяти процесса.</li>
+        <li>История запусков исполнения пока записывается отдельно через SQLite и JSON-записи.</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>Нет постоянного журнала наблюдаемости.</li>
+        <li>Нет сквозной записи событий из всех основных контуров.</li>
+        <li>Нужно перенести или адаптировать <code>internal/execution/history</code> под этот контур.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

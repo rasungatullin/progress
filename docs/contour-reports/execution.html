@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур исполнения</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур исполнения</h1>
+      <p class="lead">Отчёт о контуре, который превращает задание на выполнение в действие, операции, запуск и нормализованный результат.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/execution</code></span>
+        <span class="pill">Документация: <code>docs/contours/execution</code></span>
+        <span class="pill">Класс: основной контур</span>
+      </div>
+      <nav class="nav">
+        <a href="../project-structure-report.html">К основному отчёту</a>
+        <a href="../contours/execution/README.md">К каноническому описанию</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур исполнения получает задание от контура принятия решения, разрешает действие из методики, готовит данные и окружение, выполняет операции, запускает исполнительный модуль при необходимости и возвращает результат выполнения.</p>
+    </section>
+
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="340" viewBox="0 0 940 340" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="35" y="80" width="160" height="64" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="55" y="108" font-size="15" font-weight="700">Assignment</text><text x="55" y="128" font-size="12" fill="#5d6875">задание</text>
+          <rect x="250" y="80" width="160" height="64" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="270" y="108" font-size="15" font-weight="700">Action</text><text x="270" y="128" font-size="12" fill="#5d6875">шаблон операций</text>
+          <rect x="465" y="80" width="160" height="64" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="485" y="108" font-size="15" font-weight="700">Invocation</text><text x="485" y="128" font-size="12" fill="#5d6875">рабочий вызов</text>
+          <rect x="680" y="80" width="180" height="64" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="700" y="108" font-size="15" font-weight="700">ExecutionResult</text><text x="700" y="128" font-size="12" fill="#5d6875">операции и запуск</text>
+          <path d="M195 112 L250 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M410 112 L465 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M625 112 L680 112" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="105" y="225" width="150" height="58" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="125" y="251" font-size="15" font-weight="700">Profile</text><text x="125" y="271" font-size="12" fill="#5d6875">режим запуска</text>
+          <rect x="310" y="225" width="150" height="58" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="330" y="251" font-size="15" font-weight="700">Allocation</text><text x="330" y="271" font-size="12" fill="#5d6875">ресурсы</text>
+          <rect x="515" y="225" width="150" height="58" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="535" y="251" font-size="15" font-weight="700">Workplace</text><text x="535" y="271" font-size="12" fill="#5d6875">рабочее место</text>
+          <rect x="720" y="225" width="150" height="58" rx="8" fill="#fff6e9" stroke="#b85c00"/><text x="740" y="251" font-size="15" font-weight="700">History</text><text x="740" y="271" font-size="12" fill="#5d6875">переходное хранение</text>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>ExecutionAssignment</code></td><td>Межконтурное задание от решения к исполнению.</td></tr>
+        <tr><td><code>ActionInvocation</code>, <code>OperationInvocation</code></td><td>Публичные входы исполнения для действия или отдельной операции.</td></tr>
+        <tr><td><code>Invocation</code></td><td>Внутреннее рабочее представление вызова с разрешёнными параметрами.</td></tr>
+        <tr><td><code>Action</code>, <code>OperationSpec</code>, <code>OperationResult</code></td><td>Шаблон действия, технические шаги и результаты их прохождения.</td></tr>
+        <tr><td><code>LaunchResult</code>, <code>ExecutionResult</code></td><td>Результат запуска исполнительного модуля и итог всего действия.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li>Сервис получает <code>ActionInvocation</code> и строит внутренний <code>Invocation</code>.</li>
+        <li>Действие разрешается из каталога методик, затем подбирается профиль, ресурсная привязка и рабочее место.</li>
+        <li>Операции действия выполняются последовательно: подготовка данных, рабочее место, запуск синтеза, разбор результата и внешние операции.</li>
+        <li>Результаты операций и запуска сводятся в <code>ExecutionResult</code>.</li>
+        <li>Локальная история записывается через <code>internal/execution/history</code> и JSON-записи <code>.progress/execution-runs</code>.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li><code>go test ./...</code> сейчас падает в тестах <code>internal/execution</code> из-за старой сигнатуры <code>resolveActionFromCatalog</code>.</li>
+        <li>История запусков целево должна принадлежать наблюдаемости, а не подпакету исполнения.</li>
+        <li>Содержательные инструкции ещё частично живут в профилях через <code>prompt-additions</code>.</li>
+        <li>Нужно окончательно убрать скрытые механики вроде профильного <code>commit_push</code> из документации и оставить явные операции действия.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

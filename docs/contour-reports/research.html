@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур исследований</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Контур исследований</h1>
+      <p class="lead">Отчёт о контуре проверки гипотез по улучшению методик, маршрутов, профилей, ресурсов и настроек комплекса.</p>
+      <div class="meta">
+        <span class="pill">Пакет: <code>internal/research</code></span>
+        <span class="pill">Документация: <code>docs/contours/research</code></span>
+        <span class="pill">Класс: исследовательский контур</span>
+      </div>
+      <nav class="nav"><a href="../project-structure-report.html">К основному отчёту</a><a href="../contours/research/README.md">К каноническому описанию</a></nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Назначение</h2>
+      <p>Контур исследований проверяет гипотезы об улучшении комплекса на воспроизводимых наборах задач. Он должен сравнивать варианты методик, действий, профилей, ресурсов и настроек, а результаты передавать в аналитику.</p>
+    </section>
+    <section>
+      <h2>Схема контура</h2>
+      <div class="diagram">
+        <svg width="940" height="270" viewBox="0 0 940 270" role="img">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#65758a"/></marker></defs>
+          <rect x="45" y="80" width="160" height="60" rx="8" fill="#fff" stroke="#9aa9b8"/><text x="65" y="108" font-size="15" font-weight="700">Hypothesis</text><text x="65" y="128" font-size="12" fill="#5d6875">гипотеза</text>
+          <rect x="265" y="80" width="160" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="285" y="108" font-size="15" font-weight="700">Variant</text><text x="285" y="128" font-size="12" fill="#5d6875">вариант проверки</text>
+          <rect x="485" y="80" width="160" height="60" rx="8" fill="#e9f4f8" stroke="#1f6f8b"/><text x="505" y="108" font-size="15" font-weight="700">Experiment</text><text x="505" y="128" font-size="12" fill="#5d6875">эксперимент</text>
+          <rect x="705" y="80" width="160" height="60" rx="8" fill="#eef4ea" stroke="#4f7d3a"/><text x="725" y="108" font-size="15" font-weight="700">Plan</text><text x="725" y="128" font-size="12" fill="#5d6875">план проверки</text>
+          <path d="M205 110 L265 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M425 110 L485 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/><path d="M645 110 L705 110" stroke="#65758a" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="335" y="200" width="250" height="48" rx="8" fill="#fff6e9" stroke="#b85c00"/><text x="355" y="229" font-size="15" font-weight="700">Нужны данные банка задач и аналитики</text>
+        </svg>
+      </div>
+    </section>
+    <section>
+      <h2>Сущности и роли</h2>
+      <table>
+        <tr><th>Сущность</th><th>Роль</th></tr>
+        <tr><td><code>Hypothesis</code></td><td>Формулировка улучшения, которое нужно проверить.</td></tr>
+        <tr><td><code>Variant</code></td><td>Вариант методики, маршрута, профиля или настройки.</td></tr>
+        <tr><td><code>Experiment</code></td><td>Эксперимент с вариантами и выборкой.</td></tr>
+        <tr><td><code>Plan</code></td><td>Последовательность действий исследования.</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Как работает сейчас</h2>
+      <ol>
+        <li>Сервис формирует план исследования из гипотезы, вариантов и эксперимента.</li>
+        <li>Контур представлен как начальный каркас с тестами.</li>
+        <li>Фактические сравнительные прогоны ещё не подключены к исполнению, банку задач и аналитике.</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Проблемы и вопросы</h2>
+      <ul>
+        <li>Нужно определить воспроизводимый протокол эксперимента.</li>
+        <li>Нужна изоляция экспериментальных методик от рабочих маршрутов.</li>
+        <li>Следует связать результаты экспериментов с отчётами аналитики без автоматического изменения методик.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

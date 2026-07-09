@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Отчёт о структуре комплекса «Прогресс»</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --paper: #ffffff;
+      --ink: #1f2933;
+      --muted: #5d6875;
+      --line: #d7dde5;
+      --soft: #eef2f6;
+      --accent: #1f6f8b;
+      --accent-2: #4f7d3a;
+      --warn: #b85c00;
+      --risk: #a12a2a;
+      --ok: #23714d;
+      --code: #102033;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    header {
+      background: #203040;
+      color: #fff;
+      padding: 44px 24px 36px;
+    }
+
+    header .inner,
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: 36px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: 26px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 18px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #e7edf3;
+      color: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+    }
+
+    main {
+      padding: 26px 24px 52px;
+    }
+
+    section {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 24px;
+      margin: 0 0 20px;
+      box-shadow: 0 1px 2px rgba(16, 32, 51, 0.04);
+    }
+
+    .lead {
+      max-width: 900px;
+      color: #d9e2ea;
+      font-size: 17px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+      color: #e9f0f5;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      font-size: 13px;
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .toc a {
+      display: block;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--soft);
+      color: var(--ink);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfd;
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e2eef5;
+      color: #184f68;
+      font-size: 12px;
+      margin: 0 4px 6px 0;
+    }
+
+    .tag.warn {
+      background: #fff0dc;
+      color: var(--warn);
+    }
+
+    .tag.risk {
+      background: #fbe4e4;
+      color: var(--risk);
+    }
+
+    .tag.ok {
+      background: #e2f4e8;
+      color: var(--ok);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 4px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #edf2f6;
+      font-weight: 650;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 0 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      padding: 10px 12px;
+      background: #edf6fa;
+      color: #234252;
+      margin: 12px 0;
+    }
+
+    .risk-box {
+      border-left: 4px solid var(--risk);
+      padding: 10px 12px;
+      background: #fff1f1;
+      color: #542020;
+      margin: 12px 0;
+    }
+
+    .warn-box {
+      border-left: 4px solid var(--warn);
+      padding: 10px 12px;
+      background: #fff6e9;
+      color: #5a3300;
+      margin: 12px 0;
+    }
+
+    .diagram {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+      padding: 12px;
+      margin: 12px 0 18px;
+    }
+
+    svg {
+      max-width: 100%;
+      height: auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: -6px;
+    }
+
+    .status-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+    }
+
+    .status-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfd;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 720px) {
+      h1 {
+        font-size: 28px;
+      }
+
+      section {
+        padding: 18px;
+      }
+
+      th,
+      td {
+        font-size: 13px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Отчёт о структуре комплекса «Прогресс»</h1>
+      <p class="lead">Сводка текущих сущностей, ролей, связей, фактического рабочего цикла, кодовой архитектуры, проблемных мест и открытых вопросов. Отчёт построен по состоянию рабочей копии после обновления на <code>origin/main</code>.</p>
+      <div class="meta">
+        <span class="pill">Дата среза: 2026-07-09</span>
+        <span class="pill">Коммит: <code>8fc6c3c</code></span>
+        <span class="pill">Репозиторий: <code>/Users/rasungatullin/OpenWork/progress</code></span>
+        <span class="pill">Формат: статический HTML</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="summary">
+      <h2>Краткое заключение</h2>
+      <p>Комплекс уже вышел за пределы первичного каркаса: в коде есть реестр контуров, каталог методик, интеграционные адаптеры, контур принятия решения, контур исполнения с действиями и операциями, ресурсная модель, локальная история запусков и простой пользовательский интерфейс просмотра.</p>
+      <p>Ключевая архитектурная идея выдержана частично: основные контуры есть, но несколько переходных механизмов смешивают целевые границы. Самый заметный разрыв находится в контуре реакции на внешние события: целевые документы ограничивают его нормализацией сигнала, а текущий код использует его как координатор полного цикла задачи.</p>
+      <div class="status-list">
+        <div class="status-item">
+          <span class="tag ok">реализовано</span>
+          <p>Есть проверяемый реестр контуров в <code>internal/contours</code>, прикладные маршруты в <code>.progress/methodology</code> и рабочие входы CLI для интеграции, методик, реакции, решения и исполнения.</p>
+        </div>
+        <div class="status-item">
+          <span class="tag warn">переходное состояние</span>
+          <p>Сохраняются совместимые форматы <code>.progress/decision/workflows.json</code>, старые поля <code>runners</code>, <code>models</code>, <code>runner</code>, <code>model</code> и локальная история <code>.progress/execution-runs</code>.</p>
+        </div>
+        <div class="status-item">
+          <span class="tag risk">риск</span>
+          <p>Полная проверка <code>go test ./...</code> не проходит: тесты <code>internal/execution</code> не синхронизированы с текущей сигнатурой <code>resolveActionFromCatalog</code>, а тест <code>internal/configuration</code> видит внешнюю интеграционную конфигурацию.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="contents">
+      <h2>Содержание</h2>
+      <ul class="toc">
+        <li><a href="#system-map">Контурная карта</a></li>
+        <li><a href="#contour-reports">Отчёты по контурам</a></li>
+        <li><a href="#current-flow">Как работает текущий цикл</a></li>
+        <li><a href="#entities">Текущие сущности</a></li>
+        <li><a href="#relationships">Связи сущностей</a></li>
+        <li><a href="#code-architecture">Кодовая архитектура</a></li>
+        <li><a href="#configuration">Конфигурация и данные</a></li>
+        <li><a href="#problems">Проблемные места</a></li>
+        <li><a href="#questions">Открытые вопросы</a></li>
+        <li><a href="#recommendations">Предлагаемые изменения</a></li>
+        <li><a href="#evidence">Источники проверки</a></li>
+      </ul>
+    </section>
+
+    <section id="contour-reports">
+      <h2>Отчёты по контурам</h2>
+      <p>Для каждого контура подготовлен отдельный HTML-документ с кратким назначением, схемой, перечнем сущностей, описанием текущей работы, проблемными местами и открытыми вопросами.</p>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Основные контуры</h3>
+          <ul>
+            <li><a href="contour-reports/reactivity.html">Контур реакции на внешние события</a></li>
+            <li><a href="contour-reports/integration.html">Контур интеграции</a></li>
+            <li><a href="contour-reports/decision.html">Контур принятия решения</a></li>
+            <li><a href="contour-reports/execution.html">Контур исполнения</a></li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3>Обеспечивающие контуры</h3>
+          <ul>
+            <li><a href="contour-reports/methodology.html">Контур методик</a></li>
+            <li><a href="contour-reports/configuration.html">Контур настроек и ресурсов</a></li>
+            <li><a href="contour-reports/observability.html">Контур журналирования и наблюдаемости</a></li>
+            <li><a href="contour-reports/user-interface.html">Контур пользовательского интерфейса</a></li>
+            <li><a href="contour-reports/authorization.html">Контур авторизации</a></li>
+            <li><a href="contour-reports/execution-queue.html">Очередь исполнения задач</a></li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3>Исследовательские контуры</h3>
+          <ul>
+            <li><a href="contour-reports/analytics.html">Контур аналитики и статистики</a></li>
+            <li><a href="contour-reports/task-bank.html">Банк задач</a></li>
+            <li><a href="contour-reports/research.html">Контур исследований</a></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="system-map">
+      <h2>Контурная карта</h2>
+      <p>Кодовая карта контуров закреплена в <code>internal/contours/registry.go</code>. В ней описаны 13 контуров: 4 основных, 6 обеспечивающих и 3 исследовательских. Это наиболее точный текущий источник архитектурной структуры.</p>
+
+      <div class="diagram" aria-label="Карта контуров">
+        <svg width="1080" height="610" viewBox="0 0 1080 610" role="img">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#65758a"></path>
+            </marker>
+            <style>
+              .box{fill:#fff;stroke:#9aa9b8;stroke-width:1.5}
+              .main{fill:#e9f4f8;stroke:#1f6f8b}
+              .support{fill:#eef4ea;stroke:#4f7d3a}
+              .research{fill:#f7efe4;stroke:#b85c00}
+              .title{font-size:15px;font-weight:700;fill:#1f2933}
+              .text{font-size:12px;fill:#4b5563}
+              .edge{stroke:#65758a;stroke-width:1.5;fill:none;marker-end:url(#arrow)}
+              .edge-soft{stroke:#9aa9b8;stroke-width:1.2;stroke-dasharray:5 4;fill:none;marker-end:url(#arrow)}
+            </style>
+          </defs>
+
+          <rect class="box main" x="40" y="60" width="190" height="72" rx="8"></rect>
+          <text class="title" x="58" y="88">Реакция</text>
+          <text class="text" x="58" y="110">событие -> сигнал</text>
+
+          <rect class="box main" x="300" y="60" width="190" height="72" rx="8"></rect>
+          <text class="title" x="318" y="88">Интеграция</text>
+          <text class="text" x="318" y="110">внешние системы</text>
+
+          <rect class="box main" x="560" y="60" width="190" height="72" rx="8"></rect>
+          <text class="title" x="578" y="88">Решение</text>
+          <text class="text" x="578" y="110">маршрут и задание</text>
+
+          <rect class="box main" x="820" y="60" width="190" height="72" rx="8"></rect>
+          <text class="title" x="838" y="88">Исполнение</text>
+          <text class="text" x="838" y="110">действия и операции</text>
+
+          <path class="edge" d="M230 96 L300 96"></path>
+          <path class="edge" d="M490 96 L560 96"></path>
+          <path class="edge" d="M750 96 L820 96"></path>
+          <path class="edge" d="M915 132 C910 205 675 205 655 132"></path>
+          <path class="edge" d="M850 132 C760 210 435 210 395 132"></path>
+
+          <rect class="box support" x="40" y="250" width="190" height="72" rx="8"></rect>
+          <text class="title" x="58" y="278">Методики</text>
+          <text class="text" x="58" y="300">маршруты и действия</text>
+
+          <rect class="box support" x="300" y="250" width="190" height="72" rx="8"></rect>
+          <text class="title" x="318" y="278">Настройки и ресурсы</text>
+          <text class="text" x="318" y="300">системы, ресурсы, профили</text>
+
+          <rect class="box support" x="560" y="250" width="190" height="72" rx="8"></rect>
+          <text class="title" x="578" y="278">Наблюдаемость</text>
+          <text class="text" x="578" y="300">события и история</text>
+
+          <rect class="box support" x="820" y="250" width="190" height="72" rx="8"></rect>
+          <text class="title" x="838" y="278">Пользовательский интерфейс</text>
+          <text class="text" x="838" y="300">просмотр и диагностика</text>
+
+          <path class="edge-soft" d="M135 250 C180 185 605 185 655 132"></path>
+          <path class="edge-soft" d="M135 250 C250 215 830 210 915 132"></path>
+          <path class="edge-soft" d="M395 250 C420 185 835 185 915 132"></path>
+          <path class="edge-soft" d="M655 250 L655 132"></path>
+          <path class="edge-soft" d="M750 286 L820 286"></path>
+
+          <rect class="box support" x="40" y="405" width="190" height="72" rx="8"></rect>
+          <text class="title" x="58" y="433">Авторизация</text>
+          <text class="text" x="58" y="455">допуск к операциям</text>
+
+          <rect class="box support" x="300" y="405" width="190" height="72" rx="8"></rect>
+          <text class="title" x="318" y="433">Очередь исполнения</text>
+          <text class="text" x="318" y="455">отложенные задания</text>
+
+          <rect class="box research" x="560" y="405" width="140" height="72" rx="8"></rect>
+          <text class="title" x="578" y="433">Банк задач</text>
+          <text class="text" x="578" y="455">проверочные наборы</text>
+
+          <rect class="box research" x="735" y="405" width="140" height="72" rx="8"></rect>
+          <text class="title" x="753" y="433">Исследования</text>
+          <text class="text" x="753" y="455">гипотезы</text>
+
+          <rect class="box research" x="910" y="405" width="140" height="72" rx="8"></rect>
+          <text class="title" x="928" y="433">Аналитика</text>
+          <text class="text" x="928" y="455">показатели</text>
+
+          <path class="edge-soft" d="M135 405 C200 348 780 348 915 322"></path>
+          <path class="edge-soft" d="M395 405 C430 345 785 337 915 322"></path>
+          <path class="edge-soft" d="M700 441 L735 441"></path>
+          <path class="edge-soft" d="M875 441 L910 441"></path>
+          <path class="edge-soft" d="M980 405 C950 350 760 345 655 322"></path>
+
+          <text class="text" x="42" y="545">Сплошные линии показывают основной прикладной цикл. Пунктир показывает обеспечивающие и исследовательские обмены.</text>
+        </svg>
+      </div>
+
+      <div class="legend">
+        <span><span class="tag">основной контур</span> реакция, интеграция, решение, исполнение</span>
+        <span><span class="tag ok">обеспечение</span> методики, настройки, наблюдаемость, интерфейс, авторизация, очередь</span>
+        <span><span class="tag warn">исследование</span> банк задач, исследования, аналитика</span>
+      </div>
+    </section>
+
+    <section id="current-flow">
+      <h2>Как работает текущий цикл</h2>
+      <p>Фактический прикладной путь сейчас проще и плотнее целевой модели. Ручной запуск или команда реактивного контура получает номер задачи, восстанавливает состояние через интеграции, применяет маршрут из каталога методик, формирует задание на выполнение, запускает действие и меняет внешние признаки задачи по результату.</p>
+
+      <div class="diagram" aria-label="Последовательность текущего цикла">
+        <svg width="1080" height="430" viewBox="0 0 1080 430" role="img">
+          <defs>
+            <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#65758a"></path>
+            </marker>
+            <style>
+              .lane{stroke:#c7d0da;stroke-width:1}
+              .node{fill:#fff;stroke:#9aa9b8;stroke-width:1.5}
+              .main-node{fill:#e9f4f8;stroke:#1f6f8b}
+              .warn-node{fill:#fff6e9;stroke:#b85c00}
+              .label{font-size:13px;fill:#1f2933;font-weight:650}
+              .desc{font-size:11px;fill:#5d6875}
+              .arrow{stroke:#65758a;stroke-width:1.5;fill:none;marker-end:url(#arrow2)}
+            </style>
+          </defs>
+          <line class="lane" x1="120" y1="50" x2="120" y2="370"></line>
+          <line class="lane" x1="300" y1="50" x2="300" y2="370"></line>
+          <line class="lane" x1="480" y1="50" x2="480" y2="370"></line>
+          <line class="lane" x1="660" y1="50" x2="660" y2="370"></line>
+          <line class="lane" x1="840" y1="50" x2="840" y2="370"></line>
+
+          <text class="label" x="58" y="32">CLI/событие</text>
+          <text class="label" x="252" y="32">Реакция</text>
+          <text class="label" x="438" y="32">Интеграция</text>
+          <text class="label" x="620" y="32">Решение</text>
+          <text class="label" x="805" y="32">Исполнение</text>
+
+          <rect class="node main-node" x="48" y="72" width="145" height="58" rx="8"></rect>
+          <text class="label" x="64" y="98">номер задачи</text>
+          <text class="desc" x="64" y="116">ручной или внешний вход</text>
+
+          <path class="arrow" d="M193 101 L228 101"></path>
+          <rect class="node warn-node" x="228" y="72" width="145" height="58" rx="8"></rect>
+          <text class="label" x="244" y="98">ProcessTask</text>
+          <text class="desc" x="244" y="116">координация цикла</text>
+
+          <path class="arrow" d="M373 101 L408 101"></path>
+          <rect class="node main-node" x="408" y="72" width="145" height="58" rx="8"></rect>
+          <text class="label" x="424" y="98">get issue / PR</text>
+          <text class="desc" x="424" y="116">внешние сведения</text>
+
+          <path class="arrow" d="M553 101 L588 101"></path>
+          <rect class="node main-node" x="588" y="72" width="145" height="58" rx="8"></rect>
+          <text class="label" x="604" y="98">Consider</text>
+          <text class="desc" x="604" y="116">маршрут и проверка</text>
+
+          <path class="arrow" d="M733 101 L768 101"></path>
+          <rect class="node main-node" x="768" y="72" width="150" height="58" rx="8"></rect>
+          <text class="label" x="784" y="98">ExecuteAction</text>
+          <text class="desc" x="784" y="116">операции действия</text>
+
+          <path class="arrow" d="M843 130 C843 170 300 170 300 130"></path>
+          <rect class="node" x="228" y="205" width="145" height="58" rx="8"></rect>
+          <text class="label" x="244" y="231">метки задачи</text>
+          <text class="desc" x="244" y="249">следующая стадия</text>
+
+          <path class="arrow" d="M373 234 C520 305 780 302 843 130"></path>
+          <rect class="node" x="768" y="205" width="150" height="58" rx="8"></rect>
+          <text class="label" x="784" y="231">результат</text>
+          <text class="desc" x="784" y="249">LaunchResult + операции</text>
+
+          <path class="arrow" d="M843 263 C782 342 347 342 300 263"></path>
+          <text class="desc" x="350" y="385">Цикл повторяется, пока маршрут не вернёт отсутствие следующей операции или пока не достигнут предел циклов.</text>
+        </svg>
+      </div>
+
+      <ol>
+        <li><code>progress reactivity process --task N</code> или <code>progress decision start --task N</code> запускает прикладной цикл.</li>
+        <li>Контур интеграции получает задачу, связанный запрос на слияние, комментарии, замечания и внешнее состояние.</li>
+        <li>Контур принятия решения применяет маршрут из <code>.progress/methodology/routes</code> и строит <code>ExecutionPlan</code> с <code>ExecutionAssignment</code>.</li>
+        <li>Контур исполнения разрешает действие из <code>.progress/methodology/actions</code>, подбирает профиль и ресурсы, готовит рабочее место, выполняет операции и запускает синтез там, где он нужен.</li>
+        <li>Завершающие операции через контур интеграции публикуют запрос на слияние, замечания, ответы или другие внешние изменения.</li>
+        <li>Контур реакции в текущем практическом обработчике меняет стадийные метки и запускает следующий цикл при необходимости.</li>
+      </ol>
+    </section>
+
+    <section id="entities">
+      <h2>Текущие сущности и роли</h2>
+      <p>Ниже перечислены основные публичные и близкие к публичным модели, которые реально участвуют в межконтурном обмене или задают рабочую конфигурацию комплекса.</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Слой</th>
+            <th>Сущности</th>
+            <th>Роль</th>
+            <th>Замечание</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Реестр архитектуры</td>
+            <td><code>contours.Registry</code>, <code>Contour</code>, <code>Contract</code></td>
+            <td>Кодовая карта контуров и формальных межконтурных контрактов.</td>
+            <td>Содержит 13 контуров и набор обязательных контрактов, но обязательная проверка покрывает не все описанные связи.</td>
+          </tr>
+          <tr>
+            <td>Реакция</td>
+            <td><code>reactivity.Event</code>, <code>Process</code>, <code>Signal</code>, <code>Result</code>, <code>TaskProcessingResult</code></td>
+            <td>Нормализация входа и практический запуск цикла обработки задачи.</td>
+            <td><code>TaskProcessingResult</code> отражает переходную координационную роль, которой нет в целевой границе контура.</td>
+          </tr>
+          <tr>
+            <td>Интеграция</td>
+            <td><code>Request</code>, <code>ProviderRequest</code>, <code>Response</code>, <code>Route</code>, <code>CanonicalTask</code>, <code>TrackerIssue</code>, <code>MergeRequest</code>, <code>ReviewRemark</code></td>
+            <td>Единый шлюз чтения и записи во внешние системы, нормализация внешних объектов.</td>
+            <td>Есть два уровня моделей: канонические объекты и модели внешнего трекера. Решение пока использует оба.</td>
+          </tr>
+          <tr>
+            <td>Решение</td>
+            <td><code>DecisionContext</code>, <code>ConsiderationInput</code>, <code>ConsiderationResult</code>, <code>ExecutionPlan</code>, <code>DecisionFailure</code></td>
+            <td>Применение маршрута, фиксация оснований и построение задания на выполнение.</td>
+            <td><code>ExecutionPlan</code> является практической моделью первого среза; межконтурным заданием должен быть <code>ExecutionAssignment</code>.</td>
+          </tr>
+          <tr>
+            <td>Методики</td>
+            <td><code>Catalog</code>, <code>Route</code>, <code>RouteCheck</code>, <code>Action</code>, <code>ActionOperation</code>, <code>Instruction</code>, <code>Operation</code>, <code>Entity</code></td>
+            <td>Переносимое описание маршрутов, действий, инструкций и операций.</td>
+            <td>Фактический каталог разложен по каталогам <code>.progress/methodology</code>: 4 маршрута, 9 действий, 15 операций, 5 инструкций.</td>
+          </tr>
+          <tr>
+            <td>Исполнение</td>
+            <td><code>ExecutionAssignment</code>, <code>ActionInvocation</code>, <code>Invocation</code>, <code>Profile</code>, <code>Allocation</code>, <code>Workplace</code>, <code>LaunchResult</code>, <code>ExecutionResult</code></td>
+            <td>Превращение задания на выполнение в действие, операции, запуск и нормализованный результат.</td>
+            <td>Локальная история запусков пока принадлежит исполнению, хотя целевая архитектура относит её к наблюдаемости.</td>
+          </tr>
+          <tr>
+            <td>Настройки и ресурсы</td>
+            <td><code>configuration.Snapshot</code>, <code>IntegrationConfig</code>, <code>ExecutionResourceConfig</code>, <code>ResourceConfigFile</code></td>
+            <td>Слияние проектных, локальных и глобальных настроек интеграций, ресурсов и привязок.</td>
+            <td>Новый формат сосуществует со старыми полями <code>runners</code>, <code>models</code>, <code>runner</code>, <code>model</code>.</td>
+          </tr>
+          <tr>
+            <td>Наблюдаемость</td>
+            <td><code>observability.Event</code>, <code>RecordInput</code>, <code>Filter</code></td>
+            <td>Диагностические события и будущий постоянный журнал.</td>
+            <td>Каркас хранит события в памяти и пока не является владельцем истории запусков.</td>
+          </tr>
+          <tr>
+            <td>Интерфейс и исследования</td>
+            <td><code>ui.ViewModel</code>, <code>authorization.Decision</code>, <code>executionqueue.Item</code>, <code>analytics.Report</code>, <code>taskbank.Case</code>, <code>research.Plan</code></td>
+            <td>Поддержка эксплуатационного просмотра, допуска, очередей, измерений и экспериментов.</td>
+            <td>Большая часть этих контуров находится в состоянии начального каркаса.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="relationships">
+      <h2>Связи сущностей</h2>
+      <p>Основная предметная цепочка строится вокруг задачи. Внешняя задача преобразуется в каноническую задачу, затем в контекст решения, задание на выполнение и результат выполнения.</p>
+
+      <div class="diagram" aria-label="Связи ключевых сущностей">
+        <svg width="1080" height="500" viewBox="0 0 1080 500" role="img">
+          <defs>
+            <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#65758a"></path>
+            </marker>
+            <style>
+              .entity{fill:#fff;stroke:#9aa9b8;stroke-width:1.5}
+              .canonical{fill:#e9f4f8;stroke:#1f6f8b}
+              .method{fill:#eef4ea;stroke:#4f7d3a}
+              .transient{fill:#fff6e9;stroke:#b85c00}
+              .name{font-size:14px;font-weight:700;fill:#1f2933}
+              .body{font-size:11px;fill:#5d6875}
+              .rel{stroke:#65758a;stroke-width:1.5;fill:none;marker-end:url(#arrow3)}
+              .rel-soft{stroke:#9aa9b8;stroke-width:1.2;stroke-dasharray:5 4;fill:none;marker-end:url(#arrow3)}
+            </style>
+          </defs>
+
+          <rect class="entity" x="40" y="55" width="170" height="70" rx="8"></rect>
+          <text class="name" x="56" y="84">TrackerIssue</text>
+          <text class="body" x="56" y="104">задача внешней системы</text>
+
+          <rect class="entity canonical" x="280" y="55" width="170" height="70" rx="8"></rect>
+          <text class="name" x="296" y="84">CanonicalTask</text>
+          <text class="body" x="296" y="104">каноническая задача</text>
+
+          <rect class="entity canonical" x="520" y="55" width="190" height="70" rx="8"></rect>
+          <text class="name" x="536" y="84">DecisionContext</text>
+          <text class="body" x="536" y="104">задача, сигнал, связи</text>
+
+          <rect class="entity transient" x="780" y="55" width="190" height="70" rx="8"></rect>
+          <text class="name" x="796" y="84">ExecutionPlan</text>
+          <text class="body" x="796" y="104">переходный план решения</text>
+
+          <path class="rel" d="M210 90 L280 90"></path>
+          <path class="rel" d="M450 90 L520 90"></path>
+          <path class="rel" d="M710 90 L780 90"></path>
+
+          <rect class="entity method" x="280" y="205" width="170" height="70" rx="8"></rect>
+          <text class="name" x="296" y="234">Route</text>
+          <text class="body" x="296" y="254">проверки маршрута</text>
+
+          <rect class="entity method" x="520" y="205" width="190" height="70" rx="8"></rect>
+          <text class="name" x="536" y="234">Action</text>
+          <text class="body" x="536" y="254">операции и инструкция</text>
+
+          <rect class="entity canonical" x="780" y="205" width="190" height="70" rx="8"></rect>
+          <text class="name" x="796" y="234">ExecutionAssignment</text>
+          <text class="body" x="796" y="254">межконтурное задание</text>
+
+          <path class="rel-soft" d="M365 205 C390 150 575 147 615 125"></path>
+          <path class="rel-soft" d="M615 205 C655 160 820 155 875 125"></path>
+          <path class="rel" d="M875 125 L875 205"></path>
+
+          <rect class="entity" x="40" y="355" width="170" height="70" rx="8"></rect>
+          <text class="name" x="56" y="384">Profile</text>
+          <text class="body" x="56" y="404">технический режим</text>
+
+          <rect class="entity" x="280" y="355" width="170" height="70" rx="8"></rect>
+          <text class="name" x="296" y="384">Allocation</text>
+          <text class="body" x="296" y="404">инструмент и ресурс</text>
+
+          <rect class="entity" x="520" y="355" width="190" height="70" rx="8"></rect>
+          <text class="name" x="536" y="384">LaunchResult</text>
+          <text class="body" x="536" y="404">результат запуска</text>
+
+          <rect class="entity canonical" x="780" y="355" width="190" height="70" rx="8"></rect>
+          <text class="name" x="796" y="384">ExecutionResult</text>
+          <text class="body" x="796" y="404">результат действия</text>
+
+          <path class="rel-soft" d="M210 390 L280 390"></path>
+          <path class="rel-soft" d="M450 390 L520 390"></path>
+          <path class="rel" d="M710 390 L780 390"></path>
+          <path class="rel" d="M875 275 L875 355"></path>
+          <path class="rel-soft" d="M615 275 L615 355"></path>
+        </svg>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Каноническая линия</h3>
+          <p><code>CanonicalTask</code> должна быть основной задачей для принятия решения. Сейчас она формируется из <code>TrackerIssue</code>, но контекст решения всё ещё хранит обе модели.</p>
+        </div>
+        <div class="card">
+          <h3>Методическая линия</h3>
+          <p><code>Route</code> выбирает проверку, проверка выбирает <code>Action</code>, действие задаёт операции и инструкцию. Это уже перенесено в каталог <code>.progress/methodology</code>.</p>
+        </div>
+        <div class="card">
+          <h3>Исполнительная линия</h3>
+          <p><code>ExecutionAssignment</code> является межконтурным входом исполнения. Затем контур исполнения собирает внутренний <code>Invocation</code>, профиль, выделение ресурсов и рабочее место.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="code-architecture">
+      <h2>Кодовая архитектура</h2>
+      <p>Код организован как Go-модуль с точкой входа <code>cmd/progress</code> и внутренними пакетами <code>internal/*</code>. Пакет <code>internal/cli</code> собирает команды, а доменные пакеты реализуют контуры и обеспечивающие слои.</p>
+
+      <div class="diagram" aria-label="Кодовая архитектура">
+        <svg width="1080" height="520" viewBox="0 0 1080 520" role="img">
+          <defs>
+            <marker id="arrow4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#65758a"></path>
+            </marker>
+            <style>
+              .pkg{fill:#fff;stroke:#9aa9b8;stroke-width:1.4}
+              .entry{fill:#e9f4f8;stroke:#1f6f8b}
+              .domain{fill:#eef4ea;stroke:#4f7d3a}
+              .infra{fill:#f7efe4;stroke:#b85c00}
+              .t{font-size:14px;font-weight:700;fill:#1f2933}
+              .d{font-size:11px;fill:#5d6875}
+              .a{stroke:#65758a;stroke-width:1.4;fill:none;marker-end:url(#arrow4)}
+              .s{stroke:#9aa9b8;stroke-width:1.1;stroke-dasharray:5 4;fill:none;marker-end:url(#arrow4)}
+            </style>
+          </defs>
+
+          <rect class="pkg entry" x="450" y="30" width="180" height="60" rx="8"></rect>
+          <text class="t" x="468" y="56">cmd/progress</text>
+          <text class="d" x="468" y="75">точка входа CLI</text>
+
+          <rect class="pkg entry" x="450" y="130" width="180" height="60" rx="8"></rect>
+          <text class="t" x="468" y="156">internal/cli</text>
+          <text class="d" x="468" y="175">команды и вывод</text>
+          <path class="a" d="M540 90 L540 130"></path>
+
+          <rect class="pkg domain" x="40" y="250" width="155" height="60" rx="8"></rect>
+          <text class="t" x="58" y="276">reactivity</text>
+          <text class="d" x="58" y="295">вход и цикл</text>
+
+          <rect class="pkg domain" x="225" y="250" width="155" height="60" rx="8"></rect>
+          <text class="t" x="243" y="276">integration</text>
+          <text class="d" x="243" y="295">адаптеры</text>
+
+          <rect class="pkg domain" x="410" y="250" width="155" height="60" rx="8"></rect>
+          <text class="t" x="428" y="276">decision</text>
+          <text class="d" x="428" y="295">маршруты</text>
+
+          <rect class="pkg domain" x="595" y="250" width="155" height="60" rx="8"></rect>
+          <text class="t" x="613" y="276">execution</text>
+          <text class="d" x="613" y="295">действия</text>
+
+          <rect class="pkg infra" x="780" y="250" width="155" height="60" rx="8"></rect>
+          <text class="t" x="798" y="276">methodology</text>
+          <text class="d" x="798" y="295">каталог</text>
+
+          <path class="a" d="M450 175 C330 210 180 210 118 250"></path>
+          <path class="a" d="M490 190 C425 215 325 220 303 250"></path>
+          <path class="a" d="M540 190 C520 215 495 225 488 250"></path>
+          <path class="a" d="M590 190 C625 215 660 225 673 250"></path>
+          <path class="a" d="M630 175 C740 205 825 215 858 250"></path>
+
+          <rect class="pkg infra" x="135" y="395" width="155" height="60" rx="8"></rect>
+          <text class="t" x="153" y="421">configuration</text>
+          <text class="d" x="153" y="440">снимки настроек</text>
+
+          <rect class="pkg infra" x="320" y="395" width="155" height="60" rx="8"></rect>
+          <text class="t" x="338" y="421">contours</text>
+          <text class="d" x="338" y="440">реестр</text>
+
+          <rect class="pkg infra" x="505" y="395" width="155" height="60" rx="8"></rect>
+          <text class="t" x="523" y="421">observability</text>
+          <text class="d" x="523" y="440">события</text>
+
+          <rect class="pkg infra" x="690" y="395" width="155" height="60" rx="8"></rect>
+          <text class="t" x="708" y="421">history</text>
+          <text class="d" x="708" y="440">SQLite и записи</text>
+
+          <rect class="pkg infra" x="875" y="395" width="155" height="60" rx="8"></rect>
+          <text class="t" x="893" y="421">ui/web</text>
+          <text class="d" x="893" y="440">локальный просмотр</text>
+
+          <path class="s" d="M303 310 C260 350 230 365 213 395"></path>
+          <path class="s" d="M488 310 C455 352 420 365 398 395"></path>
+          <path class="s" d="M673 310 C665 350 620 365 583 395"></path>
+          <path class="s" d="M673 310 C700 350 735 365 768 395"></path>
+          <path class="s" d="M935 280 C990 315 985 360 953 395"></path>
+        </svg>
+      </div>
+
+      <h3>Основные пакеты</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Пакет</th>
+            <th>Назначение</th>
+            <th>Внутреннее устройство</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>internal/cli</code></td>
+            <td>Сборка команд <code>cobra</code>, разбор флагов, текстовый вывод.</td>
+            <td>Команды разделены по контурам: <code>decision</code>, <code>execution</code>, <code>integration</code>, <code>methodology</code>, <code>configuration</code>, <code>reactivity</code>, <code>web</code>.</td>
+          </tr>
+          <tr>
+            <td><code>internal/integration</code></td>
+            <td>Диспетчер интеграционных запросов и нормализация ответов.</td>
+            <td>Есть модельный подпакет, встроенные адаптеры GitHub, Bitbucket, Confluence, Telegram, Mattermost, local tracker, script, а также хранилище приватных значений.</td>
+          </tr>
+          <tr>
+            <td><code>internal/decision</code></td>
+            <td>Сбор контекста, применение маршрута, построение решения.</td>
+            <td><code>service.go</code> содержит прикладную логику, <code>types.go</code> - публичные модели, <code>workflows.go</code> - совместимый слой маршрутов.</td>
+          </tr>
+          <tr>
+            <td><code>internal/execution</code></td>
+            <td>Разрешение действия, подготовка запуска, выполнение операций и нормализация результата.</td>
+            <td>Основной сервис, разрешение действий, встроенные операции, интеграционные операции, запуск, история, профили, ресурсы, рабочие места и модельные типы.</td>
+          </tr>
+          <tr>
+            <td><code>internal/methodology</code></td>
+            <td>Чтение и запись каталога методик.</td>
+            <td>Каталог, маршруты, действия, операции, инструкции и расширяемые сущности хранятся слоями в <code>.progress/methodology</code>.</td>
+          </tr>
+          <tr>
+            <td><code>internal/configuration</code></td>
+            <td>Снимок настроек интеграции и ресурсов.</td>
+            <td>Отдельные загрузчики для интеграционных систем и исполнительных ресурсов, включая совместимость со старыми полями.</td>
+          </tr>
+          <tr>
+            <td><code>internal/observability</code>, <code>internal/ui</code>, <code>internal/analytics</code>, <code>internal/research</code>, <code>internal/taskbank</code></td>
+            <td>Обеспечивающие и исследовательские контуры.</td>
+            <td>Преимущественно начальные сервисы с минимальными типами и тестами.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Пробелы кодовой архитектуры</h3>
+      <ul>
+        <li>Нет явного пакета координатора прикладного цикла. Его роль сейчас фактически выполняет <code>internal/reactivity/processing.go</code>, что конфликтует с целевой границей контура реакции.</li>
+        <li>Слой решения содержит совместимый <code>workflow*</code>-словарь, хотя целевым источником маршрутов уже является контур методик.</li>
+        <li>Модельные имена частично не квалифицированы в документации: <code>Signal</code>, <code>Decision</code>, <code>Request</code>, <code>Route</code>, <code>Action</code>, <code>Failure</code>, <code>Artifact</code> встречаются в разных пакетах.</li>
+        <li>История запусков физически находится в подпакете исполнения, а не в контуре журналирования и наблюдаемости.</li>
+        <li>Публичная CLI-документация шире фактической реализации: например, ветка <code>decision</code> реализует только <code>start</code>.</li>
+      </ul>
+    </section>
+
+    <section id="configuration">
+      <h2>Конфигурация, данные и локальные артефакты</h2>
+      <p>Рабочая конфигурация хранится в <code>.progress</code>. Она содержит каталог методик, настройки интеграций, профили исполнения, ресурсы, локальную историю запусков, рабочие места и локальные зеркала репозиториев.</p>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Каталог методик</h3>
+          <p><code>.progress/methodology</code> содержит 36 файлов: 4 маршрута, 9 действий, 15 операций, 5 инструкций и дополнительные сущности. Это главный практический источник маршрутов и действий.</p>
+        </div>
+        <div class="card">
+          <h3>Исполнение</h3>
+          <p><code>.progress/execution/profiles.json</code> задаёт профили, <code>.progress/execution/resources.json</code> задаёт ресурсы, окружения и привязки. В текущем рабочем дереве <code>resources.json</code> изменён локально.</p>
+        </div>
+        <div class="card">
+          <h3>Интеграции</h3>
+          <p><code>.progress/integration/systems.json</code> описывает доступные интегрируемые системы. Приватные значения выносятся в хранилище секретов, включая macOS Keychain для поддержанного окружения.</p>
+        </div>
+        <div class="card">
+          <h3>История</h3>
+          <p><code>.progress/execution-runs/execution.db</code> и JSON-записи запусков используются локальным интерфейсом. Целевым владельцем этих сведений должен стать контур журналирования и наблюдаемости.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="problems">
+      <h2>Проблемные места</h2>
+
+      <div class="risk-box">
+        <strong>Проверка тестов не зелёная.</strong>
+        <p><code>go test ./...</code> завершается с ошибкой: тесты <code>internal/execution/service_test.go</code> вызывают <code>resolveActionFromCatalog</code> со старой сигнатурой, а <code>internal/configuration/contour_test.go</code> получает неожиданную интеграционную конфигурацию из окружения.</p>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Область</th>
+            <th>Наблюдение</th>
+            <th>Риск</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Границы контуров</td>
+            <td>Практический обработчик <code>reactivity.ProcessTask</code> восстанавливает задачу, вызывает решение, запускает исполнение и меняет метки.</td>
+            <td>Контур реакции становится не входным, а координационным слоем, что усложняет дальнейшую автономизацию и очередь исполнения.</td>
+          </tr>
+          <tr>
+            <td>Межконтурное задание</td>
+            <td><code>ExecutionPlan</code> и <code>ExecutionAssignment</code> оба описывают задание, но находятся на разных уровнях.</td>
+            <td>Смешение терминов затрудняет публичный контракт между решением и исполнением.</td>
+          </tr>
+          <tr>
+            <td>Канонические данные</td>
+            <td><code>DecisionContext</code> хранит <code>CanonicalTask</code> и <code>TrackerIssue</code>.</td>
+            <td>Контур принятия решения остаётся частично связанным с моделью внешнего трекера.</td>
+          </tr>
+          <tr>
+            <td>Методики</td>
+            <td>Новый каталог методик работает, но <code>.progress/decision/workflows.json</code> и <code>workflow*</code>-типы остаются резервным форматом.</td>
+            <td>Наличие двух источников маршрутов увеличивает риск расхождения поведения и документации.</td>
+          </tr>
+          <tr>
+            <td>Профили исполнения</td>
+            <td>Профили ещё содержат содержательные <code>prompt-additions</code>.</td>
+            <td>Профиль продолжает частично задавать методическое поведение, хотя целевая архитектура переносит инструкции в контур методик.</td>
+          </tr>
+          <tr>
+            <td>Наблюдаемость</td>
+            <td><code>internal/observability</code> хранит события в памяти, а история запусков живёт в <code>internal/execution/history</code>.</td>
+            <td>Единый журнал запуска, операций, решений и отказов пока не сформирован.</td>
+          </tr>
+          <tr>
+            <td>Интерфейс</td>
+            <td>В документах и HTML-активах есть раздел «Верификация», но такого контура нет в реестре.</td>
+            <td>Интерфейс показывает целевой или устаревший раздел как текущую структуру.</td>
+          </tr>
+          <tr>
+            <td>CLI</td>
+            <td>Документы описывают широкий набор команд <code>decision</code>, но фактически реализована только <code>decision start</code>.</td>
+            <td>Оператор может ожидать диагностические команды, которых ещё нет в публичном CLI.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="questions">
+      <h2>Открытые вопросы</h2>
+      <ol>
+        <li>Нужен ли отдельный координатор полного прикладного цикла или эта роль должна быть явно закреплена за контуром принятия решения?</li>
+        <li>Когда <code>ExecutionPlan</code> должен быть удалён из публичного словаря или переименован как внутренняя модель рассмотрения?</li>
+        <li>Какая модель является единственным входом решения: <code>CanonicalTask</code> с набором связанных объектов или смешанный <code>DecisionContext</code> с внешними моделями трекера?</li>
+        <li>Какой контур является владельцем стадийных меток задачи: решение, реакция, исполнение или отдельная операция маршрута?</li>
+        <li>Каким образом локальная история исполнения будет перенесена в контур журналирования и наблюдаемости без потери совместимости с текущим пользовательским интерфейсом?</li>
+        <li>Нужно ли сохранять <code>.progress/decision/workflows.json</code> как долгосрочный резервный формат или пора ограничить его миграционным периодом?</li>
+        <li>Какие из целевых команд CLI должны стать публичным контрактом ближайшего этапа: <code>readiness</code>, <code>describe</code>, <code>context</code>, <code>route</code>, <code>plan</code>, <code>--dry-run</code>, <code>--explain</code>?</li>
+        <li>Должна ли «верификация» стать отдельным контуром, частью маршрутов решения или набором действий исполнения?</li>
+      </ol>
+    </section>
+
+    <section id="recommendations">
+      <h2>Предлагаемые изменения</h2>
+
+      <h3>Уточнить архитектурные границы</h3>
+      <ul>
+        <li>Ввести отдельный раздел документации про координатор прикладного цикла или явно классифицировать <code>reactivity.ProcessTask</code> как временный диагностический механизм.</li>
+        <li>Закрепить правило: контур принятия решения выбирает допустимое действие, контур исполнения выполняет только явно разрешённые операции действия, контур интеграции инкапсулирует внешние API.</li>
+        <li>Обновить <code>docs/contours/CONTRACTS.md</code> и проверку обязательных контрактов, чтобы обязательность совпадала с фактическим реестром.</li>
+      </ul>
+
+      <h3>Стабилизировать публичные модели</h3>
+      <ul>
+        <li>Сделать <code>ExecutionAssignment</code> единственным публичным заданием на выполнение между решением и исполнением.</li>
+        <li>Оставить <code>ExecutionPlan</code> как внутреннюю модель рассмотрения или убрать после переноса CLI-вывода на <code>ConsiderationResult</code> и <code>ExecutionAssignment</code>.</li>
+        <li>Квалифицировать неоднозначные имена в <code>docs/styleguide/public-models.md</code>: <code>decision.Signal</code>, <code>reactivity.Signal</code>, <code>integration.Request</code>, <code>methodology.Action</code>, <code>execution.Action</code>, <code>integration.Artifact</code>, <code>execution.Artifact</code>.</li>
+      </ul>
+
+      <h3>Завершить миграции</h3>
+      <ul>
+        <li>Вывести <code>.progress/decision/workflows.json</code> и <code>workflow*</code>-типы из основного пути после миграционного окна.</li>
+        <li>Перенести содержательные инструкции из профилей исполнения в <code>.progress/methodology/instructions</code> и действия.</li>
+        <li>Сократить поддержку старых ресурсных полей до совместимого чтения и добавить явную команду миграции в новый формат.</li>
+      </ul>
+
+      <h3>Укрепить кодовую базу</h3>
+      <ul>
+        <li>Исправить падающие тесты <code>internal/execution</code> и изолировать конфигурационный тест от пользовательского окружения.</li>
+        <li>Перенести запись истории запусков в интерфейс наблюдаемости или в адаптер, который затем сможет заменить локальную SQLite-модель.</li>
+        <li>Синхронизировать CLI-документацию с фактическими командами или реализовать недостающие диагностические команды.</li>
+        <li>Убрать устаревшие UI-ссылки на <code>Profile.commit_push</code> и несуществующий контур «Верификация» либо добавить этот контур в реестр и документы.</li>
+      </ul>
+    </section>
+
+    <section id="evidence">
+      <h2>Источники проверки</h2>
+      <p>Отчёт подготовлен по текущему состоянию рабочей копии. Основные проверенные источники:</p>
+      <ul>
+        <li><code>internal/contours/registry.go</code> - текущая карта контуров и контрактов.</li>
+        <li><code>docs/TARGET_ARCHITECTURE.md</code>, <code>docs/ARCHITECTURE.md</code>, <code>docs/OPERATING_MODEL.md</code> - целевая и операционная архитектура.</li>
+        <li><code>docs/styleguide/public-models.md</code> - публичные модели и документационные имена.</li>
+        <li><code>docs/contours/*/README.md</code> и <code>docs/contours/*/TARGET_ARCHITECTURE.md</code> - описания контуров.</li>
+        <li><code>internal/reactivity</code>, <code>internal/decision</code>, <code>internal/execution</code>, <code>internal/integration</code>, <code>internal/methodology</code>, <code>internal/configuration</code> - фактические реализации основных путей.</li>
+        <li><code>.progress/methodology</code>, <code>.progress/execution</code>, <code>.progress/integration</code> - рабочие конфигурационные слои.</li>
+        <li><code>go run ./cmd/progress --help</code>, <code>go run ./cmd/progress decision --help</code>, <code>go run ./cmd/progress execution --help</code> - фактический публичный CLI.</li>
+        <li><code>go test ./...</code> - текущая проверка тестов, завершившаяся ошибкой в <code>internal/execution</code> и <code>internal/configuration</code>.</li>
+      </ul>
+
+      <div class="warn-box">
+        <strong>Состояние рабочей копии.</strong>
+        <p>На момент подготовки отчёта рабочее дерево находится в detached <code>HEAD</code>, а файл <code>.progress/execution/resources.json</code> имеет локальное изменение, которое отчёт не изменяет.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
