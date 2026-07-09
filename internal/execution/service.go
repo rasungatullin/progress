@@ -447,7 +447,7 @@ func (s *Service) finishOperationHistory(ctx context.Context, state *operationEx
 		launchResult.Summary = strings.TrimSpace(operationErr.Error())
 	}
 
-	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, launchResult, operationErr)
+	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), state.allocation, state.workplace, launchResult, operationErr)
 }
 
 func (s *Service) beginStartHistory(ctx context.Context, root string, in invocation) history.Handle {
@@ -487,6 +487,12 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 	profileName := profile.Name
 	if strings.TrimSpace(profileName) == "" {
 		profileName = strings.TrimSpace(in.Profile)
+	}
+	if strings.TrimSpace(profileName) == "" {
+		profileName = strings.TrimSpace(in.Launch.ModelBinding)
+	}
+	if strings.TrimSpace(profileName) == "" {
+		profileName = strings.TrimSpace(allocation.ModelBinding)
 	}
 
 	_ = history.Update(ctx, handle, history.Run{

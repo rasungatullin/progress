@@ -531,7 +531,18 @@ func TestServiceExecuteResolveProfileUsesOperationIOAndKeepsStateProfile(t *test
 					In:     model.OperationMap{"profile_name": {Ref: "action.profile"}},
 					Out:    model.OperationMap{"profile": {Ref: "data.profile"}},
 				},
-				builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
+				{
+					Name:   OperationKindAllocateResources,
+					Kind:   OperationKindAllocateResources,
+					Title:  "Ресурсное снабжение",
+					Origin: OperationOriginBuiltin,
+					In: model.OperationMap{
+						"requires_synthesis": {Ref: "action.requires_synthesis"},
+						"invocation":         {Ref: "in"},
+						"profile":            {Ref: "data.profile"},
+					},
+					Out: model.OperationMap{"allocation": {Ref: "data.allocation"}},
+				},
 				builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
 			},
 		}},
@@ -559,11 +570,11 @@ func TestServiceExecuteResolveProfileUsesOperationIOAndKeepsStateProfile(t *test
 		t.Fatalf("resolve-profile output must include mapped profile: %#v", operation)
 	}
 	if resources.profile.Name != "coder" || resources.profile.ModelBinding != "coder" {
-		t.Fatalf("resource allocation must receive state profile copy: %#v", resources.profile)
+		t.Fatalf("resource allocation must receive mapped data profile: %#v", resources.profile)
 	}
 }
 
-func TestResolveProfileFillsActionDataAndStateProfile(t *testing.T) {
+func TestResolveProfileFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := model.OperationSpec{
@@ -596,8 +607,8 @@ func TestResolveProfileFillsActionDataAndStateProfile(t *testing.T) {
 	if dataProfile.Name != "coder" || dataProfile.ModelBinding != "coder" {
 		t.Fatalf("unexpected data profile: %#v", dataProfile)
 	}
-	if state.profile.Name != "coder" || state.profile.ModelBinding != "coder" {
-		t.Fatalf("state profile must keep compatibility copy: %#v", state.profile)
+	if state.profile.Name != "" || state.profile.ModelBinding != "" {
+		t.Fatalf("resolve-profile must not write implicit state profile: %#v", state.profile)
 	}
 }
 
@@ -625,9 +636,6 @@ func TestResolveProfileUsesOperationInputValue(t *testing.T) {
 	err := builtinOperationExecutor{service: service}.resolveProfile(context.Background(), state, operation, OperationKindResolveProfile)
 	if err != nil {
 		t.Fatalf("resolve profile: %v", err)
-	}
-	if state.profile.Name != "review" {
-		t.Fatalf("resolve-profile must use operation input value: %#v", state.profile)
 	}
 	if profiles.invocation.Profile != "review" {
 		t.Fatalf("profile resolver must receive operation input value, got %#v", profiles.invocation)

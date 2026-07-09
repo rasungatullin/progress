@@ -50,7 +50,7 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 			Status:  "completed",
 			Summary: fmt.Sprintf("action=%s class=%s operations=completed", state.action.Name, state.action.Class),
 		}
-		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
+		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), state.allocation, state.workplace, state.result, nil)
 	}
 
 	return nil
@@ -271,10 +271,17 @@ func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *ope
 		return err
 	}
 
-	writeOperationData(state, operation.Out, "profile", profile)
-	state.profile = profile
+	writeResolveProfileData(state, operation, profile)
 	state.tracker.completeIO(name, resolveProfileInputSummary(profileName, operation), resolveProfileOutputSummary(profile, operation), fmt.Sprintf("profile=%s mode=%s", profile.Name, profile.Mode))
 	return nil
+}
+
+func writeResolveProfileData(state *operationExecution, operation OperationSpec, profile profile) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"profile": {Ref: "data.profile"}}
+	}
+	writeOperationData(state, out, "profile", profile)
 }
 
 func resolveProfileInputName(state *operationExecution, operation OperationSpec) string {
@@ -330,6 +337,25 @@ func writeOperationData(state *operationExecution, mappings model.OperationMap, 
 		state.data = map[string]any{}
 	}
 	state.data[name] = value
+}
+
+func profileFromExecutionData(state *operationExecution) profile {
+	if state == nil {
+		return profile{}
+	}
+	if value, ok := state.data["profile"].(profile); ok {
+		return value
+	}
+	return state.profile
+}
+
+func firstResolvedProfile(values ...profile) profile {
+	for _, value := range values {
+		if strings.TrimSpace(value.Name) != "" || strings.TrimSpace(value.ModelBinding) != "" {
+			return value
+		}
+	}
+	return profile{}
 }
 
 func resolveProfileInputSummary(profileName string, operation OperationSpec) string {
@@ -479,7 +505,7 @@ func allocateResourcesInputFromOperation(state *operationExecution, operation Op
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
 		input.invocation = state.in
-		input.profile = state.profile
+		input.profile = profileFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -664,7 +690,7 @@ func prepareWorkplaceInputFromOperation(state *operationExecution, operation Ope
 	if state != nil {
 		input.requiresWorkplace = state.action.RequiresWorkplace
 		input.invocation = state.in
-		input.profile = state.profile
+		input.profile = profileFromExecutionData(state)
 		input.allocation = state.allocation
 	}
 	if len(operation.In) == 0 {
@@ -838,7 +864,7 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	state.in = directiveInvocation
 	writeOperationData(state, operation.Out, "directive", state.in.Launch)
 	state.tracker.completeIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(state.in.Launch, operation), "Исполнительная директива подготовлена к запуску.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, input.allocation, state.workplace, LaunchResult{Status: "running"}, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), input.allocation, state.workplace, LaunchResult{Status: "running"}, nil)
 	return nil
 }
 
@@ -973,7 +999,7 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	result, err := e.service.launch(launchCtx, launchInvocation, input.profile, input.allocation, input.workplace)
 	state.result = result
 	writeOperationData(state, operation.Out, "result", result)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, launchInvocation, input.profile, input.allocation, input.workplace, result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, launchInvocation, firstResolvedProfile(input.profile, profileFromExecutionData(state)), input.allocation, input.workplace, result, err)
 	if err != nil {
 		if result.StructuredOutput != nil {
 			state.tracker.completeIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), fmt.Sprintf("status=%s", result.Status))
@@ -1014,7 +1040,7 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 		input.requiresSynthesis = state.action.RequiresSynthesis
 		input.invocation = state.in
 		input.directive = state.in.Launch
-		input.profile = state.profile
+		input.profile = profileFromExecutionData(state)
 		input.allocation = state.allocation
 		input.workplace = state.workplace
 	}
@@ -1412,7 +1438,7 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
 		input.invocation = state.in
-		input.profile = state.profile
+		input.profile = profileFromExecutionData(state)
 		input.allocation = state.allocation
 		input.workplace = state.workplace
 		input.result = state.result
@@ -1518,7 +1544,7 @@ func (e builtinOperationExecutor) finalize(ctx context.Context, state *operation
 		}
 		writeOperationData(state, operation.Out, "result", state.result)
 		state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(state.result, operation), finalizeSummary(state.result))
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), state.allocation, state.workplace, state.result, nil)
 		return nil
 	}
 
@@ -1646,7 +1672,7 @@ func (e builtinOperationExecutor) unsupported(ctx context.Context, state *operat
 	err := fmt.Errorf("operation %q is unsupported", name)
 	state.result = failedStartResult(err)
 	state.tracker.fail(name, "Операция не поддержана текущей реализацией.", err, "operation_unsupported", false, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), state.allocation, state.workplace, state.result, err)
 	return err
 }
 
