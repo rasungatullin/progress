@@ -722,7 +722,7 @@ func reviewRemarksFromExecutionData(state *operationExecution) []integration.Rev
 	if value, ok := state.data["review_remarks"].([]integration.ReviewRemark); ok {
 		return append([]integration.ReviewRemark(nil), value...)
 	}
-	return append([]integration.ReviewRemark(nil), state.reviewRemarks...)
+	return nil
 }
 
 func reviewRemarksValueFromPublishReviewResponsesMapping(state *operationExecution, mapping model.OperationMapping) ([]integration.ReviewRemark, bool) {
@@ -740,11 +740,6 @@ func reviewRemarksValueFromPublishReviewResponsesMapping(state *operationExecuti
 		}
 		value, ok := state.data["review_remarks"].([]integration.ReviewRemark)
 		return value, ok
-	case "state.review_remarks":
-		if state == nil {
-			return nil, false
-		}
-		return append([]integration.ReviewRemark(nil), state.reviewRemarks...), true
 	default:
 		return nil, false
 	}
