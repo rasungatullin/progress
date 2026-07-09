@@ -1355,6 +1355,42 @@ func TestLoadReviewRemarksFillsActionDataAndKeepsState(t *testing.T) {
 	}
 }
 
+func TestFinalizeFillsActionDataAndKeepsStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := finalizeOperationSpec()
+	state := &operationExecution{
+		action: model.Action{
+			Name:              ActionClassIntegrationChange,
+			Class:             ActionClassIntegrationChange,
+			RequiresSynthesis: false,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"result": model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		},
+		result:  model.LaunchResult{Status: "legacy-state", Summary: "legacy-state"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.finalize(context.Background(), state, operation, OperationKindFinalize)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "completed" || !strings.Contains(dataResult.Summary, "synthesis=not-required") {
+		t.Fatalf("finalize must fill data.result: %#v", state.data)
+	}
+	if state.result.Status != dataResult.Status || state.result.Summary != dataResult.Summary {
+		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindFinalize)
+	if result == nil || result.Status != OperationStatusCompleted || result.Input == "" || result.Output == "" {
+		t.Fatalf("finalize must keep contract diagnostics: %#v", result)
+	}
+}
+
 func TestPublishMergeRequestFillsActionDataAndKeepsStateResult(t *testing.T) {
 	t.Parallel()
 
@@ -2150,6 +2186,44 @@ func TestActionResolutionKeepsLoadReviewRemarksMapping(t *testing.T) {
 	}
 	if operation.In["invocation"].Ref != "data.invocation" || operation.In["pull_request"].Ref != "data.pull_request" || operation.Out["review_remarks"].Ref != "data.review_remarks" || operation.Out["invocation"].Ref != "data.invocation" {
 		t.Fatalf("load-review-remarks must keep action data mapping: %#v", operation)
+	}
+}
+
+func TestActionResolutionKeepsFinalizeMapping(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              ActionClassIntegrationChange,
+			Class:             ActionClassIntegrationChange,
+			RequiresWorkplace: boolRef(false),
+			RequiresSynthesis: boolRef(false),
+			Operations: []methodology.ActionOperation{{
+				Name: OperationKindFinalize,
+				In: map[string]methodology.ActionMapping{
+					"requires_synthesis": mappingRef("action.requires_synthesis"),
+					"action_name":        mappingRef("action.name"),
+					"action_class":       mappingRef("action.class"),
+					"result":             mappingRef("data.result"),
+				},
+				Out: map[string]methodology.ActionMapping{
+					"result": mappingRef("data.result"),
+				},
+			}},
+		}},
+		Operations: []methodology.Operation{
+			{Name: OperationKindFinalize, Kind: OperationKindFinalize, Title: "Завершающая фиксация", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+		},
+	}, invocation{Action: ActionClassIntegrationChange})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	operation := findOperationSpec(action, OperationKindFinalize)
+	if operation == nil {
+		t.Fatalf("finalize operation must be present: %#v", action.Operations)
+	}
+	if operation.In["requires_synthesis"].Ref != "action.requires_synthesis" || operation.In["action_name"].Ref != "action.name" || operation.In["action_class"].Ref != "action.class" || operation.In["result"].Ref != "data.result" || operation.Out["result"].Ref != "data.result" {
+		t.Fatalf("finalize must keep action data mapping: %#v", operation)
 	}
 }
 
@@ -3257,6 +3331,23 @@ func loadReviewRemarksOperationSpec() model.OperationSpec {
 		Out: model.OperationMap{
 			"review_remarks": {Ref: "data.review_remarks"},
 			"invocation":     {Ref: "data.invocation"},
+		},
+	}
+}
+
+func finalizeOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindFinalize,
+		Kind:   OperationKindFinalize,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"requires_synthesis": {Ref: "action.requires_synthesis"},
+			"action_name":        {Ref: "action.name"},
+			"action_class":       {Ref: "action.class"},
+			"result":             {Ref: "data.result"},
+		},
+		Out: model.OperationMap{
+			"result": {Ref: "data.result"},
 		},
 	}
 }

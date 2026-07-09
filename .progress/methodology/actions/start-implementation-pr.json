@@ -302,7 +302,26 @@
       }
     },
     {
-      "name": "finalize"
+      "name": "finalize",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "action_name": {
+          "ref": "action.name"
+        },
+        "action_class": {
+          "ref": "action.class"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      },
+      "out": {
+        "result": {
+          "ref": "data.result"
+        }
+      }
     }
   ],
   "description": "Реализация задачи с отправкой ветки и открытием запроса на слияние.",

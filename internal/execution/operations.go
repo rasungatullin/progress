@@ -86,7 +86,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindPublishReviewResponses:
 		return e.publishReviewResponses(ctx, state, operation, name)
 	case OperationKindFinalize:
-		return e.finalize(ctx, state, name)
+		return e.finalize(ctx, state, operation, name)
 	default:
 		return e.unsupported(ctx, state, operation, name)
 	}
@@ -1508,19 +1508,111 @@ func commitPushOutputSummary(commitSummary string, result LaunchResult, operatio
 	})
 }
 
-func (e builtinOperationExecutor) finalize(ctx context.Context, state *operationExecution, name string) error {
-	if !state.action.RequiresSynthesis {
+func (e builtinOperationExecutor) finalize(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := finalizeInputFromOperation(state, operation)
+	applyFinalizeInputToState(state, input)
+	if !input.requiresSynthesis {
 		state.result = LaunchResult{
 			Status:  "completed",
-			Summary: fmt.Sprintf("action=%s class=%s synthesis=not-required", state.action.Name, state.action.Class),
+			Summary: fmt.Sprintf("action=%s class=%s synthesis=not-required", input.actionName, input.actionClass),
 		}
-		state.tracker.complete(name, finalizeSummary(state.result))
+		writeOperationData(state, operation.Out, "result", state.result)
+		state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(state.result, operation), finalizeSummary(state.result))
 		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
 		return nil
 	}
 
-	state.tracker.complete(name, finalizeSummary(state.result))
+	writeOperationData(state, operation.Out, "result", state.result)
+	state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(state.result, operation), finalizeSummary(state.result))
 	return nil
+}
+
+type finalizeInput struct {
+	requiresSynthesis bool
+	actionName        string
+	actionClass       string
+	result            LaunchResult
+}
+
+func finalizeInputFromOperation(state *operationExecution, operation OperationSpec) finalizeInput {
+	input := finalizeInput{}
+	if state != nil {
+		input.requiresSynthesis = state.action.RequiresSynthesis
+		input.actionName = state.action.Name
+		input.actionClass = string(state.action.Class)
+		input.result = state.result
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["requires_synthesis"]; ok {
+		if value, ok := boolValueFromParseResultMapping(state, mapping); ok {
+			input.requiresSynthesis = value
+		}
+	}
+	if mapping, ok := operation.In["action_name"]; ok {
+		if value, ok := actionStringValueFromFinalizeMapping(state, mapping); ok {
+			input.actionName = value
+		}
+	}
+	if mapping, ok := operation.In["action_class"]; ok {
+		if value, ok := actionStringValueFromFinalizeMapping(state, mapping); ok {
+			input.actionClass = value
+		}
+	}
+	if mapping, ok := operation.In["result"]; ok {
+		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
+			input.result = value
+		}
+	}
+	return input
+}
+
+func actionStringValueFromFinalizeMapping(state *operationExecution, mapping model.OperationMapping) (string, bool) {
+	if len(mapping.Value) != 0 {
+		var value string
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return strings.TrimSpace(value), true
+		}
+		return "", false
+	}
+	if state == nil {
+		return "", false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "action.name":
+		return strings.TrimSpace(state.action.Name), true
+	case "action.class":
+		return strings.TrimSpace(string(state.action.Class)), true
+	default:
+		return "", false
+	}
+}
+
+func applyFinalizeInputToState(state *operationExecution, input finalizeInput) {
+	if state == nil {
+		return
+	}
+	state.result = input.result
+}
+
+func finalizeInputSummary(input finalizeInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+		"action_name":        strings.TrimSpace(input.actionName),
+		"action_class":       strings.TrimSpace(input.actionClass),
+		"result":             resultSummary(input.result),
+	})
+}
+
+func finalizeOutputSummary(result LaunchResult, operation OperationSpec) string {
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		resultJSON = []byte(fmt.Sprintf(`{"status":%q}`, result.Status))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"result": string(resultJSON),
+	})
 }
 
 func actionOperationNameByKind(action Action, kind string) (string, bool) {
