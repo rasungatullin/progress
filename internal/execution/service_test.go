@@ -813,7 +813,7 @@ func TestAllocateResourcesWritesNotRequiredAllocationForActionWithoutSynthesis(t
 	}
 }
 
-func TestPrepareWorkplaceFillsActionDataAndKeepsStateWorkplace(t *testing.T) {
+func TestPrepareWorkplaceFillsActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := prepareWorkplaceOperationSpec()
@@ -829,6 +829,12 @@ func TestPrepareWorkplaceFillsActionDataAndKeepsStateWorkplace(t *testing.T) {
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
+			"invocation": model.Invocation{
+				Task: "task-42",
+				Workplace: model.WorkplaceSpec{
+					Name: "task-42",
+				},
+			},
 			"profile":    model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
 			"allocation": model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
 		},
@@ -856,8 +862,12 @@ func TestPrepareWorkplaceFillsActionDataAndKeepsStateWorkplace(t *testing.T) {
 	if state.workplace.Name != "" || state.workplace.Ready {
 		t.Fatalf("prepare-workplace must not write implicit state workplace: %#v", state.workplace)
 	}
-	if state.in.Launch.Directory != "/tmp/task-42" {
-		t.Fatalf("state invocation must keep launch directory compatibility copy: %#v", state.in.Launch)
+	dataInvocation, ok := state.data["invocation"].(model.Invocation)
+	if !ok || dataInvocation.Launch.Directory != "/tmp/task-42" {
+		t.Fatalf("prepare-workplace must write launch directory to data.invocation: %#v", state.data)
+	}
+	if state.in.Launch.Directory != "" {
+		t.Fatalf("prepare-workplace must not write implicit state invocation: %#v", state.in.Launch)
 	}
 	if workplaces.invocation.Workplace.Name != "task-42" {
 		t.Fatalf("workplace manager must receive invocation from operation input: %#v", workplaces.invocation)
@@ -877,6 +887,7 @@ func TestPrepareWorkplaceWritesLocalReadyWorkplaceForActionWithoutWorkplace(t *t
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
+			"invocation": model.Invocation{Launch: model.LaunchSpec{Directory: "/repo"}},
 			"profile":    model.Profile{Name: "default", Mode: "manual"},
 			"allocation": model.Allocation{Resource: "not-required", Source: "action-without-synthesis"},
 		},
@@ -898,9 +909,44 @@ func TestPrepareWorkplaceWritesLocalReadyWorkplaceForActionWithoutWorkplace(t *t
 	if state.workplace.Name != "" || state.workplace.Ready {
 		t.Fatalf("prepare-workplace must not write skipped implicit state workplace: %#v", state.workplace)
 	}
+	dataInvocation, ok := state.data["invocation"].(model.Invocation)
+	if !ok || dataInvocation.Launch.Directory != "/repo" {
+		t.Fatalf("prepare-workplace must keep skipped invocation output: %#v", state.data)
+	}
 	result := findOperationResult(state.tracker.snapshot(), OperationKindPrepareWorkplace)
 	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
 		t.Fatalf("skipped workplace must keep contract output diagnostics: %#v", result)
+	}
+}
+
+func TestPrepareWorkplaceFailureDoesNotWriteStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := prepareWorkplaceOperationSpec()
+	state := &operationExecution{
+		action: model.Action{
+			RequiresWorkplace: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"invocation": model.Invocation{Task: "task-42"},
+			"profile":    model.Profile{Name: "coder", Mode: "manual"},
+			"allocation": model.Allocation{Resource: "binding:coder"},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger:     log.Default(),
+		workplaces: &stubWorkplaceManager{err: errors.New("workplace failed")},
+	}
+
+	err := builtinOperationExecutor{service: service}.prepareWorkplace(context.Background(), state, operation, OperationKindPrepareWorkplace)
+	if err == nil {
+		t.Fatal("prepare workplace must return workplace error")
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("prepare-workplace must not write implicit state result: %#v", state.result)
 	}
 }
 

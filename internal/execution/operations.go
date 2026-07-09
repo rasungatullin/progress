@@ -754,15 +754,12 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 
 	workplace, err := e.service.prepareWorkplace(ctx, input.invocation, input.profile, input.allocation)
 	if err != nil {
-		state.result = failedStartResult(err)
+		result := failedStartResult(err)
 		state.tracker.fail(name, "Исполнительное рабочее место не подготовлено.", err, "workplace_not_prepared", true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, model.Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, model.Workplace{}, result, err)
 		return err
 	}
 
-	if strings.TrimSpace(state.in.Launch.Directory) == "" {
-		state.in.Launch.Directory = workplace.Name
-	}
 	preparedInvocation := input.invocation
 	if strings.TrimSpace(preparedInvocation.Launch.Directory) == "" {
 		preparedInvocation.Launch.Directory = workplace.Name
@@ -858,6 +855,12 @@ func invocationValueFromPrepareWorkplaceMapping(state *operationExecution, mappi
 			return invocation{}, false
 		}
 		return state.in, true
+	case "data.invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		value, ok := state.data["invocation"].(invocation)
+		return value, ok
 	default:
 		return invocation{}, false
 	}
