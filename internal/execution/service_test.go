@@ -1514,6 +1514,11 @@ func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 			"invocation":   input,
 			"pull_request": pullRequest,
 		},
+		pullRequest: &integration.MergeRequest{
+			Repository: "legacy/name",
+			Number:     999,
+			HeadRef:    "legacy/head",
+		},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
 	integrations := &stubIntegrationExecutor{
@@ -1547,6 +1552,9 @@ func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 	}
 	if len(state.reviewRemarks) != 0 {
 		t.Fatalf("load-review-remarks must not write implicit state review remarks: %#v", state.reviewRemarks)
+	}
+	if state.pullRequest == nil || state.pullRequest.Number != 999 || state.pullRequest.Repository != "legacy/name" {
+		t.Fatalf("load-review-remarks must not read or write implicit state pull request: %#v", state.pullRequest)
 	}
 	if state.in.Action != "legacy" || state.in.Launch.StructuredInput != nil {
 		t.Fatalf("load-review-remarks must not write implicit state invocation: %#v", state.in)

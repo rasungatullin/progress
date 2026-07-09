@@ -222,9 +222,6 @@ func loadReviewRemarksInputFromOperation(state *operationExecution, operation Op
 		input.invocation = invocationFromExecutionData(state)
 		if value, ok := state.data["pull_request"].(integration.MergeRequest); ok {
 			input.pullRequest = &value
-		} else if state.pullRequest != nil {
-			pullRequest := *state.pullRequest
-			input.pullRequest = &pullRequest
 		}
 	}
 	if len(operation.In) == 0 {
@@ -282,11 +279,6 @@ func mergeRequestValueFromLoadReviewRemarksMapping(state *operationExecution, ma
 		}
 		value, ok := state.data["pull_request"].(integration.MergeRequest)
 		return value, ok
-	case "state.pull_request":
-		if state == nil || state.pullRequest == nil {
-			return integration.MergeRequest{}, false
-		}
-		return *state.pullRequest, true
 	default:
 		return integration.MergeRequest{}, false
 	}
