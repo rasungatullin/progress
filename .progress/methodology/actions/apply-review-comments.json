@@ -9,6 +9,38 @@
   ],
   "requires_workplace": true,
   "requires_synthesis": true,
+  "contract": {
+    "in": {
+      "expected_result": {
+        "type": "string",
+        "required": true,
+        "description": "Ожидаемый результат выполнения действия."
+      },
+      "constraints": {
+        "type": "string_array",
+        "description": "Ограничения маршрута обработки."
+      },
+      "canonical_task": {
+        "type": "object",
+        "required": true,
+        "description": "Каноническая задача, восстановленная по внешнему рабочему объекту."
+      },
+      "related_objects": {
+        "type": "object_array",
+        "required": true,
+        "description": "Связанные канонические объекты, включая запрос на слияние для доработки по замечаниям ревизии."
+      },
+      "reasons": {
+        "type": "object_array",
+        "description": "Основания выбора действия."
+      },
+      "structured_input": {
+        "type": "object",
+        "required": true,
+        "description": "Структурированный ввод для контура исполнения."
+      }
+    }
+  },
   "operations": [
     {
       "name": "resolve-action"
