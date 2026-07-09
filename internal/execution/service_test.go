@@ -1710,25 +1710,33 @@ func TestPublishMergeRequestFillsOnlyActionData(t *testing.T) {
 	operation := publishMergeRequestOperationSpec()
 	state := &operationExecution{
 		in: model.Invocation{
-			Task: "task-132",
+			Task: "legacy",
 			Assignment: &ExecutionAssignment{
-				CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132, Title: "Поддержать действие"},
+				CanonicalTask: &ObjectRef{Type: "task", Repository: "legacy/name", Number: 999, Title: "Старое действие"},
 			},
-			Workplace: model.WorkplaceSpec{Name: "132"},
+			Workplace: model.WorkplaceSpec{Name: "legacy"},
 		},
 		assignment: &ExecutionAssignment{
-			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132, Title: "Поддержать действие"},
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "legacy/name", Number: 999, Title: "Старое действие"},
 		},
 		action: model.Action{
 			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
+			"invocation": model.Invocation{
+				Task: "task-132",
+				Assignment: &ExecutionAssignment{
+					CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132, Title: "Поддержать действие"},
+				},
+				Workplace: model.WorkplaceSpec{Name: "132"},
+			},
 			"workplace":         model.Workplace{Name: "/tmp/work", RepositoryRoot: "/tmp/work", Ready: true},
 			"result":            model.LaunchResult{Status: "completed", Summary: "launch complete"},
 			"structured_output": &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"},
 		},
-		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+		pullRequest: &integration.MergeRequest{Repository: "legacy/name", Number: 998, BaseRef: "legacy-base", HeadRef: "legacy-head"},
+		result:      model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker:     newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {

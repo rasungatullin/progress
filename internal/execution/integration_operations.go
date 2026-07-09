@@ -507,7 +507,7 @@ func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, s
 
 func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := publishMergeRequestInputFromOperation(state, operation)
-	ref := pullRequestRefFromPublishMergeRequestInput(state, input)
+	ref := pullRequestRefFromPublishReviewRemarksInput(state, input)
 	if ref.Number <= 0 {
 		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
@@ -935,6 +935,24 @@ func pullRequestRefFromState(state *operationExecution) pullRequestRef {
 
 func pullRequestRefFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput) pullRequestRef {
 	ref := pullRequestRefFromAssignment(publishMergeRequestAssignment(state, input))
+	if strings.TrimSpace(ref.Head) == "" {
+		assignment := publishMergeRequestAssignment(state, input)
+		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
+			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
+		}
+	}
+	return ref
+}
+
+func publishMergeRequestAssignment(state *operationExecution, input publishMergeRequestInput) *ExecutionAssignment {
+	if input.invocation.Assignment != nil {
+		return assignmentFromInvocation(input.invocation)
+	}
+	return nil
+}
+
+func pullRequestRefFromPublishReviewRemarksInput(state *operationExecution, input publishMergeRequestInput) pullRequestRef {
+	ref := pullRequestRefFromAssignment(publishReviewRemarksAssignment(state, input))
 	if strings.TrimSpace(ref.Repository) == "" && state != nil && state.assignment != nil {
 		stateRef := pullRequestRefFromAssignment(state.assignment)
 		ref.Repository = stateRef.Repository
@@ -955,7 +973,7 @@ func pullRequestRefFromPublishMergeRequestInput(state *operationExecution, input
 		ref.Title = state.pullRequest.Title
 	}
 	if strings.TrimSpace(ref.Head) == "" {
-		assignment := publishMergeRequestAssignment(state, input)
+		assignment := publishReviewRemarksAssignment(state, input)
 		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
 			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
 		}
@@ -963,7 +981,7 @@ func pullRequestRefFromPublishMergeRequestInput(state *operationExecution, input
 	return ref
 }
 
-func publishMergeRequestAssignment(state *operationExecution, input publishMergeRequestInput) *ExecutionAssignment {
+func publishReviewRemarksAssignment(state *operationExecution, input publishMergeRequestInput) *ExecutionAssignment {
 	if input.invocation.Assignment != nil {
 		return assignmentFromInvocation(input.invocation)
 	}
