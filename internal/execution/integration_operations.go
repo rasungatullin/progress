@@ -971,25 +971,6 @@ func publishReviewRemarksAssignment(state *operationExecution, input publishMerg
 
 func pullRequestRefFromPublishReviewResponsesInput(state *operationExecution, input publishReviewResponsesInput) pullRequestRef {
 	ref := pullRequestRefFromAssignment(publishReviewResponsesAssignment(state, input))
-	if strings.TrimSpace(ref.Repository) == "" && state != nil && state.assignment != nil {
-		stateRef := pullRequestRefFromAssignment(state.assignment)
-		ref.Repository = stateRef.Repository
-	}
-	if ref.Number <= 0 && state != nil && state.pullRequest != nil {
-		ref.Number = state.pullRequest.Number
-	}
-	if strings.TrimSpace(ref.Repository) == "" && state != nil && state.pullRequest != nil {
-		ref.Repository = state.pullRequest.Repository
-	}
-	if strings.TrimSpace(ref.Base) == "" && state != nil && state.pullRequest != nil {
-		ref.Base = state.pullRequest.BaseRef
-	}
-	if strings.TrimSpace(ref.Head) == "" && state != nil && state.pullRequest != nil {
-		ref.Head = state.pullRequest.HeadRef
-	}
-	if strings.TrimSpace(ref.Title) == "" && state != nil && state.pullRequest != nil {
-		ref.Title = state.pullRequest.Title
-	}
 	if strings.TrimSpace(ref.Head) == "" {
 		assignment := publishReviewResponsesAssignment(state, input)
 		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
@@ -1002,9 +983,6 @@ func pullRequestRefFromPublishReviewResponsesInput(state *operationExecution, in
 func publishReviewResponsesAssignment(state *operationExecution, input publishReviewResponsesInput) *ExecutionAssignment {
 	if input.invocation.Assignment != nil {
 		return assignmentFromInvocation(input.invocation)
-	}
-	if state != nil {
-		return state.assignment
 	}
 	return nil
 }

@@ -2061,24 +2061,32 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 	state := &operationExecution{
 		in: model.Invocation{
 			Assignment: &ExecutionAssignment{
+				CanonicalTask: &ObjectRef{Type: "task", Repository: "legacy/name", Number: 999},
+				RelatedObjects: []ObjectRef{{
+					Type:       "merge-request",
+					Repository: "legacy/name",
+					Number:     999,
+				}},
+			},
+		},
+		assignment: &ExecutionAssignment{
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "legacy/name", Number: 999},
+			RelatedObjects: []ObjectRef{{
+				Type:       "merge-request",
+				Repository: "legacy/name",
+				Number:     999,
+			}},
+		},
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{
 				CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112},
 				RelatedObjects: []ObjectRef{{
 					Type:       "merge-request",
 					Repository: "owner/name",
 					Number:     17,
 				}},
-			},
-		},
-		assignment: &ExecutionAssignment{
-			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112},
-			RelatedObjects: []ObjectRef{{
-				Type:       "merge-request",
-				Repository: "owner/name",
-				Number:     17,
 			}},
-		},
-		action: model.Action{Operations: []model.OperationSpec{operation}},
-		data: map[string]any{
 			"result": model.LaunchResult{Status: "completed", Summary: "apply complete"},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
@@ -2088,6 +2096,7 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 			}}},
 			"review_remarks": remarks,
 		},
+		pullRequest:   &integration.MergeRequest{Repository: "legacy/name", Number: 998, HeadRef: "legacy-head"},
 		result:        model.LaunchResult{Status: "legacy", Summary: "legacy"},
 		reviewRemarks: []integration.ReviewRemark{{ExternalID: "legacy", ReplyToID: "legacy-thread"}},
 		tracker:       newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
@@ -2129,6 +2138,9 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 	}
 	if len(state.reviewRemarks) != 1 || state.reviewRemarks[0].ExternalID != "legacy" {
 		t.Fatalf("publish-review-responses must not write implicit state review remarks: %#v", state.reviewRemarks)
+	}
+	if state.pullRequest == nil || state.pullRequest.Number != 998 || state.pullRequest.Repository != "legacy/name" {
+		t.Fatalf("publish-review-responses must not read or write implicit state pull request: %#v", state.pullRequest)
 	}
 	if len(integrations.calls) != 2 {
 		t.Fatalf("expected reply and resolve integration calls, got %#v", integrations.calls)
@@ -2201,10 +2213,11 @@ func TestPublishReviewResponsesWritesOutputsWhenNoResponses(t *testing.T) {
 
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
-		in:         model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-		assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}},
+		in:         model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "legacy/name", Number: 999}}}},
+		assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "legacy/name", Number: 999}}},
 		action:     model.Action{Operations: []model.OperationSpec{operation}},
 		data: map[string]any{
+			"invocation":        model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
 			"result":            model.LaunchResult{Status: "completed", Summary: "apply complete"},
 			"structured_output": &model.StructuredOutput{Summary: "No responses."},
 			"review_remarks":    []integration.ReviewRemark{{ExternalID: "remark-1", ReplyToID: "thread-1"}},
