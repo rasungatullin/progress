@@ -72,6 +72,14 @@
       "commit_summary": {
         "type": "string",
         "description": "Сводка создания коммита и отправки ветки."
+      },
+      "review_remarks": {
+        "type": "object_array",
+        "description": "Загруженные замечания ревизии для поиска цепочек обсуждения."
+      },
+      "review_responses_summary": {
+        "type": "string",
+        "description": "Сводка записи ответов на замечания и закрытия цепочек обсуждения."
       }
     }
   },
@@ -265,7 +273,29 @@
       }
     },
     {
-      "name": "publish-review-responses"
+      "name": "publish-review-responses",
+      "in": {
+        "invocation": {
+          "ref": "in"
+        },
+        "result": {
+          "ref": "data.result"
+        },
+        "structured_output": {
+          "ref": "data.structured_output"
+        },
+        "review_remarks": {
+          "ref": "data.review_remarks"
+        }
+      },
+      "out": {
+        "review_responses_summary": {
+          "ref": "data.review_responses_summary"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
       "name": "finalize"

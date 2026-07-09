@@ -84,7 +84,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindPublishReviewRemarks:
 		return e.publishReviewRemarks(ctx, state, operation, name)
 	case OperationKindPublishReviewResponses:
-		return e.publishReviewResponses(ctx, state, name)
+		return e.publishReviewResponses(ctx, state, operation, name)
 	case OperationKindFinalize:
 		return e.finalize(ctx, state, name)
 	default:

@@ -3,5 +3,38 @@
   "kind": "publish-review-responses",
   "title": "Запись ответов на замечания",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
+      },
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Результат выполнения с учётом создания коммита и отправки ветки."
+      },
+      "structured_output": {
+        "type": "object",
+        "description": "Нормализованный структурированный результат выполнения."
+      },
+      "review_remarks": {
+        "type": "object_array",
+        "description": "Загруженные замечания ревизии для поиска цепочек обсуждения."
+      }
+    },
+    "out": {
+      "review_responses_summary": {
+        "type": "string",
+        "description": "Сводка записи ответов на замечания и закрытия цепочек обсуждения."
+      },
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Результат выполнения с учётом записи ответов на замечания."
+      }
+    }
+  }
 }

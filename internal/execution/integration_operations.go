@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rasungatullin/progress/internal/execution/model"
 	"github.com/rasungatullin/progress/internal/integration"
 	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
@@ -312,15 +313,19 @@ func publishReviewRemarksOutputSummary(summary string, result LaunchResult, oper
 	})
 }
 
-func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, state *operationExecution, name string) error {
+func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := publishReviewResponsesInputFromOperation(state, operation)
+	applyPublishReviewResponsesInputToState(state, input)
 	ref := pullRequestRefFromState(state)
 	if ref.Number <= 0 {
 		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
-	responses := reviewResponsesFromOutput(state.result.StructuredOutput)
+	responses := reviewResponsesFromOutput(input.structuredOutput)
 	if len(responses) == 0 {
-		state.tracker.skip(name, "Структурированный вывод не содержит ответов на замечания.")
+		writeOperationData(state, operation.Out, "review_responses_summary", "")
+		writeOperationData(state, operation.Out, "result", state.result)
+		state.tracker.skipIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary("", state.result, operation), "Структурированный вывод не содержит ответов на замечания.")
 		return nil
 	}
 
@@ -336,9 +341,109 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 
 	summary := fmt.Sprintf("review-responses-published=%d review-threads-resolved=%d", count, resolved)
 	state.result.Summary = joinExecutionSummaries(state.result.Summary, summary)
-	state.tracker.completeIO(name, fmt.Sprintf("repository=%s number=%d", ref.Repository, ref.Number), summary, "Ответы на замечания записаны через контур интеграции.")
+	writeOperationData(state, operation.Out, "review_responses_summary", summary)
+	writeOperationData(state, operation.Out, "result", state.result)
+	state.tracker.completeIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary(summary, state.result, operation), "Ответы на замечания записаны через контур интеграции.")
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
 	return nil
+}
+
+type publishReviewResponsesInput struct {
+	invocation       invocation
+	result           LaunchResult
+	structuredOutput *StructuredOutput
+	reviewRemarks    []integration.ReviewRemark
+}
+
+func publishReviewResponsesInputFromOperation(state *operationExecution, operation OperationSpec) publishReviewResponsesInput {
+	input := publishReviewResponsesInput{}
+	if state != nil {
+		input.invocation = state.in
+		input.result = state.result
+		input.structuredOutput = state.result.StructuredOutput
+		input.reviewRemarks = append([]integration.ReviewRemark(nil), state.reviewRemarks...)
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["result"]; ok {
+		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
+			input.result = value
+			input.structuredOutput = value.StructuredOutput
+		}
+	}
+	if mapping, ok := operation.In["structured_output"]; ok {
+		if value, ok := structuredOutputValueFromCommitPushMapping(state, mapping); ok {
+			input.structuredOutput = value
+		}
+	}
+	if mapping, ok := operation.In["review_remarks"]; ok {
+		if value, ok := reviewRemarksValueFromPublishReviewResponsesMapping(state, mapping); ok {
+			input.reviewRemarks = value
+		}
+	}
+	return input
+}
+
+func reviewRemarksValueFromPublishReviewResponsesMapping(state *operationExecution, mapping model.OperationMapping) ([]integration.ReviewRemark, bool) {
+	if len(mapping.Value) != 0 {
+		var value []integration.ReviewRemark
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return nil, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.review_remarks":
+		if state == nil {
+			return nil, false
+		}
+		value, ok := state.data["review_remarks"].([]integration.ReviewRemark)
+		return value, ok
+	case "state.review_remarks":
+		if state == nil {
+			return nil, false
+		}
+		return append([]integration.ReviewRemark(nil), state.reviewRemarks...), true
+	default:
+		return nil, false
+	}
+}
+
+func applyPublishReviewResponsesInputToState(state *operationExecution, input publishReviewResponsesInput) {
+	if state == nil {
+		return
+	}
+	state.in = input.invocation
+	state.assignment = assignmentFromInvocation(input.invocation)
+	state.result = input.result
+	state.result.StructuredOutput = input.structuredOutput
+	state.reviewRemarks = append([]integration.ReviewRemark(nil), input.reviewRemarks...)
+}
+
+func publishReviewResponsesInputSummary(input publishReviewResponsesInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"invocation":        invocationSummary(input.invocation),
+		"result":            resultSummary(input.result),
+		"structured_output": structuredOutputSummary(input.structuredOutput),
+		"review_remarks":    formatInt(len(input.reviewRemarks)),
+	})
+}
+
+func publishReviewResponsesOutputSummary(summary string, result LaunchResult, operation OperationSpec) string {
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		resultJSON = []byte(fmt.Sprintf(`{"status":%q}`, result.Status))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"review_responses_summary": summary,
+		"result":                   string(resultJSON),
+	})
 }
 
 type reviewRemarkComment struct {
