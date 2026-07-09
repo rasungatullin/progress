@@ -1288,6 +1288,73 @@ func TestLoadPullRequestFillsActionDataAndKeepsState(t *testing.T) {
 	}
 }
 
+func TestLoadReviewRemarksFillsActionDataAndKeepsState(t *testing.T) {
+	t.Parallel()
+
+	operation := loadReviewRemarksOperationSpec()
+	input := model.Invocation{
+		Assignment: &ExecutionAssignment{
+			CanonicalTask:   &ObjectRef{Type: "task", Number: 112},
+			StructuredInput: &StructuredInput{Task: "Исправить замечания ревизии."},
+		},
+	}
+	pullRequest := integration.MergeRequest{
+		Repository: "owner/name",
+		Number:     17,
+		State:      "OPEN",
+		BaseRef:    "main",
+		HeadRef:    "feature/review",
+	}
+	state := &operationExecution{
+		in:     model.Invocation{Action: "legacy"},
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation":   input,
+			"pull_request": pullRequest,
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	integrations := &stubIntegrationExecutor{
+		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			if req.Operation != "comments" || req.Repository != "owner/name" || req.Number != 17 {
+				t.Fatalf("unexpected integration request: %#v", req)
+			}
+			return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
+				Repository:         req.Repository,
+				MergeRequestNumber: req.Number,
+				ExternalID:         "comment-1",
+				ReplyToID:          "thread-1",
+				State:              "unresolved",
+				Body:               "Добавьте проверку отказа.",
+			}}}, nil
+		},
+	}
+	service := &Service{logger: log.Default(), integrations: integrations}
+
+	err := builtinOperationExecutor{service: service}.loadReviewRemarks(context.Background(), state, operation, OperationKindLoadReviewRemarks, true)
+	if err != nil {
+		t.Fatalf("load review remarks: %v", err)
+	}
+	dataRemarks, ok := state.data["review_remarks"].([]integration.ReviewRemark)
+	if !ok || len(dataRemarks) != 1 || dataRemarks[0].ExternalID != "comment-1" {
+		t.Fatalf("load-review-remarks must fill data.review_remarks: %#v", state.data)
+	}
+	dataInvocation, ok := state.data["invocation"].(model.Invocation)
+	if !ok || dataInvocation.Launch.StructuredInput == nil || len(dataInvocation.Launch.StructuredInput.ReviewRemarks) != 1 || dataInvocation.Launch.StructuredInput.ReviewRemarks[0].ID != "comment-1" {
+		t.Fatalf("load-review-remarks must fill enriched data.invocation: %#v", state.data)
+	}
+	if len(state.reviewRemarks) != 1 || state.reviewRemarks[0].ExternalID != dataRemarks[0].ExternalID {
+		t.Fatalf("state review remarks must keep compatibility copy: state=%#v data=%#v", state.reviewRemarks, dataRemarks)
+	}
+	if state.in.Launch.StructuredInput == nil || len(state.in.Launch.StructuredInput.ReviewRemarks) != 1 {
+		t.Fatalf("state invocation must keep compatibility copy: %#v", state.in)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindLoadReviewRemarks)
+	if result == nil || result.Status != OperationStatusCompleted || result.Input == "" || result.Output == "" {
+		t.Fatalf("load-review-remarks must keep contract diagnostics: %#v", result)
+	}
+}
+
 func TestPublishMergeRequestFillsActionDataAndKeepsStateResult(t *testing.T) {
 	t.Parallel()
 
@@ -2046,6 +2113,43 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 	}
 	if operation.In["invocation"].Ref != "in" || operation.Out["pull_request"].Ref != "data.pull_request" || operation.Out["invocation"].Ref != "data.invocation" {
 		t.Fatalf("load-pull-request must keep action data mapping: %#v", operation)
+	}
+}
+
+func TestActionResolutionKeepsLoadReviewRemarksMapping(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              ActionApplyReviewComments,
+			Class:             ActionClassEngineeringSynthesis,
+			RequiresWorkplace: boolRef(true),
+			RequiresSynthesis: boolRef(true),
+			Operations: []methodology.ActionOperation{{
+				Name: OperationKindLoadReviewRemarks,
+				In: map[string]methodology.ActionMapping{
+					"invocation":   mappingRef("data.invocation"),
+					"pull_request": mappingRef("data.pull_request"),
+				},
+				Out: map[string]methodology.ActionMapping{
+					"review_remarks": mappingRef("data.review_remarks"),
+					"invocation":     mappingRef("data.invocation"),
+				},
+			}},
+		}},
+		Operations: []methodology.Operation{
+			{Name: OperationKindLoadReviewRemarks, Kind: OperationKindLoadReviewRemarks, Title: "Получение замечаний ревизии", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+		},
+	}, invocation{Action: ActionApplyReviewComments})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	operation := findOperationSpec(action, OperationKindLoadReviewRemarks)
+	if operation == nil {
+		t.Fatalf("load-review-remarks operation must be present: %#v", action.Operations)
+	}
+	if operation.In["invocation"].Ref != "data.invocation" || operation.In["pull_request"].Ref != "data.pull_request" || operation.Out["review_remarks"].Ref != "data.review_remarks" || operation.Out["invocation"].Ref != "data.invocation" {
+		t.Fatalf("load-review-remarks must keep action data mapping: %#v", operation)
 	}
 }
 
@@ -3137,6 +3241,22 @@ func loadPullRequestOperationSpec() model.OperationSpec {
 		Out: model.OperationMap{
 			"pull_request": {Ref: "data.pull_request"},
 			"invocation":   {Ref: "data.invocation"},
+		},
+	}
+}
+
+func loadReviewRemarksOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindLoadReviewRemarks,
+		Kind:   OperationKindLoadReviewRemarks,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"invocation":   {Ref: "data.invocation"},
+			"pull_request": {Ref: "data.pull_request"},
+		},
+		Out: model.OperationMap{
+			"review_remarks": {Ref: "data.review_remarks"},
+			"invocation":     {Ref: "data.invocation"},
 		},
 	}
 }

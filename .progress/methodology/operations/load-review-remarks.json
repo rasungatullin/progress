@@ -2,5 +2,30 @@
   "name": "load-review-remarks",
   "kind": "load-review-remarks",
   "title": "Получение замечаний ревизии",
-  "origin": "builtin"
+  "origin": "builtin",
+  "contract": {
+    "in": {
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Ввод контура исполнения, синхронизированный с параметрами запроса на слияние."
+      },
+      "pull_request": {
+        "type": "object",
+        "required": true,
+        "description": "Загруженный запрос на слияние, по которому нужно получить замечания ревизии."
+      }
+    },
+    "out": {
+      "review_remarks": {
+        "type": "object_array",
+        "description": "Загруженные замечания ревизии."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Ввод контура исполнения, дополненный замечаниями ревизии."
+      }
+    }
+  }
 }

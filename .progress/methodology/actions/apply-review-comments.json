@@ -140,7 +140,23 @@
       }
     },
     {
-      "name": "load-review-remarks"
+      "name": "load-review-remarks",
+      "in": {
+        "invocation": {
+          "ref": "data.invocation"
+        },
+        "pull_request": {
+          "ref": "data.pull_request"
+        }
+      },
+      "out": {
+        "review_remarks": {
+          "ref": "data.review_remarks"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        }
+      }
     },
     {
       "name": "resolve-profile",

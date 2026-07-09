@@ -104,7 +104,9 @@ func loadPullRequestOutputSummary(pr integration.MergeRequest, in invocation, op
 	})
 }
 
-func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *operationExecution, name string, required bool) error {
+func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *operationExecution, operation OperationSpec, name string, required bool) error {
+	input := loadReviewRemarksInputFromOperation(state, operation)
+	applyLoadReviewRemarksInputToState(state, input)
 	ref := pullRequestRefFromState(state)
 	if ref.Number <= 0 {
 		return e.failOrSkipIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required", required)
@@ -129,14 +131,102 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 	}
 
 	state.reviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
-	input := ensureExecutionStructuredInput(state)
-	input.ReviewRemarks = mergeStructuredRemarks(input.ReviewRemarks, structuredRemarksFromIntegration(response.ReviewRemarks))
-	input.OperationalContext = append(input.OperationalContext, StructuredContext{
+	structuredInput := ensureExecutionStructuredInput(state)
+	structuredInput.ReviewRemarks = mergeStructuredRemarks(structuredInput.ReviewRemarks, structuredRemarksFromIntegration(response.ReviewRemarks))
+	structuredInput.OperationalContext = append(structuredInput.OperationalContext, StructuredContext{
 		Title: "Сведения о замечаниях ревизии",
 		Body:  fmt.Sprintf("repository=%s\npull_request=%d\nremarks=%d", ref.Repository, ref.Number, len(response.ReviewRemarks)),
 	})
-	state.tracker.completeIO(name, fmt.Sprintf("repository=%s number=%d", ref.Repository, ref.Number), fmt.Sprintf("review-remarks=%d", len(response.ReviewRemarks)), "Замечания ревизии получены через контур интеграции.")
+	writeOperationData(state, operation.Out, "review_remarks", state.reviewRemarks)
+	writeOperationData(state, operation.Out, "invocation", state.in)
+	state.tracker.completeIO(name, loadReviewRemarksInputSummary(input, ref, operation), loadReviewRemarksOutputSummary(state.reviewRemarks, state.in, operation), "Замечания ревизии получены через контур интеграции.")
 	return nil
+}
+
+type loadReviewRemarksInput struct {
+	invocation  invocation
+	pullRequest *integration.MergeRequest
+}
+
+func loadReviewRemarksInputFromOperation(state *operationExecution, operation OperationSpec) loadReviewRemarksInput {
+	input := loadReviewRemarksInput{}
+	if state != nil {
+		input.invocation = state.in
+		if state.pullRequest != nil {
+			pullRequest := *state.pullRequest
+			input.pullRequest = &pullRequest
+		}
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["pull_request"]; ok {
+		if value, ok := mergeRequestValueFromLoadReviewRemarksMapping(state, mapping); ok {
+			input.pullRequest = &value
+		}
+	}
+	return input
+}
+
+func mergeRequestValueFromLoadReviewRemarksMapping(state *operationExecution, mapping model.OperationMapping) (integration.MergeRequest, bool) {
+	if len(mapping.Value) != 0 {
+		var value integration.MergeRequest
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return integration.MergeRequest{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.pull_request":
+		if state == nil {
+			return integration.MergeRequest{}, false
+		}
+		value, ok := state.data["pull_request"].(integration.MergeRequest)
+		return value, ok
+	case "state.pull_request":
+		if state == nil || state.pullRequest == nil {
+			return integration.MergeRequest{}, false
+		}
+		return *state.pullRequest, true
+	default:
+		return integration.MergeRequest{}, false
+	}
+}
+
+func applyLoadReviewRemarksInputToState(state *operationExecution, input loadReviewRemarksInput) {
+	if state == nil {
+		return
+	}
+	state.in = input.invocation
+	state.assignment = assignmentFromInvocation(input.invocation)
+	if input.pullRequest != nil {
+		pullRequest := *input.pullRequest
+		state.pullRequest = &pullRequest
+		applyPullRequestToState(state, pullRequest)
+	}
+}
+
+func loadReviewRemarksInputSummary(input loadReviewRemarksInput, ref pullRequestRef, operation OperationSpec) string {
+	pullRequest := ""
+	if input.pullRequest != nil {
+		pullRequest = mergeRequestSummary(*input.pullRequest)
+	}
+	return operationIOSummary(operation.In, map[string]string{
+		"invocation":   fmt.Sprintf("repository=%s number=%d", ref.Repository, ref.Number),
+		"pull_request": pullRequest,
+	})
+}
+
+func loadReviewRemarksOutputSummary(remarks []integration.ReviewRemark, in invocation, operation OperationSpec) string {
+	return operationIOSummary(operation.Out, map[string]string{
+		"review_remarks": formatInt(len(remarks)),
+		"invocation":     invocationSummary(in),
+	})
 }
 
 func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
