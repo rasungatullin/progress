@@ -1077,6 +1077,65 @@ func TestLaunchSynthesisWritesSkippedResultForActionWithoutSynthesis(t *testing.
 	}
 }
 
+func TestParseResultFillsActionDataAndKeepsStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := parseResultOperationSpec()
+	output := &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}
+	state := &operationExecution{
+		action: model.Action{
+			RequiresSynthesis: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"result": model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: output},
+		},
+		result:  model.LaunchResult{Status: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+
+	err := builtinOperationExecutor{}.parseResult(state, operation, OperationKindParseResult)
+	if err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+	dataOutput, ok := state.data["structured_output"].(*model.StructuredOutput)
+	if !ok {
+		t.Fatalf("parse-result must fill data.structured_output: %#v", state.data)
+	}
+	if dataOutput.Summary != "Done." || dataOutput.CommitMessage != "Apply change" {
+		t.Fatalf("unexpected structured output: %#v", dataOutput)
+	}
+	if state.result.Status != "completed" || state.result.StructuredOutput == nil || state.result.StructuredOutput.Summary != "Done." {
+		t.Fatalf("state result must keep compatibility copy: %#v", state.result)
+	}
+}
+
+func TestParseResultWritesEmptyOutputForActionWithoutSynthesis(t *testing.T) {
+	t.Parallel()
+
+	operation := parseResultOperationSpec()
+	state := &operationExecution{
+		action: model.Action{
+			RequiresSynthesis: false,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data:    map[string]any{"result": model.LaunchResult{Status: "skipped", Summary: "synthesis=not-required"}},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+
+	err := builtinOperationExecutor{}.parseResult(state, operation, OperationKindParseResult)
+	if err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+	if _, ok := state.data["structured_output"].(*model.StructuredOutput); !ok {
+		t.Fatalf("parse-result must write empty structured output to data.structured_output: %#v", state.data)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindParseResult)
+	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
+		t.Fatalf("skipped parse result must keep contract output diagnostics: %#v", result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -1274,7 +1333,16 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 						"result": mappingRef("data.result"),
 					},
 				},
-				{Name: OperationKindParseResult},
+				{
+					Name: OperationKindParseResult,
+					In: map[string]methodology.ActionMapping{
+						"requires_synthesis": mappingRef("action.requires_synthesis"),
+						"result":             mappingRef("data.result"),
+					},
+					Out: map[string]methodology.ActionMapping{
+						"structured_output": mappingRef("data.structured_output"),
+					},
+				},
 				{Name: OperationKindCommitPush},
 				{Name: OperationKindPublishReviewResponses},
 				{Name: OperationKindFinalize},
@@ -1369,6 +1437,13 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	}
 	if launchOperation.In["directive"].Ref != "data.directive" || launchOperation.In["workplace"].Ref != "data.workplace" || launchOperation.Out["result"].Ref != "data.result" {
 		t.Fatalf("launch-synthesis must keep action data mapping: %#v", launchOperation)
+	}
+	parseOperation := findOperationSpec(action, OperationKindParseResult)
+	if parseOperation == nil {
+		t.Fatalf("parse-result operation must be present: %#v", action.Operations)
+	}
+	if parseOperation.In["result"].Ref != "data.result" || parseOperation.Out["structured_output"].Ref != "data.structured_output" {
+		t.Fatalf("parse-result must keep action data mapping: %#v", parseOperation)
 	}
 }
 
@@ -2326,6 +2401,21 @@ func launchSynthesisOperationSpec() model.OperationSpec {
 		},
 		Out: model.OperationMap{
 			"result": {Ref: "data.result"},
+		},
+	}
+}
+
+func parseResultOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindParseResult,
+		Kind:   OperationKindParseResult,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"requires_synthesis": {Ref: "action.requires_synthesis"},
+			"result":             {Ref: "data.result"},
+		},
+		Out: model.OperationMap{
+			"structured_output": {Ref: "data.structured_output"},
 		},
 	}
 }

@@ -3,5 +3,25 @@
   "kind": "parse-result",
   "title": "Разбор результата",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "requires_synthesis": {
+        "type": "boolean",
+        "required": true,
+        "description": "Признак необходимости запуска синтеза для разрешённого действия."
+      },
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Результат запуска выполнения."
+      }
+    },
+    "out": {
+      "structured_output": {
+        "type": "object",
+        "description": "Нормализованный структурированный результат выполнения."
+      }
+    }
+  }
 }

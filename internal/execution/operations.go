@@ -76,7 +76,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindLaunchSynthesis:
 		return e.launchSynthesis(ctx, state, operation, name)
 	case OperationKindParseResult:
-		return e.parseResult(state, name)
+		return e.parseResult(state, operation, name)
 	case OperationKindCommitPush:
 		return e.commitPush(ctx, state, name)
 	case OperationKindPublishMergeRequest:
@@ -1242,14 +1242,108 @@ func workplaceSummary(workplace workplace) string {
 	return strings.Join(parts, ",")
 }
 
-func (e builtinOperationExecutor) parseResult(state *operationExecution, name string) error {
-	if !state.action.RequiresSynthesis {
-		state.tracker.skip(name, "Разбор результата синтеза не требуется.")
+func (e builtinOperationExecutor) parseResult(state *operationExecution, operation OperationSpec, name string) error {
+	input := parseResultInputFromOperation(state, operation)
+	if !input.requiresSynthesis {
+		writeOperationData(state, operation.Out, "structured_output", (*StructuredOutput)(nil))
+		state.tracker.skipIO(name, parseResultInputSummary(input, operation), parseResultOutputSummary(nil, operation), "Разбор результата синтеза не требуется.")
 		return nil
 	}
 
-	state.tracker.completeIO(name, resultSummary(state.result), structuredOutputSummary(state.result.StructuredOutput), "Результат выполнения нормализован.")
+	if state != nil {
+		state.result = input.result
+	}
+	writeOperationData(state, operation.Out, "structured_output", input.result.StructuredOutput)
+	state.tracker.completeIO(name, parseResultInputSummary(input, operation), parseResultOutputSummary(input.result.StructuredOutput, operation), "Результат выполнения нормализован.")
 	return nil
+}
+
+type parseResultInput struct {
+	requiresSynthesis bool
+	result            LaunchResult
+}
+
+func parseResultInputFromOperation(state *operationExecution, operation OperationSpec) parseResultInput {
+	input := parseResultInput{}
+	if state != nil {
+		input.requiresSynthesis = state.action.RequiresSynthesis
+		input.result = state.result
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["requires_synthesis"]; ok {
+		if value, ok := boolValueFromParseResultMapping(state, mapping); ok {
+			input.requiresSynthesis = value
+		}
+	}
+	if mapping, ok := operation.In["result"]; ok {
+		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
+			input.result = value
+		}
+	}
+	return input
+}
+
+func boolValueFromParseResultMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
+	if len(mapping.Value) != 0 {
+		var value bool
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return false, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "action.requires_synthesis":
+		if state == nil {
+			return false, false
+		}
+		return state.action.RequiresSynthesis, true
+	default:
+		return false, false
+	}
+}
+
+func resultValueFromParseResultMapping(state *operationExecution, mapping model.OperationMapping) (LaunchResult, bool) {
+	if len(mapping.Value) != 0 {
+		var value LaunchResult
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return LaunchResult{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.result":
+		if state == nil {
+			return LaunchResult{}, false
+		}
+		value, ok := state.data["result"].(LaunchResult)
+		return value, ok
+	case "state.result":
+		if state == nil {
+			return LaunchResult{}, false
+		}
+		return state.result, true
+	default:
+		return LaunchResult{}, false
+	}
+}
+
+func parseResultInputSummary(input parseResultInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+		"result":             resultSummary(input.result),
+	})
+}
+
+func parseResultOutputSummary(output *StructuredOutput, operation OperationSpec) string {
+	outputJSON, err := json.Marshal(output)
+	if err != nil {
+		outputJSON = []byte("null")
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"structured_output": string(outputJSON),
+	})
 }
 
 func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operationExecution, name string) error {

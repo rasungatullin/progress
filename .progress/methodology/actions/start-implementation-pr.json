@@ -71,6 +71,10 @@
       "result": {
         "type": "object",
         "description": "Результат запуска выполнения."
+      },
+      "structured_output": {
+        "type": "object",
+        "description": "Нормализованный структурированный результат выполнения."
       }
     }
   },
@@ -208,7 +212,20 @@
       }
     },
     {
-      "name": "parse-result"
+      "name": "parse-result",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      },
+      "out": {
+        "structured_output": {
+          "ref": "data.structured_output"
+        }
+      }
     },
     {
       "name": "commit-push"
