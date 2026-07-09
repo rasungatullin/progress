@@ -231,14 +231,12 @@ func loadReviewRemarksOutputSummary(remarks []integration.ReviewRemark, in invoc
 
 func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := publishMergeRequestInputFromOperation(state, operation)
-	applyPublishMergeRequestInputToState(state, input)
-	ref := pullRequestRefFromState(state)
+	ref := pullRequestRefFromPublishMergeRequestInput(state, input)
 	if ref.Number > 0 {
 		mergeRequest := mergeRequestFromRef(ref)
-		writeOperationData(state, operation.Out, "merge_request", mergeRequest)
-		writeOperationData(state, operation.Out, "publish_summary", fmt.Sprintf("pull-request=%d", ref.Number))
-		writeOperationData(state, operation.Out, "result", state.result)
-		state.tracker.skipIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, fmt.Sprintf("pull-request=%d", ref.Number), state.result, operation), fmt.Sprintf("Запрос на слияние уже задан: number=%d.", ref.Number))
+		summary := fmt.Sprintf("pull-request=%d", ref.Number)
+		writePublishMergeRequestData(state, operation, mergeRequest, summary, input.result)
+		state.tracker.skipIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, summary, input.result, operation), fmt.Sprintf("Запрос на слияние уже задан: number=%d.", ref.Number))
 		return nil
 	}
 	if strings.TrimSpace(ref.Repository) == "" {
@@ -255,10 +253,10 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 		ref.Base = base
 	}
 	if strings.TrimSpace(ref.Title) == "" {
-		ref.Title = pullRequestTitle(state)
+		ref.Title = pullRequestTitleFromPublishMergeRequestInput(state, input, ref)
 	}
 	if strings.TrimSpace(ref.Body) == "" {
-		ref.Body = pullRequestBody(state)
+		ref.Body = pullRequestBodyFromPublishMergeRequestInput(state, input)
 	}
 
 	executor, err := e.integrationExecutor()
@@ -285,14 +283,26 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 
 	summary := pullRequestPublishSummary(response)
 	mergeRequest := mergeRequestFromPublishResponse(response, ref)
-	state.pullRequest = &mergeRequest
-	state.result.Summary = joinExecutionSummaries(state.result.Summary, summary)
-	writeOperationData(state, operation.Out, "merge_request", mergeRequest)
-	writeOperationData(state, operation.Out, "publish_summary", summary)
-	writeOperationData(state, operation.Out, "result", state.result)
-	state.tracker.completeIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, summary, state.result, operation), "Запрос на слияние зафиксирован через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
+	result := input.result
+	result.Summary = joinExecutionSummaries(result.Summary, summary)
+	writePublishMergeRequestData(state, operation, mergeRequest, summary, result)
+	state.tracker.completeIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, summary, result, operation), "Запрос на слияние зафиксирован через контур интеграции.")
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), input.workplace, result, nil)
 	return nil
+}
+
+func writePublishMergeRequestData(state *operationExecution, operation OperationSpec, mergeRequest integration.MergeRequest, summary string, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"merge_request":   {Ref: "data.merge_request"},
+			"publish_summary": {Ref: "data.publish_summary"},
+			"result":          {Ref: "data.result"},
+		}
+	}
+	writeOperationData(state, out, "merge_request", mergeRequest)
+	writeOperationData(state, out, "publish_summary", summary)
+	writeOperationData(state, out, "result", result)
 }
 
 type publishMergeRequestInput struct {
@@ -772,6 +782,46 @@ func pullRequestRefFromState(state *operationExecution) pullRequestRef {
 	return ref
 }
 
+func pullRequestRefFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput) pullRequestRef {
+	ref := pullRequestRefFromAssignment(publishMergeRequestAssignment(state, input))
+	if strings.TrimSpace(ref.Repository) == "" && state != nil && state.assignment != nil {
+		stateRef := pullRequestRefFromAssignment(state.assignment)
+		ref.Repository = stateRef.Repository
+	}
+	if ref.Number <= 0 && state != nil && state.pullRequest != nil {
+		ref.Number = state.pullRequest.Number
+	}
+	if strings.TrimSpace(ref.Repository) == "" && state != nil && state.pullRequest != nil {
+		ref.Repository = state.pullRequest.Repository
+	}
+	if strings.TrimSpace(ref.Base) == "" && state != nil && state.pullRequest != nil {
+		ref.Base = state.pullRequest.BaseRef
+	}
+	if strings.TrimSpace(ref.Head) == "" && state != nil && state.pullRequest != nil {
+		ref.Head = state.pullRequest.HeadRef
+	}
+	if strings.TrimSpace(ref.Title) == "" && state != nil && state.pullRequest != nil {
+		ref.Title = state.pullRequest.Title
+	}
+	if strings.TrimSpace(ref.Head) == "" {
+		assignment := publishMergeRequestAssignment(state, input)
+		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
+			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
+		}
+	}
+	return ref
+}
+
+func publishMergeRequestAssignment(state *operationExecution, input publishMergeRequestInput) *ExecutionAssignment {
+	if input.invocation.Assignment != nil {
+		return assignmentFromInvocation(input.invocation)
+	}
+	if state != nil {
+		return state.assignment
+	}
+	return nil
+}
+
 func pullRequestRefFromAssignment(assignment *ExecutionAssignment) pullRequestRef {
 	ref := pullRequestRef{}
 	if assignment == nil {
@@ -1062,6 +1112,26 @@ func pullRequestTitle(state *operationExecution) string {
 	return "Инженерное изменение"
 }
 
+func pullRequestTitleFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput, ref pullRequestRef) string {
+	if strings.TrimSpace(ref.Title) != "" {
+		return strings.TrimSpace(ref.Title)
+	}
+	assignment := publishMergeRequestAssignment(state, input)
+	if assignment != nil && assignment.CanonicalTask != nil {
+		task := assignment.CanonicalTask
+		if task.Number > 0 && strings.TrimSpace(task.Title) != "" {
+			return fmt.Sprintf("Задача #%d: %s", task.Number, strings.TrimSpace(task.Title))
+		}
+		if task.Number > 0 {
+			return fmt.Sprintf("Задача #%d", task.Number)
+		}
+	}
+	if input.structuredOutput != nil && strings.TrimSpace(input.structuredOutput.CommitMessage) != "" {
+		return strings.TrimSpace(input.structuredOutput.CommitMessage)
+	}
+	return "Инженерное изменение"
+}
+
 func pullRequestBody(state *operationExecution) string {
 	parts := []string{}
 	if state != nil && state.assignment != nil && state.assignment.CanonicalTask != nil {
@@ -1094,6 +1164,43 @@ func pullRequestBody(state *operationExecution) string {
 	}
 	if len(parts) == 0 {
 		return "Запрос на слияние открыт контуром исполнения."
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func pullRequestBodyFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput) string {
+	parts := []string{}
+	assignment := publishMergeRequestAssignment(state, input)
+	if assignment != nil && assignment.CanonicalTask != nil {
+		task := assignment.CanonicalTask
+		if task.Number > 0 {
+			parts = append(parts, fmt.Sprintf("Задача: #%d", task.Number))
+		}
+		if strings.TrimSpace(task.URL) != "" {
+			parts = append(parts, "Ссылка на задачу: "+strings.TrimSpace(task.URL))
+		}
+		if task.Attributes != nil && strings.TrimSpace(task.Attributes["body"]) != "" {
+			parts = append(parts, strings.TrimSpace(task.Attributes["body"]))
+		}
+	}
+	if output := input.structuredOutput; output != nil {
+		if strings.TrimSpace(output.Summary) != "" {
+			parts = append(parts, "Результат:\n"+strings.TrimSpace(output.Summary))
+		}
+		if len(output.Changes) != 0 {
+			lines := []string{"Изменения:"}
+			for _, change := range output.Changes {
+				if strings.TrimSpace(change.Summary) != "" {
+					lines = append(lines, "- "+strings.TrimSpace(change.Summary))
+				}
+			}
+			if len(lines) > 1 {
+				parts = append(parts, strings.Join(lines, "\n"))
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
 	}
 	return strings.Join(parts, "\n\n")
 }

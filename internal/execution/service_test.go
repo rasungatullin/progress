@@ -1399,7 +1399,7 @@ func TestFinalizeFillsOnlyActionData(t *testing.T) {
 	}
 }
 
-func TestPublishMergeRequestFillsActionDataAndKeepsStateResult(t *testing.T) {
+func TestPublishMergeRequestFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := publishMergeRequestOperationSpec()
@@ -1465,8 +1465,8 @@ func TestPublishMergeRequestFillsActionDataAndKeepsStateResult(t *testing.T) {
 	if !ok || !strings.Contains(dataResult.Summary, "pull-request=17") {
 		t.Fatalf("publish-merge-request must update data.result: %#v", state.data)
 	}
-	if state.result.Summary != dataResult.Summary {
-		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("publish-merge-request must not write implicit state result: %#v", state.result)
 	}
 }
 
