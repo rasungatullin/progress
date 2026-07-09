@@ -2070,6 +2070,67 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestPublishReviewResponsesFailureFillsOnlyActionData(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation": model.Invocation{
+				Assignment: &ExecutionAssignment{
+					RelatedObjects: []ObjectRef{{
+						Type:       "merge-request",
+						Repository: "owner/name",
+						Number:     17,
+					}},
+				},
+			},
+			"result": model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
+				RemarkID: "remark-1",
+				Status:   "resolved",
+				Summary:  "Проверка добавлена.",
+				Body:     "Добавил покрытие отказа.",
+			}}},
+			"review_remarks": []integration.ReviewRemark{{
+				ExternalID: "remark-1",
+				ReplyToID:  "thread-1",
+				State:      "unresolved",
+				Body:       "Исправьте обработку ошибки.",
+			}},
+		},
+		result:        model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		reviewRemarks: []integration.ReviewRemark{{ExternalID: "legacy", ReplyToID: "legacy-thread"}},
+		tracker:       newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger: log.Default(),
+		integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+			return integration.Response{}, errors.New("publish failed")
+		}},
+	}
+
+	err := builtinOperationExecutor{service: service}.publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses)
+	if err == nil {
+		t.Fatalf("publish review responses must fail")
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "publish failed") {
+		t.Fatalf("publish-review-responses failure must fill data.result: %#v", state.data)
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("publish-review-responses failure must not write implicit state result: %#v", state.result)
+	}
+	if len(state.reviewRemarks) != 1 || state.reviewRemarks[0].ExternalID != "legacy" {
+		t.Fatalf("publish-review-responses failure must not write implicit state review remarks: %#v", state.reviewRemarks)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindPublishReviewResponses)
+	if result == nil || result.Status != OperationStatusFailed || result.Failure == nil || result.Failure.Code != "review_responses_publish_failed" {
+		t.Fatalf("publish-review-responses failure must keep diagnostics: %#v", result)
+	}
+}
+
 func TestPublishReviewResponsesWritesOutputsWhenNoResponses(t *testing.T) {
 	t.Parallel()
 

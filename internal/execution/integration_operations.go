@@ -608,7 +608,7 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 	input := publishReviewResponsesInputFromOperation(state, operation)
 	ref := pullRequestRefFromPublishReviewResponsesInput(state, input)
 	if ref.Number <= 0 {
-		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
+		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
 	responses := reviewResponsesFromOutput(input.structuredOutput)
@@ -620,12 +620,12 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 
 	count, err := e.publishReviewResponseComments(ctx, ref, responses, input.reviewRemarks)
 	if err != nil {
-		return e.failIntegrationOperation(ctx, state, name, "Ответы на замечания не записаны.", err, "review_responses_publish_failed")
+		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не записаны.", err, "review_responses_publish_failed")
 	}
 
 	resolved, err := e.resolveReviewThreads(ctx, responses, input.reviewRemarks)
 	if err != nil {
-		return e.failIntegrationOperation(ctx, state, name, "Ответы записаны, но часть цепочек обсуждения не закрыта.", err, "review_thread_resolve_failed")
+		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы записаны, но часть цепочек обсуждения не закрыта.", err, "review_thread_resolve_failed")
 	}
 
 	summary := fmt.Sprintf("review-responses-published=%d review-threads-resolved=%d", count, resolved)
@@ -635,6 +635,38 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 	state.tracker.completeIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary(summary, result, operation), "Ответы на замечания записаны через контур интеграции.")
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
 	return nil
+}
+
+func (e builtinOperationExecutor) failPublishReviewResponsesOperation(ctx context.Context, state *operationExecution, operation OperationSpec, input publishReviewResponsesInput, name string, summary string, err error, code string) error {
+	result := failedPublishReviewResponsesResult(input, err)
+	writePublishReviewResponsesFailureData(state, operation, result)
+	state.tracker.fail(name, summary, err, code, true, true)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, err)
+	return err
+}
+
+func failedPublishReviewResponsesResult(input publishReviewResponsesInput, err error) LaunchResult {
+	result := input.result
+	if strings.TrimSpace(result.Status) == "" {
+		result = failedStartResult(err)
+	} else {
+		result.Status = "failed"
+		result.Summary = joinExecutionSummaries(result.Summary, strings.TrimSpace(err.Error()))
+	}
+	if result.StructuredOutput == nil {
+		result.StructuredOutput = input.structuredOutput
+	}
+	return result
+}
+
+func writePublishReviewResponsesFailureData(state *operationExecution, operation OperationSpec, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"result": {Ref: "data.result"},
+		}
+	}
+	writeOperationData(state, out, "result", result)
 }
 
 func writePublishReviewResponsesData(state *operationExecution, operation OperationSpec, summary string, result LaunchResult) {
