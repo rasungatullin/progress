@@ -984,6 +984,99 @@ func TestBuildDirectiveWritesDirectiveForActionWithoutSynthesis(t *testing.T) {
 	}
 }
 
+func TestLaunchSynthesisFillsActionDataAndKeepsStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := launchSynthesisOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Task: "task-42",
+		},
+		action: model.Action{
+			RequiresSynthesis: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"directive":  model.LaunchSpec{Directory: "/tmp/work", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder", CommitPush: true},
+			"profile":    model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
+			"allocation": model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
+			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
+		},
+		profile:    model.Profile{Name: "legacy", Mode: "manual", ModelBinding: "legacy"},
+		allocation: model.Allocation{Resource: "legacy", Runner: "legacy"},
+		workplace:  model.Workplace{Name: "/tmp/legacy", Ready: true},
+		tracker:    newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	launcher := &stubLauncher{result: model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: &model.StructuredOutput{Summary: "Done."}}}
+	service := &Service{
+		logger:   log.Default(),
+		launcher: launcher,
+	}
+
+	err := builtinOperationExecutor{service: service}.launchSynthesis(context.Background(), state, operation, OperationKindLaunchSynthesis)
+	if err != nil {
+		t.Fatalf("launch synthesis: %v", err)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok {
+		t.Fatalf("launch-synthesis must fill data.result: %#v", state.data)
+	}
+	if dataResult.Status != "completed" || dataResult.StructuredOutput == nil || dataResult.StructuredOutput.Summary != "Done." {
+		t.Fatalf("unexpected data result: %#v", dataResult)
+	}
+	if state.result.Status != "completed" || state.result.StructuredOutput == nil || state.result.StructuredOutput.Summary != "Done." {
+		t.Fatalf("state result must keep compatibility copy: %#v", state.result)
+	}
+	if launcher.invocation.Launch.Runner != "opencode" || launcher.invocation.Launch.Model != "openai/gpt-5.5" || launcher.invocation.Launch.CommitPush {
+		t.Fatalf("launcher must receive directive from operation input with commit push disabled: %#v", launcher.invocation.Launch)
+	}
+	if launcher.profile.Name != "coder" || launcher.allocation.Resource != "binding:coder" || launcher.workplace.Name != "/tmp/work" {
+		t.Fatalf("launcher must receive operation input data: profile=%#v allocation=%#v workplace=%#v", launcher.profile, launcher.allocation, launcher.workplace)
+	}
+}
+
+func TestLaunchSynthesisWritesSkippedResultForActionWithoutSynthesis(t *testing.T) {
+	t.Parallel()
+
+	operation := launchSynthesisOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Task: "task-42",
+		},
+		action: model.Action{
+			RequiresSynthesis: false,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"directive":  model.LaunchSpec{StructuredInput: &StructuredInput{Task: "No synthesis."}},
+			"profile":    model.Profile{Name: "default", Mode: "manual"},
+			"allocation": model.Allocation{Resource: "not-required"},
+			"workplace":  model.Workplace{Name: "/repo", Ready: true},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger:   log.Default(),
+		launcher: &stubLauncher{err: errors.New("launcher must not be called")},
+	}
+
+	err := builtinOperationExecutor{service: service}.launchSynthesis(context.Background(), state, operation, OperationKindLaunchSynthesis)
+	if err != nil {
+		t.Fatalf("launch synthesis: %v", err)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "skipped" || !strings.Contains(dataResult.Summary, "synthesis=not-required") {
+		t.Fatalf("launch-synthesis must write skipped result to data.result: %#v", state.data)
+	}
+	if state.result.Status != "" {
+		t.Fatalf("skipped launch must keep old empty state result for finalization compatibility: %#v", state.result)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindLaunchSynthesis)
+	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
+		t.Fatalf("skipped launch must keep contract output diagnostics: %#v", result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -1167,7 +1260,20 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 						"directive": mappingRef("data.directive"),
 					},
 				},
-				{Name: OperationKindLaunchSynthesis},
+				{
+					Name: OperationKindLaunchSynthesis,
+					In: map[string]methodology.ActionMapping{
+						"requires_synthesis": mappingRef("action.requires_synthesis"),
+						"invocation":         mappingRef("in"),
+						"directive":          mappingRef("data.directive"),
+						"profile":            mappingRef("data.profile"),
+						"allocation":         mappingRef("data.allocation"),
+						"workplace":          mappingRef("data.workplace"),
+					},
+					Out: map[string]methodology.ActionMapping{
+						"result": mappingRef("data.result"),
+					},
+				},
 				{Name: OperationKindParseResult},
 				{Name: OperationKindCommitPush},
 				{Name: OperationKindPublishReviewResponses},
@@ -1256,6 +1362,13 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	}
 	if directiveOperation.In["requires_synthesis"].Ref != "action.requires_synthesis" || directiveOperation.In["allocation"].Ref != "data.allocation" || directiveOperation.Out["directive"].Ref != "data.directive" {
 		t.Fatalf("build-directive must keep action data mapping: %#v", directiveOperation)
+	}
+	launchOperation := findOperationSpec(action, OperationKindLaunchSynthesis)
+	if launchOperation == nil {
+		t.Fatalf("launch-synthesis operation must be present: %#v", action.Operations)
+	}
+	if launchOperation.In["directive"].Ref != "data.directive" || launchOperation.In["workplace"].Ref != "data.workplace" || launchOperation.Out["result"].Ref != "data.result" {
+		t.Fatalf("launch-synthesis must keep action data mapping: %#v", launchOperation)
 	}
 }
 
@@ -1964,6 +2077,8 @@ func TestServiceLaunchReturnsResumeUnsupportedForUnsupportedRunner(t *testing.T)
 type stubLauncher struct {
 	invocation       model.Invocation
 	profile          model.Profile
+	allocation       model.Allocation
+	workplace        model.Workplace
 	result           model.LaunchResult
 	err              error
 	beforeReturn     func()
@@ -1987,9 +2102,11 @@ func (s *stubIntegrationExecutor) Execute(ctx context.Context, req integration.R
 	return integration.Response{Status: "ok"}, nil
 }
 
-func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, profile model.Profile, _ model.Allocation, _ model.Workplace) (model.LaunchResult, error) {
+func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, profile model.Profile, allocation model.Allocation, workplace model.Workplace) (model.LaunchResult, error) {
 	s.invocation = in
 	s.profile = profile
+	s.allocation = allocation
+	s.workplace = workplace
 	if s.beforeReturn != nil {
 		s.beforeReturn()
 	}
@@ -2190,6 +2307,25 @@ func buildDirectiveOperationSpec() model.OperationSpec {
 		},
 		Out: model.OperationMap{
 			"directive": {Ref: "data.directive"},
+		},
+	}
+}
+
+func launchSynthesisOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindLaunchSynthesis,
+		Kind:   OperationKindLaunchSynthesis,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"requires_synthesis": {Ref: "action.requires_synthesis"},
+			"invocation":         {Ref: "in"},
+			"directive":          {Ref: "data.directive"},
+			"profile":            {Ref: "data.profile"},
+			"allocation":         {Ref: "data.allocation"},
+			"workplace":          {Ref: "data.workplace"},
+		},
+		Out: model.OperationMap{
+			"result": {Ref: "data.result"},
 		},
 	}
 }

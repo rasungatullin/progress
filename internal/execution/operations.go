@@ -74,7 +74,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindBuildDirective:
 		return e.buildDirective(ctx, state, operation, name)
 	case OperationKindLaunchSynthesis:
-		return e.launchSynthesis(ctx, state, name)
+		return e.launchSynthesis(ctx, state, operation, name)
 	case OperationKindParseResult:
 		return e.parseResult(state, name)
 	case OperationKindCommitPush:
@@ -951,22 +951,26 @@ func buildDirectiveOutputSummary(directive launchSpec, operation OperationSpec) 
 	})
 }
 
-func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, name string) error {
-	if !state.action.RequiresSynthesis {
-		state.tracker.skip(name, "Запуск синтеза не требуется для разрешённого действия.")
+func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := launchSynthesisInputFromOperation(state, operation)
+	if !input.requiresSynthesis {
+		result := LaunchResult{Status: "skipped", Summary: "synthesis=not-required"}
+		writeOperationData(state, operation.Out, "result", result)
+		state.tracker.skipIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), "Запуск синтеза не требуется для разрешённого действия.")
 		return nil
 	}
 
 	launchCtx := launch.WithHistoryHandle(ctx, state.historyHandle)
-	launchInvocation := state.in
+	launchInvocation := input.invocation
+	launchInvocation.Launch = input.directive
 	launchInvocation.Launch.CommitPush = false
-	launchProfile := state.profile
-	result, err := e.service.launch(launchCtx, launchInvocation, launchProfile, state.allocation, state.workplace)
+	result, err := e.service.launch(launchCtx, launchInvocation, input.profile, input.allocation, input.workplace)
 	state.result = result
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, result, err)
+	writeOperationData(state, operation.Out, "result", result)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, launchInvocation, input.profile, input.allocation, input.workplace, result, err)
 	if err != nil {
 		if result.StructuredOutput != nil {
-			state.tracker.complete(name, fmt.Sprintf("status=%s", result.Status))
+			state.tracker.completeIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), fmt.Sprintf("status=%s", result.Status))
 			if parseResultName, ok := actionOperationNameByKind(state.action, OperationKindParseResult); ok {
 				state.tracker.completeIO(parseResultName, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат синтеза получен и нормализован.")
 			}
@@ -985,8 +989,257 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 		return err
 	}
 
-	state.tracker.complete(name, fmt.Sprintf("status=%s", result.Status))
+	state.tracker.completeIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), fmt.Sprintf("status=%s", result.Status))
 	return nil
+}
+
+type launchSynthesisInput struct {
+	requiresSynthesis bool
+	invocation        invocation
+	directive         launchSpec
+	profile           profile
+	allocation        allocation
+	workplace         workplace
+}
+
+func launchSynthesisInputFromOperation(state *operationExecution, operation OperationSpec) launchSynthesisInput {
+	input := launchSynthesisInput{}
+	if state != nil {
+		input.requiresSynthesis = state.action.RequiresSynthesis
+		input.invocation = state.in
+		input.directive = state.in.Launch
+		input.profile = state.profile
+		input.allocation = state.allocation
+		input.workplace = state.workplace
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["requires_synthesis"]; ok {
+		if value, ok := boolValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.requiresSynthesis = value
+		}
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["directive"]; ok {
+		if value, ok := directiveValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.directive = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.allocation = value
+		}
+	}
+	if mapping, ok := operation.In["workplace"]; ok {
+		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.workplace = value
+		}
+	}
+	return input
+}
+
+func boolValueFromLaunchSynthesisMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
+	if len(mapping.Value) != 0 {
+		var value bool
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return false, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "action.requires_synthesis":
+		if state == nil {
+			return false, false
+		}
+		return state.action.RequiresSynthesis, true
+	default:
+		return false, false
+	}
+}
+
+func invocationValueFromLaunchSynthesisMapping(state *operationExecution, mapping model.OperationMapping) (invocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value invocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return invocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "in", "invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		return state.in, true
+	default:
+		return invocation{}, false
+	}
+}
+
+func directiveValueFromLaunchSynthesisMapping(state *operationExecution, mapping model.OperationMapping) (launchSpec, bool) {
+	if len(mapping.Value) != 0 {
+		var value launchSpec
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return launchSpec{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.directive":
+		if state == nil {
+			return launchSpec{}, false
+		}
+		value, ok := state.data["directive"].(launchSpec)
+		return value, ok
+	case "state.launch":
+		if state == nil {
+			return launchSpec{}, false
+		}
+		return state.in.Launch, true
+	default:
+		return launchSpec{}, false
+	}
+}
+
+func profileValueFromLaunchSynthesisMapping(state *operationExecution, mapping model.OperationMapping) (profile, bool) {
+	if len(mapping.Value) != 0 {
+		var value profile
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return profile{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.profile":
+		if state == nil {
+			return profile{}, false
+		}
+		value, ok := state.data["profile"].(profile)
+		return value, ok
+	case "state.profile":
+		if state == nil {
+			return profile{}, false
+		}
+		return state.profile, true
+	default:
+		return profile{}, false
+	}
+}
+
+func allocationValueFromLaunchSynthesisMapping(state *operationExecution, mapping model.OperationMapping) (allocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value allocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return allocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.allocation":
+		if state == nil {
+			return allocation{}, false
+		}
+		value, ok := state.data["allocation"].(allocation)
+		return value, ok
+	case "state.allocation":
+		if state == nil {
+			return allocation{}, false
+		}
+		return state.allocation, true
+	default:
+		return allocation{}, false
+	}
+}
+
+func workplaceValueFromLaunchSynthesisMapping(state *operationExecution, mapping model.OperationMapping) (workplace, bool) {
+	if len(mapping.Value) != 0 {
+		var value workplace
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return workplace{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.workplace":
+		if state == nil {
+			return workplace{}, false
+		}
+		value, ok := state.data["workplace"].(workplace)
+		return value, ok
+	case "state.workplace":
+		if state == nil {
+			return workplace{}, false
+		}
+		return state.workplace, true
+	default:
+		return workplace{}, false
+	}
+}
+
+func launchSynthesisInputSummary(input launchSynthesisInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"allocation":         allocationSummary(input.allocation),
+		"directive":          directiveSummary(input.directive),
+		"invocation":         invocationSummary(input.invocation),
+		"profile":            profileSummary(input.profile),
+		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+		"workplace":          workplaceSummary(input.workplace),
+	})
+}
+
+func launchSynthesisOutputSummary(result LaunchResult, operation OperationSpec) string {
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		resultJSON = []byte(fmt.Sprintf(`{"status":%q}`, result.Status))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"result": string(resultJSON),
+	})
+}
+
+func directiveSummary(directive launchSpec) string {
+	if strings.TrimSpace(directive.Runner) == "" && strings.TrimSpace(directive.Model) == "" {
+		return "absent"
+	}
+	parts := []string{}
+	if runner := strings.TrimSpace(directive.Runner); runner != "" {
+		parts = append(parts, "runner="+runner)
+	}
+	if model := strings.TrimSpace(directive.Model); model != "" {
+		parts = append(parts, "model="+model)
+	}
+	if binding := strings.TrimSpace(directive.ModelBinding); binding != "" {
+		parts = append(parts, "binding="+binding)
+	}
+	if directory := strings.TrimSpace(directive.Directory); directory != "" {
+		parts = append(parts, "directory="+directory)
+	}
+	return strings.Join(parts, ",")
+}
+
+func workplaceSummary(workplace workplace) string {
+	if strings.TrimSpace(workplace.Name) == "" && strings.TrimSpace(workplace.RepositoryRoot) == "" {
+		return "absent"
+	}
+	parts := []string{}
+	if name := strings.TrimSpace(workplace.Name); name != "" {
+		parts = append(parts, "name="+name)
+	}
+	if root := strings.TrimSpace(workplace.RepositoryRoot); root != "" {
+		parts = append(parts, "repository-root="+root)
+	}
+	parts = append(parts, fmt.Sprintf("ready=%t", workplace.Ready))
+	return strings.Join(parts, ",")
 }
 
 func (e builtinOperationExecutor) parseResult(state *operationExecution, name string) error {

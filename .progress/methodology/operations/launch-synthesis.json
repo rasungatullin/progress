@@ -3,5 +3,46 @@
   "kind": "launch-synthesis",
   "title": "Запуск синтеза",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "requires_synthesis": {
+        "type": "boolean",
+        "required": true,
+        "description": "Признак необходимости запуска синтеза для разрешённого действия."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
+      },
+      "directive": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленная исполнительная директива."
+      },
+      "profile": {
+        "type": "object",
+        "required": true,
+        "description": "Разрешённый исполнительный профиль."
+      },
+      "allocation": {
+        "type": "object",
+        "required": true,
+        "description": "Результат ресурсного снабжения."
+      },
+      "workplace": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленное рабочее место."
+      }
+    },
+    "out": {
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Результат запуска выполнения."
+      }
+    }
+  }
 }

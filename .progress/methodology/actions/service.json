@@ -57,6 +57,10 @@
       "directive": {
         "type": "object",
         "description": "Подготовленная исполнительная директива для запуска выполнения."
+      },
+      "result": {
+        "type": "object",
+        "description": "Результат запуска выполнения."
       }
     }
   },
@@ -166,7 +170,32 @@
       }
     },
     {
-      "name": "launch-synthesis"
+      "name": "launch-synthesis",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "invocation": {
+          "ref": "in"
+        },
+        "directive": {
+          "ref": "data.directive"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        }
+      },
+      "out": {
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
       "name": "parse-result"
