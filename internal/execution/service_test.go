@@ -1557,6 +1557,73 @@ func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestLoadReviewRemarksFailureDoesNotWriteStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := loadReviewRemarksOperationSpec()
+	state := &operationExecution{
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation":   model.Invocation{},
+			"pull_request": integration.MergeRequest{Repository: "owner/name", Number: 17},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger: log.Default(),
+		integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+			return integration.Response{}, errors.New("remarks failed")
+		}},
+	}
+
+	err := builtinOperationExecutor{service: service}.loadReviewRemarks(context.Background(), state, operation, OperationKindLoadReviewRemarks, true)
+	if err == nil {
+		t.Fatal("load-review-remarks must return integration error")
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "remarks failed") {
+		t.Fatalf("load-review-remarks must write failed result to data.result: %#v", state.data)
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("load-review-remarks must not write implicit state result: %#v", state.result)
+	}
+}
+
+func TestLoadReviewRemarksOptionalFailureDoesNotWriteStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := loadReviewRemarksOperationSpec()
+	state := &operationExecution{
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation":   model.Invocation{},
+			"pull_request": integration.MergeRequest{Repository: "owner/name", Number: 17},
+			"result":       model.LaunchResult{Status: "running", Summary: "running"},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger: log.Default(),
+		integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+			return integration.Response{}, errors.New("optional remarks failed")
+		}},
+	}
+
+	err := builtinOperationExecutor{service: service}.loadReviewRemarks(context.Background(), state, operation, OperationKindLoadReviewRemarks, false)
+	if err != nil {
+		t.Fatalf("optional load-review-remarks must skip integration error: %v", err)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "running" {
+		t.Fatalf("optional load-review-remarks must keep data.result: %#v", state.data)
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("optional load-review-remarks must not write implicit state result: %#v", state.result)
+	}
+}
+
 func TestFinalizeFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
@@ -2416,6 +2483,7 @@ func TestActionResolutionKeepsLoadReviewRemarksMapping(t *testing.T) {
 				Out: map[string]methodology.ActionMapping{
 					"review_remarks": mappingRef("data.review_remarks"),
 					"invocation":     mappingRef("data.invocation"),
+					"result":         mappingRef("data.result"),
 				},
 			}},
 		}},
@@ -2430,7 +2498,7 @@ func TestActionResolutionKeepsLoadReviewRemarksMapping(t *testing.T) {
 	if operation == nil {
 		t.Fatalf("load-review-remarks operation must be present: %#v", action.Operations)
 	}
-	if operation.In["invocation"].Ref != "data.invocation" || operation.In["pull_request"].Ref != "data.pull_request" || operation.Out["review_remarks"].Ref != "data.review_remarks" || operation.Out["invocation"].Ref != "data.invocation" {
+	if operation.In["invocation"].Ref != "data.invocation" || operation.In["pull_request"].Ref != "data.pull_request" || operation.Out["review_remarks"].Ref != "data.review_remarks" || operation.Out["invocation"].Ref != "data.invocation" || operation.Out["result"].Ref != "data.result" {
 		t.Fatalf("load-review-remarks must keep action data mapping: %#v", operation)
 	}
 }
@@ -3582,6 +3650,7 @@ func loadReviewRemarksOperationSpec() model.OperationSpec {
 		Out: model.OperationMap{
 			"review_remarks": {Ref: "data.review_remarks"},
 			"invocation":     {Ref: "data.invocation"},
+			"result":         {Ref: "data.result"},
 		},
 	}
 }

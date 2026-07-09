@@ -125,12 +125,12 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 	input := loadReviewRemarksInputFromOperation(state, operation)
 	ref := pullRequestRefFromLoadReviewRemarksInput(input)
 	if ref.Number <= 0 {
-		return e.failOrSkipIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required", required)
+		return e.failOrSkipLoadReviewRemarksOperation(ctx, state, operation, input.invocation, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required", required)
 	}
 
 	executor, err := e.integrationExecutor()
 	if err != nil {
-		return e.failOrSkipIntegrationOperation(ctx, state, name, "Контур интеграции недоступен.", err, "integration_unavailable", required)
+		return e.failOrSkipLoadReviewRemarksOperation(ctx, state, operation, input.invocation, name, "Контур интеграции недоступен.", err, "integration_unavailable", required)
 	}
 
 	response, err := executor.Execute(ctx, integration.Request{
@@ -143,13 +143,27 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 		Number:          ref.Number,
 	})
 	if err != nil {
-		return e.failOrSkipIntegrationOperation(ctx, state, name, "Замечания ревизии не получены.", err, "review_remarks_load_failed", required)
+		return e.failOrSkipLoadReviewRemarksOperation(ctx, state, operation, input.invocation, name, "Замечания ревизии не получены.", err, "review_remarks_load_failed", required)
 	}
 
 	reviewRemarks := append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
 	invocation := invocationWithReviewRemarks(input.invocation, ref, reviewRemarks)
 	writeLoadReviewRemarksData(state, operation, reviewRemarks, invocation)
 	state.tracker.completeIO(name, loadReviewRemarksInputSummary(input, ref, operation), loadReviewRemarksOutputSummary(reviewRemarks, invocation, operation), "Замечания ревизии получены через контур интеграции.")
+	return nil
+}
+
+func (e builtinOperationExecutor) failOrSkipLoadReviewRemarksOperation(ctx context.Context, state *operationExecution, operation OperationSpec, in invocation, name string, summary string, err error, code string, required bool) error {
+	if required {
+		result := failedStartResult(err)
+		writeLoadReviewRemarksFailureData(state, operation, result)
+		state.tracker.fail(name, summary, err, code, true, true)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, err)
+		return err
+	}
+
+	state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), resultFromExecutionData(state), nil)
 	return nil
 }
 
@@ -163,6 +177,14 @@ func writeLoadReviewRemarksData(state *operationExecution, operation OperationSp
 	}
 	writeOperationData(state, out, "review_remarks", remarks)
 	writeOperationData(state, out, "invocation", invocation)
+}
+
+func writeLoadReviewRemarksFailureData(state *operationExecution, operation OperationSpec, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"result": {Ref: "data.result"}}
+	}
+	writeOperationData(state, out, "result", result)
 }
 
 func invocationWithReviewRemarks(in invocation, ref pullRequestRef, remarks []integration.ReviewRemark) invocation {

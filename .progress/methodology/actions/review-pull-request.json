@@ -157,6 +157,9 @@
         },
         "invocation": {
           "ref": "data.invocation"
+        },
+        "result": {
+          "ref": "data.result"
         }
       }
     },
