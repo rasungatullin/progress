@@ -746,7 +746,8 @@ func TestAllocateResourcesFillsOnlyActionData(t *testing.T) {
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
-			"profile": model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
+			"invocation": model.Invocation{Task: "from-data", Action: "implement"},
+			"profile":    model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
 		},
 		profile: model.Profile{Name: "legacy", Mode: "manual", ModelBinding: "legacy"},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
@@ -774,6 +775,9 @@ func TestAllocateResourcesFillsOnlyActionData(t *testing.T) {
 	if resources.profile.Name != "coder" || resources.profile.ModelBinding != "coder" {
 		t.Fatalf("resource allocation must use profile from operation input: %#v", resources.profile)
 	}
+	if resources.invocation.Task != "from-data" || resources.invocation.Action != "implement" {
+		t.Fatalf("resource allocation must use invocation from operation input: %#v", resources.invocation)
+	}
 }
 
 func TestAllocateResourcesWritesNotRequiredAllocationForActionWithoutSynthesis(t *testing.T) {
@@ -787,7 +791,8 @@ func TestAllocateResourcesWritesNotRequiredAllocationForActionWithoutSynthesis(t
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
-			"profile": model.Profile{Name: "default", Mode: "manual"},
+			"invocation": model.Invocation{Action: "service"},
+			"profile":    model.Profile{Name: "default", Mode: "manual"},
 		},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
@@ -810,6 +815,36 @@ func TestAllocateResourcesWritesNotRequiredAllocationForActionWithoutSynthesis(t
 	result := findOperationResult(state.tracker.snapshot(), OperationKindAllocateResources)
 	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
 		t.Fatalf("skipped allocation must keep contract output diagnostics: %#v", result)
+	}
+}
+
+func TestAllocateResourcesFailureDoesNotWriteStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := allocateResourcesOperationSpec()
+	state := &operationExecution{
+		action: model.Action{
+			RequiresSynthesis: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"invocation": model.Invocation{Task: "task-42"},
+			"profile":    model.Profile{Name: "coder", Mode: "manual"},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger:    log.Default(),
+		resources: &stubResourceProvider{err: errors.New("resources failed")},
+	}
+
+	err := builtinOperationExecutor{service: service}.allocateResources(context.Background(), state, operation, OperationKindAllocateResources)
+	if err == nil {
+		t.Fatal("allocate resources must return resource error")
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("allocate-resources must not write implicit state result: %#v", state.result)
 	}
 }
 
@@ -3161,14 +3196,16 @@ func (s *stubProfileResolver) Resolve(_ context.Context, in model.Invocation) (m
 
 type stubResourceProvider struct {
 	allocation model.Allocation
+	invocation model.Invocation
 	profile    model.Profile
 	err        error
 }
 
-func (s *stubResourceProvider) Allocate(_ context.Context, _ model.Invocation, profile model.Profile) (model.Allocation, error) {
+func (s *stubResourceProvider) Allocate(_ context.Context, in model.Invocation, profile model.Profile) (model.Allocation, error) {
 	if s.err != nil {
 		return model.Allocation{}, s.err
 	}
+	s.invocation = in
 	s.profile = profile
 	return s.allocation, nil
 }

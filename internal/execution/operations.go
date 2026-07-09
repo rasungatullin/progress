@@ -566,9 +566,9 @@ func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *
 
 	allocation, err := e.service.allocateResources(ctx, input.invocation, input.profile)
 	if err != nil {
-		state.result = failedStartResult(err)
+		result := failedStartResult(err)
 		state.tracker.fail(name, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, model.Allocation{}, model.Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, model.Allocation{}, model.Workplace{}, result, err)
 		return err
 	}
 
