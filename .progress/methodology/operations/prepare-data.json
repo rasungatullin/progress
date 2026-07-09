@@ -3,5 +3,43 @@
   "kind": "prepare-data",
   "title": "Подготовка данных",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "expected_result": {
+        "type": "string",
+        "description": "Ожидаемый результат выполнения действия."
+      },
+      "constraints": {
+        "type": "string_array",
+        "description": "Ограничения маршрута обработки."
+      },
+      "canonical_task": {
+        "type": "object",
+        "description": "Каноническая задача, восстановленная по внешнему рабочему объекту."
+      },
+      "related_objects": {
+        "type": "object_array",
+        "description": "Связанные канонические объекты."
+      },
+      "reasons": {
+        "type": "object_array",
+        "description": "Основания выбора действия."
+      },
+      "structured_input": {
+        "type": "object",
+        "description": "Структурированный ввод для контура исполнения."
+      }
+    },
+    "out": {
+      "structured_input": {
+        "type": "object",
+        "description": "Подготовленный структурированный ввод для запуска исполнения."
+      },
+      "workplace": {
+        "type": "object",
+        "description": "Подготовленная спецификация рабочего места с синхронизированными ветками."
+      }
+    }
+  }
 }

@@ -60,7 +60,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	name := operationResultName(operation)
 	switch operationKind(operation) {
 	case OperationKindPrepareData:
-		return e.prepareData(ctx, state, name)
+		return e.prepareData(ctx, state, operation, name)
 	case OperationKindLoadPullRequest:
 		return e.loadPullRequest(ctx, state, name)
 	case OperationKindLoadReviewRemarks:
@@ -92,7 +92,13 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	}
 }
 
-func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operationExecution, name string) error {
+func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	preparedAssignment := prepareDataInputFromOperation(state, operation)
+	state.assignment = preparedAssignment
+	state.in.Assignment = preparedAssignment
+	if preparedAssignment != nil {
+		state.in.Launch.StructuredInput = preparedAssignment.StructuredInput
+	}
 	if err := syncPullRequestRefsWithWorkplace(state); err != nil {
 		state.result = failedStartResult(err)
 		state.tracker.fail(name, "Данные задания не согласованы с веткой рабочего места.", err, "pull_request_branch_mismatch", true, true)
@@ -100,8 +106,115 @@ func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operat
 		return err
 	}
 
-	state.tracker.completeIO(name, assignmentSummary(state.assignment), structuredInputSummary(state.assignment.StructuredInput), "Данные задания подготовлены для выполнения.")
+	writeOperationData(state, operation.Out, "structured_input", state.in.Launch.StructuredInput)
+	writeOperationData(state, operation.Out, "workplace", state.in.Workplace)
+	state.tracker.completeIO(name, prepareDataInputSummary(preparedAssignment, operation), prepareDataOutputSummary(state, operation), "Данные задания подготовлены для выполнения.")
 	return nil
+}
+
+func prepareDataInputFromOperation(state *operationExecution, operation OperationSpec) *ExecutionAssignment {
+	if state == nil {
+		return &ExecutionAssignment{}
+	}
+	assignment := cloneAssignment(state.assignment)
+	if assignment == nil {
+		assignment = &ExecutionAssignment{}
+	}
+	if len(operation.In) == 0 {
+		return assignment
+	}
+
+	if mapping, ok := operation.In["expected_result"]; ok {
+		assignment.ExpectedResult = stringValueFromPrepareDataMapping(state, mapping)
+	}
+	if mapping, ok := operation.In["constraints"]; ok {
+		if constraints, ok := valueFromPrepareDataMapping[[]string](state, mapping); ok {
+			assignment.Constraints = constraints
+		}
+	}
+	if mapping, ok := operation.In["canonical_task"]; ok {
+		if canonicalTask, ok := valueFromPrepareDataMapping[*ObjectRef](state, mapping); ok {
+			assignment.CanonicalTask = canonicalTask
+		} else if canonicalTask, ok := valueFromPrepareDataMapping[ObjectRef](state, mapping); ok {
+			assignment.CanonicalTask = &canonicalTask
+		}
+	}
+	if mapping, ok := operation.In["related_objects"]; ok {
+		if relatedObjects, ok := valueFromPrepareDataMapping[[]ObjectRef](state, mapping); ok {
+			assignment.RelatedObjects = relatedObjects
+		}
+	}
+	if mapping, ok := operation.In["reasons"]; ok {
+		if reasons, ok := valueFromPrepareDataMapping[[]AssignmentReason](state, mapping); ok {
+			assignment.Reasons = reasons
+		}
+	}
+	if mapping, ok := operation.In["structured_input"]; ok {
+		if structuredInput, ok := valueFromPrepareDataMapping[*StructuredInput](state, mapping); ok {
+			assignment.StructuredInput = structuredInput
+		} else if structuredInput, ok := valueFromPrepareDataMapping[StructuredInput](state, mapping); ok {
+			assignment.StructuredInput = &structuredInput
+		}
+	}
+	return assignment
+}
+
+func stringValueFromPrepareDataMapping(state *operationExecution, mapping model.OperationMapping) string {
+	if value, ok := valueFromPrepareDataMapping[string](state, mapping); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func valueFromPrepareDataMapping[T any](state *operationExecution, mapping model.OperationMapping) (T, bool) {
+	var zero T
+	if len(mapping.Value) != 0 {
+		var value T
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return zero, false
+	}
+	raw, ok := prepareDataRefValue(state, mapping.Ref)
+	if !ok {
+		return zero, false
+	}
+	value, ok := raw.(T)
+	if ok {
+		return value, true
+	}
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		return zero, false
+	}
+	var decoded T
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return zero, false
+	}
+	return decoded, true
+}
+
+func prepareDataRefValue(state *operationExecution, ref string) (any, bool) {
+	if state == nil || state.assignment == nil {
+		return nil, false
+	}
+	ref = strings.TrimSpace(ref)
+	switch ref {
+	case "in.expected_result", "assignment.expected_result":
+		return state.assignment.ExpectedResult, true
+	case "in.constraints", "assignment.constraints":
+		return state.assignment.Constraints, true
+	case "in.canonical_task", "assignment.canonical_task":
+		return state.assignment.CanonicalTask, true
+	case "in.related_objects", "assignment.related_objects":
+		return state.assignment.RelatedObjects, true
+	case "in.reasons", "assignment.reasons":
+		return state.assignment.Reasons, true
+	case "in.structured_input", "assignment.structured_input":
+		return state.assignment.StructuredInput, true
+	default:
+		return nil, false
+	}
 }
 
 func syncPullRequestRefsWithWorkplace(state *operationExecution) error {
@@ -237,6 +350,74 @@ func resolveProfileOutputSummary(profile profile, operation OperationSpec) strin
 	return operationIOSummary(operation.Out, map[string]string{
 		"profile": string(profileJSON),
 	})
+}
+
+func prepareDataInputSummary(assignment *ExecutionAssignment, operation OperationSpec) string {
+	if assignment == nil {
+		return ""
+	}
+	return operationIOSummary(operation.In, map[string]string{
+		"canonical_task":   objectPresenceSummary(assignment.CanonicalTask),
+		"constraints":      formatInt(len(assignment.Constraints)),
+		"expected_result":  presenceSummary(assignment.ExpectedResult),
+		"reasons":          formatInt(len(assignment.Reasons)),
+		"related_objects":  formatInt(len(assignment.RelatedObjects)),
+		"structured_input": structuredInputSummary(assignment.StructuredInput),
+	})
+}
+
+func prepareDataOutputSummary(state *operationExecution, operation OperationSpec) string {
+	if state == nil {
+		return ""
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"structured_input": structuredInputSummary(state.in.Launch.StructuredInput),
+		"workplace":        workplaceSpecSummary(state.in.Workplace),
+	})
+}
+
+func objectPresenceSummary(object *ObjectRef) string {
+	if object == nil {
+		return "absent"
+	}
+	parts := []string{"present"}
+	if strings.TrimSpace(object.Type) != "" {
+		parts = append(parts, "type="+strings.TrimSpace(object.Type))
+	}
+	if object.Number != 0 {
+		parts = append(parts, "number="+formatInt(object.Number))
+	}
+	if repository := strings.TrimSpace(object.Repository); repository != "" {
+		parts = append(parts, "repository="+repository)
+	}
+	return strings.Join(parts, ",")
+}
+
+func presenceSummary(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "absent"
+	}
+	return "present"
+}
+
+func workplaceSpecSummary(workplace workplaceSpec) string {
+	parts := []string{}
+	if name := strings.TrimSpace(workplace.Name); name != "" {
+		parts = append(parts, "name="+name)
+	}
+	if baseRef := strings.TrimSpace(workplace.BaseRef); baseRef != "" {
+		parts = append(parts, "base="+baseRef)
+	}
+	if headRef := strings.TrimSpace(workplace.HeadRef); headRef != "" {
+		parts = append(parts, "head="+headRef)
+	}
+	if environment := strings.TrimSpace(workplace.Environment); environment != "" {
+		parts = append(parts, "environment="+environment)
+	}
+	if len(parts) == 0 {
+		return "absent"
+	}
+	return strings.Join(parts, ",")
 }
 
 func operationIOSummary(mappings model.OperationMap, values map[string]string) string {

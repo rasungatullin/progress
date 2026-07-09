@@ -41,12 +41,48 @@
       "profile": {
         "type": "object",
         "description": "Разрешённый исполнительный профиль для последующих операций действия."
+      },
+      "structured_input": {
+        "type": "object",
+        "description": "Подготовленный структурированный ввод для запуска исполнения."
+      },
+      "workplace": {
+        "type": "object",
+        "description": "Подготовленная спецификация рабочего места с синхронизированными ветками."
       }
     }
   },
   "operations": [
     {
-      "name": "prepare-data"
+      "name": "prepare-data",
+      "in": {
+        "expected_result": {
+          "ref": "in.expected_result"
+        },
+        "constraints": {
+          "ref": "in.constraints"
+        },
+        "canonical_task": {
+          "ref": "in.canonical_task"
+        },
+        "related_objects": {
+          "ref": "in.related_objects"
+        },
+        "reasons": {
+          "ref": "in.reasons"
+        },
+        "structured_input": {
+          "ref": "in.structured_input"
+        }
+      },
+      "out": {
+        "structured_input": {
+          "ref": "data.structured_input"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        }
+      }
     },
     {
       "name": "resolve-profile",

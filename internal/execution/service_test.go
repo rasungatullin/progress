@@ -638,6 +638,81 @@ func TestResolveProfileUsesOperationInputValue(t *testing.T) {
 	}
 }
 
+func TestPrepareDataFillsActionDataAndKeepsStateCopies(t *testing.T) {
+	t.Parallel()
+
+	operation := prepareDataOperationSpec()
+	assignment := &ExecutionAssignment{
+		Action:          ActionStartImplementationPR,
+		ExpectedResult:  "Выполнить реализацию.",
+		Constraints:     []string{"Не менять публичный интерфейс."},
+		CanonicalTask:   &ObjectRef{Type: "task", Repository: "owner/name", Number: 112},
+		RelatedObjects:  []ObjectRef{{Type: "merge-request", Attributes: map[string]string{"base_ref": "main", "head_ref": "112"}}},
+		Reasons:         []AssignmentReason{{Code: "route_selected", Message: "Маршрут выбрал реализацию."}},
+		StructuredInput: &StructuredInput{Task: "Ship it."},
+	}
+	state := &operationExecution{
+		in: model.Invocation{
+			Assignment: assignment,
+			Workplace:  model.WorkplaceSpec{Name: "112"},
+		},
+		assignment: assignment,
+		action: model.Action{
+			Name:       ActionStartImplementationPR,
+			Operations: []model.OperationSpec{operation},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.prepareData(context.Background(), state, operation, OperationKindPrepareData)
+	if err != nil {
+		t.Fatalf("prepare data: %v", err)
+	}
+	dataInput, ok := state.data["structured_input"].(*StructuredInput)
+	if !ok || dataInput.Task != "Ship it." {
+		t.Fatalf("prepare-data must fill data.structured_input: %#v", state.data)
+	}
+	dataWorkplace, ok := state.data["workplace"].(model.WorkplaceSpec)
+	if !ok || dataWorkplace.BaseRef != "main" || dataWorkplace.HeadRef != "112" {
+		t.Fatalf("prepare-data must fill data.workplace with synchronized refs: %#v", state.data)
+	}
+	if state.in.Launch.StructuredInput == nil || state.in.Launch.StructuredInput.Task != "Ship it." {
+		t.Fatalf("state invocation must keep prepared structured input: %#v", state.in)
+	}
+	if state.in.Workplace.BaseRef != "main" || state.in.Workplace.HeadRef != "112" {
+		t.Fatalf("state invocation must keep prepared workplace refs: %#v", state.in.Workplace)
+	}
+}
+
+func TestPrepareDataUsesOperationInputValue(t *testing.T) {
+	t.Parallel()
+
+	operation := prepareDataOperationSpec()
+	operation.In["structured_input"] = model.OperationMapping{Value: json.RawMessage(`{"task":"Из входа операции."}`)}
+	state := &operationExecution{
+		in: model.Invocation{
+			Assignment: &ExecutionAssignment{StructuredInput: &StructuredInput{Task: "Из старого состояния."}},
+		},
+		assignment: &ExecutionAssignment{StructuredInput: &StructuredInput{Task: "Из старого состояния."}},
+		action:     model.Action{Operations: []model.OperationSpec{operation}},
+		tracker:    newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.prepareData(context.Background(), state, operation, OperationKindPrepareData)
+	if err != nil {
+		t.Fatalf("prepare data: %v", err)
+	}
+	if state.assignment.StructuredInput == nil || state.assignment.StructuredInput.Task != "Из входа операции." {
+		t.Fatalf("prepare-data must use operation input value: %#v", state.assignment)
+	}
+	dataInput, ok := state.data["structured_input"].(*StructuredInput)
+	if !ok || dataInput.Task != "Из входа операции." {
+		t.Fatalf("prepare-data must write selected structured input to data.structured_input: %#v", state.data)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -769,7 +844,21 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 			RequiresWorkplace: boolRef(true),
 			RequiresSynthesis: boolRef(true),
 			Operations: []methodology.ActionOperation{
-				{Name: OperationKindPrepareData},
+				{
+					Name: OperationKindPrepareData,
+					In: map[string]methodology.ActionMapping{
+						"expected_result":  mappingRef("in.expected_result"),
+						"constraints":      mappingRef("in.constraints"),
+						"canonical_task":   mappingRef("in.canonical_task"),
+						"related_objects":  mappingRef("in.related_objects"),
+						"reasons":          mappingRef("in.reasons"),
+						"structured_input": mappingRef("in.structured_input"),
+					},
+					Out: map[string]methodology.ActionMapping{
+						"structured_input": mappingRef("data.structured_input"),
+						"workplace":        mappingRef("data.workplace"),
+					},
+				},
 				{Name: OperationKindLoadPullRequest},
 				{Name: OperationKindLoadReviewRemarks},
 				{Name: OperationKindResolveProfile, In: map[string]methodology.ActionMapping{"profile_name": mappingRef("action.profile")}, Out: map[string]methodology.ActionMapping{"profile": mappingRef("data.profile")}},
@@ -830,6 +919,13 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 		if operation.Required != expectation.required {
 			t.Fatalf("unexpected required flag for %q: %#v", expectation.name, operation)
 		}
+	}
+	prepareOperation := findOperationSpec(action, OperationKindPrepareData)
+	if prepareOperation == nil {
+		t.Fatalf("prepare-data operation must be present: %#v", action.Operations)
+	}
+	if prepareOperation.In["structured_input"].Ref != "in.structured_input" || prepareOperation.Out["structured_input"].Ref != "data.structured_input" || prepareOperation.Out["workplace"].Ref != "data.workplace" {
+		t.Fatalf("prepare-data must keep action data mapping: %#v", prepareOperation)
 	}
 	profileOperation := findOperationSpec(action, OperationKindResolveProfile)
 	if profileOperation == nil {
@@ -1704,6 +1800,26 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 
 func optionalExecutionOperation(name string) methodology.ActionOperation {
 	return methodology.ActionOperation{Name: name, Kind: name, Origin: OperationOriginBuiltin, Required: boolRef(false)}
+}
+
+func prepareDataOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindPrepareData,
+		Kind:   OperationKindPrepareData,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"expected_result":  {Ref: "in.expected_result"},
+			"constraints":      {Ref: "in.constraints"},
+			"canonical_task":   {Ref: "in.canonical_task"},
+			"related_objects":  {Ref: "in.related_objects"},
+			"reasons":          {Ref: "in.reasons"},
+			"structured_input": {Ref: "in.structured_input"},
+		},
+		Out: model.OperationMap{
+			"structured_input": {Ref: "data.structured_input"},
+			"workplace":        {Ref: "data.workplace"},
+		},
+	}
 }
 
 func boolRef(value bool) *bool {
