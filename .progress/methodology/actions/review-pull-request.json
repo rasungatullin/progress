@@ -4,6 +4,7 @@
   "profile": "review",
   "aliases": [
     "pr-review",
+    "review",
     "review-pr"
   ],
   "requires_workplace": true,

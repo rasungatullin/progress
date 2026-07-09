@@ -3,7 +3,14 @@
   "class": "engineering-synthesis",
   "profile": "coder",
   "aliases": [
+    "code",
+    "code-commit",
+    "coder",
+    "coding",
+    "implement",
+    "implement-commit",
     "implement-pr",
+    "implementation",
     "implementation-pr",
     "open-pr",
     "start-implementation"

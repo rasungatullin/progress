@@ -146,7 +146,7 @@ func newExecutionService(cmd *cobra.Command) executionCommandService {
 }
 
 func newActionFlags() *actionFlags {
-	return &actionFlags{action: execution.ActionClassEngineeringSynthesis}
+	return &actionFlags{action: execution.ActionStartImplementationPR}
 }
 
 func newOperationFlags() *operationFlags {

@@ -152,7 +152,7 @@ JSON-строки структурированных секций выводят
 
 ```bash
 progress execution action \
-  --action implement \
+  --action start-implementation-pr \
   --task "Подготовить изменение по задаче 123" \
   --constraint "Не менять публичный формат интеграционных ответов"
 ```
@@ -161,7 +161,7 @@ progress execution action \
 
 ```bash
 progress execution action \
-  --action review \
+  --action review-pull-request \
   --input-file .progress/execution/input.json
 ```
 
@@ -206,7 +206,7 @@ progress execution action \
 
 ```bash
 progress execution operation resolve-action \
-  --action review \
+  --action review-pull-request \
   --task "Проверить изменения по запросу на слияние"
 ```
 

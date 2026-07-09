@@ -146,7 +146,7 @@ func TestExecutionActionAllowsActionOnlyInvocation(t *testing.T) {
 	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
 		return executionCommandServiceStub{
 			executeAction: func(_ context.Context, req execution.ActionInvocation) (execution.ExecutionResult, error) {
-				if req.Assignment == nil || req.Assignment.Action != execution.ActionClassEngineeringSynthesis {
+				if req.Assignment == nil || req.Assignment.Action != execution.ActionStartImplementationPR {
 					t.Fatalf("unexpected action request: %#v", req)
 				}
 				if req.Assignment.StructuredInput != nil {

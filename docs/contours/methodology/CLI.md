@@ -35,8 +35,8 @@
 methodology/
   catalog.json
   routes/task-processing.json
-  actions/implement.json
-  instructions/default-directive.json
+  actions/start-implementation-pr.json
+  instructions/start-implementation-pr-directive.json
   entities/decision-rule--description-assessment.json
 ```
 
@@ -58,23 +58,24 @@ methodology/
 }
 ```
 
-Пример `actions/implement.json`:
+Пример `actions/start-implementation-pr.json`:
 
 ```json
 {
-  "name": "implement",
+  "name": "start-implementation-pr",
   "class": "engineering-synthesis",
-  "profile": "default"
+  "profile": "coder"
 }
 ```
 
-Пример `instructions/default-directive.json`:
+Пример `instructions/start-implementation-pr-directive.json`:
 
 ```json
 {
-  "name": "default-directive",
-  "profile": "default",
-  "body": "Сформировать результат выполнения."
+  "name": "start-implementation-pr-directive",
+  "profile": "coder",
+  "action": "start-implementation-pr",
+  "body": "Выполнить задачу и открыть запрос на слияние."
 }
 ```
 
@@ -137,7 +138,7 @@ progress methodology select --route task-processing
 Переопределение действия или профиля:
 
 ```bash
-progress methodology select --route task-processing --action implement --profile coder
+progress methodology select --route task-processing --action start-implementation-pr --profile coder
 ```
 
 Вывод содержит выбранные сущности, источники `global` или `local`, пути каталогов и диагностические строки выбора.
@@ -164,9 +165,9 @@ progress methodology save --file ./catalog.json --scope global
 
 ```bash
 progress methodology add action \
-  --name implement \
+  --name start-implementation-pr \
   --class engineering-synthesis \
-  --profile default \
+  --profile coder \
   --operation prepare-data \
   --operation launch-synthesis
 ```
@@ -177,8 +178,8 @@ progress methodology add action \
 progress methodology add route \
   --name manual-action \
   --title "Ручной запуск действия" \
-  --action implement \
-  --profile default \
+  --action start-implementation-pr \
+  --profile coder \
   --reason-code issue_context_ready \
   --reason-message "Контекст задачи готов к передаче в контур исполнения."
 ```
@@ -199,8 +200,9 @@ progress methodology add route \
 
 ```bash
 progress methodology add instruction \
-  --name default-directive \
-  --profile default \
+  --name start-implementation-pr-directive \
+  --profile coder \
+  --action start-implementation-pr \
   --body-file ./instruction.md
 ```
 

@@ -417,7 +417,7 @@ func buildExecuteDecision(context DecisionContext, route selectedWorkflowRoute) 
 	issue := context.Issue
 	prompt := buildExecutionTask(issue)
 	if strings.TrimSpace(route.Action) == "" {
-		route.Action = "implement"
+		route.Action = execution.ActionStartImplementationPR
 	}
 	if strings.TrimSpace(route.ExpectedResult) == "" {
 		route.ExpectedResult = "Выполнить выбранное действие и вернуть диагностируемый результат."
