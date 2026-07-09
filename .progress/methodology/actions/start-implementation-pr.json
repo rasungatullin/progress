@@ -75,6 +75,10 @@
       "structured_output": {
         "type": "object",
         "description": "Нормализованный структурированный результат выполнения."
+      },
+      "commit_summary": {
+        "type": "string",
+        "description": "Сводка создания коммита и отправки ветки."
       }
     }
   },
@@ -228,7 +232,38 @@
       }
     },
     {
-      "name": "commit-push"
+      "name": "commit-push",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "invocation": {
+          "ref": "in"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        },
+        "result": {
+          "ref": "data.result"
+        },
+        "structured_output": {
+          "ref": "data.structured_output"
+        }
+      },
+      "out": {
+        "commit_summary": {
+          "ref": "data.commit_summary"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
       "name": "publish-merge-request"

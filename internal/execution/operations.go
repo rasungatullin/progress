@@ -78,7 +78,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindParseResult:
 		return e.parseResult(state, operation, name)
 	case OperationKindCommitPush:
-		return e.commitPush(ctx, state, name)
+		return e.commitPush(ctx, state, operation, name)
 	case OperationKindPublishMergeRequest:
 		return e.publishMergeRequest(ctx, state, name)
 	case OperationKindPublishReviewRemarks:
@@ -1346,39 +1346,160 @@ func parseResultOutputSummary(output *StructuredOutput, operation OperationSpec)
 	})
 }
 
-func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operationExecution, name string) error {
-	if !state.action.RequiresSynthesis {
-		state.tracker.skip(name, "Создание коммита не требуется для действия без синтеза.")
+func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := commitPushInputFromOperation(state, operation)
+	if !input.requiresSynthesis {
+		writeOperationData(state, operation.Out, "commit_summary", "")
+		writeOperationData(state, operation.Out, "result", input.result)
+		state.tracker.skipIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary("", input.result, operation), "Создание коммита не требуется для действия без синтеза.")
 		return nil
 	}
 
 	pusher, ok := e.service.launcher.(commitPusher)
 	if !ok {
 		err := fmt.Errorf("commit-push operation is unsupported by launcher")
-		state.result.Status = "failed"
-		if strings.TrimSpace(state.result.Summary) == "" {
-			state.result.Summary = err.Error()
+		input.result.Status = "failed"
+		if strings.TrimSpace(input.result.Summary) == "" {
+			input.result.Summary = err.Error()
 		}
+		state.result = input.result
+		writeOperationData(state, operation.Out, "result", input.result)
 		state.tracker.fail(name, "Операция commit-push не поддержана модулем запуска.", err, "commit_push_unsupported", false, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, err)
 		return err
 	}
 
-	summary, err := pusher.CommitAndPush(ctx, state.in, state.allocation, state.workplace, state.result.StructuredOutput)
+	summary, err := pusher.CommitAndPush(ctx, input.invocation, input.allocation, input.workplace, input.structuredOutput)
 	if err != nil {
-		state.result.Status = "failed"
-		if strings.TrimSpace(state.result.Summary) == "" {
-			state.result.Summary = strings.TrimSpace(err.Error())
+		input.result.Status = "failed"
+		if strings.TrimSpace(input.result.Summary) == "" {
+			input.result.Summary = strings.TrimSpace(err.Error())
 		}
+		state.result = input.result
+		writeOperationData(state, operation.Out, "result", input.result)
 		state.tracker.fail(name, "Создание коммита или отправка ветки не выполнены.", err, "commit_push_failed", true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, err)
 		return err
 	}
 
-	state.result.Summary = joinExecutionSummaries(state.result.Summary, summary)
-	state.tracker.complete(name, summary)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
+	input.result.Summary = joinExecutionSummaries(input.result.Summary, summary)
+	state.result = input.result
+	writeOperationData(state, operation.Out, "commit_summary", summary)
+	writeOperationData(state, operation.Out, "result", input.result)
+	state.tracker.completeIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary(summary, input.result, operation), summary)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, nil)
 	return nil
+}
+
+type commitPushInput struct {
+	requiresSynthesis bool
+	invocation        invocation
+	profile           profile
+	allocation        allocation
+	workplace         workplace
+	result            LaunchResult
+	structuredOutput  *StructuredOutput
+}
+
+func commitPushInputFromOperation(state *operationExecution, operation OperationSpec) commitPushInput {
+	input := commitPushInput{}
+	if state != nil {
+		input.requiresSynthesis = state.action.RequiresSynthesis
+		input.invocation = state.in
+		input.profile = state.profile
+		input.allocation = state.allocation
+		input.workplace = state.workplace
+		input.result = state.result
+		input.structuredOutput = state.result.StructuredOutput
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["requires_synthesis"]; ok {
+		if value, ok := boolValueFromParseResultMapping(state, mapping); ok {
+			input.requiresSynthesis = value
+		}
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.allocation = value
+		}
+	}
+	if mapping, ok := operation.In["workplace"]; ok {
+		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.workplace = value
+		}
+	}
+	if mapping, ok := operation.In["result"]; ok {
+		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
+			input.result = value
+			input.structuredOutput = value.StructuredOutput
+		}
+	}
+	if mapping, ok := operation.In["structured_output"]; ok {
+		if value, ok := structuredOutputValueFromCommitPushMapping(state, mapping); ok {
+			input.structuredOutput = value
+		}
+	}
+	return input
+}
+
+func structuredOutputValueFromCommitPushMapping(state *operationExecution, mapping model.OperationMapping) (*StructuredOutput, bool) {
+	if len(mapping.Value) != 0 {
+		var value StructuredOutput
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return &value, true
+		}
+		return nil, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.structured_output":
+		if state == nil {
+			return nil, false
+		}
+		value, ok := state.data["structured_output"].(*StructuredOutput)
+		return value, ok
+	case "state.result.structured_output":
+		if state == nil {
+			return nil, false
+		}
+		return state.result.StructuredOutput, true
+	default:
+		return nil, false
+	}
+}
+
+func commitPushInputSummary(input commitPushInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"allocation":         allocationSummary(input.allocation),
+		"invocation":         invocationSummary(input.invocation),
+		"profile":            profileSummary(input.profile),
+		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+		"result":             resultSummary(input.result),
+		"structured_output":  structuredOutputSummary(input.structuredOutput),
+		"workplace":          workplaceSummary(input.workplace),
+	})
+}
+
+func commitPushOutputSummary(commitSummary string, result LaunchResult, operation OperationSpec) string {
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		resultJSON = []byte(fmt.Sprintf(`{"status":%q}`, result.Status))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"commit_summary": commitSummary,
+		"result":         string(resultJSON),
+	})
 }
 
 func (e builtinOperationExecutor) finalize(ctx context.Context, state *operationExecution, name string) error {

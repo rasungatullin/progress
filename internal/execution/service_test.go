@@ -1136,6 +1136,97 @@ func TestParseResultWritesEmptyOutputForActionWithoutSynthesis(t *testing.T) {
 	}
 }
 
+func TestCommitPushFillsActionDataAndKeepsStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := commitPushOperationSpec()
+	structuredOutput := &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}
+	state := &operationExecution{
+		in: model.Invocation{
+			Task: "task-42",
+		},
+		action: model.Action{
+			RequiresSynthesis: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"profile":           model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
+			"allocation":        model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
+			"workplace":         model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":            model.LaunchResult{Status: "completed", Summary: "launch complete"},
+			"structured_output": structuredOutput,
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy", StructuredOutput: &model.StructuredOutput{Summary: "Legacy."}},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	launcher := &stubLauncher{commitSummary: "git=committed+pushed branch=task-42"}
+	service := &Service{
+		logger:   log.Default(),
+		launcher: launcher,
+	}
+
+	err := builtinOperationExecutor{service: service}.commitPush(context.Background(), state, operation, OperationKindCommitPush)
+	if err != nil {
+		t.Fatalf("commit push: %v", err)
+	}
+	if state.data["commit_summary"] != "git=committed+pushed branch=task-42" {
+		t.Fatalf("commit-push must fill data.commit_summary: %#v", state.data)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok {
+		t.Fatalf("commit-push must update data.result: %#v", state.data)
+	}
+	if !strings.Contains(dataResult.Summary, "launch complete") || !strings.Contains(dataResult.Summary, "git=committed+pushed branch=task-42") {
+		t.Fatalf("unexpected data result summary: %#v", dataResult)
+	}
+	if state.result.Summary != dataResult.Summary {
+		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	}
+	if !launcher.commitCalled || launcher.commitOutput == nil || launcher.commitOutput.Summary != "Done." {
+		t.Fatalf("commit-push must pass structured output from operation input: %#v", launcher)
+	}
+	if launcher.commitAllocation.Resource != "binding:coder" || launcher.commitWorkplace.Name != "/tmp/work" {
+		t.Fatalf("commit-push must pass operation input data: allocation=%#v workplace=%#v", launcher.commitAllocation, launcher.commitWorkplace)
+	}
+}
+
+func TestCommitPushWritesResultForActionWithoutSynthesis(t *testing.T) {
+	t.Parallel()
+
+	operation := commitPushOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{Task: "task-42"},
+		action: model.Action{
+			RequiresSynthesis: false,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"result": model.LaunchResult{Status: "skipped", Summary: "synthesis=not-required"},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger:   log.Default(),
+		launcher: &stubLauncher{commitErr: errors.New("commit must not be called")},
+	}
+
+	err := builtinOperationExecutor{service: service}.commitPush(context.Background(), state, operation, OperationKindCommitPush)
+	if err != nil {
+		t.Fatalf("commit push: %v", err)
+	}
+	if state.data["commit_summary"] != "" {
+		t.Fatalf("skipped commit-push must write empty commit summary: %#v", state.data)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "skipped" {
+		t.Fatalf("skipped commit-push must keep data.result: %#v", state.data)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindCommitPush)
+	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
+		t.Fatalf("skipped commit-push must keep contract output diagnostics: %#v", result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -1343,7 +1434,22 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 						"structured_output": mappingRef("data.structured_output"),
 					},
 				},
-				{Name: OperationKindCommitPush},
+				{
+					Name: OperationKindCommitPush,
+					In: map[string]methodology.ActionMapping{
+						"requires_synthesis": mappingRef("action.requires_synthesis"),
+						"invocation":         mappingRef("in"),
+						"profile":            mappingRef("data.profile"),
+						"allocation":         mappingRef("data.allocation"),
+						"workplace":          mappingRef("data.workplace"),
+						"result":             mappingRef("data.result"),
+						"structured_output":  mappingRef("data.structured_output"),
+					},
+					Out: map[string]methodology.ActionMapping{
+						"commit_summary": mappingRef("data.commit_summary"),
+						"result":         mappingRef("data.result"),
+					},
+				},
 				{Name: OperationKindPublishReviewResponses},
 				{Name: OperationKindFinalize},
 			},
@@ -1444,6 +1550,13 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	}
 	if parseOperation.In["result"].Ref != "data.result" || parseOperation.Out["structured_output"].Ref != "data.structured_output" {
 		t.Fatalf("parse-result must keep action data mapping: %#v", parseOperation)
+	}
+	commitOperation := findOperationSpec(action, OperationKindCommitPush)
+	if commitOperation == nil {
+		t.Fatalf("commit-push operation must be present: %#v", action.Operations)
+	}
+	if commitOperation.In["structured_output"].Ref != "data.structured_output" || commitOperation.In["workplace"].Ref != "data.workplace" || commitOperation.Out["commit_summary"].Ref != "data.commit_summary" || commitOperation.Out["result"].Ref != "data.result" {
+		t.Fatalf("commit-push must keep action data mapping: %#v", commitOperation)
 	}
 }
 
@@ -2158,7 +2271,10 @@ type stubLauncher struct {
 	err              error
 	beforeReturn     func()
 	commitCalled     bool
+	commitInvocation model.Invocation
 	commitAllocation model.Allocation
+	commitWorkplace  model.Workplace
+	commitOutput     *model.StructuredOutput
 	commitSummary    string
 	commitErr        error
 	commit           func(context.Context, model.Invocation, model.Allocation, model.Workplace, *model.StructuredOutput) (string, error)
@@ -2193,7 +2309,10 @@ func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, profile mo
 
 func (s *stubLauncher) CommitAndPush(ctx context.Context, in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
 	s.commitCalled = true
+	s.commitInvocation = in
 	s.commitAllocation = allocation
+	s.commitWorkplace = workplace
+	s.commitOutput = output
 	if s.commit != nil {
 		return s.commit(ctx, in, allocation, workplace, output)
 	}
@@ -2416,6 +2535,27 @@ func parseResultOperationSpec() model.OperationSpec {
 		},
 		Out: model.OperationMap{
 			"structured_output": {Ref: "data.structured_output"},
+		},
+	}
+}
+
+func commitPushOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindCommitPush,
+		Kind:   OperationKindCommitPush,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"requires_synthesis": {Ref: "action.requires_synthesis"},
+			"invocation":         {Ref: "in"},
+			"profile":            {Ref: "data.profile"},
+			"allocation":         {Ref: "data.allocation"},
+			"workplace":          {Ref: "data.workplace"},
+			"result":             {Ref: "data.result"},
+			"structured_output":  {Ref: "data.structured_output"},
+		},
+		Out: model.OperationMap{
+			"commit_summary": {Ref: "data.commit_summary"},
+			"result":         {Ref: "data.result"},
 		},
 	}
 }
