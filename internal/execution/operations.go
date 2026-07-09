@@ -56,9 +56,6 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationExecution, operation OperationSpec) error {
 	name := operationResultName(operation)
 	switch operationKind(operation) {
-	case OperationKindResolveAction:
-		state.tracker.complete(name, fmt.Sprintf("action=%s class=%s", state.action.Name, state.action.Class))
-		return nil
 	case OperationKindPrepareData:
 		return e.prepareData(ctx, state, name)
 	case OperationKindLoadPullRequest:

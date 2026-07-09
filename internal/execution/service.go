@@ -131,11 +131,7 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 	action, err := s.resolveAction(ctx, in)
 	if err != nil {
 		result := failedStartResult(err)
-		operations := actionResolutionFailureOperations(err)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile{}, allocation{}, workplace{}, result, err)
-		if operation := findOperationResult(operations, OperationKindResolveAction); operation != nil {
-			return *operation, err
-		}
 		return OperationResult{}, err
 	}
 	if !actionContainsOperation(action, operationName) {
@@ -221,9 +217,8 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 	action, err := s.resolveAction(ctx, in)
 	if err != nil {
 		result := failedStartResult(err)
-		operations := actionResolutionFailureOperations(err)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile{}, allocation{}, workplace{}, result, err)
-		return executionResultFromLaunch(assignment, Action{Name: actionNameFromInvocation(in)}, operations, result, err), err
+		return executionResultFromLaunch(assignment, Action{Name: actionNameFromInvocation(in)}, nil, result, err), err
 	}
 	if strings.TrimSpace(action.Profile) != "" {
 		in.Profile = strings.TrimSpace(action.Profile)

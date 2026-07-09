@@ -55,7 +55,11 @@ func TestServiceSnapshotLoadsAvailableLayers(t *testing.T) {
 func TestServiceSnapshotReportsMissingConfig(t *testing.T) {
 	t.Parallel()
 
-	snapshot, err := NewService(nil).Snapshot(context.Background(), SnapshotInput{RepoRoot: t.TempDir(), LoadIntegration: true})
+	snapshot, err := NewService(nil).Snapshot(context.Background(), SnapshotInput{
+		RepoRoot:        t.TempDir(),
+		ConfigHome:      t.TempDir(),
+		LoadIntegration: true,
+	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}

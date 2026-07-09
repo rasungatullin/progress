@@ -54,7 +54,7 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 				Status: "completed",
 				Action: execution.Action{Name: "implement"},
 				Operations: []execution.OperationResult{{
-					Name:   "resolve-action",
+					Name:   "prepare-data",
 					Status: "completed",
 				}},
 			},
@@ -79,7 +79,7 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 		"decision-reason=issue_context_ready:Issue-backed decision context is ready for direct execution handoff.\n",
 		"execution-result-status=completed\n",
 		"execution-action=implement\n",
-		"execution-operation=resolve-action:completed\n",
+		"execution-operation=prepare-data:completed\n",
 		"execution-status=completed\n",
 		"execution-summary=profile=default runner=opencode\n",
 		"issue-number=123\n",

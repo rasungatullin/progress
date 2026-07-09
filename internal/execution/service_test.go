@@ -154,7 +154,7 @@ func TestServiceExecuteOperationClosesHistoryForEarlyOperation(t *testing.T) {
 	service := &Service{logger: log.Default()}
 
 	result, err := service.ExecuteOperation(context.Background(), OperationInvocation{
-		Operation: OperationKindResolveAction,
+		Operation: OperationKindPrepareData,
 		Assignment: &ExecutionAssignment{
 			Action:        "review",
 			CanonicalTask: &ObjectRef{Type: "task", Number: 61},
@@ -163,7 +163,7 @@ func TestServiceExecuteOperationClosesHistoryForEarlyOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute operation: %v", err)
 	}
-	if result.Name != OperationKindResolveAction || result.Status != OperationStatusCompleted {
+	if result.Name != OperationKindPrepareData || result.Status != OperationStatusCompleted {
 		t.Fatalf("unexpected operation result: %#v", result)
 	}
 
@@ -218,7 +218,6 @@ func TestServiceExecuteReturnsActionAndOperationResults(t *testing.T) {
 		t.Fatalf("execution result must keep assignment: %#v", result.Assignment)
 	}
 	expectedOperations := []string{
-		OperationKindResolveAction,
 		OperationKindPrepareData,
 		OperationKindResolveProfile,
 		OperationKindAllocateResources,
@@ -239,8 +238,8 @@ func TestServiceExecuteReturnsActionAndOperationResults(t *testing.T) {
 			t.Fatalf("operation %s must be completed: %#v", operationName, result.Operations[index])
 		}
 	}
-	if result.Operations[1].Input == "" || result.Operations[1].Output == "" {
-		t.Fatalf("prepare data operation must keep input and output diagnostics: %#v", result.Operations[1])
+	if result.Operations[0].Input == "" || result.Operations[0].Output == "" {
+		t.Fatalf("prepare data operation must keep input and output diagnostics: %#v", result.Operations[0])
 	}
 }
 
@@ -272,17 +271,14 @@ func TestServiceExecuteReturnsDiagnosedOperationFailure(t *testing.T) {
 	if len(result.Operations) < 2 {
 		t.Fatalf("expected operation diagnostics: %#v", result.Operations)
 	}
-	if result.Operations[0].Name != OperationKindResolveAction || result.Operations[0].Status != OperationStatusCompleted {
-		t.Fatalf("action resolution must be completed: %#v", result.Operations[0])
-	}
-	if result.Operations[1].Name != OperationKindPrepareData || result.Operations[1].Status != OperationStatusCompleted {
+	if result.Operations[0].Name != OperationKindPrepareData || result.Operations[0].Status != OperationStatusCompleted {
 		t.Fatalf("data preparation must be completed: %#v", result.Operations[1])
 	}
-	if result.Operations[2].Name != OperationKindResolveProfile || result.Operations[2].Status != OperationStatusFailed {
-		t.Fatalf("profile operation must be failed: %#v", result.Operations[2])
+	if result.Operations[1].Name != OperationKindResolveProfile || result.Operations[1].Status != OperationStatusFailed {
+		t.Fatalf("profile operation must be failed: %#v", result.Operations[1])
 	}
-	if result.Operations[2].Failure == nil || result.Operations[2].Failure.Code != "profile_not_found" {
-		t.Fatalf("unexpected operation failure: %#v", result.Operations[2])
+	if result.Operations[1].Failure == nil || result.Operations[1].Failure.Code != "profile_not_found" {
+		t.Fatalf("unexpected operation failure: %#v", result.Operations[1])
 	}
 }
 
@@ -309,11 +305,8 @@ func TestServiceExecuteReturnsActionFailureAtZeroStage(t *testing.T) {
 	if result.Failure == nil || result.Failure.Code != "action_not_found" {
 		t.Fatalf("unexpected failure: %#v", result.Failure)
 	}
-	if len(result.Operations) != 1 || result.Operations[0].Name != OperationKindResolveAction || result.Operations[0].Status != OperationStatusFailed {
-		t.Fatalf("expected only failed action resolution operation: %#v", result.Operations)
-	}
-	if result.Operations[0].Failure == nil || result.Operations[0].Failure.Code != "action_not_found" {
-		t.Fatalf("unexpected action operation failure: %#v", result.Operations[0])
+	if len(result.Operations) != 0 {
+		t.Fatalf("action resolution failure must not create operation diagnostics: %#v", result.Operations)
 	}
 
 	runs, historyErr := history.List(context.Background(), root, history.ListFilter{Limit: 10, Status: "failed"})
@@ -392,7 +385,6 @@ func TestServiceExecuteLaunchFailureUsesCatalogOperationNames(t *testing.T) {
 			RequiresWorkplace: true,
 			RequiresSynthesis: true,
 			Operations: []model.OperationSpec{
-				builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
 				builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
 				builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
 				builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
@@ -491,7 +483,6 @@ func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
 			RequiresWorkplace: false,
 			RequiresSynthesis: false,
 			Operations: []model.OperationSpec{
-				builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
 				builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
 			},
 		}},
@@ -510,10 +501,10 @@ func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
 	if result.Status != "completed" {
 		t.Fatalf("unexpected result: %#v", result)
 	}
-	if len(result.Operations) != 2 {
+	if len(result.Operations) != 1 {
 		t.Fatalf("operation list must come from resolved action: %#v", result.Operations)
 	}
-	if result.Operations[0].Name != OperationKindResolveAction || result.Operations[1].Name != OperationKindFinalize {
+	if result.Operations[0].Name != OperationKindFinalize {
 		t.Fatalf("unexpected operation order: %#v", result.Operations)
 	}
 }
@@ -545,7 +536,7 @@ func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
 				Aliases:           []string{"implement"},
 				RequiresWorkplace: boolRef(true),
 				RequiresSynthesis: boolRef(true),
-				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+				Operations:        testExecutionOperations(OperationKindFinalize),
 			},
 			{
 				Name:              "implement",
@@ -553,7 +544,7 @@ func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
 				Profile:           "local",
 				RequiresWorkplace: boolRef(false),
 				RequiresSynthesis: boolRef(false),
-				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+				Operations:        testExecutionOperations(OperationKindFinalize),
 			},
 		},
 	}, invocation{Action: "implement"})
@@ -577,7 +568,7 @@ func TestActionResolutionPrefersLaterAlias(t *testing.T) {
 				Aliases:           []string{"implement"},
 				RequiresWorkplace: boolRef(true),
 				RequiresSynthesis: boolRef(true),
-				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+				Operations:        testExecutionOperations(OperationKindFinalize),
 			},
 			{
 				Name:              "local-implementation",
@@ -586,7 +577,7 @@ func TestActionResolutionPrefersLaterAlias(t *testing.T) {
 				Aliases:           []string{"implement"},
 				RequiresWorkplace: boolRef(false),
 				RequiresSynthesis: boolRef(false),
-				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
+				Operations:        testExecutionOperations(OperationKindFinalize),
 			},
 		},
 	}, invocation{Action: "implement"})
@@ -607,13 +598,13 @@ func TestActionResolutionRejectsDuplicateOperations(t *testing.T) {
 			Class:             ActionClassService,
 			RequiresWorkplace: boolRef(false),
 			RequiresSynthesis: boolRef(false),
-			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindResolveAction),
+			Operations:        testExecutionOperations(OperationKindPrepareData, OperationKindPrepareData),
 		}},
 	}, invocation{Action: "diagnostic"})
 	if err == nil {
 		t.Fatal("expected duplicate operation error")
 	}
-	if !strings.Contains(err.Error(), `операция "resolve-action" задана повторно`) {
+	if !strings.Contains(err.Error(), `операция "prepare-data" задана повторно`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -627,7 +618,7 @@ func TestActionResolutionMakesReviewRemarksRequiredForApplyReviewComments(t *tes
 			Class:             ActionClassEngineeringSynthesis,
 			RequiresWorkplace: boolRef(true),
 			RequiresSynthesis: boolRef(true),
-			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindLoadReviewRemarks, OperationKindFinalize),
+			Operations:        testExecutionOperations(OperationKindLoadReviewRemarks, OperationKindFinalize),
 		}},
 	}, invocation{Action: ActionApplyReviewComments})
 	if err != nil {
@@ -649,7 +640,6 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 			RequiresWorkplace: boolRef(true),
 			RequiresSynthesis: boolRef(true),
 			Operations: []methodology.ActionOperation{
-				{Name: OperationKindResolveAction},
 				{Name: OperationKindPrepareData},
 				{Name: OperationKindLoadPullRequest},
 				{Name: OperationKindLoadReviewRemarks},
@@ -665,7 +655,6 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 			},
 		}},
 		Operations: []methodology.Operation{
-			{Name: OperationKindResolveAction, Kind: OperationKindResolveAction, Title: "Разрешение действия", Origin: OperationOriginBuiltin, Required: boolRef(true)},
 			{Name: OperationKindPrepareData, Kind: OperationKindPrepareData, Title: "Подготовка данных", Origin: OperationOriginBuiltin, Required: boolRef(true)},
 			{Name: OperationKindLoadPullRequest, Kind: OperationKindLoadPullRequest, Title: "Получение запроса на слияние", Origin: OperationOriginBuiltin, Required: boolRef(true)},
 			{Name: OperationKindLoadReviewRemarks, Kind: OperationKindLoadReviewRemarks, Title: "Получение замечаний ревизии", Origin: OperationOriginBuiltin},
@@ -688,7 +677,6 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 		name     string
 		required bool
 	}{
-		{OperationKindResolveAction, true},
 		{OperationKindPrepareData, true},
 		{OperationKindLoadPullRequest, true},
 		{OperationKindLoadReviewRemarks, true},
@@ -1550,13 +1538,13 @@ func writeTestMethodologyCatalog(t *testing.T, root string) {
 func testExecutionMethodologyCatalog() methodology.Catalog {
 	return methodology.Catalog{
 		Actions: []methodology.Action{
-			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
-			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
-			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
-			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
-			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
-			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
-			{Name: ActionClassIntegrationChange, Class: ActionClassIntegrationChange, Profile: "default", RequiresWorkplace: boolRef(false), RequiresSynthesis: boolRef(false), Operations: testExecutionOperations(OperationKindResolveAction, OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
+			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
+			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
+			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
+			{Name: ActionClassIntegrationChange, Class: ActionClassIntegrationChange, Profile: "default", RequiresWorkplace: boolRef(false), RequiresSynthesis: boolRef(false), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
 		},
 	}
 }
@@ -1592,7 +1580,6 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
@@ -1611,7 +1598,6 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
@@ -1630,7 +1616,6 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
@@ -1650,7 +1635,6 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
@@ -1668,7 +1652,6 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": false},
@@ -1689,7 +1672,6 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": true},
@@ -1711,7 +1693,6 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": false,
       "requires_synthesis": false,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "origin": "builtin", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},

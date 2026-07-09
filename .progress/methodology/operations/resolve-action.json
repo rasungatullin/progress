@@ -1,7 +1,0 @@
-{
-  "name": "resolve-action",
-  "kind": "resolve-action",
-  "title": "Разрешение действия",
-  "origin": "builtin",
-  "required": true
-}

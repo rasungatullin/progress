@@ -24,7 +24,6 @@ const (
 	ActionReviewPullRequest     = "review-pull-request"
 	ActionApplyReviewComments   = "apply-review-comments"
 
-	OperationKindResolveAction          = "resolve-action"
 	OperationKindPrepareData            = "prepare-data"
 	OperationKindLoadPullRequest        = "load-pull-request"
 	OperationKindLoadReviewRemarks      = "load-review-remarks"
@@ -284,8 +283,6 @@ func normalizeMethodologyOperation(operation methodology.Operation) methodology.
 
 func defaultOperationSpec(kind string) model.OperationSpec {
 	switch strings.TrimSpace(kind) {
-	case OperationKindResolveAction:
-		return builtinOperation(OperationKindResolveAction, "Разрешение действия", true)
 	case OperationKindPrepareData:
 		return builtinOperation(OperationKindPrepareData, "Подготовка данных", true)
 	case OperationKindLoadPullRequest:
@@ -470,7 +467,7 @@ func executionResultFromLaunch(assignment *model.ExecutionAssignment, action mod
 		Launch:          &result,
 	}
 	if err != nil {
-		executionResult.Failure = executionFailure(executionFailureCode(operations), err, false, true)
+		executionResult.Failure = executionFailure(executionFailureCode(err, operations), err, false, true)
 	}
 
 	return executionResult
@@ -503,32 +500,25 @@ func cloneAction(action model.Action) model.Action {
 	return cloned
 }
 
-func actionResolutionFailureOperations(err error) []model.OperationResult {
-	tracker := newOperationTracker(model.Action{
-		Operations: []model.OperationSpec{
-			builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
-		},
-	})
-	code := "action_not_found"
-	summary := "Действие не найдено на нулевом этапе исполнения."
+func actionResolutionFailureCode(err error) string {
 	var resolutionErr actionResolutionError
-	if errors.As(err, &resolutionErr) {
-		if strings.TrimSpace(resolutionErr.code) != "" {
-			code = resolutionErr.code
-		}
-		if code != "action_not_found" {
-			summary = "Разрешение действия завершилось диагностируемым отказом."
-		}
+	if !errors.As(err, &resolutionErr) {
+		return ""
 	}
-	tracker.fail(OperationKindResolveAction, summary, err, code, false, true)
-	return tracker.snapshot()
+	if code := strings.TrimSpace(resolutionErr.code); code != "" {
+		return code
+	}
+	return "action_not_found"
 }
 
-func executionFailureCode(operations []model.OperationResult) string {
+func executionFailureCode(err error, operations []model.OperationResult) string {
 	for _, operation := range operations {
 		if operation.Failure != nil && strings.TrimSpace(operation.Failure.Code) != "" {
 			return operation.Failure.Code
 		}
+	}
+	if code := actionResolutionFailureCode(err); code != "" {
+		return code
 	}
 	return "execution_failed"
 }

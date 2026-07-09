@@ -41,9 +41,6 @@
   },
   "operations": [
     {
-      "name": "resolve-action"
-    },
-    {
       "name": "prepare-data"
     },
     {

@@ -310,7 +310,6 @@ func methodologyCatalogJSON() string {
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "required": true},
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true},
@@ -329,7 +328,6 @@ func methodologyCatalogJSON() string {
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "required": true},
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true},
@@ -347,7 +345,6 @@ func methodologyCatalogJSON() string {
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "required": true},
         {"name": "prepare-data", "kind": "prepare-data", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "required": true},
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true},
