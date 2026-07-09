@@ -992,7 +992,7 @@ func TestBuildDirectiveWritesDirectiveForActionWithoutSynthesis(t *testing.T) {
 	}
 }
 
-func TestLaunchSynthesisFillsActionDataAndKeepsStateResult(t *testing.T) {
+func TestLaunchSynthesisFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := launchSynthesisOperationSpec()
@@ -1032,8 +1032,8 @@ func TestLaunchSynthesisFillsActionDataAndKeepsStateResult(t *testing.T) {
 	if dataResult.Status != "completed" || dataResult.StructuredOutput == nil || dataResult.StructuredOutput.Summary != "Done." {
 		t.Fatalf("unexpected data result: %#v", dataResult)
 	}
-	if state.result.Status != "completed" || state.result.StructuredOutput == nil || state.result.StructuredOutput.Summary != "Done." {
-		t.Fatalf("state result must keep compatibility copy: %#v", state.result)
+	if state.result.Status != "" || state.result.StructuredOutput != nil {
+		t.Fatalf("launch-synthesis must not write implicit state result: %#v", state.result)
 	}
 	if launcher.invocation.Launch.Runner != "opencode" || launcher.invocation.Launch.Model != "openai/gpt-5.5" || launcher.invocation.Launch.CommitPush {
 		t.Fatalf("launcher must receive directive from operation input with commit push disabled: %#v", launcher.invocation.Launch)

@@ -388,6 +388,19 @@ func directiveFromExecutionData(state *operationExecution) launchSpec {
 	return state.in.Launch
 }
 
+func resultFromExecutionData(state *operationExecution) LaunchResult {
+	if state == nil {
+		return LaunchResult{}
+	}
+	if strings.TrimSpace(state.result.Status) != "" {
+		return state.result
+	}
+	if value, ok := state.data["result"].(LaunchResult); ok {
+		return value
+	}
+	return state.result
+}
+
 func resolveProfileInputSummary(profileName string, operation OperationSpec) string {
 	profileName = strings.TrimSpace(profileName)
 	if profileName == "" {
@@ -1038,7 +1051,7 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	input := launchSynthesisInputFromOperation(state, operation)
 	if !input.requiresSynthesis {
 		result := LaunchResult{Status: "skipped", Summary: "synthesis=not-required"}
-		writeOperationData(state, operation.Out, "result", result)
+		writeLaunchSynthesisData(state, operation, result)
 		state.tracker.skipIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), "Запуск синтеза не требуется для разрешённого действия.")
 		return nil
 	}
@@ -1048,8 +1061,7 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	launchInvocation.Launch = input.directive
 	launchInvocation.Launch.CommitPush = false
 	result, err := e.service.launch(launchCtx, launchInvocation, input.profile, input.allocation, input.workplace)
-	state.result = result
-	writeOperationData(state, operation.Out, "result", result)
+	writeLaunchSynthesisData(state, operation, result)
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, launchInvocation, firstResolvedProfile(input.profile, profileFromExecutionData(state)), input.allocation, input.workplace, result, err)
 	if err != nil {
 		if result.StructuredOutput != nil {
@@ -1074,6 +1086,14 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 
 	state.tracker.completeIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), fmt.Sprintf("status=%s", result.Status))
 	return nil
+}
+
+func writeLaunchSynthesisData(state *operationExecution, operation OperationSpec, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"result": {Ref: "data.result"}}
+	}
+	writeOperationData(state, out, "result", result)
 }
 
 type launchSynthesisInput struct {
@@ -1350,7 +1370,7 @@ func parseResultInputFromOperation(state *operationExecution, operation Operatio
 	input := parseResultInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.result = state.result
+		input.result = resultFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -1432,8 +1452,7 @@ func parseResultOutputSummary(output *StructuredOutput, operation OperationSpec)
 func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := commitPushInputFromOperation(state, operation)
 	if !input.requiresSynthesis {
-		writeOperationData(state, operation.Out, "commit_summary", "")
-		writeOperationData(state, operation.Out, "result", input.result)
+		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.skipIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary("", input.result, operation), "Создание коммита не требуется для действия без синтеза.")
 		return nil
 	}
@@ -1446,7 +1465,7 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 			input.result.Summary = err.Error()
 		}
 		state.result = input.result
-		writeOperationData(state, operation.Out, "result", input.result)
+		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.fail(name, "Операция commit-push не поддержана модулем запуска.", err, "commit_push_unsupported", false, true)
 		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, err)
 		return err
@@ -1459,7 +1478,7 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 			input.result.Summary = strings.TrimSpace(err.Error())
 		}
 		state.result = input.result
-		writeOperationData(state, operation.Out, "result", input.result)
+		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.fail(name, "Создание коммита или отправка ветки не выполнены.", err, "commit_push_failed", true, true)
 		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, err)
 		return err
@@ -1467,11 +1486,22 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 
 	input.result.Summary = joinExecutionSummaries(input.result.Summary, summary)
 	state.result = input.result
-	writeOperationData(state, operation.Out, "commit_summary", summary)
-	writeOperationData(state, operation.Out, "result", input.result)
+	writeCommitPushData(state, operation, summary, input.result)
 	state.tracker.completeIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary(summary, input.result, operation), summary)
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, nil)
 	return nil
+}
+
+func writeCommitPushData(state *operationExecution, operation OperationSpec, summary string, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"commit_summary": {Ref: "data.commit_summary"},
+			"result":         {Ref: "data.result"},
+		}
+	}
+	writeOperationData(state, out, "commit_summary", summary)
+	writeOperationData(state, out, "result", result)
 }
 
 type commitPushInput struct {
@@ -1492,8 +1522,8 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 		input.profile = profileFromExecutionData(state)
 		input.allocation = allocationFromExecutionData(state)
 		input.workplace = workplaceFromExecutionData(state)
-		input.result = state.result
-		input.structuredOutput = state.result.StructuredOutput
+		input.result = resultFromExecutionData(state)
+		input.structuredOutput = input.result.StructuredOutput
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -1617,7 +1647,7 @@ func finalizeInputFromOperation(state *operationExecution, operation OperationSp
 		input.requiresSynthesis = state.action.RequiresSynthesis
 		input.actionName = state.action.Name
 		input.actionClass = string(state.action.Class)
-		input.result = state.result
+		input.result = resultFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
