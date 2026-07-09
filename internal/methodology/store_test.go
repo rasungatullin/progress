@@ -2,6 +2,7 @@ package methodology
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -11,6 +12,15 @@ import (
 
 	"github.com/rasungatullin/progress/internal/configuration"
 )
+
+func mustMarshalCatalogJSON(t *testing.T, value any) string {
+	t.Helper()
+	b, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("build catalog json: %v", err)
+	}
+	return string(b)
+}
 
 func TestLoadCatalogMergesGlobalAndLocalLayersWithLocalPriority(t *testing.T) {
 	t.Parallel()
@@ -236,6 +246,368 @@ func TestLoadCatalogRejectsInvalidActionOperations(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestLoadCatalogAllowsLegacyActionOperationShortForm(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions": [{"name":"implement","operations":[{"name":"resolve-action"}]}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	if _, err := LoadCatalogWithHome("/repo", "/config-home", readFile); err != nil {
+		t.Fatalf("load catalog with legacy operation form: %v", err)
+	}
+}
+
+func TestLoadCatalogAcceptsEmptyContracts(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","contract":{},"operations":[{"name":"resolve-action"}]}],
+				"operations":[{"name":"resolve-action","contract":{}}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	if _, err := LoadCatalogWithHome("/repo", "/config-home", readFile); err != nil {
+		t.Fatalf("load catalog with empty contracts: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsInvalidActionContractFieldType(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","contract":{"in":{"task_id":{}}}}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected invalid contract field type error")
+	}
+	if !strings.Contains(err.Error(), "implement.contract.in.task_id.type must be non-empty") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogAcceptsActionOperationBindingByValue(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"value":"task-123"}}}]}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	if _, err := LoadCatalogWithHome("/repo", "/config-home", readFile); err != nil {
+		t.Fatalf("load catalog with value binding: %v", err)
+	}
+}
+
+func TestLoadCatalogAcceptsActionOperationBindingByNullValue(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(mustMarshalCatalogJSON(t, map[string]any{
+				"actions": []any{
+					map[string]any{
+						"name": "implement",
+						"operations": []any{
+							map[string]any{
+								"name": "resolve-action",
+								"in": map[string]any{
+									"task_id": map[string]any{
+										"value": nil,
+									},
+								},
+							},
+						},
+					},
+				},
+				"operations": []any{
+					map[string]any{"name": "resolve-action"},
+				},
+			})), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	if _, err := LoadCatalogWithHome("/repo", "/config-home", readFile); err != nil {
+		t.Fatalf("load catalog with null value binding: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsActionOperationBindingWithoutRefOrValue(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{}}}]}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected binding error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[0].in.task_id must contain either ref or value`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsConflictingActionOperationBinding(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":"in.task_id","value":"abc"}}}]}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected conflicting binding error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[0].in.task_id has both ref and value`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsConflictingActionOperationBindingWithNullValue(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(mustMarshalCatalogJSON(t, map[string]any{
+				"actions": []any{
+					map[string]any{
+						"name": "implement",
+						"operations": []any{
+							map[string]any{
+								"name": "resolve-action",
+								"in": map[string]any{
+									"task_id": map[string]any{
+										"ref":   "in.task_id",
+										"value": nil,
+									},
+								},
+							},
+						},
+					},
+				},
+				"operations": []any{
+					map[string]any{"name": "resolve-action"},
+				},
+			})), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected conflicting binding error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[0].in.task_id has both ref and value`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsConflictingActionOperationBindingWithEmptyRef(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":" ","value":"abc"}}}]}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected conflicting binding error")
+	}
+	if !strings.Contains(err.Error(), `action "implement" operations[0].in.task_id has both ref and value`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsEmptyOperationContractFieldType(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
+				"operations":[{"name":"resolve-action","contract":{"in":{"task_id":{}}}}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected invalid operation contract field type error")
+	}
+	if !strings.Contains(err.Error(), "resolve-action.contract.in.task_id.type must be non-empty") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsOperationContractRequiredTypeError(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
+				"operations":[{"name":"resolve-action","contract":{"out":{"workspace":{"type":"string","required":"yes"}}}}
+				]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected required type error")
+	}
+	if !strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsActionContractSectionType(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","contract":{"in":[]}}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected contract section type error")
+	}
+	if !strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsActionContractInNullSection(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","contract":{"in":null}}],
+				"operations":[{"name":"resolve-action"}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected contract section type error")
+	}
+	if !strings.Contains(err.Error(), "implement.contract.in must be an object") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsInvalidActionContractRequiredType(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(mustMarshalCatalogJSON(t, map[string]any{
+				"actions": []any{
+					map[string]any{
+						"name": "implement",
+						"contract": map[string]any{
+							"in": map[string]any{
+								"task_id": map[string]any{
+									"type":     "string",
+									"required": "yes",
+								},
+							},
+						},
+					},
+				},
+				"operations": []any{
+					map[string]any{"name": "resolve-action"},
+				},
+			})), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected required type error")
+	}
+	if !strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsOperationContractOutNullSection(t *testing.T) {
+	t.Parallel()
+
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{
+				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
+				"operations":[{"name":"resolve-action","contract":{"out":null}}]
+			}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/config-home", readFile)
+	if err == nil {
+		t.Fatal("expected contract section type error")
+	}
+	if !strings.Contains(err.Error(), "resolve-action.contract.out must be an object") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
