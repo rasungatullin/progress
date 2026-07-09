@@ -79,6 +79,14 @@
       "commit_summary": {
         "type": "string",
         "description": "Сводка создания коммита и отправки ветки."
+      },
+      "merge_request": {
+        "type": "object",
+        "description": "Опубликованный запрос на слияние."
+      },
+      "publish_summary": {
+        "type": "string",
+        "description": "Сводка публикации запроса на слияние."
       }
     }
   },
@@ -266,7 +274,32 @@
       }
     },
     {
-      "name": "publish-merge-request"
+      "name": "publish-merge-request",
+      "in": {
+        "invocation": {
+          "ref": "in"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        },
+        "result": {
+          "ref": "data.result"
+        },
+        "structured_output": {
+          "ref": "data.structured_output"
+        }
+      },
+      "out": {
+        "merge_request": {
+          "ref": "data.merge_request"
+        },
+        "publish_summary": {
+          "ref": "data.publish_summary"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
       "name": "finalize"

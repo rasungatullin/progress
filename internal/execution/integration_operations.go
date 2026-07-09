@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -91,10 +92,16 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 	return nil
 }
 
-func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state *operationExecution, name string) error {
+func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := publishMergeRequestInputFromOperation(state, operation)
+	applyPublishMergeRequestInputToState(state, input)
 	ref := pullRequestRefFromState(state)
 	if ref.Number > 0 {
-		state.tracker.skip(name, fmt.Sprintf("Запрос на слияние уже задан: number=%d.", ref.Number))
+		mergeRequest := mergeRequestFromRef(ref)
+		writeOperationData(state, operation.Out, "merge_request", mergeRequest)
+		writeOperationData(state, operation.Out, "publish_summary", fmt.Sprintf("pull-request=%d", ref.Number))
+		writeOperationData(state, operation.Out, "result", state.result)
+		state.tracker.skipIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, fmt.Sprintf("pull-request=%d", ref.Number), state.result, operation), fmt.Sprintf("Запрос на слияние уже задан: number=%d.", ref.Number))
 		return nil
 	}
 	if strings.TrimSpace(ref.Repository) == "" {
@@ -140,10 +147,94 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	}
 
 	summary := pullRequestPublishSummary(response)
+	mergeRequest := mergeRequestFromPublishResponse(response, ref)
+	state.pullRequest = &mergeRequest
 	state.result.Summary = joinExecutionSummaries(state.result.Summary, summary)
-	state.tracker.completeIO(name, fmt.Sprintf("repository=%s base=%s head=%s", ref.Repository, ref.Base, ref.Head), summary, "Запрос на слияние зафиксирован через контур интеграции.")
+	writeOperationData(state, operation.Out, "merge_request", mergeRequest)
+	writeOperationData(state, operation.Out, "publish_summary", summary)
+	writeOperationData(state, operation.Out, "result", state.result)
+	state.tracker.completeIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, summary, state.result, operation), "Запрос на слияние зафиксирован через контур интеграции.")
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, nil)
 	return nil
+}
+
+type publishMergeRequestInput struct {
+	invocation       invocation
+	workplace        workplace
+	result           LaunchResult
+	structuredOutput *StructuredOutput
+}
+
+func publishMergeRequestInputFromOperation(state *operationExecution, operation OperationSpec) publishMergeRequestInput {
+	input := publishMergeRequestInput{}
+	if state != nil {
+		input.invocation = state.in
+		input.workplace = state.workplace
+		input.result = state.result
+		input.structuredOutput = state.result.StructuredOutput
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["workplace"]; ok {
+		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.workplace = value
+		}
+	}
+	if mapping, ok := operation.In["result"]; ok {
+		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
+			input.result = value
+			input.structuredOutput = value.StructuredOutput
+		}
+	}
+	if mapping, ok := operation.In["structured_output"]; ok {
+		if value, ok := structuredOutputValueFromCommitPushMapping(state, mapping); ok {
+			input.structuredOutput = value
+		}
+	}
+	return input
+}
+
+func applyPublishMergeRequestInputToState(state *operationExecution, input publishMergeRequestInput) {
+	if state == nil {
+		return
+	}
+	state.in = input.invocation
+	state.assignment = assignmentFromInvocation(input.invocation)
+	state.workplace = input.workplace
+	state.result = input.result
+	state.result.StructuredOutput = input.structuredOutput
+}
+
+func publishMergeRequestInputSummary(input publishMergeRequestInput, ref pullRequestRef, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"invocation":        invocationSummary(input.invocation),
+		"result":            resultSummary(input.result),
+		"structured_output": structuredOutputSummary(input.structuredOutput),
+		"workplace":         workplaceSummary(input.workplace),
+		"pull_request_ref":  fmt.Sprintf("repository=%s base=%s head=%s", ref.Repository, ref.Base, ref.Head),
+	})
+}
+
+func publishMergeRequestOutputSummary(mergeRequest integration.MergeRequest, summary string, result LaunchResult, operation OperationSpec) string {
+	mergeRequestJSON, err := json.Marshal(mergeRequest)
+	if err != nil {
+		mergeRequestJSON = []byte(fmt.Sprintf(`{"repository":%q,"number":%d}`, mergeRequest.Repository, mergeRequest.Number))
+	}
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		resultJSON = []byte(fmt.Sprintf(`{"status":%q}`, result.Status))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"merge_request":   string(mergeRequestJSON),
+		"publish_summary": summary,
+		"result":          string(resultJSON),
+	})
 }
 
 func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, state *operationExecution) (string, error) {
@@ -483,6 +574,50 @@ func mergeRequestFromIntegrationResponse(response integration.Response) (integra
 		}, true
 	}
 	return integration.MergeRequest{}, false
+}
+
+func mergeRequestFromPublishResponse(response integration.Response, ref pullRequestRef) integration.MergeRequest {
+	if mergeRequest, ok := mergeRequestFromIntegrationResponse(response); ok {
+		return mergeRequest
+	}
+	mergeRequest := mergeRequestFromRef(ref)
+	if response.PullRequestStatus != nil {
+		status := response.PullRequestStatus
+		mergeRequest.System = strings.TrimSpace(status.System)
+		mergeRequest.Repository = firstNonEmptyTrimmed(status.Repository, mergeRequest.Repository)
+		if status.Number > 0 {
+			mergeRequest.Number = status.Number
+		}
+		mergeRequest.State = strings.TrimSpace(status.State)
+		mergeRequest.BaseRef = firstNonEmptyTrimmed(status.Base, mergeRequest.BaseRef)
+		mergeRequest.HeadRef = firstNonEmptyTrimmed(status.Head, mergeRequest.HeadRef)
+		mergeRequest.Title = firstNonEmptyTrimmed(status.Title, mergeRequest.Title)
+		mergeRequest.URL = strings.TrimSpace(status.URL)
+		return mergeRequest
+	}
+	if response.OperationResult != nil {
+		result := response.OperationResult
+		mergeRequest.System = strings.TrimSpace(result.System)
+		mergeRequest.ExternalID = strings.TrimSpace(result.ExternalID)
+		if number, err := strconv.Atoi(strings.TrimSpace(result.ExternalID)); err == nil && number > 0 {
+			mergeRequest.Number = number
+		}
+		mergeRequest.State = strings.TrimSpace(result.Status)
+		mergeRequest.URL = strings.TrimSpace(result.URL)
+		return mergeRequest
+	}
+	return mergeRequest
+}
+
+func mergeRequestFromRef(ref pullRequestRef) integration.MergeRequest {
+	return integration.MergeRequest{
+		Repository: strings.TrimSpace(ref.Repository),
+		Number:     ref.Number,
+		Title:      strings.TrimSpace(ref.Title),
+		Body:       strings.TrimSpace(ref.Body),
+		BaseRef:    strings.TrimSpace(ref.Base),
+		HeadRef:    strings.TrimSpace(ref.Head),
+	}
 }
 
 func applyPullRequestToState(state *operationExecution, pr integration.MergeRequest) {

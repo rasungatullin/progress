@@ -1227,6 +1227,131 @@ func TestCommitPushWritesResultForActionWithoutSynthesis(t *testing.T) {
 	}
 }
 
+func TestPublishMergeRequestFillsActionDataAndKeepsStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := publishMergeRequestOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Task: "task-132",
+			Assignment: &ExecutionAssignment{
+				CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132, Title: "Поддержать действие"},
+			},
+			Workplace: model.WorkplaceSpec{Name: "132"},
+		},
+		assignment: &ExecutionAssignment{
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132, Title: "Поддержать действие"},
+		},
+		action: model.Action{
+			Operations: []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"workplace":         model.Workplace{Name: "/tmp/work", RepositoryRoot: "/tmp/work", Ready: true},
+			"result":            model.LaunchResult{Status: "completed", Summary: "launch complete"},
+			"structured_output": &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	integrations := &stubIntegrationExecutor{
+		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			if req.Operation != "create" || req.Repository != "owner/name" || req.Base != "main" || req.Head != "132" {
+				t.Fatalf("unexpected integration request: %#v", req)
+			}
+			return integration.Response{
+				PullRequestStatus: &integration.PullRequestStatus{Repository: req.Repository, Number: 17, State: "OPEN", URL: "https://github.com/owner/name/pull/17", Base: req.Base, Head: req.Head, Title: req.Title},
+				OperationResult:   &integration.OperationResult{Status: "ok", ExternalID: "17", URL: "https://github.com/owner/name/pull/17"},
+			}, nil
+		},
+	}
+	service := &Service{
+		logger:       log.Default(),
+		integrations: integrations,
+		runGitOutput: func(_ context.Context, dir string, args ...string) (string, error) {
+			if dir != "/tmp/work" || strings.Join(args, " ") != "symbolic-ref refs/remotes/origin/HEAD" {
+				return "", errors.New("unexpected git command")
+			}
+			return "refs/remotes/origin/main\n", nil
+		},
+	}
+
+	err := builtinOperationExecutor{service: service}.publishMergeRequest(context.Background(), state, operation, OperationKindPublishMergeRequest)
+	if err != nil {
+		t.Fatalf("publish merge request: %v", err)
+	}
+	mergeRequest, ok := state.data["merge_request"].(integration.MergeRequest)
+	if !ok {
+		t.Fatalf("publish-merge-request must fill data.merge_request: %#v", state.data)
+	}
+	if mergeRequest.Number != 17 || mergeRequest.URL != "https://github.com/owner/name/pull/17" || mergeRequest.HeadRef != "132" {
+		t.Fatalf("unexpected merge request: %#v", mergeRequest)
+	}
+	if summary := state.data["publish_summary"]; summary == "" || !strings.Contains(summary.(string), "pull-request=17") {
+		t.Fatalf("publish-merge-request must fill data.publish_summary: %#v", state.data)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || !strings.Contains(dataResult.Summary, "pull-request=17") {
+		t.Fatalf("publish-merge-request must update data.result: %#v", state.data)
+	}
+	if state.result.Summary != dataResult.Summary {
+		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	}
+}
+
+func TestPublishMergeRequestWritesOutputsWhenPullRequestAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	operation := publishMergeRequestOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Assignment: &ExecutionAssignment{
+				CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132},
+				RelatedObjects: []ObjectRef{{
+					Type:       "merge-request",
+					Repository: "owner/name",
+					Number:     17,
+				}},
+			},
+		},
+		assignment: &ExecutionAssignment{
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132},
+			RelatedObjects: []ObjectRef{{
+				Type:       "merge-request",
+				Repository: "owner/name",
+				Number:     17,
+			}},
+		},
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"workplace": model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":    model.LaunchResult{Status: "completed", Summary: "launch complete"},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger: log.Default(),
+		integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+			return integration.Response{}, errors.New("integration must not be called")
+		}},
+	}
+
+	err := builtinOperationExecutor{service: service}.publishMergeRequest(context.Background(), state, operation, OperationKindPublishMergeRequest)
+	if err != nil {
+		t.Fatalf("publish merge request: %v", err)
+	}
+	mergeRequest, ok := state.data["merge_request"].(integration.MergeRequest)
+	if !ok || mergeRequest.Number != 17 {
+		t.Fatalf("skipped publish must fill data.merge_request: %#v", state.data)
+	}
+	if state.data["publish_summary"] != "pull-request=17" {
+		t.Fatalf("skipped publish must fill data.publish_summary: %#v", state.data)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindPublishMergeRequest)
+	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
+		t.Fatalf("skipped publish must keep contract output diagnostics: %#v", result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -1557,6 +1682,46 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	}
 	if commitOperation.In["structured_output"].Ref != "data.structured_output" || commitOperation.In["workplace"].Ref != "data.workplace" || commitOperation.Out["commit_summary"].Ref != "data.commit_summary" || commitOperation.Out["result"].Ref != "data.result" {
 		t.Fatalf("commit-push must keep action data mapping: %#v", commitOperation)
+	}
+}
+
+func TestActionResolutionKeepsPublishMergeRequestMapping(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              ActionStartImplementationPR,
+			Class:             ActionClassEngineeringSynthesis,
+			RequiresWorkplace: boolRef(true),
+			RequiresSynthesis: boolRef(true),
+			Operations: []methodology.ActionOperation{{
+				Name: OperationKindPublishMergeRequest,
+				In: map[string]methodology.ActionMapping{
+					"invocation":        mappingRef("in"),
+					"workplace":         mappingRef("data.workplace"),
+					"result":            mappingRef("data.result"),
+					"structured_output": mappingRef("data.structured_output"),
+				},
+				Out: map[string]methodology.ActionMapping{
+					"merge_request":   mappingRef("data.merge_request"),
+					"publish_summary": mappingRef("data.publish_summary"),
+					"result":          mappingRef("data.result"),
+				},
+			}},
+		}},
+		Operations: []methodology.Operation{
+			{Name: OperationKindPublishMergeRequest, Kind: OperationKindPublishMergeRequest, Title: "Открытие запроса на слияние", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+		},
+	}, invocation{Action: ActionStartImplementationPR})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	operation := findOperationSpec(action, OperationKindPublishMergeRequest)
+	if operation == nil {
+		t.Fatalf("publish-merge-request operation must be present: %#v", action.Operations)
+	}
+	if operation.In["structured_output"].Ref != "data.structured_output" || operation.Out["merge_request"].Ref != "data.merge_request" || operation.Out["result"].Ref != "data.result" {
+		t.Fatalf("publish-merge-request must keep action data mapping: %#v", operation)
 	}
 }
 
@@ -2556,6 +2721,25 @@ func commitPushOperationSpec() model.OperationSpec {
 		Out: model.OperationMap{
 			"commit_summary": {Ref: "data.commit_summary"},
 			"result":         {Ref: "data.result"},
+		},
+	}
+}
+
+func publishMergeRequestOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindPublishMergeRequest,
+		Kind:   OperationKindPublishMergeRequest,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"invocation":        {Ref: "in"},
+			"workplace":         {Ref: "data.workplace"},
+			"result":            {Ref: "data.result"},
+			"structured_output": {Ref: "data.structured_output"},
+		},
+		Out: model.OperationMap{
+			"merge_request":   {Ref: "data.merge_request"},
+			"publish_summary": {Ref: "data.publish_summary"},
+			"result":          {Ref: "data.result"},
 		},
 	}
 }
