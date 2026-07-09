@@ -1363,7 +1363,7 @@ func TestLoadReviewRemarksFillsActionDataAndKeepsState(t *testing.T) {
 	}
 }
 
-func TestFinalizeFillsActionDataAndKeepsStateResult(t *testing.T) {
+func TestFinalizeFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := finalizeOperationSpec()
@@ -1390,8 +1390,8 @@ func TestFinalizeFillsActionDataAndKeepsStateResult(t *testing.T) {
 	if !ok || dataResult.Status != "completed" || !strings.Contains(dataResult.Summary, "synthesis=not-required") {
 		t.Fatalf("finalize must fill data.result: %#v", state.data)
 	}
-	if state.result.Status != dataResult.Status || state.result.Summary != dataResult.Summary {
-		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	if state.result.Status != "legacy-state" || state.result.Summary != "legacy-state" {
+		t.Fatalf("finalize must not write implicit state result: %#v", state.result)
 	}
 	result := findOperationResult(state.tracker.snapshot(), OperationKindFinalize)
 	if result == nil || result.Status != OperationStatusCompleted || result.Input == "" || result.Output == "" {

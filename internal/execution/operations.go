@@ -45,12 +45,12 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 		}
 	}
 
-	if strings.TrimSpace(state.result.Status) == "" {
-		state.result = LaunchResult{
+	if strings.TrimSpace(resultFromExecutionData(state).Status) == "" {
+		result := LaunchResult{
 			Status:  "completed",
 			Summary: fmt.Sprintf("action=%s class=%s operations=completed", state.action.Name, state.action.Class),
 		}
-		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
+		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
 	}
 
 	return nil
@@ -391,9 +391,6 @@ func directiveFromExecutionData(state *operationExecution) launchSpec {
 func resultFromExecutionData(state *operationExecution) LaunchResult {
 	if state == nil {
 		return LaunchResult{}
-	}
-	if strings.TrimSpace(state.result.Status) != "" {
-		return state.result
 	}
 	if value, ok := state.data["result"].(LaunchResult); ok {
 		return value
@@ -1621,21 +1618,28 @@ func commitPushOutputSummary(commitSummary string, result LaunchResult, operatio
 
 func (e builtinOperationExecutor) finalize(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := finalizeInputFromOperation(state, operation)
-	applyFinalizeInputToState(state, input)
 	if !input.requiresSynthesis {
-		state.result = LaunchResult{
+		result := LaunchResult{
 			Status:  "completed",
 			Summary: fmt.Sprintf("action=%s class=%s synthesis=not-required", input.actionName, input.actionClass),
 		}
-		writeOperationData(state, operation.Out, "result", state.result)
-		state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(state.result, operation), finalizeSummary(state.result))
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
+		writeFinalizeData(state, operation, result)
+		state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(result, operation), finalizeSummary(result))
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
 		return nil
 	}
 
-	writeOperationData(state, operation.Out, "result", state.result)
-	state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(state.result, operation), finalizeSummary(state.result))
+	writeFinalizeData(state, operation, input.result)
+	state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(input.result, operation), finalizeSummary(input.result))
 	return nil
+}
+
+func writeFinalizeData(state *operationExecution, operation OperationSpec, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"result": {Ref: "data.result"}}
+	}
+	writeOperationData(state, out, "result", result)
 }
 
 type finalizeInput struct {
@@ -1652,6 +1656,13 @@ func finalizeInputFromOperation(state *operationExecution, operation OperationSp
 		input.actionName = state.action.Name
 		input.actionClass = string(state.action.Class)
 		input.result = resultFromExecutionData(state)
+		if len(operation.In) == 0 &&
+			strings.TrimSpace(state.result.Status) != "" &&
+			strings.TrimSpace(input.result.Summary) != "" &&
+			strings.Contains(state.result.Summary, input.result.Summary) &&
+			state.result.Summary != input.result.Summary {
+			input.result = state.result
+		}
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -1698,13 +1709,6 @@ func actionStringValueFromFinalizeMapping(state *operationExecution, mapping mod
 	default:
 		return "", false
 	}
-}
-
-func applyFinalizeInputToState(state *operationExecution, input finalizeInput) {
-	if state == nil {
-		return
-	}
-	state.result = input.result
 }
 
 func finalizeInputSummary(input finalizeInput, operation OperationSpec) string {
