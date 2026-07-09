@@ -447,7 +447,7 @@ func (s *Service) finishOperationHistory(ctx context.Context, state *operationEx
 		launchResult.Summary = strings.TrimSpace(operationErr.Error())
 	}
 
-	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), state.allocation, state.workplace, launchResult, operationErr)
+	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, launchResult, operationErr)
 }
 
 func (s *Service) beginStartHistory(ctx context.Context, root string, in invocation) history.Handle {

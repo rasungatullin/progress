@@ -50,7 +50,7 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 			Status:  "completed",
 			Summary: fmt.Sprintf("action=%s class=%s operations=completed", state.action.Name, state.action.Class),
 		}
-		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), state.allocation, state.workplace, state.result, nil)
+		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, nil)
 	}
 
 	return nil
@@ -358,6 +358,16 @@ func firstResolvedProfile(values ...profile) profile {
 	return profile{}
 }
 
+func allocationFromExecutionData(state *operationExecution) allocation {
+	if state == nil {
+		return allocation{}
+	}
+	if value, ok := state.data["allocation"].(allocation); ok {
+		return value
+	}
+	return state.allocation
+}
+
 func resolveProfileInputSummary(profileName string, operation OperationSpec) string {
 	profileName = strings.TrimSpace(profileName)
 	if profileName == "" {
@@ -474,9 +484,9 @@ func operationIOSummary(mappings model.OperationMap, values map[string]string) s
 func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := allocateResourcesInputFromOperation(state, operation)
 	if !input.requiresSynthesis {
-		state.allocation = allocation{Resource: "not-required", Source: "action-without-synthesis"}
-		writeOperationData(state, operation.Out, "allocation", state.allocation)
-		state.tracker.skipIO(name, allocateResourcesInputSummary(input, operation), allocateResourcesOutputSummary(state.allocation, operation), "Ресурсное снабжение не требуется для действия без синтеза.")
+		allocation := allocation{Resource: "not-required", Source: "action-without-synthesis"}
+		writeAllocateResourcesData(state, operation, allocation)
+		state.tracker.skipIO(name, allocateResourcesInputSummary(input, operation), allocateResourcesOutputSummary(allocation, operation), "Ресурсное снабжение не требуется для действия без синтеза.")
 		return nil
 	}
 
@@ -488,10 +498,17 @@ func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *
 		return err
 	}
 
-	state.allocation = allocation
-	writeOperationData(state, operation.Out, "allocation", allocation)
+	writeAllocateResourcesData(state, operation, allocation)
 	state.tracker.completeIO(name, allocateResourcesInputSummary(input, operation), allocateResourcesOutputSummary(allocation, operation), fmt.Sprintf("resource=%s runner=%s model=%s", allocation.Resource, allocation.Runner, allocation.Model))
 	return nil
+}
+
+func writeAllocateResourcesData(state *operationExecution, operation OperationSpec, allocation allocation) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"allocation": {Ref: "data.allocation"}}
+	}
+	writeOperationData(state, out, "allocation", allocation)
 }
 
 type allocateResourcesInput struct {
@@ -691,7 +708,7 @@ func prepareWorkplaceInputFromOperation(state *operationExecution, operation Ope
 		input.requiresWorkplace = state.action.RequiresWorkplace
 		input.invocation = state.in
 		input.profile = profileFromExecutionData(state)
-		input.allocation = state.allocation
+		input.allocation = allocationFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -879,7 +896,7 @@ func buildDirectiveInputFromOperation(state *operationExecution, operation Opera
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
 		input.invocation = state.in
-		input.allocation = state.allocation
+		input.allocation = allocationFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -1041,7 +1058,7 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 		input.invocation = state.in
 		input.directive = state.in.Launch
 		input.profile = profileFromExecutionData(state)
-		input.allocation = state.allocation
+		input.allocation = allocationFromExecutionData(state)
 		input.workplace = state.workplace
 	}
 	if len(operation.In) == 0 {
@@ -1439,7 +1456,7 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 		input.requiresSynthesis = state.action.RequiresSynthesis
 		input.invocation = state.in
 		input.profile = profileFromExecutionData(state)
-		input.allocation = state.allocation
+		input.allocation = allocationFromExecutionData(state)
 		input.workplace = state.workplace
 		input.result = state.result
 		input.structuredOutput = state.result.StructuredOutput
@@ -1544,7 +1561,7 @@ func (e builtinOperationExecutor) finalize(ctx context.Context, state *operation
 		}
 		writeOperationData(state, operation.Out, "result", state.result)
 		state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(state.result, operation), finalizeSummary(state.result))
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), state.allocation, state.workplace, state.result, nil)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, nil)
 		return nil
 	}
 
@@ -1672,7 +1689,7 @@ func (e builtinOperationExecutor) unsupported(ctx context.Context, state *operat
 	err := fmt.Errorf("operation %q is unsupported", name)
 	state.result = failedStartResult(err)
 	state.tracker.fail(name, "Операция не поддержана текущей реализацией.", err, "operation_unsupported", false, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), state.allocation, state.workplace, state.result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), state.workplace, state.result, err)
 	return err
 }
 

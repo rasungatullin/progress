@@ -721,7 +721,7 @@ func TestPrepareDataUsesOperationInputValue(t *testing.T) {
 	}
 }
 
-func TestAllocateResourcesFillsActionDataAndKeepsStateAllocation(t *testing.T) {
+func TestAllocateResourcesFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := allocateResourcesOperationSpec()
@@ -757,8 +757,8 @@ func TestAllocateResourcesFillsActionDataAndKeepsStateAllocation(t *testing.T) {
 	if dataAllocation.Resource != "binding:coder" || dataAllocation.ModelBinding != "coder" {
 		t.Fatalf("unexpected data allocation: %#v", dataAllocation)
 	}
-	if state.allocation.Resource != "binding:coder" || state.allocation.ModelBinding != "coder" {
-		t.Fatalf("state allocation must keep compatibility copy: %#v", state.allocation)
+	if state.allocation.Resource != "" || state.allocation.ModelBinding != "" {
+		t.Fatalf("allocate-resources must not write implicit state allocation: %#v", state.allocation)
 	}
 	if resources.profile.Name != "coder" || resources.profile.ModelBinding != "coder" {
 		t.Fatalf("resource allocation must use profile from operation input: %#v", resources.profile)
@@ -793,8 +793,8 @@ func TestAllocateResourcesWritesNotRequiredAllocationForActionWithoutSynthesis(t
 	if !ok || dataAllocation.Resource != "not-required" || dataAllocation.Source != "action-without-synthesis" {
 		t.Fatalf("allocate-resources must write skipped allocation to data.allocation: %#v", state.data)
 	}
-	if state.allocation.Resource != "not-required" || state.allocation.Source != "action-without-synthesis" {
-		t.Fatalf("state allocation must keep skipped compatibility copy: %#v", state.allocation)
+	if state.allocation.Resource != "" || state.allocation.Source != "" {
+		t.Fatalf("allocate-resources must not write skipped implicit state allocation: %#v", state.allocation)
 	}
 	result := findOperationResult(state.tracker.snapshot(), OperationKindAllocateResources)
 	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
