@@ -1626,7 +1626,7 @@ func TestPublishReviewRemarksWritesOutputsWhenNoRemarks(t *testing.T) {
 	}
 }
 
-func TestPublishReviewResponsesFillsActionDataAndKeepsStateResult(t *testing.T) {
+func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := publishReviewResponsesOperationSpec()
@@ -1702,11 +1702,11 @@ func TestPublishReviewResponsesFillsActionDataAndKeepsStateResult(t *testing.T) 
 	if !ok || !strings.Contains(dataResult.Summary, "review-responses-published=1 review-threads-resolved=1") {
 		t.Fatalf("publish-review-responses must update data.result: %#v", state.data)
 	}
-	if state.result.Summary != dataResult.Summary {
-		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("publish-review-responses must not write implicit state result: %#v", state.result)
 	}
-	if len(state.reviewRemarks) != 1 || state.reviewRemarks[0].ExternalID != "remark-1" {
-		t.Fatalf("state review remarks must keep compatibility copy from action data: %#v", state.reviewRemarks)
+	if len(state.reviewRemarks) != 1 || state.reviewRemarks[0].ExternalID != "legacy" {
+		t.Fatalf("publish-review-responses must not write implicit state review remarks: %#v", state.reviewRemarks)
 	}
 	if len(integrations.calls) != 2 {
 		t.Fatalf("expected reply and resolve integration calls, got %#v", integrations.calls)

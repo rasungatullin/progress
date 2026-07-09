@@ -471,37 +471,47 @@ func publishReviewRemarksOutputSummary(summary string, result LaunchResult, oper
 
 func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := publishReviewResponsesInputFromOperation(state, operation)
-	applyPublishReviewResponsesInputToState(state, input)
-	ref := pullRequestRefFromState(state)
+	ref := pullRequestRefFromPublishReviewResponsesInput(state, input)
 	if ref.Number <= 0 {
 		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
 	responses := reviewResponsesFromOutput(input.structuredOutput)
 	if len(responses) == 0 {
-		writeOperationData(state, operation.Out, "review_responses_summary", "")
-		writeOperationData(state, operation.Out, "result", state.result)
-		state.tracker.skipIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary("", state.result, operation), "Структурированный вывод не содержит ответов на замечания.")
+		writePublishReviewResponsesData(state, operation, "", input.result)
+		state.tracker.skipIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary("", input.result, operation), "Структурированный вывод не содержит ответов на замечания.")
 		return nil
 	}
 
-	count, err := e.publishReviewResponseComments(ctx, state, ref, responses)
+	count, err := e.publishReviewResponseComments(ctx, ref, responses, input.reviewRemarks)
 	if err != nil {
 		return e.failIntegrationOperation(ctx, state, name, "Ответы на замечания не записаны.", err, "review_responses_publish_failed")
 	}
 
-	resolved, err := e.resolveReviewThreads(ctx, state, responses)
+	resolved, err := e.resolveReviewThreads(ctx, responses, input.reviewRemarks)
 	if err != nil {
 		return e.failIntegrationOperation(ctx, state, name, "Ответы записаны, но часть цепочек обсуждения не закрыта.", err, "review_thread_resolve_failed")
 	}
 
 	summary := fmt.Sprintf("review-responses-published=%d review-threads-resolved=%d", count, resolved)
-	state.result.Summary = joinExecutionSummaries(state.result.Summary, summary)
-	writeOperationData(state, operation.Out, "review_responses_summary", summary)
-	writeOperationData(state, operation.Out, "result", state.result)
-	state.tracker.completeIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary(summary, state.result, operation), "Ответы на замечания записаны через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
+	result := input.result
+	result.Summary = joinExecutionSummaries(result.Summary, summary)
+	writePublishReviewResponsesData(state, operation, summary, result)
+	state.tracker.completeIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary(summary, result, operation), "Ответы на замечания записаны через контур интеграции.")
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
 	return nil
+}
+
+func writePublishReviewResponsesData(state *operationExecution, operation OperationSpec, summary string, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"review_responses_summary": {Ref: "data.review_responses_summary"},
+			"result":                   {Ref: "data.result"},
+		}
+	}
+	writeOperationData(state, out, "review_responses_summary", summary)
+	writeOperationData(state, out, "result", result)
 }
 
 type publishReviewResponsesInput struct {
@@ -569,17 +579,6 @@ func reviewRemarksValueFromPublishReviewResponsesMapping(state *operationExecuti
 	default:
 		return nil, false
 	}
-}
-
-func applyPublishReviewResponsesInputToState(state *operationExecution, input publishReviewResponsesInput) {
-	if state == nil {
-		return
-	}
-	state.in = input.invocation
-	state.assignment = assignmentFromInvocation(input.invocation)
-	state.result = input.result
-	state.result.StructuredOutput = input.structuredOutput
-	state.reviewRemarks = append([]integration.ReviewRemark(nil), input.reviewRemarks...)
 }
 
 func publishReviewResponsesInputSummary(input publishReviewResponsesInput, operation OperationSpec) string {
@@ -662,7 +661,7 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 	return count, errors.Join(failures...)
 }
 
-func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, state *operationExecution, ref pullRequestRef, responses []StructuredResponse) (int, error) {
+func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, ref pullRequestRef, responses []StructuredResponse, reviewRemarks []integration.ReviewRemark) (int, error) {
 	executor, err := e.integrationExecutor()
 	if err != nil {
 		return 0, err
@@ -674,7 +673,7 @@ func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Cont
 		if body == "" {
 			continue
 		}
-		threadID := reviewThreadIDForResponse(state.reviewRemarks, response)
+		threadID := reviewThreadIDForResponse(reviewRemarks, response)
 		request := integration.Request{
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
@@ -701,7 +700,7 @@ func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Cont
 	return count, nil
 }
 
-func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, state *operationExecution, responses []StructuredResponse) (int, error) {
+func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, responses []StructuredResponse, reviewRemarks []integration.ReviewRemark) (int, error) {
 	executor, err := e.integrationExecutor()
 	if err != nil {
 		return 0, err
@@ -713,7 +712,7 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, stat
 		if !isResolvedReviewResponse(response) {
 			continue
 		}
-		threadID := reviewThreadIDForResponse(state.reviewRemarks, response)
+		threadID := reviewThreadIDForResponse(reviewRemarks, response)
 		if threadID == "" {
 			continue
 		}
@@ -823,6 +822,46 @@ func pullRequestRefFromPublishMergeRequestInput(state *operationExecution, input
 }
 
 func publishMergeRequestAssignment(state *operationExecution, input publishMergeRequestInput) *ExecutionAssignment {
+	if input.invocation.Assignment != nil {
+		return assignmentFromInvocation(input.invocation)
+	}
+	if state != nil {
+		return state.assignment
+	}
+	return nil
+}
+
+func pullRequestRefFromPublishReviewResponsesInput(state *operationExecution, input publishReviewResponsesInput) pullRequestRef {
+	ref := pullRequestRefFromAssignment(publishReviewResponsesAssignment(state, input))
+	if strings.TrimSpace(ref.Repository) == "" && state != nil && state.assignment != nil {
+		stateRef := pullRequestRefFromAssignment(state.assignment)
+		ref.Repository = stateRef.Repository
+	}
+	if ref.Number <= 0 && state != nil && state.pullRequest != nil {
+		ref.Number = state.pullRequest.Number
+	}
+	if strings.TrimSpace(ref.Repository) == "" && state != nil && state.pullRequest != nil {
+		ref.Repository = state.pullRequest.Repository
+	}
+	if strings.TrimSpace(ref.Base) == "" && state != nil && state.pullRequest != nil {
+		ref.Base = state.pullRequest.BaseRef
+	}
+	if strings.TrimSpace(ref.Head) == "" && state != nil && state.pullRequest != nil {
+		ref.Head = state.pullRequest.HeadRef
+	}
+	if strings.TrimSpace(ref.Title) == "" && state != nil && state.pullRequest != nil {
+		ref.Title = state.pullRequest.Title
+	}
+	if strings.TrimSpace(ref.Head) == "" {
+		assignment := publishReviewResponsesAssignment(state, input)
+		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
+			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
+		}
+	}
+	return ref
+}
+
+func publishReviewResponsesAssignment(state *operationExecution, input publishReviewResponsesInput) *ExecutionAssignment {
 	if input.invocation.Assignment != nil {
 		return assignmentFromInvocation(input.invocation)
 	}
