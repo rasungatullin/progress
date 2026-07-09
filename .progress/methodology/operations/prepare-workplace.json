@@ -3,5 +3,36 @@
   "kind": "prepare-workplace",
   "title": "Подготовка рабочего места",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "requires_workplace": {
+        "type": "boolean",
+        "required": true,
+        "description": "Признак необходимости подготовки рабочего места для разрешённого действия."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
+      },
+      "profile": {
+        "type": "object",
+        "required": true,
+        "description": "Разрешённый исполнительный профиль."
+      },
+      "allocation": {
+        "type": "object",
+        "required": true,
+        "description": "Результат ресурсного снабжения."
+      }
+    },
+    "out": {
+      "workplace": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленное рабочее место для последующих операций действия."
+      }
+    }
+  }
 }

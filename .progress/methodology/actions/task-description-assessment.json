@@ -124,7 +124,26 @@
       }
     },
     {
-      "name": "prepare-workplace"
+      "name": "prepare-workplace",
+      "in": {
+        "requires_workplace": {
+          "ref": "action.requires_workplace"
+        },
+        "invocation": {
+          "ref": "in"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        }
+      },
+      "out": {
+        "workplace": {
+          "ref": "data.workplace"
+        }
+      }
     },
     {
       "name": "build-directive"

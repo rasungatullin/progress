@@ -794,6 +794,97 @@ func TestAllocateResourcesWritesNotRequiredAllocationForActionWithoutSynthesis(t
 	}
 }
 
+func TestPrepareWorkplaceFillsActionDataAndKeepsStateWorkplace(t *testing.T) {
+	t.Parallel()
+
+	operation := prepareWorkplaceOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Task: "task-42",
+			Workplace: model.WorkplaceSpec{
+				Name: "task-42",
+			},
+		},
+		action: model.Action{
+			RequiresWorkplace: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"profile":    model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
+			"allocation": model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
+		},
+		profile:    model.Profile{Name: "legacy", Mode: "manual", ModelBinding: "legacy"},
+		allocation: model.Allocation{Resource: "legacy", Runner: "legacy"},
+		tracker:    newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	workplaces := &stubWorkplaceManager{workplace: model.Workplace{Name: "/tmp/task-42", RepositoryRoot: "/tmp/repo", Ready: true}}
+	service := &Service{
+		logger:     log.Default(),
+		workplaces: workplaces,
+	}
+
+	err := builtinOperationExecutor{service: service}.prepareWorkplace(context.Background(), state, operation, OperationKindPrepareWorkplace)
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+	dataWorkplace, ok := state.data["workplace"].(model.Workplace)
+	if !ok {
+		t.Fatalf("prepare-workplace must fill data.workplace: %#v", state.data)
+	}
+	if dataWorkplace.Name != "/tmp/task-42" || !dataWorkplace.Ready {
+		t.Fatalf("unexpected data workplace: %#v", dataWorkplace)
+	}
+	if state.workplace.Name != "/tmp/task-42" || !state.workplace.Ready {
+		t.Fatalf("state workplace must keep compatibility copy: %#v", state.workplace)
+	}
+	if state.in.Launch.Directory != "/tmp/task-42" {
+		t.Fatalf("state invocation must keep launch directory compatibility copy: %#v", state.in.Launch)
+	}
+	if workplaces.invocation.Workplace.Name != "task-42" {
+		t.Fatalf("workplace manager must receive invocation from operation input: %#v", workplaces.invocation)
+	}
+}
+
+func TestPrepareWorkplaceWritesLocalReadyWorkplaceForActionWithoutWorkplace(t *testing.T) {
+	t.Parallel()
+
+	operation := prepareWorkplaceOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Launch: model.LaunchSpec{Directory: "/repo"},
+		},
+		action: model.Action{
+			RequiresWorkplace: false,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"profile":    model.Profile{Name: "default", Mode: "manual"},
+			"allocation": model.Allocation{Resource: "not-required", Source: "action-without-synthesis"},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger:     log.Default(),
+		workplaces: &stubWorkplaceManager{err: errors.New("workplace must not be called")},
+	}
+
+	err := builtinOperationExecutor{service: service}.prepareWorkplace(context.Background(), state, operation, OperationKindPrepareWorkplace)
+	if err != nil {
+		t.Fatalf("prepare workplace: %v", err)
+	}
+	dataWorkplace, ok := state.data["workplace"].(model.Workplace)
+	if !ok || dataWorkplace.Name != "/repo" || !dataWorkplace.Ready {
+		t.Fatalf("prepare-workplace must write skipped workplace to data.workplace: %#v", state.data)
+	}
+	if state.workplace.Name != "/repo" || !state.workplace.Ready {
+		t.Fatalf("state workplace must keep skipped compatibility copy: %#v", state.workplace)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindPrepareWorkplace)
+	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
+		t.Fatalf("skipped workplace must keep contract output diagnostics: %#v", result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -954,7 +1045,18 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 						"allocation": mappingRef("data.allocation"),
 					},
 				},
-				{Name: OperationKindPrepareWorkplace},
+				{
+					Name: OperationKindPrepareWorkplace,
+					In: map[string]methodology.ActionMapping{
+						"requires_workplace": mappingRef("action.requires_workplace"),
+						"invocation":         mappingRef("in"),
+						"profile":            mappingRef("data.profile"),
+						"allocation":         mappingRef("data.allocation"),
+					},
+					Out: map[string]methodology.ActionMapping{
+						"workplace": mappingRef("data.workplace"),
+					},
+				},
 				{Name: OperationKindBuildDirective},
 				{Name: OperationKindLaunchSynthesis},
 				{Name: OperationKindParseResult},
@@ -1031,6 +1133,13 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	}
 	if allocationOperation.In["requires_synthesis"].Ref != "action.requires_synthesis" || allocationOperation.In["profile"].Ref != "data.profile" || allocationOperation.Out["allocation"].Ref != "data.allocation" {
 		t.Fatalf("allocate-resources must keep action data mapping: %#v", allocationOperation)
+	}
+	workplaceOperation := findOperationSpec(action, OperationKindPrepareWorkplace)
+	if workplaceOperation == nil {
+		t.Fatalf("prepare-workplace operation must be present: %#v", action.Operations)
+	}
+	if workplaceOperation.In["requires_workplace"].Ref != "action.requires_workplace" || workplaceOperation.In["allocation"].Ref != "data.allocation" || workplaceOperation.Out["workplace"].Ref != "data.workplace" {
+		t.Fatalf("prepare-workplace must keep action data mapping: %#v", workplaceOperation)
 	}
 }
 
@@ -1932,6 +2041,23 @@ func allocateResourcesOperationSpec() model.OperationSpec {
 		},
 		Out: model.OperationMap{
 			"allocation": {Ref: "data.allocation"},
+		},
+	}
+}
+
+func prepareWorkplaceOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindPrepareWorkplace,
+		Kind:   OperationKindPrepareWorkplace,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"requires_workplace": {Ref: "action.requires_workplace"},
+			"invocation":         {Ref: "in"},
+			"profile":            {Ref: "data.profile"},
+			"allocation":         {Ref: "data.allocation"},
+		},
+		Out: model.OperationMap{
+			"workplace": {Ref: "data.workplace"},
 		},
 	}
 }

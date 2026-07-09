@@ -70,7 +70,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindAllocateResources:
 		return e.allocateResources(ctx, state, operation, name)
 	case OperationKindPrepareWorkplace:
-		return e.prepareWorkplace(ctx, state, name)
+		return e.prepareWorkplace(ctx, state, operation, name)
 	case OperationKindBuildDirective:
 		return e.buildDirective(ctx, state, name)
 	case OperationKindLaunchSynthesis:
@@ -620,18 +620,20 @@ func profileSummary(profile profile) string {
 	return strings.Join(parts, ",")
 }
 
-func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *operationExecution, name string) error {
-	if !state.action.RequiresWorkplace {
-		state.workplace = workplace{Name: strings.TrimSpace(state.in.Launch.Directory), Ready: true}
-		state.tracker.skip(name, "Рабочее место не требуется для разрешённого действия.")
+func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := prepareWorkplaceInputFromOperation(state, operation)
+	if !input.requiresWorkplace {
+		state.workplace = workplace{Name: strings.TrimSpace(input.invocation.Launch.Directory), Ready: true}
+		writeOperationData(state, operation.Out, "workplace", state.workplace)
+		state.tracker.skipIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(state.workplace, operation), "Рабочее место не требуется для разрешённого действия.")
 		return nil
 	}
 
-	workplace, err := e.service.prepareWorkplace(ctx, state.in, state.profile, state.allocation)
+	workplace, err := e.service.prepareWorkplace(ctx, input.invocation, input.profile, input.allocation)
 	if err != nil {
 		state.result = failedStartResult(err)
 		state.tracker.fail(name, "Исполнительное рабочее место не подготовлено.", err, "workplace_not_prepared", true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, model.Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, model.Workplace{}, state.result, err)
 		return err
 	}
 
@@ -639,8 +641,177 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 	if strings.TrimSpace(state.in.Launch.Directory) == "" {
 		state.in.Launch.Directory = workplace.Name
 	}
-	state.tracker.complete(name, fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
+	writeOperationData(state, operation.Out, "workplace", workplace)
+	state.tracker.completeIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
 	return nil
+}
+
+type prepareWorkplaceInput struct {
+	requiresWorkplace bool
+	invocation        invocation
+	profile           profile
+	allocation        allocation
+}
+
+func prepareWorkplaceInputFromOperation(state *operationExecution, operation OperationSpec) prepareWorkplaceInput {
+	input := prepareWorkplaceInput{}
+	if state != nil {
+		input.requiresWorkplace = state.action.RequiresWorkplace
+		input.invocation = state.in
+		input.profile = state.profile
+		input.allocation = state.allocation
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["requires_workplace"]; ok {
+		if value, ok := boolValueFromPrepareWorkplaceMapping(state, mapping); ok {
+			input.requiresWorkplace = value
+		}
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromPrepareWorkplaceMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromPrepareWorkplaceMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromPrepareWorkplaceMapping(state, mapping); ok {
+			input.allocation = value
+		}
+	}
+	return input
+}
+
+func boolValueFromPrepareWorkplaceMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
+	if len(mapping.Value) != 0 {
+		var value bool
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return false, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "action.requires_workplace":
+		if state == nil {
+			return false, false
+		}
+		return state.action.RequiresWorkplace, true
+	default:
+		return false, false
+	}
+}
+
+func invocationValueFromPrepareWorkplaceMapping(state *operationExecution, mapping model.OperationMapping) (invocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value invocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return invocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "in", "invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		return state.in, true
+	default:
+		return invocation{}, false
+	}
+}
+
+func profileValueFromPrepareWorkplaceMapping(state *operationExecution, mapping model.OperationMapping) (profile, bool) {
+	if len(mapping.Value) != 0 {
+		var value profile
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return profile{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.profile":
+		if state == nil {
+			return profile{}, false
+		}
+		value, ok := state.data["profile"].(profile)
+		return value, ok
+	case "state.profile":
+		if state == nil {
+			return profile{}, false
+		}
+		return state.profile, true
+	default:
+		return profile{}, false
+	}
+}
+
+func allocationValueFromPrepareWorkplaceMapping(state *operationExecution, mapping model.OperationMapping) (allocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value allocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return allocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.allocation":
+		if state == nil {
+			return allocation{}, false
+		}
+		value, ok := state.data["allocation"].(allocation)
+		return value, ok
+	case "state.allocation":
+		if state == nil {
+			return allocation{}, false
+		}
+		return state.allocation, true
+	default:
+		return allocation{}, false
+	}
+}
+
+func prepareWorkplaceInputSummary(input prepareWorkplaceInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"allocation":         allocationSummary(input.allocation),
+		"invocation":         invocationSummary(input.invocation),
+		"profile":            profileSummary(input.profile),
+		"requires_workplace": fmt.Sprintf("%t", input.requiresWorkplace),
+	})
+}
+
+func prepareWorkplaceOutputSummary(workplace workplace, operation OperationSpec) string {
+	workplaceJSON, err := json.Marshal(workplace)
+	if err != nil {
+		workplaceJSON = []byte(fmt.Sprintf(`{"name":%q}`, workplace.Name))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"workplace": string(workplaceJSON),
+	})
+}
+
+func allocationSummary(allocation allocation) string {
+	if strings.TrimSpace(allocation.Resource) == "" && strings.TrimSpace(allocation.Runner) == "" && strings.TrimSpace(allocation.Model) == "" {
+		return "absent"
+	}
+	parts := []string{}
+	if resource := strings.TrimSpace(allocation.Resource); resource != "" {
+		parts = append(parts, "resource="+resource)
+	}
+	if runner := strings.TrimSpace(allocation.Runner); runner != "" {
+		parts = append(parts, "runner="+runner)
+	}
+	if model := strings.TrimSpace(allocation.Model); model != "" {
+		parts = append(parts, "model="+model)
+	}
+	if binding := strings.TrimSpace(allocation.ModelBinding); binding != "" {
+		parts = append(parts, "binding="+binding)
+	}
+	return strings.Join(parts, ",")
 }
 
 func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *operationExecution, name string) error {
