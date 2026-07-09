@@ -1140,38 +1140,6 @@ func mergeRequestFromRef(ref pullRequestRef) integration.MergeRequest {
 	}
 }
 
-func applyPullRequestToState(state *operationExecution, pr integration.MergeRequest) {
-	if state == nil {
-		return
-	}
-	if state.assignment == nil {
-		state.assignment = &ExecutionAssignment{}
-	}
-	if state.assignment.CanonicalTask == nil {
-		state.assignment.CanonicalTask = &ObjectRef{Type: "task"}
-	}
-	if strings.TrimSpace(state.assignment.CanonicalTask.Repository) == "" {
-		state.assignment.CanonicalTask.Repository = strings.TrimSpace(pr.Repository)
-	}
-	if number, ok := numericBranch(pr.HeadRef); ok && state.assignment.CanonicalTask.Number == 0 {
-		state.assignment.CanonicalTask.Number = number
-	}
-	upsertPullRequestObject(state.assignment, pr)
-	if strings.TrimSpace(state.in.Repository.URL) == "" {
-		state.in.Repository.URL = strings.TrimSpace(pr.Repository)
-	}
-	if strings.TrimSpace(state.in.Workplace.BaseRef) == "" {
-		state.in.Workplace.BaseRef = strings.TrimSpace(pr.BaseRef)
-	}
-	if strings.TrimSpace(pr.HeadRef) != "" {
-		state.in.Workplace.HeadRef = strings.TrimSpace(pr.HeadRef)
-	}
-	workplaceName := workplaceNameFromState(state)
-	if workplaceName != "" {
-		state.in.Workplace.Name = workplaceName
-	}
-}
-
 func invocationWithPullRequest(in invocation, pr integration.MergeRequest) invocation {
 	result := in
 	assignment := assignmentFromInvocation(result)
@@ -1238,10 +1206,6 @@ func numericBranch(value string) (int, bool) {
 	return number, err == nil && number > 0
 }
 
-func workplaceNameFromState(state *operationExecution) string {
-	return workplaceNameFromRef(workplaceHeadRefFromState(state))
-}
-
 func workplaceNameFromPullRequestAssignment(assignment *ExecutionAssignment) string {
 	ref := pullRequestRefFromAssignment(assignment)
 	if strings.TrimSpace(ref.Head) != "" {
@@ -1249,20 +1213,6 @@ func workplaceNameFromPullRequestAssignment(assignment *ExecutionAssignment) str
 	}
 	if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
 		return workplaceNameFromRef(strconv.Itoa(assignment.CanonicalTask.Number))
-	}
-	return ""
-}
-
-func workplaceHeadRefFromState(state *operationExecution) string {
-	if state == nil || state.assignment == nil {
-		return ""
-	}
-	ref := pullRequestRefFromAssignment(state.assignment)
-	if strings.TrimSpace(ref.Head) != "" {
-		return strings.TrimSpace(ref.Head)
-	}
-	if state.assignment.CanonicalTask != nil && state.assignment.CanonicalTask.Number > 0 {
-		return strconv.Itoa(state.assignment.CanonicalTask.Number)
 	}
 	return ""
 }
