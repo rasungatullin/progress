@@ -3,5 +3,21 @@
   "kind": "resolve-profile",
   "title": "Выбор исполнительного профиля",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "profile_name": {
+        "type": "string",
+        "required": true,
+        "description": "Имя исполнительного профиля из разрешённого действия."
+      }
+    },
+    "out": {
+      "profile": {
+        "type": "object",
+        "required": true,
+        "description": "Разрешённый исполнительный профиль с настройками запуска."
+      }
+    }
+  }
 }

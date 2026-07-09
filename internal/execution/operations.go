@@ -2,7 +2,9 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/execution/history"
@@ -15,6 +17,7 @@ type operationExecution struct {
 	in            invocation
 	assignment    *ExecutionAssignment
 	action        Action
+	data          map[string]any
 	profile       profile
 	allocation    allocation
 	workplace     workplace
@@ -63,7 +66,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindLoadReviewRemarks:
 		return e.loadReviewRemarks(ctx, state, name, operation.Required)
 	case OperationKindResolveProfile:
-		return e.resolveProfile(ctx, state, name)
+		return e.resolveProfile(ctx, state, operation, name)
 	case OperationKindAllocateResources:
 		return e.allocateResources(ctx, state, name)
 	case OperationKindPrepareWorkplace:
@@ -143,8 +146,11 @@ func explicitPullRequestHeadFromAssignment(assignment *ExecutionAssignment) stri
 	return ""
 }
 
-func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *operationExecution, name string) error {
-	profile, err := e.service.resolveProfile(ctx, state.in)
+func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	profileName := resolveProfileInputName(state, operation)
+	profileInput := state.in
+	profileInput.Profile = profileName
+	profile, err := e.service.resolveProfile(ctx, profileInput)
 	if err != nil {
 		state.result = failedStartResult(err)
 		state.tracker.fail(name, "Исполнительный профиль не определён.", err, "profile_not_found", false, true)
@@ -152,9 +158,110 @@ func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *ope
 		return err
 	}
 
+	writeOperationData(state, operation.Out, "profile", profile)
 	state.profile = profile
-	state.tracker.complete(name, fmt.Sprintf("profile=%s mode=%s", profile.Name, profile.Mode))
+	state.tracker.completeIO(name, resolveProfileInputSummary(profileName, operation), resolveProfileOutputSummary(profile, operation), fmt.Sprintf("profile=%s mode=%s", profile.Name, profile.Mode))
 	return nil
+}
+
+func resolveProfileInputName(state *operationExecution, operation OperationSpec) string {
+	if mapping, ok := operation.In["profile_name"]; ok {
+		if value := stringValueFromOperationMapping(mapping); value != "" {
+			return value
+		}
+		switch strings.TrimSpace(mapping.Ref) {
+		case "action.profile":
+			if state != nil && strings.TrimSpace(state.action.Profile) != "" {
+				return strings.TrimSpace(state.action.Profile)
+			}
+		case "in.profile", "invocation.profile":
+			if state != nil && strings.TrimSpace(state.in.Profile) != "" {
+				return strings.TrimSpace(state.in.Profile)
+			}
+		}
+	}
+	if state != nil && strings.TrimSpace(state.in.Profile) != "" {
+		return strings.TrimSpace(state.in.Profile)
+	}
+	return "default"
+}
+
+func stringValueFromOperationMapping(mapping model.OperationMapping) string {
+	if len(mapping.Value) == 0 {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(mapping.Value, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func writeOperationData(state *operationExecution, mappings model.OperationMap, field string, value any) {
+	if state == nil {
+		return
+	}
+	mapping, ok := mappings[field]
+	if !ok {
+		return
+	}
+	ref := strings.TrimSpace(mapping.Ref)
+	if !strings.HasPrefix(ref, "data.") {
+		return
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(ref, "data."))
+	if name == "" {
+		return
+	}
+	if state.data == nil {
+		state.data = map[string]any{}
+	}
+	state.data[name] = value
+}
+
+func resolveProfileInputSummary(profileName string, operation OperationSpec) string {
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		profileName = "default"
+	}
+	return operationIOSummary(operation.In, map[string]string{
+		"profile_name": profileName,
+	})
+}
+
+func resolveProfileOutputSummary(profile profile, operation OperationSpec) string {
+	profileJSON, err := json.Marshal(profile)
+	if err != nil {
+		profileJSON = []byte(fmt.Sprintf(`{"name":%q}`, profile.Name))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"profile": string(profileJSON),
+	})
+}
+
+func operationIOSummary(mappings model.OperationMap, values map[string]string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(values))
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		value := values[name]
+		ref := ""
+		if mapping, ok := mappings[name]; ok {
+			ref = strings.TrimSpace(mapping.Ref)
+		}
+		if ref != "" {
+			parts = append(parts, fmt.Sprintf("%s[%s]=%s", name, ref, value))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", name, value))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *operationExecution, name string) error {

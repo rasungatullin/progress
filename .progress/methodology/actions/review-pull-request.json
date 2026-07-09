@@ -39,6 +39,12 @@
         "required": true,
         "description": "Структурированный ввод для контура исполнения."
       }
+    },
+    "data": {
+      "profile": {
+        "type": "object",
+        "description": "Разрешённый исполнительный профиль для последующих операций действия."
+      }
     }
   },
   "operations": [
@@ -52,7 +58,17 @@
       "name": "load-review-remarks"
     },
     {
-      "name": "resolve-profile"
+      "name": "resolve-profile",
+      "in": {
+        "profile_name": {
+          "ref": "action.profile"
+        }
+      },
+      "out": {
+        "profile": {
+          "ref": "data.profile"
+        }
+      }
     },
     {
       "name": "allocate-resources"

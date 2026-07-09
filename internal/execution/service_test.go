@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
@@ -509,6 +510,134 @@ func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
 	}
 }
 
+func TestServiceExecuteResolveProfileUsesOperationIOAndKeepsStateProfile(t *testing.T) {
+	root := t.TempDir()
+	withWorkingDirectory(t, root)
+	resources := &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5"}}
+	service := &Service{
+		logger: log.Default(),
+		actions: &stubActionResolver{action: model.Action{
+			Name:              "profile-check",
+			Class:             ActionClassEngineeringSynthesis,
+			Profile:           "coder",
+			RequiresSynthesis: true,
+			Operations: []model.OperationSpec{
+				builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
+				{
+					Name:   OperationKindResolveProfile,
+					Kind:   OperationKindResolveProfile,
+					Title:  "Выбор исполнительного профиля",
+					Origin: OperationOriginBuiltin,
+					In:     model.OperationMap{"profile_name": {Ref: "action.profile"}},
+					Out:    model.OperationMap{"profile": {Ref: "data.profile"}},
+				},
+				builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
+				builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
+			},
+		}},
+		profiles:  &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder", StructuredOutput: true}},
+		resources: resources,
+	}
+
+	result, err := service.ExecuteAction(context.Background(), ActionInvocation{
+		Assignment: &ExecutionAssignment{
+			Action:          "profile-check",
+			StructuredInput: &StructuredInput{Task: "Проверить профиль."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute action: %v", err)
+	}
+	operation := findOperationResult(result.Operations, OperationKindResolveProfile)
+	if operation == nil || operation.Status != OperationStatusCompleted {
+		t.Fatalf("resolve-profile must complete: %#v", result.Operations)
+	}
+	if !strings.Contains(operation.Input, "profile_name[action.profile]=coder") {
+		t.Fatalf("resolve-profile input must use action mapping: %#v", operation)
+	}
+	if !strings.Contains(operation.Output, "profile[data.profile]=") || !strings.Contains(operation.Output, `"name":"coder"`) {
+		t.Fatalf("resolve-profile output must include mapped profile: %#v", operation)
+	}
+	if resources.profile.Name != "coder" || resources.profile.ModelBinding != "coder" {
+		t.Fatalf("resource allocation must receive state profile copy: %#v", resources.profile)
+	}
+}
+
+func TestResolveProfileFillsActionDataAndStateProfile(t *testing.T) {
+	t.Parallel()
+
+	operation := model.OperationSpec{
+		Name:   OperationKindResolveProfile,
+		Kind:   OperationKindResolveProfile,
+		Origin: OperationOriginBuiltin,
+		In:     model.OperationMap{"profile_name": {Ref: "action.profile"}},
+		Out:    model.OperationMap{"profile": {Ref: "data.profile"}},
+	}
+	state := &operationExecution{
+		in: model.Invocation{Profile: "coder"},
+		action: model.Action{
+			Operations: []model.OperationSpec{operation},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
+	}
+
+	err := builtinOperationExecutor{service: service}.resolveProfile(context.Background(), state, operation, OperationKindResolveProfile)
+	if err != nil {
+		t.Fatalf("resolve profile: %v", err)
+	}
+	dataProfile, ok := state.data["profile"].(model.Profile)
+	if !ok {
+		t.Fatalf("resolve-profile must fill data.profile: %#v", state.data)
+	}
+	if dataProfile.Name != "coder" || dataProfile.ModelBinding != "coder" {
+		t.Fatalf("unexpected data profile: %#v", dataProfile)
+	}
+	if state.profile.Name != "coder" || state.profile.ModelBinding != "coder" {
+		t.Fatalf("state profile must keep compatibility copy: %#v", state.profile)
+	}
+}
+
+func TestResolveProfileUsesOperationInputValue(t *testing.T) {
+	t.Parallel()
+
+	operation := model.OperationSpec{
+		Name:   OperationKindResolveProfile,
+		Kind:   OperationKindResolveProfile,
+		Origin: OperationOriginBuiltin,
+		In:     model.OperationMap{"profile_name": {Value: json.RawMessage(`"review"`)}},
+		Out:    model.OperationMap{"profile": {Ref: "data.profile"}},
+	}
+	state := &operationExecution{
+		in:      model.Invocation{Profile: "coder"},
+		action:  model.Action{Profile: "coder", Operations: []model.OperationSpec{operation}},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	profiles := &stubProfileResolver{profile: model.Profile{Name: "review", Mode: "manual", ModelBinding: "review"}}
+	service := &Service{
+		logger:   log.Default(),
+		profiles: profiles,
+	}
+
+	err := builtinOperationExecutor{service: service}.resolveProfile(context.Background(), state, operation, OperationKindResolveProfile)
+	if err != nil {
+		t.Fatalf("resolve profile: %v", err)
+	}
+	if state.profile.Name != "review" {
+		t.Fatalf("resolve-profile must use operation input value: %#v", state.profile)
+	}
+	if profiles.invocation.Profile != "review" {
+		t.Fatalf("profile resolver must receive operation input value, got %#v", profiles.invocation)
+	}
+	dataProfile, ok := state.data["profile"].(model.Profile)
+	if !ok || dataProfile.Name != "review" {
+		t.Fatalf("resolve-profile must write selected profile to data.profile: %#v", state.data)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -643,7 +772,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 				{Name: OperationKindPrepareData},
 				{Name: OperationKindLoadPullRequest},
 				{Name: OperationKindLoadReviewRemarks},
-				{Name: OperationKindResolveProfile},
+				{Name: OperationKindResolveProfile, In: map[string]methodology.ActionMapping{"profile_name": mappingRef("action.profile")}, Out: map[string]methodology.ActionMapping{"profile": mappingRef("data.profile")}},
 				{Name: OperationKindAllocateResources},
 				{Name: OperationKindPrepareWorkplace},
 				{Name: OperationKindBuildDirective},
@@ -701,6 +830,13 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 		if operation.Required != expectation.required {
 			t.Fatalf("unexpected required flag for %q: %#v", expectation.name, operation)
 		}
+	}
+	profileOperation := findOperationSpec(action, OperationKindResolveProfile)
+	if profileOperation == nil {
+		t.Fatalf("resolve-profile operation must be present: %#v", action.Operations)
+	}
+	if profileOperation.In["profile_name"].Ref != "action.profile" || profileOperation.Out["profile"].Ref != "data.profile" {
+		t.Fatalf("resolve-profile must keep action data mapping: %#v", profileOperation)
 	}
 }
 
@@ -1469,26 +1605,30 @@ func (s *stubActionResolver) ResolveAction(context.Context, model.Invocation) (m
 }
 
 type stubProfileResolver struct {
-	profile model.Profile
-	err     error
+	profile    model.Profile
+	invocation model.Invocation
+	err        error
 }
 
-func (s *stubProfileResolver) Resolve(context.Context, model.Invocation) (model.Profile, error) {
+func (s *stubProfileResolver) Resolve(_ context.Context, in model.Invocation) (model.Profile, error) {
 	if s.err != nil {
 		return model.Profile{}, s.err
 	}
+	s.invocation = in
 	return s.profile, nil
 }
 
 type stubResourceProvider struct {
 	allocation model.Allocation
+	profile    model.Profile
 	err        error
 }
 
-func (s *stubResourceProvider) Allocate(context.Context, model.Invocation, model.Profile) (model.Allocation, error) {
+func (s *stubResourceProvider) Allocate(_ context.Context, _ model.Invocation, profile model.Profile) (model.Allocation, error) {
 	if s.err != nil {
 		return model.Allocation{}, s.err
 	}
+	s.profile = profile
 	return s.allocation, nil
 }
 
@@ -1568,6 +1708,10 @@ func optionalExecutionOperation(name string) methodology.ActionOperation {
 
 func boolRef(value bool) *bool {
 	return &value
+}
+
+func mappingRef(value string) methodology.ActionMapping {
+	return methodology.ActionMapping{Ref: &value}
 }
 
 const testExecutionMethodologyCatalogJSON = `{

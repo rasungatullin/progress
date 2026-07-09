@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -256,6 +257,8 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 	if origin := strings.TrimSpace(operation.Origin); origin != "" {
 		defaultSpec.Origin = origin
 	}
+	defaultSpec.In = operationMappingFromMethodology(operation.In)
+	defaultSpec.Out = operationMappingFromMethodology(operation.Out)
 	if operation.Required == nil && strings.TrimSpace(action.Name) == ActionApplyReviewComments && kind == OperationKindLoadReviewRemarks {
 		defaultSpec.Required = true
 	}
@@ -263,6 +266,24 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 		defaultSpec.Required = *operation.Required
 	}
 	return defaultSpec, nil
+}
+
+func operationMappingFromMethodology(mappings map[string]methodology.ActionMapping) model.OperationMap {
+	if len(mappings) == 0 {
+		return nil
+	}
+	result := make(model.OperationMap, len(mappings))
+	for name, mapping := range mappings {
+		field := model.OperationMapping{}
+		if mapping.Ref != nil {
+			field.Ref = strings.TrimSpace(*mapping.Ref)
+		}
+		if mapping.Value != nil {
+			field.Value = append(json.RawMessage(nil), (*mapping.Value)...)
+		}
+		result[strings.TrimSpace(name)] = field
+	}
+	return result
 }
 
 func normalizeMethodologyOperation(operation methodology.Operation) methodology.Operation {
