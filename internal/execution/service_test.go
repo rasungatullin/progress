@@ -1454,6 +1454,42 @@ func TestLoadPullRequestFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestLoadPullRequestFailureDoesNotWriteStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := loadPullRequestOperationSpec()
+	state := &operationExecution{
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation": model.Invocation{
+				Assignment: &ExecutionAssignment{
+					RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}},
+				},
+			},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger: log.Default(),
+		integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+			return integration.Response{}, errors.New("load failed")
+		}},
+	}
+
+	err := builtinOperationExecutor{service: service}.loadPullRequest(context.Background(), state, operation, OperationKindLoadPullRequest)
+	if err == nil {
+		t.Fatal("load-pull-request must return integration error")
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "load failed") {
+		t.Fatalf("load-pull-request must write failed result to data.result: %#v", state.data)
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("load-pull-request must not write implicit state result: %#v", state.result)
+	}
+}
+
 func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
@@ -2342,6 +2378,7 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 				Out: map[string]methodology.ActionMapping{
 					"pull_request": mappingRef("data.pull_request"),
 					"invocation":   mappingRef("data.invocation"),
+					"result":       mappingRef("data.result"),
 				},
 			}},
 		}},
@@ -2356,7 +2393,7 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 	if operation == nil {
 		t.Fatalf("load-pull-request operation must be present: %#v", action.Operations)
 	}
-	if operation.In["invocation"].Ref != "data.invocation" || operation.Out["pull_request"].Ref != "data.pull_request" || operation.Out["invocation"].Ref != "data.invocation" {
+	if operation.In["invocation"].Ref != "data.invocation" || operation.Out["pull_request"].Ref != "data.pull_request" || operation.Out["invocation"].Ref != "data.invocation" || operation.Out["result"].Ref != "data.result" {
 		t.Fatalf("load-pull-request must keep action data mapping: %#v", operation)
 	}
 }
@@ -3528,6 +3565,7 @@ func loadPullRequestOperationSpec() model.OperationSpec {
 		Out: model.OperationMap{
 			"pull_request": {Ref: "data.pull_request"},
 			"invocation":   {Ref: "data.invocation"},
+			"result":       {Ref: "data.result"},
 		},
 	}
 }

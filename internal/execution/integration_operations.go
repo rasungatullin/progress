@@ -27,12 +27,12 @@ func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *op
 	input := loadPullRequestInputFromOperation(state, operation)
 	ref := pullRequestRefFromAssignment(assignmentFromInvocation(input.invocation))
 	if ref.Number <= 0 {
-		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
+		return e.failLoadPullRequestOperation(ctx, state, operation, input.invocation, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
 	executor, err := e.integrationExecutor()
 	if err != nil {
-		return e.failIntegrationOperation(ctx, state, name, "Контур интеграции недоступен.", err, "integration_unavailable")
+		return e.failLoadPullRequestOperation(ctx, state, operation, input.invocation, name, "Контур интеграции недоступен.", err, "integration_unavailable")
 	}
 
 	response, err := executor.Execute(ctx, integration.Request{
@@ -45,18 +45,26 @@ func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *op
 		Number:          ref.Number,
 	})
 	if err != nil {
-		return e.failIntegrationOperation(ctx, state, name, "Запрос на слияние не получен.", err, "pull_request_load_failed")
+		return e.failLoadPullRequestOperation(ctx, state, operation, input.invocation, name, "Запрос на слияние не получен.", err, "pull_request_load_failed")
 	}
 
 	mergeRequest, ok := mergeRequestFromIntegrationResponse(response)
 	if !ok {
-		return e.failIntegrationOperation(ctx, state, name, "Контур интеграции не вернул запрос на слияние.", fmt.Errorf("integration response does not include merge request"), "pull_request_missing")
+		return e.failLoadPullRequestOperation(ctx, state, operation, input.invocation, name, "Контур интеграции не вернул запрос на слияние.", fmt.Errorf("integration response does not include merge request"), "pull_request_missing")
 	}
 
 	invocation := invocationWithPullRequest(input.invocation, mergeRequest)
 	writeLoadPullRequestData(state, operation, mergeRequest, invocation)
 	state.tracker.completeIO(name, loadPullRequestInputSummary(input, operation), loadPullRequestOutputSummary(mergeRequest, invocation, operation), "Запрос на слияние получен через контур интеграции.")
 	return nil
+}
+
+func (e builtinOperationExecutor) failLoadPullRequestOperation(ctx context.Context, state *operationExecution, operation OperationSpec, in invocation, name string, summary string, err error, code string) error {
+	result := failedStartResult(err)
+	writeLoadPullRequestFailureData(state, operation, result)
+	state.tracker.fail(name, summary, err, code, true, true)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, err)
+	return err
 }
 
 func writeLoadPullRequestData(state *operationExecution, operation OperationSpec, mergeRequest integration.MergeRequest, invocation invocation) {
@@ -69,6 +77,14 @@ func writeLoadPullRequestData(state *operationExecution, operation OperationSpec
 	}
 	writeOperationData(state, out, "pull_request", mergeRequest)
 	writeOperationData(state, out, "invocation", invocation)
+}
+
+func writeLoadPullRequestFailureData(state *operationExecution, operation OperationSpec, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"result": {Ref: "data.result"}}
+	}
+	writeOperationData(state, out, "result", result)
 }
 
 type loadPullRequestInput struct {
