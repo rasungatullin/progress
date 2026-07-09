@@ -521,7 +521,7 @@ func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
-	action, err := resolveActionFromCatalog(testExecutionMethodologyCatalog(), nil, invocation{Action: "review"})
+	action, err := resolveActionFromCatalog(testExecutionMethodologyCatalog(), invocation{Action: "review"})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
 				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
 			},
 		},
-	}, nil, invocation{Action: "implement"})
+	}, invocation{Action: "implement"})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestActionResolutionPrefersLaterAlias(t *testing.T) {
 				Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindFinalize),
 			},
 		},
-	}, nil, invocation{Action: "implement"})
+	}, invocation{Action: "implement"})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestActionResolutionRejectsDuplicateOperations(t *testing.T) {
 			RequiresSynthesis: boolRef(false),
 			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindResolveAction),
 		}},
-	}, nil, invocation{Action: "diagnostic"})
+	}, invocation{Action: "diagnostic"})
 	if err == nil {
 		t.Fatal("expected duplicate operation error")
 	}
@@ -629,7 +629,7 @@ func TestActionResolutionMakesReviewRemarksRequiredForApplyReviewComments(t *tes
 			RequiresSynthesis: boolRef(true),
 			Operations:        testExecutionOperations(OperationKindResolveAction, OperationKindLoadReviewRemarks, OperationKindFinalize),
 		}},
-	}, nil, invocation{Action: ActionApplyReviewComments})
+	}, invocation{Action: ActionApplyReviewComments})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
@@ -679,7 +679,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 			{Name: OperationKindPublishReviewResponses, Kind: OperationKindPublishReviewResponses, Title: "Запись ответов на замечания", Origin: OperationOriginBuiltin, Required: boolRef(true)},
 			{Name: OperationKindFinalize, Kind: OperationKindFinalize, Title: "Завершающая фиксация", Origin: OperationOriginBuiltin, Required: boolRef(true)},
 		},
-	}, nil, invocation{Action: ActionApplyReviewComments})
+	}, invocation{Action: ActionApplyReviewComments})
 	if err != nil {
 		t.Fatalf("resolve action: %v", err)
 	}
