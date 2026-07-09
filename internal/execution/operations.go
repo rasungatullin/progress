@@ -72,7 +72,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindPrepareWorkplace:
 		return e.prepareWorkplace(ctx, state, operation, name)
 	case OperationKindBuildDirective:
-		return e.buildDirective(ctx, state, name)
+		return e.buildDirective(ctx, state, operation, name)
 	case OperationKindLaunchSynthesis:
 		return e.launchSynthesis(ctx, state, name)
 	case OperationKindParseResult:
@@ -814,20 +814,141 @@ func allocationSummary(allocation allocation) string {
 	return strings.Join(parts, ",")
 }
 
-func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *operationExecution, name string) error {
-	if !state.action.RequiresSynthesis {
-		state.tracker.skip(name, "Исполнительная директива не требуется для действия без синтеза.")
+func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := buildDirectiveInputFromOperation(state, operation)
+	if !input.requiresSynthesis {
+		state.in = input.invocation
+		writeOperationData(state, operation.Out, "directive", state.in.Launch)
+		state.tracker.skipIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(state.in.Launch, operation), "Исполнительная директива не требуется для действия без синтеза.")
 		return nil
 	}
 
-	state.in.Launch.Runner = state.allocation.Runner
-	state.in.Launch.Model = state.allocation.Model
-	if strings.TrimSpace(state.in.Launch.ModelBinding) == "" {
-		state.in.Launch.ModelBinding = state.allocation.ModelBinding
+	directiveInvocation := input.invocation
+	directiveInvocation.Launch.Runner = input.allocation.Runner
+	directiveInvocation.Launch.Model = input.allocation.Model
+	if strings.TrimSpace(directiveInvocation.Launch.ModelBinding) == "" {
+		directiveInvocation.Launch.ModelBinding = input.allocation.ModelBinding
 	}
-	state.tracker.completeIO(name, structuredInputSummary(state.in.Launch.StructuredInput), fmt.Sprintf("runner=%s model=%s", state.in.Launch.Runner, state.in.Launch.Model), "Исполнительная директива подготовлена к запуску.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, LaunchResult{Status: "running"}, nil)
+	state.in = directiveInvocation
+	writeOperationData(state, operation.Out, "directive", state.in.Launch)
+	state.tracker.completeIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(state.in.Launch, operation), "Исполнительная директива подготовлена к запуску.")
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, input.allocation, state.workplace, LaunchResult{Status: "running"}, nil)
 	return nil
+}
+
+type buildDirectiveInput struct {
+	requiresSynthesis bool
+	invocation        invocation
+	allocation        allocation
+}
+
+func buildDirectiveInputFromOperation(state *operationExecution, operation OperationSpec) buildDirectiveInput {
+	input := buildDirectiveInput{}
+	if state != nil {
+		input.requiresSynthesis = state.action.RequiresSynthesis
+		input.invocation = state.in
+		input.allocation = state.allocation
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["requires_synthesis"]; ok {
+		if value, ok := boolValueFromBuildDirectiveMapping(state, mapping); ok {
+			input.requiresSynthesis = value
+		}
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromBuildDirectiveMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromBuildDirectiveMapping(state, mapping); ok {
+			input.allocation = value
+		}
+	}
+	return input
+}
+
+func boolValueFromBuildDirectiveMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
+	if len(mapping.Value) != 0 {
+		var value bool
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return false, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "action.requires_synthesis":
+		if state == nil {
+			return false, false
+		}
+		return state.action.RequiresSynthesis, true
+	default:
+		return false, false
+	}
+}
+
+func invocationValueFromBuildDirectiveMapping(state *operationExecution, mapping model.OperationMapping) (invocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value invocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return invocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "in", "invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		return state.in, true
+	default:
+		return invocation{}, false
+	}
+}
+
+func allocationValueFromBuildDirectiveMapping(state *operationExecution, mapping model.OperationMapping) (allocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value allocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return allocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.allocation":
+		if state == nil {
+			return allocation{}, false
+		}
+		value, ok := state.data["allocation"].(allocation)
+		return value, ok
+	case "state.allocation":
+		if state == nil {
+			return allocation{}, false
+		}
+		return state.allocation, true
+	default:
+		return allocation{}, false
+	}
+}
+
+func buildDirectiveInputSummary(input buildDirectiveInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"allocation":         allocationSummary(input.allocation),
+		"invocation":         invocationSummary(input.invocation),
+		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+	})
+}
+
+func buildDirectiveOutputSummary(directive launchSpec, operation OperationSpec) string {
+	directiveJSON, err := json.Marshal(directive)
+	if err != nil {
+		directiveJSON = []byte(fmt.Sprintf(`{"runner":%q,"model":%q}`, directive.Runner, directive.Model))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"directive": string(directiveJSON),
+	})
 }
 
 func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, name string) error {

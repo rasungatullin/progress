@@ -56,6 +56,10 @@
       "allocation": {
         "type": "object",
         "description": "Результат ресурсного снабжения для последующих операций действия."
+      },
+      "directive": {
+        "type": "object",
+        "description": "Подготовленная исполнительная директива для запуска выполнения."
       }
     }
   },
@@ -146,7 +150,23 @@
       }
     },
     {
-      "name": "build-directive"
+      "name": "build-directive",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "invocation": {
+          "ref": "in"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        }
+      },
+      "out": {
+        "directive": {
+          "ref": "data.directive"
+        }
+      }
     },
     {
       "name": "launch-synthesis"

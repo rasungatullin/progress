@@ -885,6 +885,105 @@ func TestPrepareWorkplaceWritesLocalReadyWorkplaceForActionWithoutWorkplace(t *t
 	}
 }
 
+func TestBuildDirectiveFillsActionDataAndKeepsStateLaunch(t *testing.T) {
+	t.Parallel()
+
+	operation := buildDirectiveOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Task: "task-42",
+			Launch: model.LaunchSpec{
+				StructuredInput: &StructuredInput{Task: "Ship it."},
+			},
+		},
+		action: model.Action{
+			RequiresSynthesis: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"allocation": model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
+		},
+		allocation: model.Allocation{Resource: "legacy", Runner: "legacy", Model: "legacy"},
+		tracker:    newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.buildDirective(context.Background(), state, operation, OperationKindBuildDirective)
+	if err != nil {
+		t.Fatalf("build directive: %v", err)
+	}
+	directive, ok := state.data["directive"].(model.LaunchSpec)
+	if !ok {
+		t.Fatalf("build-directive must fill data.directive: %#v", state.data)
+	}
+	if directive.Runner != "opencode" || directive.Model != "openai/gpt-5.5" || directive.ModelBinding != "coder" {
+		t.Fatalf("unexpected directive: %#v", directive)
+	}
+	if state.in.Launch.Runner != "opencode" || state.in.Launch.Model != "openai/gpt-5.5" || state.in.Launch.ModelBinding != "coder" {
+		t.Fatalf("state launch must keep compatibility copy: %#v", state.in.Launch)
+	}
+}
+
+func TestBuildDirectiveKeepsExplicitModelBinding(t *testing.T) {
+	t.Parallel()
+
+	operation := buildDirectiveOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Launch: model.LaunchSpec{ModelBinding: "explicit"},
+		},
+		action: model.Action{
+			RequiresSynthesis: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"allocation": model.Allocation{Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.buildDirective(context.Background(), state, operation, OperationKindBuildDirective)
+	if err != nil {
+		t.Fatalf("build directive: %v", err)
+	}
+	directive, ok := state.data["directive"].(model.LaunchSpec)
+	if !ok || directive.ModelBinding != "explicit" {
+		t.Fatalf("build-directive must keep explicit model binding: %#v", state.data)
+	}
+}
+
+func TestBuildDirectiveWritesDirectiveForActionWithoutSynthesis(t *testing.T) {
+	t.Parallel()
+
+	operation := buildDirectiveOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "No synthesis."}},
+		},
+		action: model.Action{
+			RequiresSynthesis: false,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data:    map[string]any{"allocation": model.Allocation{Resource: "not-required"}},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.buildDirective(context.Background(), state, operation, OperationKindBuildDirective)
+	if err != nil {
+		t.Fatalf("build directive: %v", err)
+	}
+	directive, ok := state.data["directive"].(model.LaunchSpec)
+	if !ok || directive.StructuredInput == nil || directive.StructuredInput.Task != "No synthesis." {
+		t.Fatalf("build-directive must write skipped directive to data.directive: %#v", state.data)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindBuildDirective)
+	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
+		t.Fatalf("skipped directive must keep contract output diagnostics: %#v", result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -1057,7 +1156,17 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 						"workplace": mappingRef("data.workplace"),
 					},
 				},
-				{Name: OperationKindBuildDirective},
+				{
+					Name: OperationKindBuildDirective,
+					In: map[string]methodology.ActionMapping{
+						"requires_synthesis": mappingRef("action.requires_synthesis"),
+						"invocation":         mappingRef("in"),
+						"allocation":         mappingRef("data.allocation"),
+					},
+					Out: map[string]methodology.ActionMapping{
+						"directive": mappingRef("data.directive"),
+					},
+				},
 				{Name: OperationKindLaunchSynthesis},
 				{Name: OperationKindParseResult},
 				{Name: OperationKindCommitPush},
@@ -1140,6 +1249,13 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	}
 	if workplaceOperation.In["requires_workplace"].Ref != "action.requires_workplace" || workplaceOperation.In["allocation"].Ref != "data.allocation" || workplaceOperation.Out["workplace"].Ref != "data.workplace" {
 		t.Fatalf("prepare-workplace must keep action data mapping: %#v", workplaceOperation)
+	}
+	directiveOperation := findOperationSpec(action, OperationKindBuildDirective)
+	if directiveOperation == nil {
+		t.Fatalf("build-directive operation must be present: %#v", action.Operations)
+	}
+	if directiveOperation.In["requires_synthesis"].Ref != "action.requires_synthesis" || directiveOperation.In["allocation"].Ref != "data.allocation" || directiveOperation.Out["directive"].Ref != "data.directive" {
+		t.Fatalf("build-directive must keep action data mapping: %#v", directiveOperation)
 	}
 }
 
@@ -2058,6 +2174,22 @@ func prepareWorkplaceOperationSpec() model.OperationSpec {
 		},
 		Out: model.OperationMap{
 			"workplace": {Ref: "data.workplace"},
+		},
+	}
+}
+
+func buildDirectiveOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindBuildDirective,
+		Kind:   OperationKindBuildDirective,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"requires_synthesis": {Ref: "action.requires_synthesis"},
+			"invocation":         {Ref: "in"},
+			"allocation":         {Ref: "data.allocation"},
+		},
+		Out: model.OperationMap{
+			"directive": {Ref: "data.directive"},
 		},
 	}
 }

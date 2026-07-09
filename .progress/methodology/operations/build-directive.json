@@ -3,5 +3,31 @@
   "kind": "build-directive",
   "title": "Сборка исполнительной директивы",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "requires_synthesis": {
+        "type": "boolean",
+        "required": true,
+        "description": "Признак необходимости запуска синтеза для разрешённого действия."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
+      },
+      "allocation": {
+        "type": "object",
+        "required": true,
+        "description": "Результат ресурсного снабжения."
+      }
+    },
+    "out": {
+      "directive": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленная исполнительная директива для запуска выполнения."
+      }
+    }
+  }
 }
