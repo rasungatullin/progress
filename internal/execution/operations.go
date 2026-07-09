@@ -286,31 +286,47 @@ func explicitPullRequestHeadFromAssignment(assignment *ExecutionAssignment) stri
 }
 
 func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
-	profileName := resolveProfileInputName(state, operation)
-	profileInput := state.in
+	profileInput, profileName := resolveProfileInputFromOperation(state, operation)
 	profileInput.Profile = profileName
 	profile, err := e.service.resolveProfile(ctx, profileInput)
 	if err != nil {
-		state.result = failedStartResult(err)
+		result := failedStartResult(err)
+		writeResolveProfileData(state, operation, model.Profile{}, result)
 		state.tracker.fail(name, "Исполнительный профиль не определён.", err, "profile_not_found", false, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, model.Profile{}, model.Allocation{}, model.Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, profileInput, model.Profile{}, model.Allocation{}, model.Workplace{}, result, err)
 		return err
 	}
 
-	writeResolveProfileData(state, operation, profile)
+	writeResolveProfileData(state, operation, profile, LaunchResult{})
 	state.tracker.completeIO(name, resolveProfileInputSummary(profileName, operation), resolveProfileOutputSummary(profile, operation), fmt.Sprintf("profile=%s mode=%s", profile.Name, profile.Mode))
 	return nil
 }
 
-func writeResolveProfileData(state *operationExecution, operation OperationSpec, profile profile) {
+func writeResolveProfileData(state *operationExecution, operation OperationSpec, profile profile, result LaunchResult) {
 	out := operation.Out
 	if len(out) == 0 {
-		out = model.OperationMap{"profile": {Ref: "data.profile"}}
+		out = model.OperationMap{
+			"profile": {Ref: "data.profile"},
+			"result":  {Ref: "data.result"},
+		}
 	}
 	writeOperationData(state, out, "profile", profile)
+	if strings.TrimSpace(result.Status) != "" || strings.TrimSpace(result.Summary) != "" || result.StructuredOutput != nil {
+		writeOperationData(state, out, "result", result)
+	}
 }
 
-func resolveProfileInputName(state *operationExecution, operation OperationSpec) string {
+func resolveProfileInputFromOperation(state *operationExecution, operation OperationSpec) (invocation, string) {
+	profileInput := invocationFromExecutionData(state)
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromResolveProfileMapping(state, mapping); ok {
+			profileInput = value
+		}
+	}
+	return profileInput, resolveProfileInputName(state, operation, profileInput)
+}
+
+func resolveProfileInputName(state *operationExecution, operation OperationSpec, profileInput invocation) string {
 	if mapping, ok := operation.In["profile_name"]; ok {
 		if value := stringValueFromOperationMapping(mapping); value != "" {
 			return value
@@ -321,15 +337,40 @@ func resolveProfileInputName(state *operationExecution, operation OperationSpec)
 				return strings.TrimSpace(state.action.Profile)
 			}
 		case "in.profile", "invocation.profile":
-			if state != nil && strings.TrimSpace(state.in.Profile) != "" {
-				return strings.TrimSpace(state.in.Profile)
+			if strings.TrimSpace(profileInput.Profile) != "" {
+				return strings.TrimSpace(profileInput.Profile)
 			}
 		}
 	}
-	if state != nil && strings.TrimSpace(state.in.Profile) != "" {
-		return strings.TrimSpace(state.in.Profile)
+	if strings.TrimSpace(profileInput.Profile) != "" {
+		return strings.TrimSpace(profileInput.Profile)
 	}
 	return "default"
+}
+
+func invocationValueFromResolveProfileMapping(state *operationExecution, mapping model.OperationMapping) (invocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value invocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return invocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		value, ok := state.data["invocation"].(invocation)
+		return value, ok
+	case "in", "invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		return state.in, true
+	default:
+		return invocation{}, false
+	}
 }
 
 func stringValueFromOperationMapping(mapping model.OperationMapping) string {

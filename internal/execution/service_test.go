@@ -528,8 +528,14 @@ func TestServiceExecuteResolveProfileUsesOperationIOAndKeepsStateProfile(t *test
 					Kind:   OperationKindResolveProfile,
 					Title:  "Выбор исполнительного профиля",
 					Origin: OperationOriginBuiltin,
-					In:     model.OperationMap{"profile_name": {Ref: "action.profile"}},
-					Out:    model.OperationMap{"profile": {Ref: "data.profile"}},
+					In: model.OperationMap{
+						"profile_name": {Ref: "action.profile"},
+						"invocation":   {Ref: "data.invocation"},
+					},
+					Out: model.OperationMap{
+						"profile": {Ref: "data.profile"},
+						"result":  {Ref: "data.result"},
+					},
 				},
 				{
 					Name:   OperationKindAllocateResources,
@@ -581,20 +587,28 @@ func TestResolveProfileFillsOnlyActionData(t *testing.T) {
 		Name:   OperationKindResolveProfile,
 		Kind:   OperationKindResolveProfile,
 		Origin: OperationOriginBuiltin,
-		In:     model.OperationMap{"profile_name": {Ref: "action.profile"}},
-		Out:    model.OperationMap{"profile": {Ref: "data.profile"}},
+		In: model.OperationMap{
+			"profile_name": {Ref: "action.profile"},
+			"invocation":   {Ref: "data.invocation"},
+		},
+		Out: model.OperationMap{
+			"profile": {Ref: "data.profile"},
+			"result":  {Ref: "data.result"},
+		},
 	}
 	state := &operationExecution{
 		in: model.Invocation{Profile: "coder"},
 		action: model.Action{
+			Profile:    "coder",
 			Operations: []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"invocation": model.Invocation{Task: "from-data", Action: "implement", Profile: "legacy"},
 		},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
-	service := &Service{
-		logger:   log.Default(),
-		profiles: &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
-	}
+	profiles := &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}}
+	service := &Service{logger: log.Default(), profiles: profiles}
 
 	err := builtinOperationExecutor{service: service}.resolveProfile(context.Background(), state, operation, OperationKindResolveProfile)
 	if err != nil {
@@ -610,6 +624,9 @@ func TestResolveProfileFillsOnlyActionData(t *testing.T) {
 	if state.profile.Name != "" || state.profile.ModelBinding != "" {
 		t.Fatalf("resolve-profile must not write implicit state profile: %#v", state.profile)
 	}
+	if profiles.invocation.Task != "from-data" || profiles.invocation.Action != "implement" || profiles.invocation.Profile != "coder" {
+		t.Fatalf("profile resolver must receive invocation from operation input: %#v", profiles.invocation)
+	}
 }
 
 func TestResolveProfileUsesOperationInputValue(t *testing.T) {
@@ -619,12 +636,19 @@ func TestResolveProfileUsesOperationInputValue(t *testing.T) {
 		Name:   OperationKindResolveProfile,
 		Kind:   OperationKindResolveProfile,
 		Origin: OperationOriginBuiltin,
-		In:     model.OperationMap{"profile_name": {Value: json.RawMessage(`"review"`)}},
-		Out:    model.OperationMap{"profile": {Ref: "data.profile"}},
+		In: model.OperationMap{
+			"profile_name": {Value: json.RawMessage(`"review"`)},
+			"invocation":   {Ref: "data.invocation"},
+		},
+		Out: model.OperationMap{
+			"profile": {Ref: "data.profile"},
+			"result":  {Ref: "data.result"},
+		},
 	}
 	state := &operationExecution{
 		in:      model.Invocation{Profile: "coder"},
 		action:  model.Action{Profile: "coder", Operations: []model.OperationSpec{operation}},
+		data:    map[string]any{"invocation": model.Invocation{Task: "from-data", Profile: "coder"}},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
 	profiles := &stubProfileResolver{profile: model.Profile{Name: "review", Mode: "manual", ModelBinding: "review"}}
@@ -643,6 +667,48 @@ func TestResolveProfileUsesOperationInputValue(t *testing.T) {
 	dataProfile, ok := state.data["profile"].(model.Profile)
 	if !ok || dataProfile.Name != "review" {
 		t.Fatalf("resolve-profile must write selected profile to data.profile: %#v", state.data)
+	}
+}
+
+func TestResolveProfileFailureDoesNotWriteStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := model.OperationSpec{
+		Name:   OperationKindResolveProfile,
+		Kind:   OperationKindResolveProfile,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"profile_name": {Ref: "action.profile"},
+			"invocation":   {Ref: "data.invocation"},
+		},
+		Out: model.OperationMap{
+			"profile": {Ref: "data.profile"},
+			"result":  {Ref: "data.result"},
+		},
+	}
+	state := &operationExecution{
+		action: model.Action{Profile: "coder", Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation": model.Invocation{Task: "task-42"},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger:   log.Default(),
+		profiles: &stubProfileResolver{err: errors.New("profile failed")},
+	}
+
+	err := builtinOperationExecutor{service: service}.resolveProfile(context.Background(), state, operation, OperationKindResolveProfile)
+	if err == nil {
+		t.Fatal("resolve profile must return profile error")
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("resolve-profile must not write implicit state result: %#v", state.result)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "profile failed") {
+		t.Fatalf("resolve-profile must write failed result to data.result: %#v", state.data)
 	}
 }
 
@@ -1992,7 +2058,17 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 				},
 				{Name: OperationKindLoadPullRequest},
 				{Name: OperationKindLoadReviewRemarks},
-				{Name: OperationKindResolveProfile, In: map[string]methodology.ActionMapping{"profile_name": mappingRef("action.profile")}, Out: map[string]methodology.ActionMapping{"profile": mappingRef("data.profile")}},
+				{
+					Name: OperationKindResolveProfile,
+					In: map[string]methodology.ActionMapping{
+						"profile_name": mappingRef("action.profile"),
+						"invocation":   mappingRef("data.invocation"),
+					},
+					Out: map[string]methodology.ActionMapping{
+						"profile": mappingRef("data.profile"),
+						"result":  mappingRef("data.result"),
+					},
+				},
 				{
 					Name: OperationKindAllocateResources,
 					In: map[string]methodology.ActionMapping{
@@ -2131,7 +2207,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	if profileOperation == nil {
 		t.Fatalf("resolve-profile operation must be present: %#v", action.Operations)
 	}
-	if profileOperation.In["profile_name"].Ref != "action.profile" || profileOperation.Out["profile"].Ref != "data.profile" {
+	if profileOperation.In["profile_name"].Ref != "action.profile" || profileOperation.In["invocation"].Ref != "data.invocation" || profileOperation.Out["profile"].Ref != "data.profile" || profileOperation.Out["result"].Ref != "data.result" {
 		t.Fatalf("resolve-profile must keep action data mapping: %#v", profileOperation)
 	}
 	allocationOperation := findOperationSpec(action, OperationKindAllocateResources)

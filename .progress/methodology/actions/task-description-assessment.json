@@ -111,11 +111,17 @@
       "in": {
         "profile_name": {
           "ref": "action.profile"
+        },
+        "invocation": {
+          "ref": "data.invocation"
         }
       },
       "out": {
         "profile": {
           "ref": "data.profile"
+        },
+        "result": {
+          "ref": "data.result"
         }
       }
     },
