@@ -1296,7 +1296,7 @@ func TestLoadPullRequestFillsOnlyActionData(t *testing.T) {
 	}
 }
 
-func TestLoadReviewRemarksFillsActionDataAndKeepsState(t *testing.T) {
+func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := loadReviewRemarksOperationSpec()
@@ -1351,11 +1351,11 @@ func TestLoadReviewRemarksFillsActionDataAndKeepsState(t *testing.T) {
 	if !ok || dataInvocation.Launch.StructuredInput == nil || len(dataInvocation.Launch.StructuredInput.ReviewRemarks) != 1 || dataInvocation.Launch.StructuredInput.ReviewRemarks[0].ID != "comment-1" {
 		t.Fatalf("load-review-remarks must fill enriched data.invocation: %#v", state.data)
 	}
-	if len(state.reviewRemarks) != 1 || state.reviewRemarks[0].ExternalID != dataRemarks[0].ExternalID {
-		t.Fatalf("state review remarks must keep compatibility copy: state=%#v data=%#v", state.reviewRemarks, dataRemarks)
+	if len(state.reviewRemarks) != 0 {
+		t.Fatalf("load-review-remarks must not write implicit state review remarks: %#v", state.reviewRemarks)
 	}
-	if state.in.Launch.StructuredInput == nil || len(state.in.Launch.StructuredInput.ReviewRemarks) != 1 {
-		t.Fatalf("state invocation must keep compatibility copy: %#v", state.in)
+	if state.in.Action != "legacy" || state.in.Launch.StructuredInput != nil {
+		t.Fatalf("load-review-remarks must not write implicit state invocation: %#v", state.in)
 	}
 	result := findOperationResult(state.tracker.snapshot(), OperationKindLoadReviewRemarks)
 	if result == nil || result.Status != OperationStatusCompleted || result.Input == "" || result.Output == "" {

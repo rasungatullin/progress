@@ -107,8 +107,7 @@ func loadPullRequestOutputSummary(pr integration.MergeRequest, in invocation, op
 
 func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *operationExecution, operation OperationSpec, name string, required bool) error {
 	input := loadReviewRemarksInputFromOperation(state, operation)
-	applyLoadReviewRemarksInputToState(state, input)
-	ref := pullRequestRefFromState(state)
+	ref := pullRequestRefFromLoadReviewRemarksInput(input)
 	if ref.Number <= 0 {
 		return e.failOrSkipIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required", required)
 	}
@@ -131,17 +130,47 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 		return e.failOrSkipIntegrationOperation(ctx, state, name, "Замечания ревизии не получены.", err, "review_remarks_load_failed", required)
 	}
 
-	state.reviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
-	structuredInput := ensureExecutionStructuredInput(state)
-	structuredInput.ReviewRemarks = mergeStructuredRemarks(structuredInput.ReviewRemarks, structuredRemarksFromIntegration(response.ReviewRemarks))
+	reviewRemarks := append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
+	invocation := invocationWithReviewRemarks(input.invocation, ref, reviewRemarks)
+	writeLoadReviewRemarksData(state, operation, reviewRemarks, invocation)
+	state.tracker.completeIO(name, loadReviewRemarksInputSummary(input, ref, operation), loadReviewRemarksOutputSummary(reviewRemarks, invocation, operation), "Замечания ревизии получены через контур интеграции.")
+	return nil
+}
+
+func writeLoadReviewRemarksData(state *operationExecution, operation OperationSpec, remarks []integration.ReviewRemark, invocation invocation) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"review_remarks": {Ref: "data.review_remarks"},
+			"invocation":     {Ref: "data.invocation"},
+		}
+	}
+	writeOperationData(state, out, "review_remarks", remarks)
+	writeOperationData(state, out, "invocation", invocation)
+}
+
+func invocationWithReviewRemarks(in invocation, ref pullRequestRef, remarks []integration.ReviewRemark) invocation {
+	result := in
+	assignment := assignmentFromInvocation(result)
+	if assignment == nil {
+		assignment = &ExecutionAssignment{}
+	}
+	structuredInput := assignment.StructuredInput
+	if structuredInput == nil {
+		structuredInput = result.Launch.StructuredInput
+	}
+	if structuredInput == nil {
+		structuredInput = &StructuredInput{}
+	}
+	structuredInput.ReviewRemarks = mergeStructuredRemarks(structuredInput.ReviewRemarks, structuredRemarksFromIntegration(remarks))
 	structuredInput.OperationalContext = append(structuredInput.OperationalContext, StructuredContext{
 		Title: "Сведения о замечаниях ревизии",
-		Body:  fmt.Sprintf("repository=%s\npull_request=%d\nremarks=%d", ref.Repository, ref.Number, len(response.ReviewRemarks)),
+		Body:  fmt.Sprintf("repository=%s\npull_request=%d\nremarks=%d", ref.Repository, ref.Number, len(remarks)),
 	})
-	writeOperationData(state, operation.Out, "review_remarks", state.reviewRemarks)
-	writeOperationData(state, operation.Out, "invocation", state.in)
-	state.tracker.completeIO(name, loadReviewRemarksInputSummary(input, ref, operation), loadReviewRemarksOutputSummary(state.reviewRemarks, state.in, operation), "Замечания ревизии получены через контур интеграции.")
-	return nil
+	assignment.StructuredInput = structuredInput
+	result.Assignment = assignment
+	result.Launch.StructuredInput = structuredInput
+	return result
 }
 
 type loadReviewRemarksInput struct {
@@ -153,7 +182,9 @@ func loadReviewRemarksInputFromOperation(state *operationExecution, operation Op
 	input := loadReviewRemarksInput{}
 	if state != nil {
 		input.invocation = invocationFromExecutionData(state)
-		if state.pullRequest != nil {
+		if value, ok := state.data["pull_request"].(integration.MergeRequest); ok {
+			input.pullRequest = &value
+		} else if state.pullRequest != nil {
 			pullRequest := *state.pullRequest
 			input.pullRequest = &pullRequest
 		}
@@ -172,6 +203,30 @@ func loadReviewRemarksInputFromOperation(state *operationExecution, operation Op
 		}
 	}
 	return input
+}
+
+func pullRequestRefFromLoadReviewRemarksInput(input loadReviewRemarksInput) pullRequestRef {
+	ref := pullRequestRefFromAssignment(assignmentFromInvocation(input.invocation))
+	if input.pullRequest == nil {
+		return ref
+	}
+	pullRequest := input.pullRequest
+	if strings.TrimSpace(ref.Repository) == "" {
+		ref.Repository = pullRequest.Repository
+	}
+	if ref.Number <= 0 {
+		ref.Number = pullRequest.Number
+	}
+	if strings.TrimSpace(ref.Base) == "" {
+		ref.Base = pullRequest.BaseRef
+	}
+	if strings.TrimSpace(ref.Head) == "" {
+		ref.Head = pullRequest.HeadRef
+	}
+	if strings.TrimSpace(ref.Title) == "" {
+		ref.Title = pullRequest.Title
+	}
+	return ref
 }
 
 func mergeRequestValueFromLoadReviewRemarksMapping(state *operationExecution, mapping model.OperationMapping) (integration.MergeRequest, bool) {
@@ -196,19 +251,6 @@ func mergeRequestValueFromLoadReviewRemarksMapping(state *operationExecution, ma
 		return *state.pullRequest, true
 	default:
 		return integration.MergeRequest{}, false
-	}
-}
-
-func applyLoadReviewRemarksInputToState(state *operationExecution, input loadReviewRemarksInput) {
-	if state == nil {
-		return
-	}
-	state.in = input.invocation
-	state.assignment = assignmentFromInvocation(input.invocation)
-	if input.pullRequest != nil {
-		pullRequest := *input.pullRequest
-		state.pullRequest = &pullRequest
-		applyPullRequestToState(state, pullRequest)
 	}
 }
 
@@ -528,7 +570,7 @@ func publishReviewResponsesInputFromOperation(state *operationExecution, operati
 		input.invocation = invocationFromExecutionData(state)
 		input.result = resultFromExecutionData(state)
 		input.structuredOutput = structuredOutputFromExecutionData(state)
-		input.reviewRemarks = append([]integration.ReviewRemark(nil), state.reviewRemarks...)
+		input.reviewRemarks = reviewRemarksFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -555,6 +597,16 @@ func publishReviewResponsesInputFromOperation(state *operationExecution, operati
 		}
 	}
 	return input
+}
+
+func reviewRemarksFromExecutionData(state *operationExecution) []integration.ReviewRemark {
+	if state == nil {
+		return nil
+	}
+	if value, ok := state.data["review_remarks"].([]integration.ReviewRemark); ok {
+		return append([]integration.ReviewRemark(nil), value...)
+	}
+	return append([]integration.ReviewRemark(nil), state.reviewRemarks...)
 }
 
 func reviewRemarksValueFromPublishReviewResponsesMapping(state *operationExecution, mapping model.OperationMapping) ([]integration.ReviewRemark, bool) {
