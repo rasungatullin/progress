@@ -1660,6 +1660,42 @@ func TestFinalizeFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestFinalizeReadsResultOnlyFromActionData(t *testing.T) {
+	t.Parallel()
+
+	operation := finalizeOperationSpec()
+	state := &operationExecution{
+		action: model.Action{
+			Name:              ActionClassEngineeringSynthesis,
+			Class:             ActionClassEngineeringSynthesis,
+			RequiresSynthesis: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"result": model.LaunchResult{Status: "completed", Summary: "data-result"},
+		},
+		result:  model.LaunchResult{Status: "completed", Summary: "legacy-state\ndata-result"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.finalize(context.Background(), state, operation, OperationKindFinalize)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "completed" || dataResult.Summary != "data-result" {
+		t.Fatalf("finalize must use data.result as input: %#v", state.data)
+	}
+	if state.result.Summary != "legacy-state\ndata-result" {
+		t.Fatalf("finalize must not read through implicit state result: %#v", state.result)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindFinalize)
+	if result == nil || result.Status != OperationStatusCompleted || !strings.Contains(result.Output, "data-result") || strings.Contains(result.Output, "legacy-state") {
+		t.Fatalf("finalize must keep contract output diagnostics from data.result: %#v", result)
+	}
+}
+
 func TestPublishMergeRequestFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 

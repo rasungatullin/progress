@@ -1742,13 +1742,6 @@ func finalizeInputFromOperation(state *operationExecution, operation OperationSp
 		input.actionName = state.action.Name
 		input.actionClass = string(state.action.Class)
 		input.result = resultFromExecutionData(state)
-		if len(operation.In) == 0 &&
-			strings.TrimSpace(state.result.Status) != "" &&
-			strings.TrimSpace(input.result.Summary) != "" &&
-			strings.Contains(state.result.Summary, input.result.Summary) &&
-			state.result.Summary != input.result.Summary {
-			input.result = state.result
-		}
 	}
 	if len(operation.In) == 0 {
 		return input
