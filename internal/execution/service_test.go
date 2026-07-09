@@ -1886,24 +1886,32 @@ func TestPublishReviewRemarksFillsOnlyActionData(t *testing.T) {
 	state := &operationExecution{
 		in: model.Invocation{
 			Assignment: &ExecutionAssignment{
+				CanonicalTask: &ObjectRef{Type: "task", Repository: "legacy/name", Number: 999},
+				RelatedObjects: []ObjectRef{{
+					Type:       "merge-request",
+					Repository: "legacy/name",
+					Number:     999,
+				}},
+			},
+		},
+		assignment: &ExecutionAssignment{
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "legacy/name", Number: 999},
+			RelatedObjects: []ObjectRef{{
+				Type:       "merge-request",
+				Repository: "legacy/name",
+				Number:     999,
+			}},
+		},
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{
 				CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112},
 				RelatedObjects: []ObjectRef{{
 					Type:       "merge-request",
 					Repository: "owner/name",
 					Number:     17,
 				}},
-			},
-		},
-		assignment: &ExecutionAssignment{
-			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112},
-			RelatedObjects: []ObjectRef{{
-				Type:       "merge-request",
-				Repository: "owner/name",
-				Number:     17,
 			}},
-		},
-		action: model.Action{Operations: []model.OperationSpec{operation}},
-		data: map[string]any{
 			"result": model.LaunchResult{Status: "completed", Summary: "review complete"},
 			"structured_output": &model.StructuredOutput{Remarks: []model.StructuredRemark{{
 				ID:       "remark-1",
@@ -1915,8 +1923,9 @@ func TestPublishReviewRemarksFillsOnlyActionData(t *testing.T) {
 				Severity: "major",
 			}}},
 		},
-		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+		pullRequest: &integration.MergeRequest{Repository: "legacy/name", Number: 998, HeadRef: "legacy-head"},
+		result:      model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker:     newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
@@ -1941,6 +1950,9 @@ func TestPublishReviewRemarksFillsOnlyActionData(t *testing.T) {
 	}
 	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
 		t.Fatalf("publish-review-remarks must not write implicit state result: %#v", state.result)
+	}
+	if state.pullRequest == nil || state.pullRequest.Number != 998 || state.pullRequest.Repository != "legacy/name" {
+		t.Fatalf("publish-review-remarks must not read or write implicit state pull request: %#v", state.pullRequest)
 	}
 }
 
@@ -2003,10 +2015,11 @@ func TestPublishReviewRemarksWritesOutputsWhenNoRemarks(t *testing.T) {
 
 	operation := publishReviewRemarksOperationSpec()
 	state := &operationExecution{
-		in:         model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-		assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}},
+		in:         model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "legacy/name", Number: 999}}}},
+		assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "legacy/name", Number: 999}}},
 		action:     model.Action{Operations: []model.OperationSpec{operation}},
 		data: map[string]any{
+			"invocation":        model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
 			"result":            model.LaunchResult{Status: "completed", Summary: "review complete"},
 			"structured_output": &model.StructuredOutput{Summary: "No remarks."},
 		},
