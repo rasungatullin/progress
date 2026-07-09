@@ -1524,7 +1524,7 @@ func TestPublishMergeRequestWritesOutputsWhenPullRequestAlreadyExists(t *testing
 	}
 }
 
-func TestPublishReviewRemarksFillsActionDataAndKeepsStateResult(t *testing.T) {
+func TestPublishReviewRemarksFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := publishReviewRemarksOperationSpec()
@@ -1584,8 +1584,8 @@ func TestPublishReviewRemarksFillsActionDataAndKeepsStateResult(t *testing.T) {
 	if !ok || !strings.Contains(dataResult.Summary, "review-remarks-published=1") {
 		t.Fatalf("publish-review-remarks must update data.result: %#v", state.data)
 	}
-	if state.result.Summary != dataResult.Summary {
-		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("publish-review-remarks must not write implicit state result: %#v", state.result)
 	}
 }
 

@@ -412,17 +412,15 @@ func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, s
 
 func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := publishMergeRequestInputFromOperation(state, operation)
-	applyPublishMergeRequestInputToState(state, input)
-	ref := pullRequestRefFromState(state)
+	ref := pullRequestRefFromPublishMergeRequestInput(state, input)
 	if ref.Number <= 0 {
 		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
 	comments := reviewRemarkComments(input.structuredOutput)
 	if len(comments) == 0 {
-		writeOperationData(state, operation.Out, "review_remarks_summary", "")
-		writeOperationData(state, operation.Out, "result", state.result)
-		state.tracker.skipIO(name, publishReviewRemarksInputSummary(input, operation), publishReviewRemarksOutputSummary("", state.result, operation), "Структурированный вывод не содержит замечаний или заключения для записи.")
+		writePublishReviewRemarksData(state, operation, "", input.result)
+		state.tracker.skipIO(name, publishReviewRemarksInputSummary(input, operation), publishReviewRemarksOutputSummary("", input.result, operation), "Структурированный вывод не содержит замечаний или заключения для записи.")
 		return nil
 	}
 
@@ -432,12 +430,24 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 	}
 
 	summary := fmt.Sprintf("review-remarks-published=%d", count)
-	state.result.Summary = joinExecutionSummaries(state.result.Summary, summary)
-	writeOperationData(state, operation.Out, "review_remarks_summary", summary)
-	writeOperationData(state, operation.Out, "result", state.result)
-	state.tracker.completeIO(name, publishReviewRemarksInputSummary(input, operation), publishReviewRemarksOutputSummary(summary, state.result, operation), "Замечания ревизии записаны через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
+	result := input.result
+	result.Summary = joinExecutionSummaries(result.Summary, summary)
+	writePublishReviewRemarksData(state, operation, summary, result)
+	state.tracker.completeIO(name, publishReviewRemarksInputSummary(input, operation), publishReviewRemarksOutputSummary(summary, result, operation), "Замечания ревизии записаны через контур интеграции.")
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
 	return nil
+}
+
+func writePublishReviewRemarksData(state *operationExecution, operation OperationSpec, summary string, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"review_remarks_summary": {Ref: "data.review_remarks_summary"},
+			"result":                 {Ref: "data.result"},
+		}
+	}
+	writeOperationData(state, out, "review_remarks_summary", summary)
+	writeOperationData(state, out, "result", result)
 }
 
 func publishReviewRemarksInputSummary(input publishMergeRequestInput, operation OperationSpec) string {
