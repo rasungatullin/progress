@@ -68,7 +68,7 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindResolveProfile:
 		return e.resolveProfile(ctx, state, operation, name)
 	case OperationKindAllocateResources:
-		return e.allocateResources(ctx, state, name)
+		return e.allocateResources(ctx, state, operation, name)
 	case OperationKindPrepareWorkplace:
 		return e.prepareWorkplace(ctx, state, name)
 	case OperationKindBuildDirective:
@@ -445,24 +445,179 @@ func operationIOSummary(mappings model.OperationMap, values map[string]string) s
 	return strings.Join(parts, " ")
 }
 
-func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *operationExecution, name string) error {
-	if !state.action.RequiresSynthesis {
+func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := allocateResourcesInputFromOperation(state, operation)
+	if !input.requiresSynthesis {
 		state.allocation = allocation{Resource: "not-required", Source: "action-without-synthesis"}
-		state.tracker.skip(name, "Ресурсное снабжение не требуется для действия без синтеза.")
+		writeOperationData(state, operation.Out, "allocation", state.allocation)
+		state.tracker.skipIO(name, allocateResourcesInputSummary(input, operation), allocateResourcesOutputSummary(state.allocation, operation), "Ресурсное снабжение не требуется для действия без синтеза.")
 		return nil
 	}
 
-	allocation, err := e.service.allocateResources(ctx, state.in, state.profile)
+	allocation, err := e.service.allocateResources(ctx, input.invocation, input.profile)
 	if err != nil {
 		state.result = failedStartResult(err)
 		state.tracker.fail(name, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, model.Allocation{}, model.Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, model.Allocation{}, model.Workplace{}, state.result, err)
 		return err
 	}
 
 	state.allocation = allocation
-	state.tracker.complete(name, fmt.Sprintf("resource=%s runner=%s model=%s", allocation.Resource, allocation.Runner, allocation.Model))
+	writeOperationData(state, operation.Out, "allocation", allocation)
+	state.tracker.completeIO(name, allocateResourcesInputSummary(input, operation), allocateResourcesOutputSummary(allocation, operation), fmt.Sprintf("resource=%s runner=%s model=%s", allocation.Resource, allocation.Runner, allocation.Model))
 	return nil
+}
+
+type allocateResourcesInput struct {
+	requiresSynthesis bool
+	invocation        invocation
+	profile           profile
+}
+
+func allocateResourcesInputFromOperation(state *operationExecution, operation OperationSpec) allocateResourcesInput {
+	input := allocateResourcesInput{}
+	if state != nil {
+		input.requiresSynthesis = state.action.RequiresSynthesis
+		input.invocation = state.in
+		input.profile = state.profile
+	}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["requires_synthesis"]; ok {
+		if value, ok := boolValueFromAllocateResourcesMapping(state, mapping); ok {
+			input.requiresSynthesis = value
+		}
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromAllocateResourcesMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromAllocateResourcesMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	return input
+}
+
+func boolValueFromAllocateResourcesMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
+	if len(mapping.Value) != 0 {
+		var value bool
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return false, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "action.requires_synthesis":
+		if state == nil {
+			return false, false
+		}
+		return state.action.RequiresSynthesis, true
+	default:
+		return false, false
+	}
+}
+
+func invocationValueFromAllocateResourcesMapping(state *operationExecution, mapping model.OperationMapping) (invocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value invocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return invocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "in", "invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		return state.in, true
+	default:
+		return invocation{}, false
+	}
+}
+
+func profileValueFromAllocateResourcesMapping(state *operationExecution, mapping model.OperationMapping) (profile, bool) {
+	if len(mapping.Value) != 0 {
+		var value profile
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return profile{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.profile":
+		if state == nil {
+			return profile{}, false
+		}
+		value, ok := state.data["profile"].(profile)
+		return value, ok
+	case "state.profile":
+		if state == nil {
+			return profile{}, false
+		}
+		return state.profile, true
+	default:
+		return profile{}, false
+	}
+}
+
+func allocateResourcesInputSummary(input allocateResourcesInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"invocation":         invocationSummary(input.invocation),
+		"profile":            profileSummary(input.profile),
+		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+	})
+}
+
+func allocateResourcesOutputSummary(allocation allocation, operation OperationSpec) string {
+	allocationJSON, err := json.Marshal(allocation)
+	if err != nil {
+		allocationJSON = []byte(fmt.Sprintf(`{"resource":%q}`, allocation.Resource))
+	}
+	return operationIOSummary(operation.Out, map[string]string{
+		"allocation": string(allocationJSON),
+	})
+}
+
+func invocationSummary(in invocation) string {
+	parts := []string{}
+	if task := strings.TrimSpace(in.Task); task != "" {
+		parts = append(parts, "task="+task)
+	}
+	if action := strings.TrimSpace(in.Action); action != "" {
+		parts = append(parts, "action="+action)
+	}
+	if repository := strings.TrimSpace(in.Repository.URL); repository != "" {
+		parts = append(parts, "repository="+repository)
+	}
+	if workplace := strings.TrimSpace(in.Workplace.Name); workplace != "" {
+		parts = append(parts, "workplace="+workplace)
+	}
+	if len(parts) == 0 {
+		return "absent"
+	}
+	return strings.Join(parts, ",")
+}
+
+func profileSummary(profile profile) string {
+	if strings.TrimSpace(profile.Name) == "" && strings.TrimSpace(profile.ModelBinding) == "" {
+		return "absent"
+	}
+	parts := []string{}
+	if name := strings.TrimSpace(profile.Name); name != "" {
+		parts = append(parts, "name="+name)
+	}
+	if mode := strings.TrimSpace(profile.Mode); mode != "" {
+		parts = append(parts, "mode="+mode)
+	}
+	if binding := strings.TrimSpace(profile.ModelBinding); binding != "" {
+		parts = append(parts, "binding="+binding)
+	}
+	return strings.Join(parts, ",")
 }
 
 func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *operationExecution, name string) error {

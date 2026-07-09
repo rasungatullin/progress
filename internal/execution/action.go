@@ -432,6 +432,10 @@ func (t *operationTracker) skip(name string, summary string) {
 	t.set(name, model.OperationStatus(OperationStatusSkipped), "", "", summary, nil)
 }
 
+func (t *operationTracker) skipIO(name string, input string, output string, summary string) {
+	t.set(name, model.OperationStatus(OperationStatusSkipped), input, output, summary, nil)
+}
+
 func (t *operationTracker) fail(name string, summary string, err error, code string, retryable bool, manualIntervention bool) {
 	t.set(name, model.OperationStatus(OperationStatusFailed), "", "", summary, executionFailure(code, err, retryable, manualIntervention))
 }

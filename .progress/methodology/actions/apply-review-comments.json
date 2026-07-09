@@ -52,6 +52,10 @@
       "workplace": {
         "type": "object",
         "description": "Подготовленная спецификация рабочего места с синхронизированными ветками."
+      },
+      "allocation": {
+        "type": "object",
+        "description": "Результат ресурсного снабжения для последующих операций действия."
       }
     }
   },
@@ -107,7 +111,23 @@
       }
     },
     {
-      "name": "allocate-resources"
+      "name": "allocate-resources",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "invocation": {
+          "ref": "in"
+        },
+        "profile": {
+          "ref": "data.profile"
+        }
+      },
+      "out": {
+        "allocation": {
+          "ref": "data.allocation"
+        }
+      }
     },
     {
       "name": "prepare-workplace"

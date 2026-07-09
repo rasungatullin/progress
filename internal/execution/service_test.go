@@ -713,6 +713,87 @@ func TestPrepareDataUsesOperationInputValue(t *testing.T) {
 	}
 }
 
+func TestAllocateResourcesFillsActionDataAndKeepsStateAllocation(t *testing.T) {
+	t.Parallel()
+
+	operation := allocateResourcesOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Task:   "task-42",
+			Action: "implement",
+		},
+		action: model.Action{
+			RequiresSynthesis: true,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"profile": model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
+		},
+		profile: model.Profile{Name: "legacy", Mode: "manual", ModelBinding: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	resources := &stubResourceProvider{allocation: model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"}}
+	service := &Service{
+		logger:    log.Default(),
+		resources: resources,
+	}
+
+	err := builtinOperationExecutor{service: service}.allocateResources(context.Background(), state, operation, OperationKindAllocateResources)
+	if err != nil {
+		t.Fatalf("allocate resources: %v", err)
+	}
+	dataAllocation, ok := state.data["allocation"].(model.Allocation)
+	if !ok {
+		t.Fatalf("allocate-resources must fill data.allocation: %#v", state.data)
+	}
+	if dataAllocation.Resource != "binding:coder" || dataAllocation.ModelBinding != "coder" {
+		t.Fatalf("unexpected data allocation: %#v", dataAllocation)
+	}
+	if state.allocation.Resource != "binding:coder" || state.allocation.ModelBinding != "coder" {
+		t.Fatalf("state allocation must keep compatibility copy: %#v", state.allocation)
+	}
+	if resources.profile.Name != "coder" || resources.profile.ModelBinding != "coder" {
+		t.Fatalf("resource allocation must use profile from operation input: %#v", resources.profile)
+	}
+}
+
+func TestAllocateResourcesWritesNotRequiredAllocationForActionWithoutSynthesis(t *testing.T) {
+	t.Parallel()
+
+	operation := allocateResourcesOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{Action: "service"},
+		action: model.Action{
+			RequiresSynthesis: false,
+			Operations:        []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"profile": model.Profile{Name: "default", Mode: "manual"},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger:    log.Default(),
+		resources: &stubResourceProvider{err: errors.New("resources must not be called")},
+	}
+
+	err := builtinOperationExecutor{service: service}.allocateResources(context.Background(), state, operation, OperationKindAllocateResources)
+	if err != nil {
+		t.Fatalf("allocate resources: %v", err)
+	}
+	dataAllocation, ok := state.data["allocation"].(model.Allocation)
+	if !ok || dataAllocation.Resource != "not-required" || dataAllocation.Source != "action-without-synthesis" {
+		t.Fatalf("allocate-resources must write skipped allocation to data.allocation: %#v", state.data)
+	}
+	if state.allocation.Resource != "not-required" || state.allocation.Source != "action-without-synthesis" {
+		t.Fatalf("state allocation must keep skipped compatibility copy: %#v", state.allocation)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindAllocateResources)
+	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
+		t.Fatalf("skipped allocation must keep contract output diagnostics: %#v", result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -862,7 +943,17 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 				{Name: OperationKindLoadPullRequest},
 				{Name: OperationKindLoadReviewRemarks},
 				{Name: OperationKindResolveProfile, In: map[string]methodology.ActionMapping{"profile_name": mappingRef("action.profile")}, Out: map[string]methodology.ActionMapping{"profile": mappingRef("data.profile")}},
-				{Name: OperationKindAllocateResources},
+				{
+					Name: OperationKindAllocateResources,
+					In: map[string]methodology.ActionMapping{
+						"requires_synthesis": mappingRef("action.requires_synthesis"),
+						"invocation":         mappingRef("in"),
+						"profile":            mappingRef("data.profile"),
+					},
+					Out: map[string]methodology.ActionMapping{
+						"allocation": mappingRef("data.allocation"),
+					},
+				},
 				{Name: OperationKindPrepareWorkplace},
 				{Name: OperationKindBuildDirective},
 				{Name: OperationKindLaunchSynthesis},
@@ -933,6 +1024,13 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	}
 	if profileOperation.In["profile_name"].Ref != "action.profile" || profileOperation.Out["profile"].Ref != "data.profile" {
 		t.Fatalf("resolve-profile must keep action data mapping: %#v", profileOperation)
+	}
+	allocationOperation := findOperationSpec(action, OperationKindAllocateResources)
+	if allocationOperation == nil {
+		t.Fatalf("allocate-resources operation must be present: %#v", action.Operations)
+	}
+	if allocationOperation.In["requires_synthesis"].Ref != "action.requires_synthesis" || allocationOperation.In["profile"].Ref != "data.profile" || allocationOperation.Out["allocation"].Ref != "data.allocation" {
+		t.Fatalf("allocate-resources must keep action data mapping: %#v", allocationOperation)
 	}
 }
 
@@ -1818,6 +1916,22 @@ func prepareDataOperationSpec() model.OperationSpec {
 		Out: model.OperationMap{
 			"structured_input": {Ref: "data.structured_input"},
 			"workplace":        {Ref: "data.workplace"},
+		},
+	}
+}
+
+func allocateResourcesOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindAllocateResources,
+		Kind:   OperationKindAllocateResources,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"requires_synthesis": {Ref: "action.requires_synthesis"},
+			"invocation":         {Ref: "in"},
+			"profile":            {Ref: "data.profile"},
+		},
+		Out: model.OperationMap{
+			"allocation": {Ref: "data.allocation"},
 		},
 	}
 }

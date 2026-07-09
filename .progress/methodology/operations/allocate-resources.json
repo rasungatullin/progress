@@ -3,5 +3,31 @@
   "kind": "allocate-resources",
   "title": "Ресурсное снабжение",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "requires_synthesis": {
+        "type": "boolean",
+        "required": true,
+        "description": "Признак необходимости запуска синтеза для разрешённого действия."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
+      },
+      "profile": {
+        "type": "object",
+        "required": true,
+        "description": "Разрешённый исполнительный профиль."
+      }
+    },
+    "out": {
+      "allocation": {
+        "type": "object",
+        "required": true,
+        "description": "Результат ресурсного снабжения для последующих операций действия."
+      }
+    }
+  }
 }
