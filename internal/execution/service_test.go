@@ -1909,6 +1909,37 @@ func TestPublishReviewResponsesWritesOutputsWhenNoResponses(t *testing.T) {
 	}
 }
 
+func TestUnsupportedRequiredOperationWritesResultData(t *testing.T) {
+	t.Parallel()
+
+	operation := model.OperationSpec{
+		Name:     "unknown-operation",
+		Kind:     model.OperationKind("unknown-operation"),
+		Origin:   OperationOriginBuiltin,
+		Required: true,
+		Out:      model.OperationMap{"result": {Ref: "data.result"}},
+	}
+	state := &operationExecution{
+		in:      model.Invocation{Task: "task-42"},
+		action:  model.Action{Operations: []model.OperationSpec{operation}},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.unsupported(context.Background(), state, operation, operation.Name)
+	if err == nil {
+		t.Fatal("unsupported required operation must return error")
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "unknown-operation") {
+		t.Fatalf("unsupported operation must write failed result to data.result: %#v", state.data)
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("unsupported operation must not write implicit state result: %#v", state.result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 

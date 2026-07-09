@@ -1845,10 +1845,19 @@ func (e builtinOperationExecutor) unsupported(ctx context.Context, state *operat
 	}
 
 	err := fmt.Errorf("operation %q is unsupported", name)
-	state.result = failedStartResult(err)
+	result := failedStartResult(err)
+	writeUnsupportedData(state, operation, result)
 	state.tracker.fail(name, "Операция не поддержана текущей реализацией.", err, "operation_unsupported", false, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, invocationFromExecutionData(state), profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, err)
 	return err
+}
+
+func writeUnsupportedData(state *operationExecution, operation OperationSpec, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"result": {Ref: "data.result"}}
+	}
+	writeOperationData(state, out, "result", result)
 }
 
 func operationKind(operation OperationSpec) OperationKind {
