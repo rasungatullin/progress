@@ -1892,6 +1892,60 @@ func TestPublishReviewRemarksFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestPublishReviewRemarksFailureFillsOnlyActionData(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewRemarksOperationSpec()
+	state := &operationExecution{
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation": model.Invocation{
+				Assignment: &ExecutionAssignment{
+					RelatedObjects: []ObjectRef{{
+						Type:       "merge-request",
+						Repository: "owner/name",
+						Number:     17,
+					}},
+				},
+			},
+			"result": model.LaunchResult{Status: "completed", Summary: "review complete"},
+			"structured_output": &model.StructuredOutput{Remarks: []model.StructuredRemark{{
+				ID:       "remark-1",
+				Title:    "Не хватает проверки",
+				Body:     "Добавьте проверку отказа.",
+				Path:     "internal/execution/service.go",
+				Line:     42,
+				Side:     "RIGHT",
+				Severity: "major",
+			}}},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger: log.Default(),
+		integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+			return integration.Response{}, errors.New("publish failed")
+		}},
+	}
+
+	err := builtinOperationExecutor{service: service}.publishReviewRemarks(context.Background(), state, operation, OperationKindPublishReviewRemarks)
+	if err == nil {
+		t.Fatalf("publish review remarks must fail")
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "publish failed") {
+		t.Fatalf("publish-review-remarks failure must fill data.result: %#v", state.data)
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("publish-review-remarks failure must not write implicit state result: %#v", state.result)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindPublishReviewRemarks)
+	if result == nil || result.Status != OperationStatusFailed || result.Failure == nil || result.Failure.Code != "review_remarks_publish_failed" {
+		t.Fatalf("publish-review-remarks failure must keep diagnostics: %#v", result)
+	}
+}
+
 func TestPublishReviewRemarksWritesOutputsWhenNoRemarks(t *testing.T) {
 	t.Parallel()
 

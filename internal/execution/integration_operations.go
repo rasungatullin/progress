@@ -517,7 +517,7 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 	input := publishMergeRequestInputFromOperation(state, operation)
 	ref := pullRequestRefFromPublishMergeRequestInput(state, input)
 	if ref.Number <= 0 {
-		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
+		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
 	comments := reviewRemarkComments(input.structuredOutput)
@@ -529,7 +529,7 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 
 	count, err := e.publishPullRequestComments(ctx, state, ref, comments)
 	if err != nil {
-		return e.failIntegrationOperation(ctx, state, name, "Замечания ревизии не записаны.", err, "review_remarks_publish_failed")
+		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Замечания ревизии не записаны.", err, "review_remarks_publish_failed")
 	}
 
 	summary := fmt.Sprintf("review-remarks-published=%d", count)
@@ -539,6 +539,38 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 	state.tracker.completeIO(name, publishReviewRemarksInputSummary(input, operation), publishReviewRemarksOutputSummary(summary, result, operation), "Замечания ревизии записаны через контур интеграции.")
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
 	return nil
+}
+
+func (e builtinOperationExecutor) failPublishReviewRemarksOperation(ctx context.Context, state *operationExecution, operation OperationSpec, input publishMergeRequestInput, name string, summary string, err error, code string) error {
+	result := failedPublishReviewRemarksResult(input, err)
+	writePublishReviewRemarksFailureData(state, operation, result)
+	state.tracker.fail(name, summary, err, code, true, true)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), input.workplace, result, err)
+	return err
+}
+
+func failedPublishReviewRemarksResult(input publishMergeRequestInput, err error) LaunchResult {
+	result := input.result
+	if strings.TrimSpace(result.Status) == "" {
+		result = failedStartResult(err)
+	} else {
+		result.Status = "failed"
+		result.Summary = joinExecutionSummaries(result.Summary, strings.TrimSpace(err.Error()))
+	}
+	if result.StructuredOutput == nil {
+		result.StructuredOutput = input.structuredOutput
+	}
+	return result
+}
+
+func writePublishReviewRemarksFailureData(state *operationExecution, operation OperationSpec, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"result": {Ref: "data.result"},
+		}
+	}
+	writeOperationData(state, out, "result", result)
 }
 
 func writePublishReviewRemarksData(state *operationExecution, operation OperationSpec, summary string, result LaunchResult) {
