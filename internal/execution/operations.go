@@ -378,6 +378,16 @@ func workplaceFromExecutionData(state *operationExecution) workplace {
 	return state.workplace
 }
 
+func directiveFromExecutionData(state *operationExecution) launchSpec {
+	if state == nil {
+		return launchSpec{}
+	}
+	if value, ok := state.data["directive"].(launchSpec); ok {
+		return value
+	}
+	return state.in.Launch
+}
+
 func resolveProfileInputSummary(profileName string, operation OperationSpec) string {
 	profileName = strings.TrimSpace(profileName)
 	if profileName == "" {
@@ -883,9 +893,9 @@ func allocationSummary(allocation allocation) string {
 func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := buildDirectiveInputFromOperation(state, operation)
 	if !input.requiresSynthesis {
-		state.in = input.invocation
-		writeOperationData(state, operation.Out, "directive", state.in.Launch)
-		state.tracker.skipIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(state.in.Launch, operation), "Исполнительная директива не требуется для действия без синтеза.")
+		directive := input.invocation.Launch
+		writeBuildDirectiveData(state, operation, directive)
+		state.tracker.skipIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(directive, operation), "Исполнительная директива не требуется для действия без синтеза.")
 		return nil
 	}
 
@@ -895,11 +905,18 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	if strings.TrimSpace(directiveInvocation.Launch.ModelBinding) == "" {
 		directiveInvocation.Launch.ModelBinding = input.allocation.ModelBinding
 	}
-	state.in = directiveInvocation
-	writeOperationData(state, operation.Out, "directive", state.in.Launch)
-	state.tracker.completeIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(state.in.Launch, operation), "Исполнительная директива подготовлена к запуску.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), input.allocation, workplaceFromExecutionData(state), LaunchResult{Status: "running"}, nil)
+	writeBuildDirectiveData(state, operation, directiveInvocation.Launch)
+	state.tracker.completeIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(directiveInvocation.Launch, operation), "Исполнительная директива подготовлена к запуску.")
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, directiveInvocation, profileFromExecutionData(state), input.allocation, workplaceFromExecutionData(state), LaunchResult{Status: "running"}, nil)
 	return nil
+}
+
+func writeBuildDirectiveData(state *operationExecution, operation OperationSpec, directive launchSpec) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"directive": {Ref: "data.directive"}}
+	}
+	writeOperationData(state, out, "directive", directive)
 }
 
 type buildDirectiveInput struct {
@@ -1073,7 +1090,7 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
 		input.invocation = state.in
-		input.directive = state.in.Launch
+		input.directive = directiveFromExecutionData(state)
 		input.profile = profileFromExecutionData(state)
 		input.allocation = allocationFromExecutionData(state)
 		input.workplace = workplaceFromExecutionData(state)

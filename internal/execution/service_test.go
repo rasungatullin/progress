@@ -893,7 +893,7 @@ func TestPrepareWorkplaceWritesLocalReadyWorkplaceForActionWithoutWorkplace(t *t
 	}
 }
 
-func TestBuildDirectiveFillsActionDataAndKeepsStateLaunch(t *testing.T) {
+func TestBuildDirectiveFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := buildDirectiveOperationSpec()
@@ -927,8 +927,8 @@ func TestBuildDirectiveFillsActionDataAndKeepsStateLaunch(t *testing.T) {
 	if directive.Runner != "opencode" || directive.Model != "openai/gpt-5.5" || directive.ModelBinding != "coder" {
 		t.Fatalf("unexpected directive: %#v", directive)
 	}
-	if state.in.Launch.Runner != "opencode" || state.in.Launch.Model != "openai/gpt-5.5" || state.in.Launch.ModelBinding != "coder" {
-		t.Fatalf("state launch must keep compatibility copy: %#v", state.in.Launch)
+	if state.in.Launch.Runner != "" || state.in.Launch.Model != "" || state.in.Launch.ModelBinding != "" {
+		t.Fatalf("build-directive must not write implicit state launch: %#v", state.in.Launch)
 	}
 }
 
