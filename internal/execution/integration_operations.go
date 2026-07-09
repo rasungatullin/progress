@@ -921,28 +921,6 @@ func (e builtinOperationExecutor) integrationExecutor() (integrationExecutor, er
 	return e.service.integrations, nil
 }
 
-func (e builtinOperationExecutor) failIntegrationOperation(ctx context.Context, state *operationExecution, name string, summary string, err error, code string) error {
-	if strings.TrimSpace(state.result.Status) == "" {
-		state.result = failedStartResult(err)
-	} else {
-		state.result.Status = "failed"
-		state.result.Summary = joinExecutionSummaries(state.result.Summary, strings.TrimSpace(err.Error()))
-	}
-	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, err)
-	return err
-}
-
-func (e builtinOperationExecutor) failOrSkipIntegrationOperation(ctx context.Context, state *operationExecution, name string, summary string, err error, code string, required bool) error {
-	if required {
-		return e.failIntegrationOperation(ctx, state, name, summary, err, code)
-	}
-
-	state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), state.result, nil)
-	return nil
-}
-
 func pullRequestRefFromState(state *operationExecution) pullRequestRef {
 	ref := pullRequestRefFromAssignment(state.assignment)
 	if state != nil && state.pullRequest != nil {
