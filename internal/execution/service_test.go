@@ -1352,6 +1352,108 @@ func TestPublishMergeRequestWritesOutputsWhenPullRequestAlreadyExists(t *testing
 	}
 }
 
+func TestPublishReviewRemarksFillsActionDataAndKeepsStateResult(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewRemarksOperationSpec()
+	state := &operationExecution{
+		in: model.Invocation{
+			Assignment: &ExecutionAssignment{
+				CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112},
+				RelatedObjects: []ObjectRef{{
+					Type:       "merge-request",
+					Repository: "owner/name",
+					Number:     17,
+				}},
+			},
+		},
+		assignment: &ExecutionAssignment{
+			CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 112},
+			RelatedObjects: []ObjectRef{{
+				Type:       "merge-request",
+				Repository: "owner/name",
+				Number:     17,
+			}},
+		},
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"result": model.LaunchResult{Status: "completed", Summary: "review complete"},
+			"structured_output": &model.StructuredOutput{Remarks: []model.StructuredRemark{{
+				ID:       "remark-1",
+				Title:    "Не хватает проверки",
+				Body:     "Добавьте проверку отказа.",
+				Path:     "internal/execution/service.go",
+				Line:     42,
+				Side:     "RIGHT",
+				Severity: "major",
+			}}},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	integrations := &stubIntegrationExecutor{
+		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			if req.Operation != "create" || req.Repository != "owner/name" || req.Number != 17 || req.Path != "internal/execution/service.go" || req.Line != 42 {
+				t.Fatalf("unexpected integration request: %#v", req)
+			}
+			return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", URL: "https://github.com/owner/name/pull/17#discussion_r1"}}, nil
+		},
+	}
+	service := &Service{logger: log.Default(), integrations: integrations}
+
+	err := builtinOperationExecutor{service: service}.publishReviewRemarks(context.Background(), state, operation, OperationKindPublishReviewRemarks)
+	if err != nil {
+		t.Fatalf("publish review remarks: %v", err)
+	}
+	if state.data["review_remarks_summary"] != "review-remarks-published=1" {
+		t.Fatalf("publish-review-remarks must fill data.review_remarks_summary: %#v", state.data)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || !strings.Contains(dataResult.Summary, "review-remarks-published=1") {
+		t.Fatalf("publish-review-remarks must update data.result: %#v", state.data)
+	}
+	if state.result.Summary != dataResult.Summary {
+		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	}
+}
+
+func TestPublishReviewRemarksWritesOutputsWhenNoRemarks(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewRemarksOperationSpec()
+	state := &operationExecution{
+		in:         model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+		assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}},
+		action:     model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"result":            model.LaunchResult{Status: "completed", Summary: "review complete"},
+			"structured_output": &model.StructuredOutput{Summary: "No remarks."},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{
+		logger: log.Default(),
+		integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+			return integration.Response{}, errors.New("integration must not be called")
+		}},
+	}
+
+	err := builtinOperationExecutor{service: service}.publishReviewRemarks(context.Background(), state, operation, OperationKindPublishReviewRemarks)
+	if err != nil {
+		t.Fatalf("publish review remarks: %v", err)
+	}
+	if state.data["review_remarks_summary"] != "" {
+		t.Fatalf("skipped publish-review-remarks must write empty summary: %#v", state.data)
+	}
+	if _, ok := state.data["result"].(model.LaunchResult); !ok {
+		t.Fatalf("skipped publish-review-remarks must keep data.result: %#v", state.data)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindPublishReviewRemarks)
+	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
+		t.Fatalf("skipped publish-review-remarks must keep contract output diagnostics: %#v", result)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -1722,6 +1824,44 @@ func TestActionResolutionKeepsPublishMergeRequestMapping(t *testing.T) {
 	}
 	if operation.In["structured_output"].Ref != "data.structured_output" || operation.Out["merge_request"].Ref != "data.merge_request" || operation.Out["result"].Ref != "data.result" {
 		t.Fatalf("publish-merge-request must keep action data mapping: %#v", operation)
+	}
+}
+
+func TestActionResolutionKeepsPublishReviewRemarksMapping(t *testing.T) {
+	t.Parallel()
+
+	action, err := resolveActionFromCatalog(methodology.Catalog{
+		Actions: []methodology.Action{{
+			Name:              ActionReviewPullRequest,
+			Class:             ActionClassReview,
+			RequiresWorkplace: boolRef(true),
+			RequiresSynthesis: boolRef(true),
+			Operations: []methodology.ActionOperation{{
+				Name: OperationKindPublishReviewRemarks,
+				In: map[string]methodology.ActionMapping{
+					"invocation":        mappingRef("in"),
+					"result":            mappingRef("data.result"),
+					"structured_output": mappingRef("data.structured_output"),
+				},
+				Out: map[string]methodology.ActionMapping{
+					"review_remarks_summary": mappingRef("data.review_remarks_summary"),
+					"result":                 mappingRef("data.result"),
+				},
+			}},
+		}},
+		Operations: []methodology.Operation{
+			{Name: OperationKindPublishReviewRemarks, Kind: OperationKindPublishReviewRemarks, Title: "Запись замечаний ревизии", Origin: OperationOriginBuiltin, Required: boolRef(true)},
+		},
+	}, invocation{Action: ActionReviewPullRequest})
+	if err != nil {
+		t.Fatalf("resolve action: %v", err)
+	}
+	operation := findOperationSpec(action, OperationKindPublishReviewRemarks)
+	if operation == nil {
+		t.Fatalf("publish-review-remarks operation must be present: %#v", action.Operations)
+	}
+	if operation.In["structured_output"].Ref != "data.structured_output" || operation.Out["review_remarks_summary"].Ref != "data.review_remarks_summary" || operation.Out["result"].Ref != "data.result" {
+		t.Fatalf("publish-review-remarks must keep action data mapping: %#v", operation)
 	}
 }
 
@@ -2740,6 +2880,23 @@ func publishMergeRequestOperationSpec() model.OperationSpec {
 			"merge_request":   {Ref: "data.merge_request"},
 			"publish_summary": {Ref: "data.publish_summary"},
 			"result":          {Ref: "data.result"},
+		},
+	}
+}
+
+func publishReviewRemarksOperationSpec() model.OperationSpec {
+	return model.OperationSpec{
+		Name:   OperationKindPublishReviewRemarks,
+		Kind:   OperationKindPublishReviewRemarks,
+		Origin: OperationOriginBuiltin,
+		In: model.OperationMap{
+			"invocation":        {Ref: "in"},
+			"result":            {Ref: "data.result"},
+			"structured_output": {Ref: "data.structured_output"},
+		},
+		Out: model.OperationMap{
+			"review_remarks_summary": {Ref: "data.review_remarks_summary"},
+			"result":                 {Ref: "data.result"},
 		},
 	}
 }

@@ -68,6 +68,10 @@
       "structured_output": {
         "type": "object",
         "description": "Нормализованный структурированный результат выполнения."
+      },
+      "review_remarks_summary": {
+        "type": "string",
+        "description": "Сводка записи замечаний ревизии."
       }
     }
   },
@@ -227,7 +231,26 @@
       }
     },
     {
-      "name": "publish-review-remarks"
+      "name": "publish-review-remarks",
+      "in": {
+        "invocation": {
+          "ref": "in"
+        },
+        "result": {
+          "ref": "data.result"
+        },
+        "structured_output": {
+          "ref": "data.structured_output"
+        }
+      },
+      "out": {
+        "review_remarks_summary": {
+          "ref": "data.review_remarks_summary"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
       "name": "finalize"
