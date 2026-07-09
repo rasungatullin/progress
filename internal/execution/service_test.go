@@ -1235,7 +1235,7 @@ func TestCommitPushWritesResultForActionWithoutSynthesis(t *testing.T) {
 	}
 }
 
-func TestLoadPullRequestFillsActionDataAndKeepsState(t *testing.T) {
+func TestLoadPullRequestFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := loadPullRequestOperationSpec()
@@ -1284,11 +1284,11 @@ func TestLoadPullRequestFillsActionDataAndKeepsState(t *testing.T) {
 	if !ok || dataInvocation.Workplace.HeadRef != "feature/review" || dataInvocation.Workplace.BaseRef != "main" {
 		t.Fatalf("load-pull-request must fill synchronized data.invocation: %#v", state.data)
 	}
-	if state.pullRequest == nil || state.pullRequest.Number != dataPullRequest.Number {
-		t.Fatalf("state pull request must keep compatibility copy: state=%#v data=%#v", state.pullRequest, dataPullRequest)
+	if state.pullRequest != nil {
+		t.Fatalf("load-pull-request must not write implicit state pull request: %#v", state.pullRequest)
 	}
-	if state.in.Workplace.HeadRef != dataInvocation.Workplace.HeadRef || state.assignment == nil || len(state.assignment.RelatedObjects) != 1 || state.assignment.RelatedObjects[0].Number != 17 {
-		t.Fatalf("state invocation and assignment must keep compatibility copy: state=%#v assignment=%#v data=%#v", state.in, state.assignment, dataInvocation)
+	if state.in.Workplace.HeadRef != "" || state.assignment != nil {
+		t.Fatalf("load-pull-request must not write implicit state invocation or assignment: state=%#v assignment=%#v", state.in, state.assignment)
 	}
 	result := findOperationResult(state.tracker.snapshot(), OperationKindLoadPullRequest)
 	if result == nil || result.Status != OperationStatusCompleted || result.Input == "" || result.Output == "" {

@@ -25,8 +25,7 @@ type pullRequestRef struct {
 
 func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := loadPullRequestInputFromOperation(state, operation)
-	applyLoadPullRequestInputToState(state, input)
-	ref := pullRequestRefFromState(state)
+	ref := pullRequestRefFromAssignment(assignmentFromInvocation(input.invocation))
 	if ref.Number <= 0 {
 		return e.failIntegrationOperation(ctx, state, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
@@ -54,12 +53,22 @@ func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *op
 		return e.failIntegrationOperation(ctx, state, name, "Контур интеграции не вернул запрос на слияние.", fmt.Errorf("integration response does not include merge request"), "pull_request_missing")
 	}
 
-	state.pullRequest = &mergeRequest
-	applyPullRequestToState(state, mergeRequest)
-	writeOperationData(state, operation.Out, "pull_request", mergeRequest)
-	writeOperationData(state, operation.Out, "invocation", state.in)
-	state.tracker.completeIO(name, loadPullRequestInputSummary(input, operation), loadPullRequestOutputSummary(mergeRequest, state.in, operation), "Запрос на слияние получен через контур интеграции.")
+	invocation := invocationWithPullRequest(input.invocation, mergeRequest)
+	writeLoadPullRequestData(state, operation, mergeRequest, invocation)
+	state.tracker.completeIO(name, loadPullRequestInputSummary(input, operation), loadPullRequestOutputSummary(mergeRequest, invocation, operation), "Запрос на слияние получен через контур интеграции.")
 	return nil
+}
+
+func writeLoadPullRequestData(state *operationExecution, operation OperationSpec, mergeRequest integration.MergeRequest, invocation invocation) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"pull_request": {Ref: "data.pull_request"},
+			"invocation":   {Ref: "data.invocation"},
+		}
+	}
+	writeOperationData(state, out, "pull_request", mergeRequest)
+	writeOperationData(state, out, "invocation", invocation)
 }
 
 type loadPullRequestInput struct {
@@ -69,7 +78,7 @@ type loadPullRequestInput struct {
 func loadPullRequestInputFromOperation(state *operationExecution, operation OperationSpec) loadPullRequestInput {
 	input := loadPullRequestInput{}
 	if state != nil {
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -80,14 +89,6 @@ func loadPullRequestInputFromOperation(state *operationExecution, operation Oper
 		}
 	}
 	return input
-}
-
-func applyLoadPullRequestInputToState(state *operationExecution, input loadPullRequestInput) {
-	if state == nil {
-		return
-	}
-	state.in = input.invocation
-	state.assignment = assignmentFromInvocation(input.invocation)
 }
 
 func loadPullRequestInputSummary(input loadPullRequestInput, operation OperationSpec) string {
@@ -151,7 +152,7 @@ type loadReviewRemarksInput struct {
 func loadReviewRemarksInputFromOperation(state *operationExecution, operation OperationSpec) loadReviewRemarksInput {
 	input := loadReviewRemarksInput{}
 	if state != nil {
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 		if state.pullRequest != nil {
 			pullRequest := *state.pullRequest
 			input.pullRequest = &pullRequest
@@ -315,7 +316,7 @@ type publishMergeRequestInput struct {
 func publishMergeRequestInputFromOperation(state *operationExecution, operation OperationSpec) publishMergeRequestInput {
 	input := publishMergeRequestInput{}
 	if state != nil {
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 		input.workplace = workplaceFromExecutionData(state)
 		input.result = resultFromExecutionData(state)
 		input.structuredOutput = structuredOutputFromExecutionData(state)
@@ -524,7 +525,7 @@ type publishReviewResponsesInput struct {
 func publishReviewResponsesInputFromOperation(state *operationExecution, operation OperationSpec) publishReviewResponsesInput {
 	input := publishReviewResponsesInput{}
 	if state != nil {
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 		input.result = resultFromExecutionData(state)
 		input.structuredOutput = structuredOutputFromExecutionData(state)
 		input.reviewRemarks = append([]integration.ReviewRemark(nil), state.reviewRemarks...)
@@ -1017,6 +1018,38 @@ func applyPullRequestToState(state *operationExecution, pr integration.MergeRequ
 	}
 }
 
+func invocationWithPullRequest(in invocation, pr integration.MergeRequest) invocation {
+	result := in
+	assignment := assignmentFromInvocation(result)
+	if assignment == nil {
+		assignment = &ExecutionAssignment{}
+	}
+	if assignment.CanonicalTask == nil {
+		assignment.CanonicalTask = &ObjectRef{Type: "task"}
+	}
+	if strings.TrimSpace(assignment.CanonicalTask.Repository) == "" {
+		assignment.CanonicalTask.Repository = strings.TrimSpace(pr.Repository)
+	}
+	if number, ok := numericBranch(pr.HeadRef); ok && assignment.CanonicalTask.Number == 0 {
+		assignment.CanonicalTask.Number = number
+	}
+	upsertPullRequestObject(assignment, pr)
+	result.Assignment = assignment
+	if strings.TrimSpace(result.Repository.URL) == "" {
+		result.Repository.URL = strings.TrimSpace(pr.Repository)
+	}
+	if strings.TrimSpace(result.Workplace.BaseRef) == "" {
+		result.Workplace.BaseRef = strings.TrimSpace(pr.BaseRef)
+	}
+	if strings.TrimSpace(pr.HeadRef) != "" {
+		result.Workplace.HeadRef = strings.TrimSpace(pr.HeadRef)
+	}
+	if workplaceName := workplaceNameFromPullRequestAssignment(assignment); workplaceName != "" {
+		result.Workplace.Name = workplaceName
+	}
+	return result
+}
+
 func upsertPullRequestObject(assignment *ExecutionAssignment, pr integration.MergeRequest) {
 	if assignment == nil {
 		return
@@ -1053,6 +1086,17 @@ func numericBranch(value string) (int, bool) {
 
 func workplaceNameFromState(state *operationExecution) string {
 	return workplaceNameFromRef(workplaceHeadRefFromState(state))
+}
+
+func workplaceNameFromPullRequestAssignment(assignment *ExecutionAssignment) string {
+	ref := pullRequestRefFromAssignment(assignment)
+	if strings.TrimSpace(ref.Head) != "" {
+		return workplaceNameFromRef(ref.Head)
+	}
+	if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
+		return workplaceNameFromRef(strconv.Itoa(assignment.CanonicalTask.Number))
+	}
+	return ""
 }
 
 func workplaceHeadRefFromState(state *operationExecution) string {

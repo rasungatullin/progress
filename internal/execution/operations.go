@@ -398,6 +398,16 @@ func resultFromExecutionData(state *operationExecution) LaunchResult {
 	return state.result
 }
 
+func invocationFromExecutionData(state *operationExecution) invocation {
+	if state == nil {
+		return invocation{}
+	}
+	if value, ok := state.data["invocation"].(invocation); ok {
+		return value
+	}
+	return state.in
+}
+
 func structuredOutputFromExecutionData(state *operationExecution) *StructuredOutput {
 	if state == nil {
 		return nil
@@ -561,7 +571,7 @@ func allocateResourcesInputFromOperation(state *operationExecution, operation Op
 	input := allocateResourcesInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 		input.profile = profileFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
@@ -753,7 +763,7 @@ func prepareWorkplaceInputFromOperation(state *operationExecution, operation Ope
 	input := prepareWorkplaceInput{}
 	if state != nil {
 		input.requiresWorkplace = state.action.RequiresWorkplace
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 		input.profile = profileFromExecutionData(state)
 		input.allocation = allocationFromExecutionData(state)
 	}
@@ -949,7 +959,7 @@ func buildDirectiveInputFromOperation(state *operationExecution, operation Opera
 	input := buildDirectiveInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 		input.allocation = allocationFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
@@ -1116,7 +1126,7 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 	input := launchSynthesisInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 		input.directive = directiveFromExecutionData(state)
 		input.profile = profileFromExecutionData(state)
 		input.allocation = allocationFromExecutionData(state)
@@ -1519,7 +1529,7 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 	input := commitPushInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.invocation = state.in
+		input.invocation = invocationFromExecutionData(state)
 		input.profile = profileFromExecutionData(state)
 		input.allocation = allocationFromExecutionData(state)
 		input.workplace = workplaceFromExecutionData(state)
