@@ -307,8 +307,8 @@ func publishMergeRequestInputFromOperation(state *operationExecution, operation 
 	if state != nil {
 		input.invocation = state.in
 		input.workplace = workplaceFromExecutionData(state)
-		input.result = state.result
-		input.structuredOutput = state.result.StructuredOutput
+		input.result = resultFromExecutionData(state)
+		input.structuredOutput = structuredOutputFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -495,8 +495,8 @@ func publishReviewResponsesInputFromOperation(state *operationExecution, operati
 	input := publishReviewResponsesInput{}
 	if state != nil {
 		input.invocation = state.in
-		input.result = state.result
-		input.structuredOutput = state.result.StructuredOutput
+		input.result = resultFromExecutionData(state)
+		input.structuredOutput = structuredOutputFromExecutionData(state)
 		input.reviewRemarks = append([]integration.ReviewRemark(nil), state.reviewRemarks...)
 	}
 	if len(operation.In) == 0 {

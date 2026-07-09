@@ -1085,7 +1085,7 @@ func TestLaunchSynthesisWritesSkippedResultForActionWithoutSynthesis(t *testing.
 	}
 }
 
-func TestParseResultFillsActionDataAndKeepsStateResult(t *testing.T) {
+func TestParseResultFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := parseResultOperationSpec()
@@ -1113,8 +1113,8 @@ func TestParseResultFillsActionDataAndKeepsStateResult(t *testing.T) {
 	if dataOutput.Summary != "Done." || dataOutput.CommitMessage != "Apply change" {
 		t.Fatalf("unexpected structured output: %#v", dataOutput)
 	}
-	if state.result.Status != "completed" || state.result.StructuredOutput == nil || state.result.StructuredOutput.Summary != "Done." {
-		t.Fatalf("state result must keep compatibility copy: %#v", state.result)
+	if state.result.Status != "legacy" || state.result.StructuredOutput != nil {
+		t.Fatalf("parse-result must not write implicit state result: %#v", state.result)
 	}
 }
 

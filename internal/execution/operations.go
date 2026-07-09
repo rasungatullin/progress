@@ -401,6 +401,16 @@ func resultFromExecutionData(state *operationExecution) LaunchResult {
 	return state.result
 }
 
+func structuredOutputFromExecutionData(state *operationExecution) *StructuredOutput {
+	if state == nil {
+		return nil
+	}
+	if value, ok := state.data["structured_output"].(*StructuredOutput); ok {
+		return value
+	}
+	return resultFromExecutionData(state).StructuredOutput
+}
+
 func resolveProfileInputSummary(profileName string, operation OperationSpec) string {
 	profileName = strings.TrimSpace(profileName)
 	if profileName == "" {
@@ -1353,9 +1363,6 @@ func (e builtinOperationExecutor) parseResult(state *operationExecution, operati
 		return nil
 	}
 
-	if state != nil {
-		state.result = input.result
-	}
 	writeOperationData(state, operation.Out, "structured_output", input.result.StructuredOutput)
 	state.tracker.completeIO(name, parseResultInputSummary(input, operation), parseResultOutputSummary(input.result.StructuredOutput, operation), "Результат выполнения нормализован.")
 	return nil
