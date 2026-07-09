@@ -321,15 +321,15 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 		return nil
 	}
 	if strings.TrimSpace(ref.Repository) == "" {
-		return e.failIntegrationOperation(ctx, state, name, "Репозиторий запроса на слияние не задан.", fmt.Errorf("repository is required for pull request creation"), "pull_request_repository_required")
+		return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Репозиторий запроса на слияние не задан.", fmt.Errorf("repository is required for pull request creation"), "pull_request_repository_required")
 	}
 	if strings.TrimSpace(ref.Head) == "" {
-		return e.failIntegrationOperation(ctx, state, name, "Ветка запроса на слияние не задана.", fmt.Errorf("head branch is required for pull request creation"), "pull_request_head_required")
+		return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Ветка запроса на слияние не задана.", fmt.Errorf("head branch is required for pull request creation"), "pull_request_head_required")
 	}
 	if strings.TrimSpace(ref.Base) == "" {
 		base, err := e.defaultMergeRequestBase(ctx, state)
 		if err != nil {
-			return e.failIntegrationOperation(ctx, state, name, "Базовая ветка запроса на слияние не определена.", err, "pull_request_base_required")
+			return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Базовая ветка запроса на слияние не определена.", err, "pull_request_base_required")
 		}
 		ref.Base = base
 	}
@@ -342,7 +342,7 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 
 	executor, err := e.integrationExecutor()
 	if err != nil {
-		return e.failIntegrationOperation(ctx, state, name, "Контур интеграции недоступен.", err, "integration_unavailable")
+		return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Контур интеграции недоступен.", err, "integration_unavailable")
 	}
 
 	response, err := executor.Execute(ctx, integration.Request{
@@ -359,7 +359,7 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 		Draft:           ref.Draft,
 	})
 	if err != nil && !pullRequestAlreadyAvailable(response) {
-		return e.failIntegrationOperation(ctx, state, name, "Запрос на слияние не открыт.", err, "pull_request_publish_failed")
+		return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Запрос на слияние не открыт.", err, "pull_request_publish_failed")
 	}
 
 	summary := pullRequestPublishSummary(response)
@@ -370,6 +370,38 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	state.tracker.completeIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, summary, result, operation), "Запрос на слияние зафиксирован через контур интеграции.")
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), input.workplace, result, nil)
 	return nil
+}
+
+func (e builtinOperationExecutor) failPublishMergeRequestOperation(ctx context.Context, state *operationExecution, operation OperationSpec, input publishMergeRequestInput, name string, summary string, err error, code string) error {
+	result := failedPublishMergeRequestResult(input, err)
+	writePublishMergeRequestFailureData(state, operation, result)
+	state.tracker.fail(name, summary, err, code, true, true)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), input.workplace, result, err)
+	return err
+}
+
+func failedPublishMergeRequestResult(input publishMergeRequestInput, err error) LaunchResult {
+	result := input.result
+	if strings.TrimSpace(result.Status) == "" {
+		result = failedStartResult(err)
+	} else {
+		result.Status = "failed"
+		result.Summary = joinExecutionSummaries(result.Summary, strings.TrimSpace(err.Error()))
+	}
+	if result.StructuredOutput == nil {
+		result.StructuredOutput = input.structuredOutput
+	}
+	return result
+}
+
+func writePublishMergeRequestFailureData(state *operationExecution, operation OperationSpec, result LaunchResult) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"result": {Ref: "data.result"},
+		}
+	}
+	writeOperationData(state, out, "result", result)
 }
 
 func writePublishMergeRequestData(state *operationExecution, operation OperationSpec, mergeRequest integration.MergeRequest, summary string, result LaunchResult) {
@@ -426,16 +458,6 @@ func publishMergeRequestInputFromOperation(state *operationExecution, operation 
 		}
 	}
 	return input
-}
-
-func applyPublishMergeRequestInputToState(state *operationExecution, input publishMergeRequestInput) {
-	if state == nil {
-		return
-	}
-	state.in = input.invocation
-	state.assignment = assignmentFromInvocation(input.invocation)
-	state.result = input.result
-	state.result.StructuredOutput = input.structuredOutput
 }
 
 func publishMergeRequestInputSummary(input publishMergeRequestInput, ref pullRequestRef, operation OperationSpec) string {

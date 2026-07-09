@@ -1731,6 +1731,48 @@ func TestPublishMergeRequestFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestPublishMergeRequestFailureFillsOnlyActionData(t *testing.T) {
+	t.Parallel()
+
+	operation := publishMergeRequestOperationSpec()
+	state := &operationExecution{
+		action: model.Action{
+			Operations: []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"invocation": model.Invocation{
+				Task: "task-132",
+				Assignment: &ExecutionAssignment{
+					CanonicalTask: &ObjectRef{Type: "task", Number: 132, Title: "Поддержать действие"},
+				},
+				Workplace: model.WorkplaceSpec{Name: "132"},
+			},
+			"workplace":         model.Workplace{Name: "/tmp/work", RepositoryRoot: "/tmp/work", Ready: true},
+			"result":            model.LaunchResult{Status: "completed", Summary: "launch complete"},
+			"structured_output": &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"},
+		},
+		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	service := &Service{logger: log.Default()}
+
+	err := builtinOperationExecutor{service: service}.publishMergeRequest(context.Background(), state, operation, OperationKindPublishMergeRequest)
+	if err == nil {
+		t.Fatalf("publish merge request must fail without repository")
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "repository is required") {
+		t.Fatalf("publish-merge-request failure must fill data.result: %#v", state.data)
+	}
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("publish-merge-request failure must not write implicit state result: %#v", state.result)
+	}
+	result := findOperationResult(state.tracker.snapshot(), OperationKindPublishMergeRequest)
+	if result == nil || result.Status != OperationStatusFailed || result.Failure == nil || result.Failure.Code != "pull_request_repository_required" {
+		t.Fatalf("publish-merge-request failure must keep diagnostics: %#v", result)
+	}
+}
+
 func TestPublishMergeRequestWritesOutputsWhenPullRequestAlreadyExists(t *testing.T) {
 	t.Parallel()
 
