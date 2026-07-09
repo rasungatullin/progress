@@ -116,6 +116,9 @@
         },
         "workplace": {
           "ref": "data.workplace"
+        },
+        "invocation": {
+          "ref": "data.invocation"
         }
       }
     },
@@ -123,7 +126,7 @@
       "name": "load-pull-request",
       "in": {
         "invocation": {
-          "ref": "in"
+          "ref": "data.invocation"
         }
       },
       "out": {
@@ -174,7 +177,7 @@
           "ref": "action.requires_synthesis"
         },
         "invocation": {
-          "ref": "in"
+          "ref": "data.invocation"
         },
         "profile": {
           "ref": "data.profile"
@@ -193,7 +196,7 @@
           "ref": "action.requires_workplace"
         },
         "invocation": {
-          "ref": "in"
+          "ref": "data.invocation"
         },
         "profile": {
           "ref": "data.profile"
@@ -205,6 +208,9 @@
       "out": {
         "workplace": {
           "ref": "data.workplace"
+        },
+        "invocation": {
+          "ref": "data.invocation"
         }
       }
     },
@@ -215,7 +221,7 @@
           "ref": "action.requires_synthesis"
         },
         "invocation": {
-          "ref": "in"
+          "ref": "data.invocation"
         },
         "allocation": {
           "ref": "data.allocation"
@@ -234,7 +240,7 @@
           "ref": "action.requires_synthesis"
         },
         "invocation": {
-          "ref": "in"
+          "ref": "data.invocation"
         },
         "directive": {
           "ref": "data.directive"
@@ -275,7 +281,7 @@
       "name": "publish-review-remarks",
       "in": {
         "invocation": {
-          "ref": "in"
+          "ref": "data.invocation"
         },
         "result": {
           "ref": "data.result"

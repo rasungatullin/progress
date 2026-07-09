@@ -538,7 +538,7 @@ func TestServiceExecuteResolveProfileUsesOperationIOAndKeepsStateProfile(t *test
 					Origin: OperationOriginBuiltin,
 					In: model.OperationMap{
 						"requires_synthesis": {Ref: "action.requires_synthesis"},
-						"invocation":         {Ref: "in"},
+						"invocation":         {Ref: "data.invocation"},
 						"profile":            {Ref: "data.profile"},
 					},
 					Out: model.OperationMap{"allocation": {Ref: "data.allocation"}},
@@ -646,7 +646,7 @@ func TestResolveProfileUsesOperationInputValue(t *testing.T) {
 	}
 }
 
-func TestPrepareDataFillsActionDataAndKeepsStateCopies(t *testing.T) {
+func TestPrepareDataFillsActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := prepareDataOperationSpec()
@@ -685,11 +685,18 @@ func TestPrepareDataFillsActionDataAndKeepsStateCopies(t *testing.T) {
 	if !ok || dataWorkplace.BaseRef != "main" || dataWorkplace.HeadRef != "112" {
 		t.Fatalf("prepare-data must fill data.workplace with synchronized refs: %#v", state.data)
 	}
-	if state.in.Launch.StructuredInput == nil || state.in.Launch.StructuredInput.Task != "Ship it." {
-		t.Fatalf("state invocation must keep prepared structured input: %#v", state.in)
+	dataInvocation, ok := state.data["invocation"].(model.Invocation)
+	if !ok {
+		t.Fatalf("prepare-data must fill data.invocation: %#v", state.data)
 	}
-	if state.in.Workplace.BaseRef != "main" || state.in.Workplace.HeadRef != "112" {
-		t.Fatalf("state invocation must keep prepared workplace refs: %#v", state.in.Workplace)
+	if dataInvocation.Launch.StructuredInput == nil || dataInvocation.Launch.StructuredInput.Task != "Ship it." {
+		t.Fatalf("data invocation must keep prepared structured input: %#v", dataInvocation)
+	}
+	if dataInvocation.Workplace.BaseRef != "main" || dataInvocation.Workplace.HeadRef != "112" {
+		t.Fatalf("data invocation must keep prepared workplace refs: %#v", dataInvocation.Workplace)
+	}
+	if state.in.Launch.StructuredInput != nil || state.in.Workplace.BaseRef != "" || state.in.Workplace.HeadRef != "" {
+		t.Fatalf("prepare-data must not write implicit state invocation: %#v", state.in)
 	}
 }
 
@@ -712,12 +719,16 @@ func TestPrepareDataUsesOperationInputValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare data: %v", err)
 	}
-	if state.assignment.StructuredInput == nil || state.assignment.StructuredInput.Task != "Из входа операции." {
-		t.Fatalf("prepare-data must use operation input value: %#v", state.assignment)
-	}
 	dataInput, ok := state.data["structured_input"].(*StructuredInput)
 	if !ok || dataInput.Task != "Из входа операции." {
 		t.Fatalf("prepare-data must write selected structured input to data.structured_input: %#v", state.data)
+	}
+	dataInvocation, ok := state.data["invocation"].(model.Invocation)
+	if !ok || dataInvocation.Assignment == nil || dataInvocation.Assignment.StructuredInput == nil || dataInvocation.Assignment.StructuredInput.Task != "Из входа операции." {
+		t.Fatalf("prepare-data must write selected invocation to data.invocation: %#v", state.data)
+	}
+	if state.assignment.StructuredInput == nil || state.assignment.StructuredInput.Task != "Из старого состояния." {
+		t.Fatalf("prepare-data must not write implicit state assignment: %#v", state.assignment)
 	}
 }
 
@@ -1895,6 +1906,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 					Out: map[string]methodology.ActionMapping{
 						"structured_input": mappingRef("data.structured_input"),
 						"workplace":        mappingRef("data.workplace"),
+						"invocation":       mappingRef("data.invocation"),
 					},
 				},
 				{Name: OperationKindLoadPullRequest},
@@ -1904,7 +1916,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 					Name: OperationKindAllocateResources,
 					In: map[string]methodology.ActionMapping{
 						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"invocation":         mappingRef("in"),
+						"invocation":         mappingRef("data.invocation"),
 						"profile":            mappingRef("data.profile"),
 					},
 					Out: map[string]methodology.ActionMapping{
@@ -1915,19 +1927,20 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 					Name: OperationKindPrepareWorkplace,
 					In: map[string]methodology.ActionMapping{
 						"requires_workplace": mappingRef("action.requires_workplace"),
-						"invocation":         mappingRef("in"),
+						"invocation":         mappingRef("data.invocation"),
 						"profile":            mappingRef("data.profile"),
 						"allocation":         mappingRef("data.allocation"),
 					},
 					Out: map[string]methodology.ActionMapping{
-						"workplace": mappingRef("data.workplace"),
+						"workplace":  mappingRef("data.workplace"),
+						"invocation": mappingRef("data.invocation"),
 					},
 				},
 				{
 					Name: OperationKindBuildDirective,
 					In: map[string]methodology.ActionMapping{
 						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"invocation":         mappingRef("in"),
+						"invocation":         mappingRef("data.invocation"),
 						"allocation":         mappingRef("data.allocation"),
 					},
 					Out: map[string]methodology.ActionMapping{
@@ -1938,7 +1951,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 					Name: OperationKindLaunchSynthesis,
 					In: map[string]methodology.ActionMapping{
 						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"invocation":         mappingRef("in"),
+						"invocation":         mappingRef("data.invocation"),
 						"directive":          mappingRef("data.directive"),
 						"profile":            mappingRef("data.profile"),
 						"allocation":         mappingRef("data.allocation"),
@@ -1962,7 +1975,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 					Name: OperationKindCommitPush,
 					In: map[string]methodology.ActionMapping{
 						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"invocation":         mappingRef("in"),
+						"invocation":         mappingRef("data.invocation"),
 						"profile":            mappingRef("data.profile"),
 						"allocation":         mappingRef("data.allocation"),
 						"workplace":          mappingRef("data.workplace"),
@@ -2030,7 +2043,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	if prepareOperation == nil {
 		t.Fatalf("prepare-data operation must be present: %#v", action.Operations)
 	}
-	if prepareOperation.In["structured_input"].Ref != "in.structured_input" || prepareOperation.Out["structured_input"].Ref != "data.structured_input" || prepareOperation.Out["workplace"].Ref != "data.workplace" {
+	if prepareOperation.In["structured_input"].Ref != "in.structured_input" || prepareOperation.Out["structured_input"].Ref != "data.structured_input" || prepareOperation.Out["workplace"].Ref != "data.workplace" || prepareOperation.Out["invocation"].Ref != "data.invocation" {
 		t.Fatalf("prepare-data must keep action data mapping: %#v", prepareOperation)
 	}
 	profileOperation := findOperationSpec(action, OperationKindResolveProfile)
@@ -2051,7 +2064,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	if workplaceOperation == nil {
 		t.Fatalf("prepare-workplace operation must be present: %#v", action.Operations)
 	}
-	if workplaceOperation.In["requires_workplace"].Ref != "action.requires_workplace" || workplaceOperation.In["allocation"].Ref != "data.allocation" || workplaceOperation.Out["workplace"].Ref != "data.workplace" {
+	if workplaceOperation.In["requires_workplace"].Ref != "action.requires_workplace" || workplaceOperation.In["allocation"].Ref != "data.allocation" || workplaceOperation.Out["workplace"].Ref != "data.workplace" || workplaceOperation.Out["invocation"].Ref != "data.invocation" {
 		t.Fatalf("prepare-workplace must keep action data mapping: %#v", workplaceOperation)
 	}
 	directiveOperation := findOperationSpec(action, OperationKindBuildDirective)
@@ -2096,7 +2109,7 @@ func TestActionResolutionKeepsPublishMergeRequestMapping(t *testing.T) {
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindPublishMergeRequest,
 				In: map[string]methodology.ActionMapping{
-					"invocation":        mappingRef("in"),
+					"invocation":        mappingRef("data.invocation"),
 					"workplace":         mappingRef("data.workplace"),
 					"result":            mappingRef("data.result"),
 					"structured_output": mappingRef("data.structured_output"),
@@ -2136,7 +2149,7 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindLoadPullRequest,
 				In: map[string]methodology.ActionMapping{
-					"invocation": mappingRef("in"),
+					"invocation": mappingRef("data.invocation"),
 				},
 				Out: map[string]methodology.ActionMapping{
 					"pull_request": mappingRef("data.pull_request"),
@@ -2155,7 +2168,7 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 	if operation == nil {
 		t.Fatalf("load-pull-request operation must be present: %#v", action.Operations)
 	}
-	if operation.In["invocation"].Ref != "in" || operation.Out["pull_request"].Ref != "data.pull_request" || operation.Out["invocation"].Ref != "data.invocation" {
+	if operation.In["invocation"].Ref != "data.invocation" || operation.Out["pull_request"].Ref != "data.pull_request" || operation.Out["invocation"].Ref != "data.invocation" {
 		t.Fatalf("load-pull-request must keep action data mapping: %#v", operation)
 	}
 }
@@ -2247,7 +2260,7 @@ func TestActionResolutionKeepsPublishReviewRemarksMapping(t *testing.T) {
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindPublishReviewRemarks,
 				In: map[string]methodology.ActionMapping{
-					"invocation":        mappingRef("in"),
+					"invocation":        mappingRef("data.invocation"),
 					"result":            mappingRef("data.result"),
 					"structured_output": mappingRef("data.structured_output"),
 				},
@@ -2285,7 +2298,7 @@ func TestActionResolutionKeepsPublishReviewResponsesMapping(t *testing.T) {
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindPublishReviewResponses,
 				In: map[string]methodology.ActionMapping{
-					"invocation":        mappingRef("in"),
+					"invocation":        mappingRef("data.invocation"),
 					"result":            mappingRef("data.result"),
 					"structured_output": mappingRef("data.structured_output"),
 					"review_remarks":    mappingRef("data.review_remarks"),
@@ -3204,6 +3217,7 @@ func prepareDataOperationSpec() model.OperationSpec {
 		Out: model.OperationMap{
 			"structured_input": {Ref: "data.structured_input"},
 			"workplace":        {Ref: "data.workplace"},
+			"invocation":       {Ref: "data.invocation"},
 		},
 	}
 }
@@ -3215,7 +3229,7 @@ func allocateResourcesOperationSpec() model.OperationSpec {
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
 			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"invocation":         {Ref: "in"},
+			"invocation":         {Ref: "data.invocation"},
 			"profile":            {Ref: "data.profile"},
 		},
 		Out: model.OperationMap{
@@ -3231,12 +3245,13 @@ func prepareWorkplaceOperationSpec() model.OperationSpec {
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
 			"requires_workplace": {Ref: "action.requires_workplace"},
-			"invocation":         {Ref: "in"},
+			"invocation":         {Ref: "data.invocation"},
 			"profile":            {Ref: "data.profile"},
 			"allocation":         {Ref: "data.allocation"},
 		},
 		Out: model.OperationMap{
-			"workplace": {Ref: "data.workplace"},
+			"workplace":  {Ref: "data.workplace"},
+			"invocation": {Ref: "data.invocation"},
 		},
 	}
 }
@@ -3248,7 +3263,7 @@ func buildDirectiveOperationSpec() model.OperationSpec {
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
 			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"invocation":         {Ref: "in"},
+			"invocation":         {Ref: "data.invocation"},
 			"allocation":         {Ref: "data.allocation"},
 		},
 		Out: model.OperationMap{
@@ -3264,7 +3279,7 @@ func launchSynthesisOperationSpec() model.OperationSpec {
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
 			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"invocation":         {Ref: "in"},
+			"invocation":         {Ref: "data.invocation"},
 			"directive":          {Ref: "data.directive"},
 			"profile":            {Ref: "data.profile"},
 			"allocation":         {Ref: "data.allocation"},
@@ -3298,7 +3313,7 @@ func commitPushOperationSpec() model.OperationSpec {
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
 			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"invocation":         {Ref: "in"},
+			"invocation":         {Ref: "data.invocation"},
 			"profile":            {Ref: "data.profile"},
 			"allocation":         {Ref: "data.allocation"},
 			"workplace":          {Ref: "data.workplace"},
@@ -3318,7 +3333,7 @@ func loadPullRequestOperationSpec() model.OperationSpec {
 		Kind:   OperationKindLoadPullRequest,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"invocation": {Ref: "in"},
+			"invocation": {Ref: "data.invocation"},
 		},
 		Out: model.OperationMap{
 			"pull_request": {Ref: "data.pull_request"},
@@ -3366,7 +3381,7 @@ func publishMergeRequestOperationSpec() model.OperationSpec {
 		Kind:   OperationKindPublishMergeRequest,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"invocation":        {Ref: "in"},
+			"invocation":        {Ref: "data.invocation"},
 			"workplace":         {Ref: "data.workplace"},
 			"result":            {Ref: "data.result"},
 			"structured_output": {Ref: "data.structured_output"},
@@ -3385,7 +3400,7 @@ func publishReviewRemarksOperationSpec() model.OperationSpec {
 		Kind:   OperationKindPublishReviewRemarks,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"invocation":        {Ref: "in"},
+			"invocation":        {Ref: "data.invocation"},
 			"result":            {Ref: "data.result"},
 			"structured_output": {Ref: "data.structured_output"},
 		},
@@ -3402,7 +3417,7 @@ func publishReviewResponsesOperationSpec() model.OperationSpec {
 		Kind:   OperationKindPublishReviewResponses,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"invocation":        {Ref: "in"},
+			"invocation":        {Ref: "data.invocation"},
 			"result":            {Ref: "data.result"},
 			"structured_output": {Ref: "data.structured_output"},
 			"review_remarks":    {Ref: "data.review_remarks"},

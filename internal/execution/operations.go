@@ -94,29 +94,48 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 
 func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	preparedAssignment := prepareDataInputFromOperation(state, operation)
-	state.assignment = preparedAssignment
-	state.in.Assignment = preparedAssignment
+	preparedInvocation := invocationFromExecutionData(state)
+	preparedInvocation.Assignment = preparedAssignment
 	if preparedAssignment != nil {
-		state.in.Launch.StructuredInput = preparedAssignment.StructuredInput
+		preparedInvocation.Launch.StructuredInput = preparedAssignment.StructuredInput
 	}
-	if err := syncPullRequestRefsWithWorkplace(state); err != nil {
-		state.result = failedStartResult(err)
+	var err error
+	preparedInvocation, err = syncPullRequestRefsWithWorkplace(state, preparedInvocation, preparedAssignment)
+	if err != nil {
+		result := failedStartResult(err)
 		state.tracker.fail(name, "Данные задания не согласованы с веткой рабочего места.", err, "pull_request_branch_mismatch", true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, model.Profile{}, model.Allocation{}, model.Workplace{}, state.result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, preparedInvocation, model.Profile{}, model.Allocation{}, model.Workplace{}, result, err)
 		return err
 	}
 
-	writeOperationData(state, operation.Out, "structured_input", state.in.Launch.StructuredInput)
-	writeOperationData(state, operation.Out, "workplace", state.in.Workplace)
-	state.tracker.completeIO(name, prepareDataInputSummary(preparedAssignment, operation), prepareDataOutputSummary(state, operation), "Данные задания подготовлены для выполнения.")
+	writePrepareData(state, operation, preparedInvocation)
+	state.tracker.completeIO(name, prepareDataInputSummary(preparedAssignment, operation), prepareDataOutputSummary(preparedInvocation, operation), "Данные задания подготовлены для выполнения.")
 	return nil
+}
+
+func writePrepareData(state *operationExecution, operation OperationSpec, in invocation) {
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{
+			"structured_input": {Ref: "data.structured_input"},
+			"workplace":        {Ref: "data.workplace"},
+			"invocation":       {Ref: "data.invocation"},
+		}
+	}
+	writeOperationData(state, out, "structured_input", in.Launch.StructuredInput)
+	writeOperationData(state, out, "workplace", in.Workplace)
+	writeOperationData(state, out, "invocation", in)
 }
 
 func prepareDataInputFromOperation(state *operationExecution, operation OperationSpec) *ExecutionAssignment {
 	if state == nil {
 		return &ExecutionAssignment{}
 	}
-	assignment := cloneAssignment(state.assignment)
+	source := state.assignment
+	if source == nil {
+		source = invocationFromExecutionData(state).Assignment
+	}
+	assignment := cloneAssignment(source)
 	if assignment == nil {
 		assignment = &ExecutionAssignment{}
 	}
@@ -195,53 +214,60 @@ func valueFromPrepareDataMapping[T any](state *operationExecution, mapping model
 }
 
 func prepareDataRefValue(state *operationExecution, ref string) (any, bool) {
-	if state == nil || state.assignment == nil {
+	if state == nil {
+		return nil, false
+	}
+	assignment := state.assignment
+	if assignment == nil {
+		assignment = invocationFromExecutionData(state).Assignment
+	}
+	if assignment == nil {
 		return nil, false
 	}
 	ref = strings.TrimSpace(ref)
 	switch ref {
 	case "in.expected_result", "assignment.expected_result":
-		return state.assignment.ExpectedResult, true
+		return assignment.ExpectedResult, true
 	case "in.constraints", "assignment.constraints":
-		return state.assignment.Constraints, true
+		return assignment.Constraints, true
 	case "in.canonical_task", "assignment.canonical_task":
-		return state.assignment.CanonicalTask, true
+		return assignment.CanonicalTask, true
 	case "in.related_objects", "assignment.related_objects":
-		return state.assignment.RelatedObjects, true
+		return assignment.RelatedObjects, true
 	case "in.reasons", "assignment.reasons":
-		return state.assignment.Reasons, true
+		return assignment.Reasons, true
 	case "in.structured_input", "assignment.structured_input":
-		return state.assignment.StructuredInput, true
+		return assignment.StructuredInput, true
 	default:
 		return nil, false
 	}
 }
 
-func syncPullRequestRefsWithWorkplace(state *operationExecution) error {
+func syncPullRequestRefsWithWorkplace(state *operationExecution, in invocation, assignment *ExecutionAssignment) (invocation, error) {
 	if state == nil {
-		return nil
+		return in, nil
 	}
 
-	ref := pullRequestRefFromAssignment(state.assignment)
-	if base := strings.TrimSpace(ref.Base); base != "" && strings.TrimSpace(state.in.Workplace.BaseRef) == "" {
-		state.in.Workplace.BaseRef = base
+	ref := pullRequestRefFromAssignment(assignment)
+	if base := strings.TrimSpace(ref.Base); base != "" && strings.TrimSpace(in.Workplace.BaseRef) == "" {
+		in.Workplace.BaseRef = base
 	}
-	explicitHead := explicitPullRequestHeadFromAssignment(state.assignment)
+	explicitHead := explicitPullRequestHeadFromAssignment(assignment)
 	if explicitHead == "" {
-		return nil
+		return in, nil
 	}
-	if strings.TrimSpace(state.in.Workplace.HeadRef) == "" {
-		state.in.Workplace.HeadRef = explicitHead
+	if strings.TrimSpace(in.Workplace.HeadRef) == "" {
+		in.Workplace.HeadRef = explicitHead
 	}
 	if state.action.Name != ActionStartImplementationPR {
-		return nil
+		return in, nil
 	}
 
-	workplaceName := strings.TrimSpace(state.in.Workplace.Name)
+	workplaceName := strings.TrimSpace(in.Workplace.Name)
 	if workplaceName != "" && explicitHead != workplaceName {
-		return fmt.Errorf("head branch %q does not match workplace branch %q for %s", explicitHead, workplaceName, ActionStartImplementationPR)
+		return in, fmt.Errorf("head branch %q does not match workplace branch %q for %s", explicitHead, workplaceName, ActionStartImplementationPR)
 	}
-	return nil
+	return in, nil
 }
 
 func explicitPullRequestHeadFromAssignment(assignment *ExecutionAssignment) string {
@@ -452,13 +478,11 @@ func prepareDataInputSummary(assignment *ExecutionAssignment, operation Operatio
 	})
 }
 
-func prepareDataOutputSummary(state *operationExecution, operation OperationSpec) string {
-	if state == nil {
-		return ""
-	}
+func prepareDataOutputSummary(in invocation, operation OperationSpec) string {
 	return operationIOSummary(operation.Out, map[string]string{
-		"structured_input": structuredInputSummary(state.in.Launch.StructuredInput),
-		"workplace":        workplaceSpecSummary(state.in.Workplace),
+		"structured_input": structuredInputSummary(in.Launch.StructuredInput),
+		"workplace":        workplaceSpecSummary(in.Workplace),
+		"invocation":       invocationSummary(in),
 	})
 }
 
@@ -723,7 +747,7 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 	input := prepareWorkplaceInputFromOperation(state, operation)
 	if !input.requiresWorkplace {
 		workplace := workplace{Name: strings.TrimSpace(input.invocation.Launch.Directory), Ready: true}
-		writePrepareWorkplaceData(state, operation, workplace)
+		writePrepareWorkplaceData(state, operation, workplace, input.invocation)
 		state.tracker.skipIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), "Рабочее место не требуется для разрешённого действия.")
 		return nil
 	}
@@ -739,17 +763,25 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 	if strings.TrimSpace(state.in.Launch.Directory) == "" {
 		state.in.Launch.Directory = workplace.Name
 	}
-	writePrepareWorkplaceData(state, operation, workplace)
+	preparedInvocation := input.invocation
+	if strings.TrimSpace(preparedInvocation.Launch.Directory) == "" {
+		preparedInvocation.Launch.Directory = workplace.Name
+	}
+	writePrepareWorkplaceData(state, operation, workplace, preparedInvocation)
 	state.tracker.completeIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
 	return nil
 }
 
-func writePrepareWorkplaceData(state *operationExecution, operation OperationSpec, workplace workplace) {
+func writePrepareWorkplaceData(state *operationExecution, operation OperationSpec, workplace workplace, in invocation) {
 	out := operation.Out
 	if len(out) == 0 {
-		out = model.OperationMap{"workplace": {Ref: "data.workplace"}}
+		out = model.OperationMap{
+			"workplace":  {Ref: "data.workplace"},
+			"invocation": {Ref: "data.invocation"},
+		}
 	}
 	writeOperationData(state, out, "workplace", workplace)
+	writeOperationData(state, out, "invocation", in)
 }
 
 type prepareWorkplaceInput struct {
