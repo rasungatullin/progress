@@ -1144,7 +1144,7 @@ func TestParseResultWritesEmptyOutputForActionWithoutSynthesis(t *testing.T) {
 	}
 }
 
-func TestCommitPushFillsActionDataAndKeepsStateResult(t *testing.T) {
+func TestCommitPushFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := commitPushOperationSpec()
@@ -1187,8 +1187,8 @@ func TestCommitPushFillsActionDataAndKeepsStateResult(t *testing.T) {
 	if !strings.Contains(dataResult.Summary, "launch complete") || !strings.Contains(dataResult.Summary, "git=committed+pushed branch=task-42") {
 		t.Fatalf("unexpected data result summary: %#v", dataResult)
 	}
-	if state.result.Summary != dataResult.Summary {
-		t.Fatalf("state result must keep compatibility copy: state=%#v data=%#v", state.result, dataResult)
+	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
+		t.Fatalf("commit-push must not write implicit state result: %#v", state.result)
 	}
 	if !launcher.commitCalled || launcher.commitOutput == nil || launcher.commitOutput.Summary != "Done." {
 		t.Fatalf("commit-push must pass structured output from operation input: %#v", launcher)

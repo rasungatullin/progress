@@ -1471,7 +1471,6 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 		if strings.TrimSpace(input.result.Summary) == "" {
 			input.result.Summary = err.Error()
 		}
-		state.result = input.result
 		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.fail(name, "Операция commit-push не поддержана модулем запуска.", err, "commit_push_unsupported", false, true)
 		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, err)
@@ -1484,7 +1483,6 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 		if strings.TrimSpace(input.result.Summary) == "" {
 			input.result.Summary = strings.TrimSpace(err.Error())
 		}
-		state.result = input.result
 		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.fail(name, "Создание коммита или отправка ветки не выполнены.", err, "commit_push_failed", true, true)
 		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, err)
@@ -1492,7 +1490,6 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 	}
 
 	input.result.Summary = joinExecutionSummaries(input.result.Summary, summary)
-	state.result = input.result
 	writeCommitPushData(state, operation, summary, input.result)
 	state.tracker.completeIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary(summary, input.result, operation), summary)
 	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, nil)
@@ -1530,7 +1527,7 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 		input.allocation = allocationFromExecutionData(state)
 		input.workplace = workplaceFromExecutionData(state)
 		input.result = resultFromExecutionData(state)
-		input.structuredOutput = input.result.StructuredOutput
+		input.structuredOutput = structuredOutputFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
