@@ -455,6 +455,14 @@ func publishMergeRequestInputFromOperation(state *operationExecution, operation 
 
 func publishReviewRemarksInputFromOperation(state *operationExecution, operation OperationSpec) publishMergeRequestInput {
 	input := publishMergeRequestInput{}
+	if state != nil {
+		input.invocation, _ = state.data["invocation"].(invocation)
+		input.profile, _ = state.data["profile"].(profile)
+		input.allocation, _ = state.data["allocation"].(allocation)
+		input.workplace, _ = state.data["workplace"].(workplace)
+		input.result, _ = state.data["result"].(LaunchResult)
+		input.structuredOutput = input.result.StructuredOutput
+	}
 	if len(operation.In) == 0 {
 		return input
 	}

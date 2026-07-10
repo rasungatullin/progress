@@ -288,21 +288,10 @@
     {
       "name": "publish-review-remarks",
       "in": {
-        "invocation": {
-          "ref": "data.invocation"
-        },
-        "profile": {
-          "ref": "data.profile"
-        },
-        "allocation": {
-          "ref": "data.allocation"
-        },
-        "workplace": {
-          "ref": "data.workplace"
-        },
-        "result": {
-          "ref": "data.result"
-        },
+        "repository": {"ref": "data.invocation.repository.url"},
+        "number": {"ref": "data.pull_request.number"},
+        "result_status": {"ref": "data.result.status"},
+        "result_summary": {"ref": "data.result.summary"},
         "structured_output": {
           "ref": "data.structured_output"
         }
