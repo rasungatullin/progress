@@ -1714,10 +1714,18 @@ func TestFinalizeFillsOnlyActionData(t *testing.T) {
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
-			"result": model.LaunchResult{Status: "legacy", Summary: "legacy"},
+			"invocation": model.Invocation{Task: "task-42"},
+			"profile":    model.Profile{Name: "default", Mode: "manual"},
+			"allocation": model.Allocation{Resource: "not-required"},
+			"workplace":  model.Workplace{Name: "/repo", Ready: true},
+			"result":     model.LaunchResult{Status: "legacy", Summary: "legacy"},
 		},
-		result:  model.LaunchResult{Status: "legacy-state", Summary: "legacy-state"},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+		in:         model.Invocation{Task: "legacy"},
+		profile:    model.Profile{Name: "legacy", Mode: "manual"},
+		allocation: model.Allocation{Resource: "legacy"},
+		workplace:  model.Workplace{Name: "/tmp/legacy", Ready: true},
+		result:     model.LaunchResult{Status: "legacy-state", Summary: "legacy-state"},
+		tracker:    newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
 	service := &Service{logger: log.Default()}
 
@@ -1731,6 +1739,9 @@ func TestFinalizeFillsOnlyActionData(t *testing.T) {
 	}
 	if state.result.Status != "legacy-state" || state.result.Summary != "legacy-state" {
 		t.Fatalf("finalize must not write implicit state result: %#v", state.result)
+	}
+	if state.in.Task != "legacy" || state.profile.Name != "legacy" || state.allocation.Resource != "legacy" || state.workplace.Name != "/tmp/legacy" {
+		t.Fatalf("finalize must not read or write implicit state context: invocation=%#v profile=%#v allocation=%#v workplace=%#v", state.in, state.profile, state.allocation, state.workplace)
 	}
 	result := findOperationResult(state.tracker.snapshot(), OperationKindFinalize)
 	if result == nil || result.Status != OperationStatusCompleted || result.Input == "" || result.Output == "" {
@@ -1750,7 +1761,11 @@ func TestFinalizeReadsResultOnlyFromActionData(t *testing.T) {
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
-			"result": model.LaunchResult{Status: "completed", Summary: "data-result"},
+			"invocation": model.Invocation{Task: "task-42"},
+			"profile":    model.Profile{Name: "coder", Mode: "manual"},
+			"allocation": model.Allocation{Resource: "binding:coder"},
+			"workplace":  model.Workplace{Name: "/repo", Ready: true},
+			"result":     model.LaunchResult{Status: "completed", Summary: "data-result"},
 		},
 		result:  model.LaunchResult{Status: "completed", Summary: "legacy-state\ndata-result"},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
@@ -3821,6 +3836,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 				result = append(result, commitPushActionOperation())
 				continue
 			}
+			if operation == OperationKindFinalize {
+				result = append(result, finalizeActionOperation())
+				continue
+			}
 			result = append(result, methodology.ActionOperation{Name: operation, Kind: operation, Origin: OperationOriginBuiltin, Required: boolRef(true)})
 		case methodology.ActionOperation:
 			result = append(result, operation)
@@ -3955,6 +3974,28 @@ func commitPushActionOperation() methodology.ActionOperation {
 		Out: map[string]methodology.ActionMapping{
 			"commit_summary": mappingRef("data.commit_summary"),
 			"result":         mappingRef("data.result"),
+		},
+	}
+}
+
+func finalizeActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindFinalize,
+		Kind:     OperationKindFinalize,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"requires_synthesis": mappingRef("action.requires_synthesis"),
+			"action_name":        mappingRef("action.name"),
+			"action_class":       mappingRef("action.class"),
+			"invocation":         mappingRef("data.invocation"),
+			"profile":            mappingRef("data.profile"),
+			"allocation":         mappingRef("data.allocation"),
+			"workplace":          mappingRef("data.workplace"),
+			"result":             mappingRef("data.result"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"result": mappingRef("data.result"),
 		},
 	}
 }
@@ -4133,6 +4174,10 @@ func finalizeOperationSpec() model.OperationSpec {
 			"requires_synthesis": {Ref: "action.requires_synthesis"},
 			"action_name":        {Ref: "action.name"},
 			"action_class":       {Ref: "action.class"},
+			"invocation":         {Ref: "data.invocation"},
+			"profile":            {Ref: "data.profile"},
+			"allocation":         {Ref: "data.allocation"},
+			"workplace":          {Ref: "data.workplace"},
 			"result":             {Ref: "data.result"},
 		},
 		Out: model.OperationMap{
@@ -4220,7 +4265,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4239,7 +4284,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4258,7 +4303,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
         {"name": "publish-merge-request", "kind": "publish-merge-request", "origin": "builtin", "required": true},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4275,7 +4320,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4295,7 +4340,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "publish-review-remarks", "kind": "publish-review-remarks", "origin": "builtin", "required": true},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4316,7 +4361,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
         {"name": "publish-review-responses", "kind": "publish-review-responses", "origin": "builtin", "required": true},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4333,7 +4378,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     }
   ]

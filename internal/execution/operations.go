@@ -1683,7 +1683,7 @@ func (e builtinOperationExecutor) finalize(ctx context.Context, state *operation
 		}
 		writeFinalizeData(state, operation, result)
 		state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(result, operation), finalizeSummary(result))
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, nil)
 		return nil
 	}
 
@@ -1704,6 +1704,10 @@ type finalizeInput struct {
 	requiresSynthesis bool
 	actionName        string
 	actionClass       string
+	invocation        invocation
+	profile           profile
+	allocation        allocation
+	workplace         workplace
 	result            LaunchResult
 }
 
@@ -1713,7 +1717,6 @@ func finalizeInputFromOperation(state *operationExecution, operation OperationSp
 		input.requiresSynthesis = state.action.RequiresSynthesis
 		input.actionName = state.action.Name
 		input.actionClass = string(state.action.Class)
-		input.result = resultFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -1736,6 +1739,26 @@ func finalizeInputFromOperation(state *operationExecution, operation OperationSp
 	if mapping, ok := operation.In["result"]; ok {
 		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
 			input.result = value
+		}
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.allocation = value
+		}
+	}
+	if mapping, ok := operation.In["workplace"]; ok {
+		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.workplace = value
 		}
 	}
 	return input
@@ -1764,10 +1787,14 @@ func actionStringValueFromFinalizeMapping(state *operationExecution, mapping mod
 
 func finalizeInputSummary(input finalizeInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
-		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+		"allocation":         allocationSummary(input.allocation),
 		"action_name":        strings.TrimSpace(input.actionName),
 		"action_class":       strings.TrimSpace(input.actionClass),
+		"invocation":         invocationSummary(input.invocation),
+		"profile":            profileSummary(input.profile),
+		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
 		"result":             resultSummary(input.result),
+		"workplace":          workplaceSummary(input.workplace),
 	})
 }
 
