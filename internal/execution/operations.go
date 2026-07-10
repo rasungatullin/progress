@@ -1253,11 +1253,12 @@ func invocationValueFromLaunchSynthesisMapping(state *operationExecution, mappin
 		return invocation{}, false
 	}
 	switch strings.TrimSpace(mapping.Ref) {
-	case "in", "invocation":
+	case "data.invocation":
 		if state == nil {
 			return invocation{}, false
 		}
-		return state.in, true
+		value, ok := state.data["invocation"].(invocation)
+		return value, ok
 	default:
 		return invocation{}, false
 	}
@@ -1278,11 +1279,6 @@ func directiveValueFromLaunchSynthesisMapping(state *operationExecution, mapping
 		}
 		value, ok := state.data["directive"].(launchSpec)
 		return value, ok
-	case "state.launch":
-		if state == nil {
-			return launchSpec{}, false
-		}
-		return state.in.Launch, true
 	default:
 		return launchSpec{}, false
 	}
@@ -1303,11 +1299,6 @@ func profileValueFromLaunchSynthesisMapping(state *operationExecution, mapping m
 		}
 		value, ok := state.data["profile"].(profile)
 		return value, ok
-	case "state.profile":
-		if state == nil {
-			return profile{}, false
-		}
-		return state.profile, true
 	default:
 		return profile{}, false
 	}
@@ -1328,11 +1319,6 @@ func allocationValueFromLaunchSynthesisMapping(state *operationExecution, mappin
 		}
 		value, ok := state.data["allocation"].(allocation)
 		return value, ok
-	case "state.allocation":
-		if state == nil {
-			return allocation{}, false
-		}
-		return state.allocation, true
 	default:
 		return allocation{}, false
 	}
@@ -1353,11 +1339,6 @@ func workplaceValueFromLaunchSynthesisMapping(state *operationExecution, mapping
 		}
 		value, ok := state.data["workplace"].(workplace)
 		return value, ok
-	case "state.workplace":
-		if state == nil {
-			return workplace{}, false
-		}
-		return state.workplace, true
 	default:
 		return workplace{}, false
 	}

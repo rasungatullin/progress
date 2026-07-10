@@ -1176,13 +1176,17 @@ func TestLaunchSynthesisFillsOnlyActionData(t *testing.T) {
 	operation := launchSynthesisOperationSpec()
 	state := &operationExecution{
 		in: model.Invocation{
-			Task: "task-42",
+			Task: "legacy",
+			Launch: model.LaunchSpec{
+				Directory: "/tmp/legacy",
+			},
 		},
 		action: model.Action{
 			RequiresSynthesis: true,
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
+			"invocation": model.Invocation{Task: "task-42"},
 			"directive":  model.LaunchSpec{Directory: "/tmp/work", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder", CommitPush: true},
 			"profile":    model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
 			"allocation": model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
@@ -1213,6 +1217,9 @@ func TestLaunchSynthesisFillsOnlyActionData(t *testing.T) {
 	if state.result.Status != "" || state.result.StructuredOutput != nil {
 		t.Fatalf("launch-synthesis must not write implicit state result: %#v", state.result)
 	}
+	if launcher.invocation.Task != "task-42" {
+		t.Fatalf("launcher must receive invocation from operation input data: %#v", launcher.invocation)
+	}
 	if launcher.invocation.Launch.Runner != "opencode" || launcher.invocation.Launch.Model != "openai/gpt-5.5" || launcher.invocation.Launch.CommitPush {
 		t.Fatalf("launcher must receive directive from operation input with commit push disabled: %#v", launcher.invocation.Launch)
 	}
@@ -1234,6 +1241,7 @@ func TestLaunchSynthesisWritesSkippedResultForActionWithoutSynthesis(t *testing.
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
+			"invocation": model.Invocation{Task: "task-42"},
 			"directive":  model.LaunchSpec{StructuredInput: &StructuredInput{Task: "No synthesis."}},
 			"profile":    model.Profile{Name: "default", Mode: "manual"},
 			"allocation": model.Allocation{Resource: "not-required"},
