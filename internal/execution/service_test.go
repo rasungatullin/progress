@@ -1337,13 +1337,14 @@ func TestCommitPushFillsOnlyActionData(t *testing.T) {
 	structuredOutput := &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}
 	state := &operationExecution{
 		in: model.Invocation{
-			Task: "task-42",
+			Task: "legacy",
 		},
 		action: model.Action{
 			RequiresSynthesis: true,
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
+			"invocation":        model.Invocation{Task: "task-42"},
 			"profile":           model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
 			"allocation":        model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
 			"workplace":         model.Workplace{Name: "/tmp/work", Ready: true},
@@ -1379,6 +1380,9 @@ func TestCommitPushFillsOnlyActionData(t *testing.T) {
 	if !launcher.commitCalled || launcher.commitOutput == nil || launcher.commitOutput.Summary != "Done." {
 		t.Fatalf("commit-push must pass structured output from operation input: %#v", launcher)
 	}
+	if launcher.commitInvocation.Task != "task-42" {
+		t.Fatalf("commit-push must pass invocation from operation input: %#v", launcher.commitInvocation)
+	}
 	if launcher.commitAllocation.Resource != "binding:coder" || launcher.commitWorkplace.Name != "/tmp/work" {
 		t.Fatalf("commit-push must pass operation input data: allocation=%#v workplace=%#v", launcher.commitAllocation, launcher.commitWorkplace)
 	}
@@ -1395,7 +1399,8 @@ func TestCommitPushWritesResultForActionWithoutSynthesis(t *testing.T) {
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
-			"result": model.LaunchResult{Status: "skipped", Summary: "synthesis=not-required"},
+			"invocation": model.Invocation{Task: "task-42"},
+			"result":     model.LaunchResult{Status: "skipped", Summary: "synthesis=not-required"},
 		},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}

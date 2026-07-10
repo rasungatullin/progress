@@ -1626,11 +1626,6 @@ func structuredOutputValueFromCommitPushMapping(state *operationExecution, mappi
 		}
 		value, ok := state.data["structured_output"].(*StructuredOutput)
 		return value, ok
-	case "state.result.structured_output":
-		if state == nil {
-			return nil, false
-		}
-		return state.result.StructuredOutput, true
 	default:
 		return nil, false
 	}
