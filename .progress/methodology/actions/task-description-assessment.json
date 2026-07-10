@@ -225,8 +225,8 @@
         "requires_synthesis": {
           "ref": "action.requires_synthesis"
         },
-        "result": {
-          "ref": "data.result"
+        "structured_output": {
+          "ref": "data.result.structured_output"
         }
       },
       "out": {

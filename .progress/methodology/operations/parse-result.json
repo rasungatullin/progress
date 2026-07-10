@@ -11,10 +11,10 @@
         "required": true,
         "description": "Признак необходимости запуска синтеза для разрешённого действия."
       },
-      "result": {
+      "structured_output": {
         "type": "object",
         "required": true,
-        "description": "Результат запуска выполнения."
+        "description": "Структурированный результат запуска выполнения."
       }
     },
     "out": {

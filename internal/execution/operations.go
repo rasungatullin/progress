@@ -1559,7 +1559,11 @@ func parseResultInputFromOperation(state *operationExecution, operation Operatio
 			input.requiresSynthesis = value
 		}
 	}
-	if mapping, ok := operation.In["result"]; ok {
+	if mapping, ok := operation.In["structured_output"]; ok {
+		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
+			input.result.StructuredOutput = value.StructuredOutput
+		}
+	} else if mapping, ok := operation.In["result"]; ok {
 		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
 			input.result = value
 		}
@@ -1595,11 +1599,14 @@ func resultValueFromParseResultMapping(state *operationExecution, mapping model.
 		return LaunchResult{}, false
 	}
 	switch strings.TrimSpace(mapping.Ref) {
-	case "data.result":
+	case "data.result", "data.result.structured_output":
 		if state == nil {
 			return LaunchResult{}, false
 		}
 		value, ok := state.data["result"].(LaunchResult)
+		if strings.TrimSpace(mapping.Ref) == "data.result.structured_output" && ok {
+			value = LaunchResult{StructuredOutput: value.StructuredOutput}
+		}
 		return value, ok
 	default:
 		return LaunchResult{}, false
