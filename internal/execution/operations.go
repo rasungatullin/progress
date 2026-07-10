@@ -140,6 +140,9 @@ func writePrepareData(state *operationExecution, operation OperationSpec, in inv
 
 func prepareDataInputFromOperation(state *operationExecution, operation OperationSpec) prepareDataInput {
 	input := prepareDataInput{}
+	if state != nil {
+		input.invocation, _ = state.data["invocation"].(invocation)
+	}
 	if mapping, ok := operation.In["invocation"]; ok {
 		if value, ok := invocationValueFromPrepareDataMapping(state, mapping); ok {
 			input.invocation = value

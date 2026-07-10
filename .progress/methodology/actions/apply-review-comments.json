@@ -95,9 +95,12 @@
     {
       "name": "prepare-data",
       "in": {
-        "invocation": {
-          "ref": "in.invocation"
-        },
+        "task": {"ref": "in.task"},
+        "action": {"ref": "in.action"},
+        "repository_url": {"ref": "in.repository_url"},
+        "workplace_name": {"ref": "in.workplace_name"},
+        "base_ref": {"ref": "in.base_ref"},
+        "head_ref": {"ref": "in.head_ref"},
         "expected_result": {
           "ref": "in.expected_result"
         },
