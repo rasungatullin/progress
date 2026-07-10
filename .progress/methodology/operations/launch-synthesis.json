@@ -11,31 +11,17 @@
         "required": true,
         "description": "Признак необходимости запуска синтеза для разрешённого действия."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
-      },
-      "directive": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленная исполнительная директива."
-      },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
-      },
-      "allocation": {
-        "type": "object",
-        "required": true,
-        "description": "Результат ресурсного снабжения."
-      },
-      "workplace": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленное рабочее место."
-      }
+      "task": {"type": "string", "required": true, "description": "Задача для запуска синтеза."},
+      "action": {"type": "string", "description": "Имя действия для запуска."},
+      "directory": {"type": "string", "required": true, "description": "Каталог запуска."},
+      "directive": {"type": "object", "required": true, "description": "Исполнительная директива запуска."},
+      "profile_name": {"type": "string", "description": "Имя исполнительного профиля."},
+      "runner": {"type": "string", "description": "Исполнительный модуль."},
+      "model": {"type": "string", "description": "Модель выполнения."},
+      "model_binding": {"type": "string", "description": "Привязка модели к ресурсу."},
+      "workplace_name": {"type": "string", "description": "Имя рабочего места."},
+      "repository_url": {"type": "string", "description": "Адрес репозитория."},
+      "structured_input": {"type": "object", "description": "Структурированный ввод синтеза."}
     },
     "out": {
       "result": {
