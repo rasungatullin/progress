@@ -5,16 +5,8 @@
   "origin": "builtin",
   "contract": {
     "in": {
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Ввод контура исполнения, синхронизированный с параметрами запроса на слияние."
-      },
-      "pull_request": {
-        "type": "object",
-        "required": true,
-        "description": "Загруженный запрос на слияние, по которому нужно получить замечания ревизии."
-      }
+      "repository": {"type": "string", "required": true, "description": "Репозиторий запроса на слияние."},
+      "number": {"type": "integer", "required": true, "description": "Номер запроса на слияние."}
     },
     "out": {
       "review_remarks": {
