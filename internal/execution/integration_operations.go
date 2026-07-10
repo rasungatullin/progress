@@ -451,12 +451,6 @@ func publishMergeRequestInputFromOperation(state *operationExecution, operation 
 
 func publishReviewRemarksInputFromOperation(state *operationExecution, operation OperationSpec) publishMergeRequestInput {
 	input := publishMergeRequestInput{}
-	if state != nil {
-		input.invocation = invocationFromExecutionData(state)
-		input.workplace = workplaceFromExecutionData(state)
-		input.result = resultFromExecutionData(state)
-		input.structuredOutput = structuredOutputFromExecutionData(state)
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -468,6 +462,16 @@ func publishReviewRemarksInputFromOperation(state *operationExecution, operation
 	if mapping, ok := operation.In["workplace"]; ok {
 		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
 			input.workplace = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.allocation = value
 		}
 	}
 	if mapping, ok := operation.In["result"]; ok {
@@ -537,7 +541,7 @@ func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, w
 
 func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := publishReviewRemarksInputFromOperation(state, operation)
-	ref := pullRequestRefFromPublishReviewRemarksInput(state, input)
+	ref := pullRequestRefFromPublishReviewRemarksInput(input)
 	if ref.Number <= 0 {
 		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
@@ -559,7 +563,7 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 	result.Summary = joinExecutionSummaries(result.Summary, summary)
 	writePublishReviewRemarksData(state, operation, summary, result)
 	state.tracker.completeIO(name, publishReviewRemarksInputSummary(input, operation), publishReviewRemarksOutputSummary(summary, result, operation), "Замечания ревизии записаны через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, nil)
 	return nil
 }
 
@@ -567,7 +571,7 @@ func (e builtinOperationExecutor) failPublishReviewRemarksOperation(ctx context.
 	result := failedPublishReviewRemarksResult(input, err)
 	writePublishReviewRemarksFailureData(state, operation, result)
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), input.workplace, result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, err)
 	return err
 }
 
@@ -610,6 +614,9 @@ func writePublishReviewRemarksData(state *operationExecution, operation Operatio
 func publishReviewRemarksInputSummary(input publishMergeRequestInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
 		"invocation":        invocationSummary(input.invocation),
+		"profile":           profileSummary(input.profile),
+		"allocation":        allocationSummary(input.allocation),
+		"workplace":         workplaceSummary(input.workplace),
 		"result":            resultSummary(input.result),
 		"structured_output": structuredOutputSummary(input.structuredOutput),
 	})
@@ -956,10 +963,10 @@ func publishMergeRequestAssignment(input publishMergeRequestInput) *ExecutionAss
 	return nil
 }
 
-func pullRequestRefFromPublishReviewRemarksInput(state *operationExecution, input publishMergeRequestInput) pullRequestRef {
-	ref := pullRequestRefFromAssignment(publishReviewRemarksAssignment(state, input))
+func pullRequestRefFromPublishReviewRemarksInput(input publishMergeRequestInput) pullRequestRef {
+	ref := pullRequestRefFromAssignment(publishReviewRemarksAssignment(input))
 	if strings.TrimSpace(ref.Head) == "" {
-		assignment := publishReviewRemarksAssignment(state, input)
+		assignment := publishReviewRemarksAssignment(input)
 		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
 			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
 		}
@@ -967,7 +974,7 @@ func pullRequestRefFromPublishReviewRemarksInput(state *operationExecution, inpu
 	return ref
 }
 
-func publishReviewRemarksAssignment(state *operationExecution, input publishMergeRequestInput) *ExecutionAssignment {
+func publishReviewRemarksAssignment(input publishMergeRequestInput) *ExecutionAssignment {
 	if input.invocation.Assignment != nil {
 		return assignmentFromInvocation(input.invocation)
 	}

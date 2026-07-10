@@ -2025,7 +2025,10 @@ func TestPublishReviewRemarksFillsOnlyActionData(t *testing.T) {
 					Number:     17,
 				}},
 			}},
-			"result": model.LaunchResult{Status: "completed", Summary: "review complete"},
+			"profile":    model.Profile{Name: "review"},
+			"allocation": model.Allocation{Model: "gpt-5"},
+			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":     model.LaunchResult{Status: "completed", Summary: "review complete"},
 			"structured_output": &model.StructuredOutput{Remarks: []model.StructuredRemark{{
 				ID:       "remark-1",
 				Title:    "Не хватает проверки",
@@ -2085,7 +2088,10 @@ func TestPublishReviewRemarksFailureFillsOnlyActionData(t *testing.T) {
 					}},
 				},
 			},
-			"result": model.LaunchResult{Status: "completed", Summary: "review complete"},
+			"profile":    model.Profile{Name: "review"},
+			"allocation": model.Allocation{Model: "gpt-5"},
+			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":     model.LaunchResult{Status: "completed", Summary: "review complete"},
 			"structured_output": &model.StructuredOutput{Remarks: []model.StructuredRemark{{
 				ID:       "remark-1",
 				Title:    "Не хватает проверки",
@@ -2133,6 +2139,9 @@ func TestPublishReviewRemarksWritesOutputsWhenNoRemarks(t *testing.T) {
 		action:     model.Action{Operations: []model.OperationSpec{operation}},
 		data: map[string]any{
 			"invocation":        model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"profile":           model.Profile{Name: "review"},
+			"allocation":        model.Allocation{Model: "gpt-5"},
+			"workplace":         model.Workplace{Name: "/tmp/work", Ready: true},
 			"result":            model.LaunchResult{Status: "completed", Summary: "review complete"},
 			"structured_output": &model.StructuredOutput{Summary: "No remarks."},
 		},
@@ -3876,6 +3885,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 				result = append(result, publishMergeRequestActionOperation())
 				continue
 			}
+			if operation == OperationKindPublishReviewRemarks {
+				result = append(result, publishReviewRemarksActionOperation())
+				continue
+			}
 			if operation == OperationKindFinalize {
 				result = append(result, finalizeActionOperation())
 				continue
@@ -4071,6 +4084,27 @@ func publishMergeRequestActionOperation() methodology.ActionOperation {
 			"merge_request":   mappingRef("data.merge_request"),
 			"publish_summary": mappingRef("data.publish_summary"),
 			"result":          mappingRef("data.result"),
+		},
+	}
+}
+
+func publishReviewRemarksActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindPublishReviewRemarks,
+		Kind:     OperationKindPublishReviewRemarks,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"invocation":        mappingRef("data.invocation"),
+			"profile":           mappingRef("data.profile"),
+			"allocation":        mappingRef("data.allocation"),
+			"workplace":         mappingRef("data.workplace"),
+			"result":            mappingRef("data.result"),
+			"structured_output": mappingRef("data.structured_output"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"review_remarks_summary": mappingRef("data.review_remarks_summary"),
+			"result":                 mappingRef("data.result"),
 		},
 	}
 }
@@ -4311,6 +4345,9 @@ func publishReviewRemarksOperationSpec() model.OperationSpec {
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
 			"invocation":        {Ref: "data.invocation"},
+			"profile":           {Ref: "data.profile"},
+			"allocation":        {Ref: "data.allocation"},
+			"workplace":         {Ref: "data.workplace"},
 			"result":            {Ref: "data.result"},
 			"structured_output": {Ref: "data.structured_output"},
 		},
@@ -4438,7 +4475,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "publish-review-remarks", "kind": "publish-review-remarks", "origin": "builtin", "required": true},
+        {"name": "publish-review-remarks", "kind": "publish-review-remarks", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"review_remarks_summary": {"ref": "data.review_remarks_summary"}, "result": {"ref": "data.result"}}},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
