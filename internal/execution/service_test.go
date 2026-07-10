@@ -212,7 +212,7 @@ func TestServiceExecuteReturnsActionAndOperationResults(t *testing.T) {
 	if result.Status != "completed" || result.Launch == nil || result.Launch.Status != "completed" {
 		t.Fatalf("unexpected execution result: %#v", result)
 	}
-	if result.Action.Name != ActionClassEngineeringSynthesis || result.Action.Profile != "default" || !result.Action.RequiresSynthesis {
+	if result.Action.Name != ActionClassEngineeringSynthesis || result.Action.Profile != "default" {
 		t.Fatalf("unexpected action: %#v", result.Action)
 	}
 	if result.Assignment == nil || result.Assignment.CanonicalTask == nil || result.Assignment.CanonicalTask.Number != 91 {
@@ -384,16 +384,15 @@ func TestServiceExecuteLaunchFailureUsesCatalogOperationNames(t *testing.T) {
 			Class:             ActionClassEngineeringSynthesis,
 			Profile:           "coder",
 			RequiresWorkplace: true,
-			RequiresSynthesis: true,
 			Operations: []model.OperationSpec{
 				builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
 				builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true),
 				builtinOperation(OperationKindAllocateResources, "Ресурсное снабжение", true),
 				builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true),
 				builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true),
-				{Name: OperationKindLaunchSynthesis, Kind: OperationKindLaunchSynthesis, Title: "Запуск синтеза", Origin: OperationOriginBuiltin, Required: true, In: model.OperationMap{"requires_synthesis": {Value: json.RawMessage("true")}}},
-				{Name: "normalize-output", Kind: OperationKindParseResult, Title: "Разбор результата", Origin: OperationOriginBuiltin, Required: true, In: model.OperationMap{"requires_synthesis": {Value: json.RawMessage("true")}}},
-				{Name: "finish-run", Kind: OperationKindFinalize, Title: "Завершающая фиксация", Origin: OperationOriginBuiltin, Required: true, In: model.OperationMap{"requires_synthesis": {Value: json.RawMessage("true")}}},
+				{Name: OperationKindLaunchSynthesis, Kind: OperationKindLaunchSynthesis, Title: "Запуск синтеза", Origin: OperationOriginBuiltin, Required: true},
+				{Name: "normalize-output", Kind: OperationKindParseResult, Title: "Разбор результата", Origin: OperationOriginBuiltin, Required: true},
+				{Name: "finish-run", Kind: OperationKindFinalize, Title: "Завершающая фиксация", Origin: OperationOriginBuiltin, Required: true},
 			},
 		}},
 		profiles:   &stubProfileResolver{profile: model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"}},
@@ -434,11 +433,16 @@ func TestServiceExecuteLaunchFailureUsesCatalogOperationNames(t *testing.T) {
 	}
 }
 
-func TestServiceExecuteSkipsResourcesWorkplaceAndLaunchWhenActionDoesNotNeedSynthesis(t *testing.T) {
+func TestServiceExecuteUsesMinimalIntegrationActionComposition(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
 	service := &Service{
-		logger:     log.Default(),
+		logger: log.Default(),
+		actions: &stubActionResolver{action: model.Action{
+			Name:       ActionClassIntegrationChange,
+			Class:      ActionClassIntegrationChange,
+			Operations: []model.OperationSpec{finalizeOperationSpec()},
+		}},
 		profiles:   &stubProfileResolver{profile: model.Profile{Name: "default", Mode: "manual"}},
 		resources:  &stubResourceProvider{err: errors.New("resources must not be called")},
 		workplaces: &stubWorkplaceManager{err: errors.New("workplace must not be called")},
@@ -455,19 +459,16 @@ func TestServiceExecuteSkipsResourcesWorkplaceAndLaunchWhenActionDoesNotNeedSynt
 	if err != nil {
 		t.Fatalf("execute integration action: %v", err)
 	}
-	if result.Status != "completed" || result.Action.RequiresWorkplace || result.Action.RequiresSynthesis {
+	if result.Status != "completed" || result.Action.RequiresWorkplace {
 		t.Fatalf("unexpected execution result: %#v", result)
 	}
 	if result.Action.Class != ActionClassIntegrationChange {
 		t.Fatalf("unexpected action class: %#v", result.Action)
 	}
-	for _, operationName := range []string{OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult} {
-		operation := findOperationResult(result.Operations, operationName)
-		if operation == nil || operation.Status != OperationStatusSkipped {
-			t.Fatalf("operation %s must be skipped: %#v", operationName, result.Operations)
-		}
+	if len(result.Operations) != 1 || result.Operations[0].Name != OperationKindFinalize {
+		t.Fatalf("integration action must contain only finalize: %#v", result.Operations)
 	}
-	if result.Launch == nil || result.Launch.Status != "completed" || !strings.Contains(result.Launch.Summary, "synthesis=not-required") {
+	if result.Launch == nil || result.Launch.Status != "completed" || !strings.Contains(result.Launch.Summary, "operations=completed") {
 		t.Fatalf("unexpected launch summary: %#v", result.Launch)
 	}
 }
@@ -482,7 +483,6 @@ func TestServiceExecuteUsesResolvedActionOperationList(t *testing.T) {
 			Name:              "diagnostic",
 			Class:             ActionClassService,
 			RequiresWorkplace: false,
-			RequiresSynthesis: false,
 			Operations: []model.OperationSpec{
 				builtinOperation(OperationKindFinalize, "Завершающая фиксация", true),
 			},
@@ -517,10 +517,9 @@ func TestServiceExecuteResolveProfileUsesOperationIOAndKeepsStateProfile(t *test
 	service := &Service{
 		logger: log.Default(),
 		actions: &stubActionResolver{action: model.Action{
-			Name:              "profile-check",
-			Class:             ActionClassEngineeringSynthesis,
-			Profile:           "coder",
-			RequiresSynthesis: true,
+			Name:    "profile-check",
+			Class:   ActionClassEngineeringSynthesis,
+			Profile: "coder",
 			Operations: []model.OperationSpec{
 				builtinOperation(OperationKindPrepareData, "Подготовка данных", true),
 				{
@@ -543,9 +542,8 @@ func TestServiceExecuteResolveProfileUsesOperationIOAndKeepsStateProfile(t *test
 					Title:  "Ресурсное снабжение",
 					Origin: OperationOriginBuiltin,
 					In: model.OperationMap{
-						"requires_synthesis": {Ref: "action.requires_synthesis"},
-						"invocation":         {Ref: "data.invocation"},
-						"profile":            {Ref: "data.profile"},
+						"invocation": {Ref: "data.invocation"},
+						"profile":    {Ref: "data.profile"},
 					},
 					Out: model.OperationMap{"allocation": {Ref: "data.allocation"}},
 				},
@@ -812,8 +810,7 @@ func TestAllocateResourcesFillsOnlyActionData(t *testing.T) {
 			Action: "implement",
 		},
 		action: model.Action{
-			RequiresSynthesis: true,
-			Operations:        []model.OperationSpec{operation},
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation": model.Invocation{Task: "from-data", Action: "implement"},
@@ -853,52 +850,13 @@ func TestAllocateResourcesFillsOnlyActionData(t *testing.T) {
 	}
 }
 
-func TestAllocateResourcesWritesNotRequiredAllocationForActionWithoutSynthesis(t *testing.T) {
-	t.Parallel()
-
-	operation := allocateResourcesOperationSpec()
-	state := &operationExecution{
-		in: model.Invocation{Action: "service"},
-		action: model.Action{
-			RequiresSynthesis: false,
-			Operations:        []model.OperationSpec{operation},
-		},
-		data: map[string]any{
-			"invocation": model.Invocation{Action: "service"},
-			"profile":    model.Profile{Name: "default", Mode: "manual"},
-		},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
-	}
-	service := &Service{
-		logger:    log.Default(),
-		resources: &stubResourceProvider{err: errors.New("resources must not be called")},
-	}
-
-	err := builtinOperationExecutor{service: service}.allocateResources(context.Background(), state, operation, OperationKindAllocateResources)
-	if err != nil {
-		t.Fatalf("allocate resources: %v", err)
-	}
-	dataAllocation, ok := state.data["allocation"].(model.Allocation)
-	if !ok || dataAllocation.Resource != "not-required" || dataAllocation.Source != "action-without-synthesis" {
-		t.Fatalf("allocate-resources must write skipped allocation to data.allocation: %#v", state.data)
-	}
-	if state.allocation.Resource != "" || state.allocation.Source != "" {
-		t.Fatalf("allocate-resources must not write skipped implicit state allocation: %#v", state.allocation)
-	}
-	result := findOperationResult(state.tracker.snapshot(), OperationKindAllocateResources)
-	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
-		t.Fatalf("skipped allocation must keep contract output diagnostics: %#v", result)
-	}
-}
-
 func TestAllocateResourcesFailureDoesNotWriteStateResult(t *testing.T) {
 	t.Parallel()
 
 	operation := allocateResourcesOperationSpec()
 	state := &operationExecution{
 		action: model.Action{
-			RequiresSynthesis: true,
-			Operations:        []model.OperationSpec{operation},
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation": model.Invocation{Task: "task-42"},
@@ -1082,8 +1040,7 @@ func TestBuildDirectiveFillsOnlyActionData(t *testing.T) {
 			},
 		},
 		action: model.Action{
-			RequiresSynthesis: true,
-			Operations:        []model.OperationSpec{operation},
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation": model.Invocation{Task: "task-42", Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "Ship it."}}},
@@ -1132,8 +1089,7 @@ func TestBuildDirectiveKeepsExplicitModelBinding(t *testing.T) {
 			Launch: model.LaunchSpec{ModelBinding: "legacy"},
 		},
 		action: model.Action{
-			RequiresSynthesis: true,
-			Operations:        []model.OperationSpec{operation},
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation": model.Invocation{Launch: model.LaunchSpec{ModelBinding: "explicit"}},
@@ -1155,37 +1111,6 @@ func TestBuildDirectiveKeepsExplicitModelBinding(t *testing.T) {
 	}
 }
 
-func TestBuildDirectiveWritesDirectiveForActionWithoutSynthesis(t *testing.T) {
-	t.Parallel()
-
-	operation := buildDirectiveOperationSpec()
-	state := &operationExecution{
-		in: model.Invocation{
-			Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "Legacy."}},
-		},
-		action: model.Action{
-			RequiresSynthesis: false,
-			Operations:        []model.OperationSpec{operation},
-		},
-		data:    map[string]any{"invocation": model.Invocation{Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "No synthesis."}}}, "profile": model.Profile{Name: "default", Mode: "manual"}, "allocation": model.Allocation{Resource: "not-required"}, "workplace": model.Workplace{Name: "/repo", Ready: true}},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
-	}
-	service := &Service{logger: log.Default()}
-
-	err := builtinOperationExecutor{service: service}.buildDirective(context.Background(), state, operation, OperationKindBuildDirective)
-	if err != nil {
-		t.Fatalf("build directive: %v", err)
-	}
-	directive, ok := state.data["directive"].(model.LaunchSpec)
-	if !ok || directive.StructuredInput == nil || directive.StructuredInput.Task != "No synthesis." {
-		t.Fatalf("build-directive must write skipped directive to data.directive: %#v", state.data)
-	}
-	result := findOperationResult(state.tracker.snapshot(), OperationKindBuildDirective)
-	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
-		t.Fatalf("skipped directive must keep contract output diagnostics: %#v", result)
-	}
-}
-
 func TestLaunchSynthesisFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
@@ -1198,8 +1123,7 @@ func TestLaunchSynthesisFillsOnlyActionData(t *testing.T) {
 			},
 		},
 		action: model.Action{
-			RequiresSynthesis: true,
-			Operations:        []model.OperationSpec{operation},
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation": model.Invocation{Task: "task-42"},
@@ -1253,49 +1177,6 @@ func TestLaunchSynthesisFillsOnlyActionData(t *testing.T) {
 	}
 }
 
-func TestLaunchSynthesisWritesSkippedResultForActionWithoutSynthesis(t *testing.T) {
-	t.Parallel()
-
-	operation := launchSynthesisOperationSpec()
-	state := &operationExecution{
-		in: model.Invocation{
-			Task: "task-42",
-		},
-		action: model.Action{
-			RequiresSynthesis: false,
-			Operations:        []model.OperationSpec{operation},
-		},
-		data: map[string]any{
-			"invocation": model.Invocation{Task: "task-42"},
-			"directive":  model.LaunchSpec{StructuredInput: &StructuredInput{Task: "No synthesis."}},
-			"profile":    model.Profile{Name: "default", Mode: "manual"},
-			"allocation": model.Allocation{Resource: "not-required"},
-			"workplace":  model.Workplace{Name: "/repo", Ready: true},
-		},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
-	}
-	service := &Service{
-		logger:   log.Default(),
-		launcher: &stubLauncher{err: errors.New("launcher must not be called")},
-	}
-
-	err := builtinOperationExecutor{service: service}.launchSynthesis(context.Background(), state, operation, OperationKindLaunchSynthesis)
-	if err != nil {
-		t.Fatalf("launch synthesis: %v", err)
-	}
-	dataResult, ok := state.data["result"].(model.LaunchResult)
-	if !ok || dataResult.Status != "skipped" || !strings.Contains(dataResult.Summary, "synthesis=not-required") {
-		t.Fatalf("launch-synthesis must write skipped result to data.result: %#v", state.data)
-	}
-	if state.result.Status != "" {
-		t.Fatalf("skipped launch must keep old empty state result for finalization compatibility: %#v", state.result)
-	}
-	result := findOperationResult(state.tracker.snapshot(), OperationKindLaunchSynthesis)
-	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
-		t.Fatalf("skipped launch must keep contract output diagnostics: %#v", result)
-	}
-}
-
 func TestParseResultFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
@@ -1303,8 +1184,7 @@ func TestParseResultFillsOnlyActionData(t *testing.T) {
 	output := &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}
 	state := &operationExecution{
 		action: model.Action{
-			RequiresSynthesis: true,
-			Operations:        []model.OperationSpec{operation},
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"result": model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: output},
@@ -1329,32 +1209,6 @@ func TestParseResultFillsOnlyActionData(t *testing.T) {
 	}
 }
 
-func TestParseResultWritesEmptyOutputForActionWithoutSynthesis(t *testing.T) {
-	t.Parallel()
-
-	operation := parseResultOperationSpec()
-	state := &operationExecution{
-		action: model.Action{
-			RequiresSynthesis: false,
-			Operations:        []model.OperationSpec{operation},
-		},
-		data:    map[string]any{"result": model.LaunchResult{Status: "skipped", Summary: "synthesis=not-required"}},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
-	}
-
-	err := builtinOperationExecutor{}.parseResult(state, operation, OperationKindParseResult)
-	if err != nil {
-		t.Fatalf("parse result: %v", err)
-	}
-	if _, ok := state.data["structured_output"].(*model.StructuredOutput); !ok {
-		t.Fatalf("parse-result must write empty structured output to data.structured_output: %#v", state.data)
-	}
-	result := findOperationResult(state.tracker.snapshot(), OperationKindParseResult)
-	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
-		t.Fatalf("skipped parse result must keep contract output diagnostics: %#v", result)
-	}
-}
-
 func TestCommitPushFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
@@ -1365,8 +1219,7 @@ func TestCommitPushFillsOnlyActionData(t *testing.T) {
 			Task: "legacy",
 		},
 		action: model.Action{
-			RequiresSynthesis: true,
-			Operations:        []model.OperationSpec{operation},
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation":        model.Invocation{Task: "task-42"},
@@ -1429,8 +1282,7 @@ func TestCommitPushDoesNotReadActionSynthesisFlag(t *testing.T) {
 	state := &operationExecution{
 		in: model.Invocation{Task: "task-42"},
 		action: model.Action{
-			RequiresSynthesis: false,
-			Operations:        []model.OperationSpec{operation},
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation":        model.Invocation{Task: "task-42"},
@@ -1752,10 +1604,9 @@ func TestFinalizeFillsOnlyActionData(t *testing.T) {
 	operation := finalizeOperationSpec()
 	state := &operationExecution{
 		action: model.Action{
-			Name:              ActionClassIntegrationChange,
-			Class:             ActionClassIntegrationChange,
-			RequiresSynthesis: false,
-			Operations:        []model.OperationSpec{operation},
+			Name:       ActionClassIntegrationChange,
+			Class:      ActionClassIntegrationChange,
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation": model.Invocation{Task: "task-42"},
@@ -1778,7 +1629,7 @@ func TestFinalizeFillsOnlyActionData(t *testing.T) {
 		t.Fatalf("finalize: %v", err)
 	}
 	dataResult, ok := state.data["result"].(model.LaunchResult)
-	if !ok || dataResult.Status != "completed" || !strings.Contains(dataResult.Summary, "synthesis=not-required") {
+	if !ok || dataResult.Status != "legacy" || dataResult.Summary != "legacy" {
 		t.Fatalf("finalize must fill data.result: %#v", state.data)
 	}
 	if state.result.Status != "legacy-state" || state.result.Summary != "legacy-state" {
@@ -1799,10 +1650,9 @@ func TestFinalizeReadsResultOnlyFromActionData(t *testing.T) {
 	operation := finalizeOperationSpec()
 	state := &operationExecution{
 		action: model.Action{
-			Name:              ActionClassEngineeringSynthesis,
-			Class:             ActionClassEngineeringSynthesis,
-			RequiresSynthesis: true,
-			Operations:        []model.OperationSpec{operation},
+			Name:       ActionClassEngineeringSynthesis,
+			Class:      ActionClassEngineeringSynthesis,
+			Operations: []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation": model.Invocation{Task: "task-42"},
@@ -2508,7 +2358,6 @@ func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
 				Profile:           "global",
 				Aliases:           []string{"implement"},
 				RequiresWorkplace: boolRef(true),
-				RequiresSynthesis: boolRef(true),
 				Operations:        testExecutionOperations(OperationKindFinalize),
 			},
 			{
@@ -2516,7 +2365,6 @@ func TestActionResolutionPrefersExactNameBeforeAlias(t *testing.T) {
 				Class:             ActionClassService,
 				Profile:           "local",
 				RequiresWorkplace: boolRef(false),
-				RequiresSynthesis: boolRef(false),
 				Operations:        testExecutionOperations(OperationKindFinalize),
 			},
 		},
@@ -2540,7 +2388,6 @@ func TestActionResolutionPrefersLaterAlias(t *testing.T) {
 				Profile:           "global",
 				Aliases:           []string{"implement"},
 				RequiresWorkplace: boolRef(true),
-				RequiresSynthesis: boolRef(true),
 				Operations:        testExecutionOperations(OperationKindFinalize),
 			},
 			{
@@ -2549,7 +2396,6 @@ func TestActionResolutionPrefersLaterAlias(t *testing.T) {
 				Profile:           "local",
 				Aliases:           []string{"implement"},
 				RequiresWorkplace: boolRef(false),
-				RequiresSynthesis: boolRef(false),
 				Operations:        testExecutionOperations(OperationKindFinalize),
 			},
 		},
@@ -2570,7 +2416,6 @@ func TestActionResolutionRejectsDuplicateOperations(t *testing.T) {
 			Name:              "diagnostic",
 			Class:             ActionClassService,
 			RequiresWorkplace: boolRef(false),
-			RequiresSynthesis: boolRef(false),
 			Operations:        testExecutionOperations(OperationKindPrepareData, OperationKindPrepareData),
 		}},
 	}, invocation{Action: "diagnostic"})
@@ -2590,7 +2435,6 @@ func TestActionResolutionMakesReviewRemarksRequiredForApplyReviewComments(t *tes
 			Name:              ActionApplyReviewComments,
 			Class:             ActionClassEngineeringSynthesis,
 			RequiresWorkplace: boolRef(true),
-			RequiresSynthesis: boolRef(true),
 			Operations:        testExecutionOperations(OperationKindLoadReviewRemarks, OperationKindFinalize),
 		}},
 	}, invocation{Action: ActionApplyReviewComments})
@@ -2611,7 +2455,6 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 			Name:              ActionApplyReviewComments,
 			Class:             ActionClassEngineeringSynthesis,
 			RequiresWorkplace: boolRef(true),
-			RequiresSynthesis: boolRef(true),
 			Operations: []methodology.ActionOperation{
 				{
 					Name: OperationKindPrepareData,
@@ -2645,9 +2488,8 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 				{
 					Name: OperationKindAllocateResources,
 					In: map[string]methodology.ActionMapping{
-						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"invocation":         mappingRef("data.invocation"),
-						"profile":            mappingRef("data.profile"),
+						"invocation": mappingRef("data.invocation"),
+						"profile":    mappingRef("data.profile"),
 					},
 					Out: map[string]methodology.ActionMapping{
 						"allocation": mappingRef("data.allocation"),
@@ -2669,9 +2511,8 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 				{
 					Name: OperationKindBuildDirective,
 					In: map[string]methodology.ActionMapping{
-						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"invocation":         mappingRef("data.invocation"),
-						"allocation":         mappingRef("data.allocation"),
+						"invocation": mappingRef("data.invocation"),
+						"allocation": mappingRef("data.allocation"),
 					},
 					Out: map[string]methodology.ActionMapping{
 						"directive": mappingRef("data.directive"),
@@ -2680,12 +2521,11 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 				{
 					Name: OperationKindLaunchSynthesis,
 					In: map[string]methodology.ActionMapping{
-						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"invocation":         mappingRef("data.invocation"),
-						"directive":          mappingRef("data.directive"),
-						"profile":            mappingRef("data.profile"),
-						"allocation":         mappingRef("data.allocation"),
-						"workplace":          mappingRef("data.workplace"),
+						"invocation": mappingRef("data.invocation"),
+						"directive":  mappingRef("data.directive"),
+						"profile":    mappingRef("data.profile"),
+						"allocation": mappingRef("data.allocation"),
+						"workplace":  mappingRef("data.workplace"),
 					},
 					Out: map[string]methodology.ActionMapping{
 						"result": mappingRef("data.result"),
@@ -2694,8 +2534,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 				{
 					Name: OperationKindParseResult,
 					In: map[string]methodology.ActionMapping{
-						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"result":             mappingRef("data.result"),
+						"result": mappingRef("data.result"),
 					},
 					Out: map[string]methodology.ActionMapping{
 						"structured_output": mappingRef("data.structured_output"),
@@ -2785,7 +2624,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	if allocationOperation == nil {
 		t.Fatalf("allocate-resources operation must be present: %#v", action.Operations)
 	}
-	if allocationOperation.In["requires_synthesis"].Ref != "action.requires_synthesis" || allocationOperation.In["profile"].Ref != "data.profile" || allocationOperation.Out["allocation"].Ref != "data.allocation" {
+	if allocationOperation.In["profile"].Ref != "data.profile" || allocationOperation.Out["allocation"].Ref != "data.allocation" {
 		t.Fatalf("allocate-resources must keep action data mapping: %#v", allocationOperation)
 	}
 	workplaceOperation := findOperationSpec(action, OperationKindPrepareWorkplace)
@@ -2799,7 +2638,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	if directiveOperation == nil {
 		t.Fatalf("build-directive operation must be present: %#v", action.Operations)
 	}
-	if directiveOperation.In["requires_synthesis"].Ref != "action.requires_synthesis" || directiveOperation.In["allocation"].Ref != "data.allocation" || directiveOperation.Out["directive"].Ref != "data.directive" {
+	if directiveOperation.In["allocation"].Ref != "data.allocation" || directiveOperation.Out["directive"].Ref != "data.directive" {
 		t.Fatalf("build-directive must keep action data mapping: %#v", directiveOperation)
 	}
 	launchOperation := findOperationSpec(action, OperationKindLaunchSynthesis)
@@ -2833,7 +2672,6 @@ func TestActionResolutionKeepsPublishMergeRequestMapping(t *testing.T) {
 			Name:              ActionStartImplementationPR,
 			Class:             ActionClassEngineeringSynthesis,
 			RequiresWorkplace: boolRef(true),
-			RequiresSynthesis: boolRef(true),
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindPublishMergeRequest,
 				In: map[string]methodology.ActionMapping{
@@ -2873,7 +2711,6 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 			Name:              ActionReviewPullRequest,
 			Class:             ActionClassReview,
 			RequiresWorkplace: boolRef(true),
-			RequiresSynthesis: boolRef(true),
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindLoadPullRequest,
 				In: map[string]methodology.ActionMapping{
@@ -2910,7 +2747,6 @@ func TestActionResolutionKeepsLoadReviewRemarksMapping(t *testing.T) {
 			Name:              ActionApplyReviewComments,
 			Class:             ActionClassEngineeringSynthesis,
 			RequiresWorkplace: boolRef(true),
-			RequiresSynthesis: boolRef(true),
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindLoadReviewRemarks,
 				In: map[string]methodology.ActionMapping{
@@ -2948,14 +2784,12 @@ func TestActionResolutionKeepsFinalizeMapping(t *testing.T) {
 			Name:              ActionClassIntegrationChange,
 			Class:             ActionClassIntegrationChange,
 			RequiresWorkplace: boolRef(false),
-			RequiresSynthesis: boolRef(false),
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindFinalize,
 				In: map[string]methodology.ActionMapping{
-					"requires_synthesis": mappingRef("action.requires_synthesis"),
-					"action_name":        mappingRef("action.name"),
-					"action_class":       mappingRef("action.class"),
-					"result":             mappingRef("data.result"),
+					"action_name":  mappingRef("action.name"),
+					"action_class": mappingRef("action.class"),
+					"result":       mappingRef("data.result"),
 				},
 				Out: map[string]methodology.ActionMapping{
 					"result": mappingRef("data.result"),
@@ -2973,7 +2807,7 @@ func TestActionResolutionKeepsFinalizeMapping(t *testing.T) {
 	if operation == nil {
 		t.Fatalf("finalize operation must be present: %#v", action.Operations)
 	}
-	if operation.In["requires_synthesis"].Ref != "action.requires_synthesis" || operation.In["action_name"].Ref != "action.name" || operation.In["action_class"].Ref != "action.class" || operation.In["result"].Ref != "data.result" || operation.Out["result"].Ref != "data.result" {
+	if operation.In["action_name"].Ref != "action.name" || operation.In["action_class"].Ref != "action.class" || operation.In["result"].Ref != "data.result" || operation.Out["result"].Ref != "data.result" {
 		t.Fatalf("finalize must keep action data mapping: %#v", operation)
 	}
 }
@@ -2986,7 +2820,6 @@ func TestActionResolutionKeepsPublishReviewRemarksMapping(t *testing.T) {
 			Name:              ActionReviewPullRequest,
 			Class:             ActionClassReview,
 			RequiresWorkplace: boolRef(true),
-			RequiresSynthesis: boolRef(true),
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindPublishReviewRemarks,
 				In: map[string]methodology.ActionMapping{
@@ -3024,7 +2857,6 @@ func TestActionResolutionKeepsPublishReviewResponsesMapping(t *testing.T) {
 			Name:              ActionApplyReviewComments,
 			Class:             ActionClassEngineeringSynthesis,
 			RequiresWorkplace: boolRef(true),
-			RequiresSynthesis: boolRef(true),
 			Operations: []methodology.ActionOperation{{
 				Name: OperationKindPublishReviewResponses,
 				In: map[string]methodology.ActionMapping{
@@ -3903,13 +3735,13 @@ func writeTestMethodologyCatalog(t *testing.T, root string) {
 func testExecutionMethodologyCatalog() methodology.Catalog {
 	return methodology.Catalog{
 		Actions: []methodology.Action{
-			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
-			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
-			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
-			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
-			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
-			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), RequiresSynthesis: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
-			{Name: ActionClassIntegrationChange, Class: ActionClassIntegrationChange, Profile: "default", RequiresWorkplace: boolRef(false), RequiresSynthesis: boolRef(false), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
+			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
+			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
+			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
+			{Name: ActionClassIntegrationChange, Class: ActionClassIntegrationChange, Profile: "default", RequiresWorkplace: boolRef(false), Operations: testExecutionOperations(OperationKindFinalize)},
 		},
 	}
 }
@@ -4030,9 +3862,8 @@ func allocateResourcesActionOperation() methodology.ActionOperation {
 		Origin:   OperationOriginBuiltin,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"requires_synthesis": mappingRef("action.requires_synthesis"),
-			"invocation":         mappingRef("data.invocation"),
-			"profile":            mappingRef("data.profile"),
+			"invocation": mappingRef("data.invocation"),
+			"profile":    mappingRef("data.profile"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"allocation": mappingRef("data.allocation"),
@@ -4101,11 +3932,10 @@ func buildDirectiveActionOperation() methodology.ActionOperation {
 		Origin:   OperationOriginBuiltin,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"requires_synthesis": mappingRef("action.requires_synthesis"),
-			"invocation":         mappingRef("data.invocation"),
-			"profile":            mappingRef("data.profile"),
-			"allocation":         mappingRef("data.allocation"),
-			"workplace":          mappingRef("data.workplace"),
+			"invocation": mappingRef("data.invocation"),
+			"profile":    mappingRef("data.profile"),
+			"allocation": mappingRef("data.allocation"),
+			"workplace":  mappingRef("data.workplace"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"directive": mappingRef("data.directive"),
@@ -4120,12 +3950,11 @@ func launchSynthesisActionOperation() methodology.ActionOperation {
 		Origin:   OperationOriginBuiltin,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"requires_synthesis": mappingRef("action.requires_synthesis"),
-			"invocation":         mappingRef("data.invocation"),
-			"directive":          mappingRef("data.directive"),
-			"profile":            mappingRef("data.profile"),
-			"allocation":         mappingRef("data.allocation"),
-			"workplace":          mappingRef("data.workplace"),
+			"invocation": mappingRef("data.invocation"),
+			"directive":  mappingRef("data.directive"),
+			"profile":    mappingRef("data.profile"),
+			"allocation": mappingRef("data.allocation"),
+			"workplace":  mappingRef("data.workplace"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"result": mappingRef("data.result"),
@@ -4140,8 +3969,7 @@ func parseResultActionOperation() methodology.ActionOperation {
 		Origin:   OperationOriginBuiltin,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"requires_synthesis": mappingRef("action.requires_synthesis"),
-			"result":             mappingRef("data.result"),
+			"result": mappingRef("data.result"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"structured_output": mappingRef("data.structured_output"),
@@ -4241,14 +4069,13 @@ func finalizeActionOperation() methodology.ActionOperation {
 		Origin:   OperationOriginBuiltin,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"requires_synthesis": mappingRef("action.requires_synthesis"),
-			"action_name":        mappingRef("action.name"),
-			"action_class":       mappingRef("action.class"),
-			"invocation":         mappingRef("data.invocation"),
-			"profile":            mappingRef("data.profile"),
-			"allocation":         mappingRef("data.allocation"),
-			"workplace":          mappingRef("data.workplace"),
-			"result":             mappingRef("data.result"),
+			"action_name":  mappingRef("action.name"),
+			"action_class": mappingRef("action.class"),
+			"invocation":   mappingRef("data.invocation"),
+			"profile":      mappingRef("data.profile"),
+			"allocation":   mappingRef("data.allocation"),
+			"workplace":    mappingRef("data.workplace"),
+			"result":       mappingRef("data.result"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"result": mappingRef("data.result"),
@@ -4288,9 +4115,8 @@ func allocateResourcesOperationSpec() model.OperationSpec {
 		Kind:   OperationKindAllocateResources,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"invocation":         {Ref: "data.invocation"},
-			"profile":            {Ref: "data.profile"},
+			"invocation": {Ref: "data.invocation"},
+			"profile":    {Ref: "data.profile"},
 		},
 		Out: model.OperationMap{
 			"allocation": {Ref: "data.allocation"},
@@ -4322,11 +4148,10 @@ func buildDirectiveOperationSpec() model.OperationSpec {
 		Kind:   OperationKindBuildDirective,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"invocation":         {Ref: "data.invocation"},
-			"profile":            {Ref: "data.profile"},
-			"allocation":         {Ref: "data.allocation"},
-			"workplace":          {Ref: "data.workplace"},
+			"invocation": {Ref: "data.invocation"},
+			"profile":    {Ref: "data.profile"},
+			"allocation": {Ref: "data.allocation"},
+			"workplace":  {Ref: "data.workplace"},
 		},
 		Out: model.OperationMap{
 			"directive": {Ref: "data.directive"},
@@ -4340,12 +4165,11 @@ func launchSynthesisOperationSpec() model.OperationSpec {
 		Kind:   OperationKindLaunchSynthesis,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"invocation":         {Ref: "data.invocation"},
-			"directive":          {Ref: "data.directive"},
-			"profile":            {Ref: "data.profile"},
-			"allocation":         {Ref: "data.allocation"},
-			"workplace":          {Ref: "data.workplace"},
+			"invocation": {Ref: "data.invocation"},
+			"directive":  {Ref: "data.directive"},
+			"profile":    {Ref: "data.profile"},
+			"allocation": {Ref: "data.allocation"},
+			"workplace":  {Ref: "data.workplace"},
 		},
 		Out: model.OperationMap{
 			"result": {Ref: "data.result"},
@@ -4359,8 +4183,7 @@ func parseResultOperationSpec() model.OperationSpec {
 		Kind:   OperationKindParseResult,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"result":             {Ref: "data.result"},
+			"result": {Ref: "data.result"},
 		},
 		Out: model.OperationMap{
 			"structured_output": {Ref: "data.structured_output"},
@@ -4426,14 +4249,13 @@ func finalizeOperationSpec() model.OperationSpec {
 		Kind:   OperationKindFinalize,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"action_name":        {Ref: "action.name"},
-			"action_class":       {Ref: "action.class"},
-			"invocation":         {Ref: "data.invocation"},
-			"profile":            {Ref: "data.profile"},
-			"allocation":         {Ref: "data.allocation"},
-			"workplace":          {Ref: "data.workplace"},
-			"result":             {Ref: "data.result"},
+			"action_name":  {Ref: "action.name"},
+			"action_class": {Ref: "action.class"},
+			"invocation":   {Ref: "data.invocation"},
+			"profile":      {Ref: "data.profile"},
+			"allocation":   {Ref: "data.allocation"},
+			"workplace":    {Ref: "data.workplace"},
+			"result":       {Ref: "data.result"},
 		},
 		Out: model.OperationMap{
 			"result": {Ref: "data.result"},
@@ -4519,16 +4341,15 @@ const testExecutionMethodologyCatalogJSON = `{
       "profile": "default",
       "aliases": ["implement"],
       "requires_workplace": true,
-      "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
-        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
-        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4537,17 +4358,16 @@ const testExecutionMethodologyCatalogJSON = `{
       "profile": "default",
       "aliases": ["implement-commit"],
       "requires_workplace": true,
-      "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
-        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
-        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"directory": {"ref": "data.workplace.name"}, "commit_message": {"ref": "data.structured_output.commit_message"}, "fallback_name": {"ref": "data.invocation.workplace.name"}, "git": {"ref": "data.allocation.git"}, "private_store": {"ref": "data.allocation.private_store"}, "config_home": {"ref": "data.allocation.config_home"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4555,18 +4375,17 @@ const testExecutionMethodologyCatalogJSON = `{
       "class": "engineering-synthesis",
       "profile": "coder",
       "requires_workplace": true,
-      "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
-        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
-        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"directory": {"ref": "data.workplace.name"}, "commit_message": {"ref": "data.structured_output.commit_message"}, "fallback_name": {"ref": "data.invocation.workplace.name"}, "git": {"ref": "data.allocation.git"}, "private_store": {"ref": "data.allocation.private_store"}, "config_home": {"ref": "data.allocation.config_home"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}}},
         {"name": "publish-merge-request", "kind": "publish-merge-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"merge_request": {"ref": "data.merge_request"}, "publish_summary": {"ref": "data.publish_summary"}, "result": {"ref": "data.result"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4574,16 +4393,15 @@ const testExecutionMethodologyCatalogJSON = `{
       "class": "review",
       "profile": "review",
       "requires_workplace": true,
-      "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
-        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
-        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4591,19 +4409,18 @@ const testExecutionMethodologyCatalogJSON = `{
       "class": "review",
       "profile": "review",
       "requires_workplace": true,
-      "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": false, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
-        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
-        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "publish-review-remarks", "kind": "publish-review-remarks", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"review_remarks_summary": {"ref": "data.review_remarks_summary"}, "result": {"ref": "data.result"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4611,20 +4428,19 @@ const testExecutionMethodologyCatalogJSON = `{
       "class": "engineering-synthesis",
       "profile": "coder",
       "requires_workplace": true,
-      "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
-        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
-        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"directory": {"ref": "data.workplace.name"}, "commit_message": {"ref": "data.structured_output.commit_message"}, "fallback_name": {"ref": "data.invocation.workplace.name"}, "git": {"ref": "data.allocation.git"}, "private_store": {"ref": "data.allocation.private_store"}, "config_home": {"ref": "data.allocation.config_home"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}}},
         {"name": "publish-review-responses", "kind": "publish-review-responses", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}, "review_remarks": {"ref": "data.review_remarks"}}, "out": {"review_responses_summary": {"ref": "data.review_responses_summary"}, "result": {"ref": "data.result"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
@@ -4632,16 +4448,15 @@ const testExecutionMethodologyCatalogJSON = `{
       "class": "integration-change",
       "profile": "default",
       "requires_workplace": false,
-      "requires_synthesis": false,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
-        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
-        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
+        {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     }
   ]

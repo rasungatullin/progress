@@ -213,7 +213,6 @@ func executionActionFromMethodology(action methodology.Action, operationsByName 
 		Profile:           strings.TrimSpace(action.Profile),
 		ExpectedResult:    strings.TrimSpace(action.ExpectedResult),
 		RequiresWorkplace: actionRequiresWorkplace(action, operations),
-		RequiresSynthesis: actionRequiresSynthesis(action, operations),
 		Operations:        operations,
 	}, nil
 }
@@ -357,19 +356,6 @@ func actionRequiresWorkplace(action methodology.Action, operations []model.Opera
 	for _, operation := range operations {
 		switch operationKind(operation) {
 		case OperationKindPrepareWorkplace, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindPublishReviewRemarks, OperationKindPublishReviewResponses:
-			return true
-		}
-	}
-	return false
-}
-
-func actionRequiresSynthesis(action methodology.Action, operations []model.OperationSpec) bool {
-	if action.RequiresSynthesis != nil {
-		return *action.RequiresSynthesis
-	}
-	for _, operation := range operations {
-		switch operationKind(operation) {
-		case OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush:
 			return true
 		}
 	}

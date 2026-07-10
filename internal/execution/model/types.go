@@ -344,7 +344,6 @@ type Action struct {
 	Profile           string          `json:"profile,omitempty"`
 	ExpectedResult    string          `json:"expected_result,omitempty"`
 	RequiresWorkplace bool            `json:"requires_workplace,omitempty"`
-	RequiresSynthesis bool            `json:"requires_synthesis,omitempty"`
 	Operations        []OperationSpec `json:"operations,omitempty"`
 }
 

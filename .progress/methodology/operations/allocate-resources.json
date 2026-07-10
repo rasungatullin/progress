@@ -6,11 +6,6 @@
   "required": true,
   "contract": {
     "in": {
-      "requires_synthesis": {
-        "type": "boolean",
-        "required": true,
-        "description": "Признак необходимости запуска синтеза для разрешённого действия."
-      },
       "model_binding": {
         "type": "string",
         "required": true,

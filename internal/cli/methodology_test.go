@@ -106,7 +106,6 @@ func TestMethodologyCLIUpdateActionPreservesConfiguredFields(t *testing.T) {
 			"profile": "default",
 			"aliases": ["implement"],
 			"requires_workplace": true,
-			"requires_synthesis": true,
 			"operations": [
 				{"name": "prepare-data", "kind": "prepare-data", "title": "Подготовка данных", "origin": "builtin", "required": true}
 			],
@@ -133,7 +132,6 @@ func TestMethodologyCLIUpdateActionPreservesConfiguredFields(t *testing.T) {
 		`"aliases":`,
 		`"implement"`,
 		`"requires_workplace": true`,
-		`"requires_synthesis": true`,
 		`"title": "Подготовка данных"`,
 		`"description": "Новое описание."`,
 	} {

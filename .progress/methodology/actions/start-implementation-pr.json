@@ -16,7 +16,6 @@
     "start-implementation"
   ],
   "requires_workplace": true,
-  "requires_synthesis": true,
   "contract": {
     "in": {
       "expected_result": {
@@ -110,9 +109,6 @@
     {
       "name": "allocate-resources",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
-        },
         "model_binding": {
           "ref": "in.model_binding"
         },
@@ -190,9 +186,6 @@
     {
       "name": "build-directive",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
-        },
         "directory": {
           "ref": "data.workplace.name"
         },
@@ -215,9 +208,6 @@
     {
       "name": "launch-synthesis",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
-        },
         "directive": {
           "ref": "data.directive"
         },
@@ -273,9 +263,6 @@
     {
       "name": "parse-result",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
-        },
         "structured_output": {
           "ref": "data.result.structured_output"
         }
@@ -360,9 +347,6 @@
     {
       "name": "finalize",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
-        },
         "action_name": {
           "ref": "action.name"
         },

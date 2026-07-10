@@ -373,7 +373,7 @@ func (s *Service) resolveAction(ctx context.Context, in invocation) (Action, err
 		return Action{}, err
 	}
 
-	s.logger.Printf("Действие разрешено: задача=%q действие=%q класс=%q рабочее-место=%t синтез=%t", in.Task, action.Name, action.Class, action.RequiresWorkplace, action.RequiresSynthesis)
+	s.logger.Printf("Действие разрешено: задача=%q действие=%q класс=%q рабочее-место=%t", in.Task, action.Name, action.Class, action.RequiresWorkplace)
 	return action, nil
 }
 
