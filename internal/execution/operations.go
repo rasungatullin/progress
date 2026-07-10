@@ -1474,11 +1474,6 @@ func resultValueFromParseResultMapping(state *operationExecution, mapping model.
 		}
 		value, ok := state.data["result"].(LaunchResult)
 		return value, ok
-	case "state.result":
-		if state == nil {
-			return LaunchResult{}, false
-		}
-		return state.result, true
 	default:
 		return LaunchResult{}, false
 	}
