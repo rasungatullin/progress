@@ -63,7 +63,6 @@ func (e builtinOperationExecutor) failLoadPullRequestOperation(ctx context.Conte
 	result := failedStartResult(err)
 	writeLoadPullRequestFailureData(state, operation, result)
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, model.Profile{}, model.Allocation{}, model.Workplace{}, result, err)
 	return err
 }
 
@@ -155,12 +154,10 @@ func (e builtinOperationExecutor) failOrSkipLoadReviewRemarksOperation(ctx conte
 		result := failedStartResult(err)
 		writeLoadReviewRemarksFailureData(state, operation, result)
 		state.tracker.fail(name, summary, err, code, true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, model.Profile{}, model.Allocation{}, model.Workplace{}, result, err)
 		return err
 	}
 
 	state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, model.Profile{}, model.Allocation{}, model.Workplace{}, model.LaunchResult{}, nil)
 	return nil
 }
 
@@ -351,7 +348,6 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	result.Summary = joinExecutionSummaries(result.Summary, summary)
 	writePublishMergeRequestData(state, operation, mergeRequest, summary, result)
 	state.tracker.completeIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, summary, result, operation), "Запрос на слияние зафиксирован через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, nil)
 	return nil
 }
 
@@ -359,7 +355,6 @@ func (e builtinOperationExecutor) failPublishMergeRequestOperation(ctx context.C
 	result := failedPublishMergeRequestResult(input, err)
 	writePublishMergeRequestFailureData(state, operation, result)
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, err)
 	return err
 }
 
@@ -563,7 +558,6 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 	result.Summary = joinExecutionSummaries(result.Summary, summary)
 	writePublishReviewRemarksData(state, operation, summary, result)
 	state.tracker.completeIO(name, publishReviewRemarksInputSummary(input, operation), publishReviewRemarksOutputSummary(summary, result, operation), "Замечания ревизии записаны через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, nil)
 	return nil
 }
 
@@ -571,7 +565,6 @@ func (e builtinOperationExecutor) failPublishReviewRemarksOperation(ctx context.
 	result := failedPublishReviewRemarksResult(input, err)
 	writePublishReviewRemarksFailureData(state, operation, result)
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, err)
 	return err
 }
 
@@ -662,7 +655,6 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 	result.Summary = joinExecutionSummaries(result.Summary, summary)
 	writePublishReviewResponsesData(state, operation, summary, result)
 	state.tracker.completeIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary(summary, result, operation), "Ответы на замечания записаны через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, nil)
 	return nil
 }
 
@@ -670,7 +662,6 @@ func (e builtinOperationExecutor) failPublishReviewResponsesOperation(ctx contex
 	result := failedPublishReviewResponsesResult(input, err)
 	writePublishReviewResponsesFailureData(state, operation, result)
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, err)
 	return err
 }
 

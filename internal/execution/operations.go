@@ -58,6 +58,12 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 }
 
 func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationExecution, operation OperationSpec) error {
+	err := e.execute(ctx, state, operation)
+	e.service.recordOperationHistory(ctx, state, operation, err)
+	return err
+}
+
+func (e builtinOperationExecutor) execute(ctx context.Context, state *operationExecution, operation OperationSpec) error {
 	name := operationResultName(operation)
 	switch operationKind(operation) {
 	case OperationKindPrepareData:
@@ -104,9 +110,7 @@ func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operat
 	var err error
 	preparedInvocation, err = syncPullRequestRefsWithWorkplace(state, preparedInvocation, preparedAssignment)
 	if err != nil {
-		result := failedStartResult(err)
 		state.tracker.fail(name, "Данные задания не согласованы с веткой рабочего места.", err, "pull_request_branch_mismatch", true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, preparedInvocation, model.Profile{}, model.Allocation{}, model.Workplace{}, result, err)
 		return err
 	}
 
@@ -313,7 +317,6 @@ func (e builtinOperationExecutor) resolveProfile(ctx context.Context, state *ope
 		result := failedStartResult(err)
 		writeResolveProfileData(state, operation, model.Profile{}, result)
 		state.tracker.fail(name, "Исполнительный профиль не определён.", err, "profile_not_found", false, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, profileInput, model.Profile{}, model.Allocation{}, model.Workplace{}, result, err)
 		return err
 	}
 
@@ -642,9 +645,7 @@ func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *
 
 	allocation, err := e.service.allocateResources(ctx, input.invocation, input.profile)
 	if err != nil {
-		result := failedStartResult(err)
 		state.tracker.fail(name, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, model.Allocation{}, model.Workplace{}, result, err)
 		return err
 	}
 
@@ -818,9 +819,7 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 
 	workplace, err := e.service.prepareWorkplace(ctx, input.invocation, input.profile, input.allocation)
 	if err != nil {
-		result := failedStartResult(err)
 		state.tracker.fail(name, "Исполнительное рабочее место не подготовлено.", err, "workplace_not_prepared", true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, model.Workplace{}, result, err)
 		return err
 	}
 
@@ -1018,7 +1017,6 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	}
 	writeBuildDirectiveData(state, operation, directiveInvocation.Launch)
 	state.tracker.completeIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(directiveInvocation.Launch, operation), "Исполнительная директива подготовлена к запуску.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, directiveInvocation, input.profile, input.allocation, input.workplace, LaunchResult{Status: "running"}, nil)
 	return nil
 }
 
@@ -1208,7 +1206,6 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	launchInvocation.Launch.CommitPush = false
 	result, err := e.service.launch(launchCtx, launchInvocation, input.profile, input.allocation, input.workplace)
 	writeLaunchSynthesisData(state, operation, result)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, launchInvocation, input.profile, input.allocation, input.workplace, result, err)
 	if err != nil {
 		if result.StructuredOutput != nil {
 			state.tracker.completeIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), fmt.Sprintf("status=%s", result.Status))
@@ -1579,7 +1576,6 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 		}
 		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.fail(name, "Операция commit-push не поддержана модулем запуска.", err, "commit_push_unsupported", false, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, err)
 		return err
 	}
 
@@ -1591,14 +1587,12 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 		}
 		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.fail(name, "Создание коммита или отправка ветки не выполнены.", err, "commit_push_failed", true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, err)
 		return err
 	}
 
 	input.result.Summary = joinExecutionSummaries(input.result.Summary, summary)
 	writeCommitPushData(state, operation, summary, input.result)
 	state.tracker.completeIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary(summary, input.result, operation), summary)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, input.result, nil)
 	return nil
 }
 
@@ -1723,7 +1717,6 @@ func (e builtinOperationExecutor) finalize(ctx context.Context, state *operation
 		}
 		writeFinalizeData(state, operation, result)
 		state.tracker.completeIO(name, finalizeInputSummary(input, operation), finalizeOutputSummary(result, operation), finalizeSummary(result))
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, nil)
 		return nil
 	}
 
@@ -1876,12 +1869,10 @@ func (e builtinOperationExecutor) unsupported(ctx context.Context, state *operat
 		return nil
 	}
 
-	input := unsupportedInputFromOperation(state, operation)
 	err := fmt.Errorf("operation %q is unsupported", name)
 	result := failedStartResult(err)
 	writeUnsupportedData(state, operation, result)
 	state.tracker.fail(name, "Операция не поддержана текущей реализацией.", err, "operation_unsupported", false, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, err)
 	return err
 }
 

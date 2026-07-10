@@ -452,6 +452,31 @@ func (s *Service) finishOperationHistory(ctx context.Context, state *operationEx
 	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, data.invocation, data.profile, data.allocation, data.workplace, launchResult, operationErr)
 }
 
+func (s *Service) recordOperationHistory(ctx context.Context, state *operationExecution, operation OperationSpec, operationErr error) {
+	if state == nil {
+		return
+	}
+
+	data := executionDataFromState(state)
+	if data.invocation.Assignment == nil {
+		data.invocation = state.in
+	}
+	result := data.result
+	if operationErr != nil {
+		result.Status = "failed"
+		if strings.TrimSpace(result.Summary) == "" {
+			result.Summary = strings.TrimSpace(operationErr.Error())
+		}
+	} else if strings.TrimSpace(result.Status) == "" {
+		result.Status = "running"
+		if operationResult := findOperationResult(state.tracker.snapshot(), operationResultName(operation)); operationResult != nil {
+			result.Summary = strings.TrimSpace(operationResult.Summary)
+		}
+	}
+
+	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, data.invocation, data.profile, data.allocation, data.workplace, result, operationErr)
+}
+
 func (s *Service) beginStartHistory(ctx context.Context, root string, in invocation) history.Handle {
 	if root == "" {
 		return history.Handle{}
