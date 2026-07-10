@@ -3836,6 +3836,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 				result = append(result, loadPullRequestActionOperation())
 				continue
 			}
+			if operation == OperationKindLoadReviewRemarks {
+				result = append(result, loadReviewRemarksActionOperation())
+				continue
+			}
 			if operation == OperationKindBuildDirective {
 				result = append(result, buildDirectiveActionOperation())
 				continue
@@ -3930,6 +3934,24 @@ func loadPullRequestActionOperation() methodology.ActionOperation {
 			"pull_request": mappingRef("data.pull_request"),
 			"invocation":   mappingRef("data.invocation"),
 			"result":       mappingRef("data.result"),
+		},
+	}
+}
+
+func loadReviewRemarksActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindLoadReviewRemarks,
+		Kind:     OperationKindLoadReviewRemarks,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"invocation":   mappingRef("data.invocation"),
+			"pull_request": mappingRef("data.pull_request"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"review_remarks": mappingRef("data.review_remarks"),
+			"invocation":     mappingRef("data.invocation"),
+			"result":         mappingRef("data.result"),
 		},
 	}
 }
@@ -4365,7 +4387,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
-        {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": false},
+        {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": false, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
@@ -4385,7 +4407,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
-        {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": true},
+        {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},

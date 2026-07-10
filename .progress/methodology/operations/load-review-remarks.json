@@ -25,6 +25,11 @@
         "type": "object",
         "required": true,
         "description": "Ввод контура исполнения, дополненный замечаниями ревизии."
+      },
+      "result": {
+        "type": "object",
+        "required": false,
+        "description": "Результат отказа при невозможности получить замечания ревизии."
       }
     }
   }

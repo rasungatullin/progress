@@ -155,12 +155,12 @@ func (e builtinOperationExecutor) failOrSkipLoadReviewRemarksOperation(ctx conte
 		result := failedStartResult(err)
 		writeLoadReviewRemarksFailureData(state, operation, result)
 		state.tracker.fail(name, summary, err, code, true, true)
-		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, err)
+		e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, model.Profile{}, model.Allocation{}, model.Workplace{}, result, err)
 		return err
 	}
 
 	state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), resultFromExecutionData(state), nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, model.Profile{}, model.Allocation{}, model.Workplace{}, model.LaunchResult{}, nil)
 	return nil
 }
 
@@ -215,12 +215,6 @@ type loadReviewRemarksInput struct {
 
 func loadReviewRemarksInputFromOperation(state *operationExecution, operation OperationSpec) loadReviewRemarksInput {
 	input := loadReviewRemarksInput{}
-	if state != nil {
-		input.invocation = invocationFromExecutionData(state)
-		if value, ok := state.data["pull_request"].(integration.MergeRequest); ok {
-			input.pullRequest = &value
-		}
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
