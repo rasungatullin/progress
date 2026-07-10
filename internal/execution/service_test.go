@@ -1399,8 +1399,8 @@ func TestCommitPushFillsOnlyActionData(t *testing.T) {
 	if !ok {
 		t.Fatalf("commit-push must update data.result: %#v", state.data)
 	}
-	if !strings.Contains(dataResult.Summary, "launch complete") || !strings.Contains(dataResult.Summary, "git=committed+pushed branch=task-42") {
-		t.Fatalf("unexpected data result summary: %#v", dataResult)
+	if dataResult.Summary != "launch complete" {
+		t.Fatalf("commit-push must not rewrite launch result: %#v", dataResult)
 	}
 	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
 		t.Fatalf("commit-push must not write implicit state result: %#v", state.result)
@@ -1414,18 +1414,15 @@ func TestCommitPushFillsOnlyActionData(t *testing.T) {
 	if state.workplace.Name != "/tmp/legacy" || !state.workplace.Ready {
 		t.Fatalf("commit-push must not read or write implicit state workplace: %#v", state.workplace)
 	}
-	if !launcher.commitCalled || launcher.commitOutput == nil || launcher.commitOutput.Summary != "Done." {
-		t.Fatalf("commit-push must pass structured output from operation input: %#v", launcher)
+	if !launcher.commitCalled || launcher.commitInput.CommitMessage != "Apply change" {
+		t.Fatalf("commit-push must pass narrow commit message: %#v", launcher.commitInput)
 	}
-	if launcher.commitInvocation.Task != "task-42" {
-		t.Fatalf("commit-push must pass invocation from operation input: %#v", launcher.commitInvocation)
-	}
-	if launcher.commitAllocation.Resource != "binding:coder" || launcher.commitWorkplace.Name != "/tmp/work" {
-		t.Fatalf("commit-push must pass operation input data: allocation=%#v workplace=%#v", launcher.commitAllocation, launcher.commitWorkplace)
+	if launcher.commitInput.Directory != "/tmp/work" {
+		t.Fatalf("commit-push must pass narrow repository directory: %#v", launcher.commitInput)
 	}
 }
 
-func TestCommitPushWritesResultForActionWithoutSynthesis(t *testing.T) {
+func TestCommitPushDoesNotReadActionSynthesisFlag(t *testing.T) {
 	t.Parallel()
 
 	operation := commitPushOperationSpec()
@@ -1447,23 +1444,12 @@ func TestCommitPushWritesResultForActionWithoutSynthesis(t *testing.T) {
 	}
 	service := &Service{
 		logger:   log.Default(),
-		launcher: &stubLauncher{commitErr: errors.New("commit must not be called")},
+		launcher: &stubLauncher{commitErr: errors.New("commit called")},
 	}
 
 	err := builtinOperationExecutor{service: service}.commitPush(context.Background(), state, operation, OperationKindCommitPush)
-	if err != nil {
-		t.Fatalf("commit push: %v", err)
-	}
-	if state.data["commit_summary"] != "" {
-		t.Fatalf("skipped commit-push must write empty commit summary: %#v", state.data)
-	}
-	dataResult, ok := state.data["result"].(model.LaunchResult)
-	if !ok || dataResult.Status != "skipped" {
-		t.Fatalf("skipped commit-push must keep data.result: %#v", state.data)
-	}
-	result := findOperationResult(state.tracker.snapshot(), OperationKindCommitPush)
-	if result == nil || result.Status != OperationStatusSkipped || result.Output == "" {
-		t.Fatalf("skipped commit-push must keep contract output diagnostics: %#v", result)
+	if err == nil || err.Error() != "commit called" {
+		t.Fatalf("commit-push must execute solely because it is present in the action: %v", err)
 	}
 }
 
@@ -2676,17 +2662,15 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 				{
 					Name: OperationKindCommitPush,
 					In: map[string]methodology.ActionMapping{
-						"requires_synthesis": mappingRef("action.requires_synthesis"),
-						"invocation":         mappingRef("data.invocation"),
-						"profile":            mappingRef("data.profile"),
-						"allocation":         mappingRef("data.allocation"),
-						"workplace":          mappingRef("data.workplace"),
-						"result":             mappingRef("data.result"),
-						"structured_output":  mappingRef("data.structured_output"),
+						"directory":      mappingRef("data.workplace.name"),
+						"commit_message": mappingRef("data.structured_output.commit_message"),
+						"fallback_name":  mappingRef("data.invocation.workplace.name"),
+						"git":            mappingRef("data.allocation.git"),
+						"private_store":  mappingRef("data.allocation.private_store"),
+						"config_home":    mappingRef("data.allocation.config_home"),
 					},
 					Out: map[string]methodology.ActionMapping{
 						"commit_summary": mappingRef("data.commit_summary"),
-						"result":         mappingRef("data.result"),
 					},
 				},
 				{Name: OperationKindPublishReviewResponses},
@@ -2794,7 +2778,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 	if commitOperation == nil {
 		t.Fatalf("commit-push operation must be present: %#v", action.Operations)
 	}
-	if commitOperation.In["structured_output"].Ref != "data.structured_output" || commitOperation.In["workplace"].Ref != "data.workplace" || commitOperation.Out["commit_summary"].Ref != "data.commit_summary" || commitOperation.Out["result"].Ref != "data.result" {
+	if commitOperation.In["commit_message"].Ref != "data.structured_output.commit_message" || commitOperation.In["directory"].Ref != "data.workplace.name" || commitOperation.In["git"].Ref != "data.allocation.git" || commitOperation.Out["commit_summary"].Ref != "data.commit_summary" || len(commitOperation.Out) != 1 {
 		t.Fatalf("commit-push must keep action data mapping: %#v", commitOperation)
 	}
 }
@@ -3063,8 +3047,8 @@ func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 	if !launcher.commitCalled {
 		t.Fatal("commit-push operation must call launcher commit stage")
 	}
-	if launcher.commitAllocation.Git != gitConfig {
-		t.Fatalf("commit-push operation must pass allocated git config: %#v", launcher.commitAllocation.Git)
+	if launcher.commitInput.Git != gitConfig {
+		t.Fatalf("commit-push operation must pass allocated git config: %#v", launcher.commitInput.Git)
 	}
 	if launcher.invocation.Launch.CommitPush {
 		t.Fatalf("launch synthesis must not receive hidden commit-push flag: %#v", launcher.invocation.Launch)
@@ -3073,8 +3057,8 @@ func TestServiceExecuteRunsCommitPushOnlyAsActionOperation(t *testing.T) {
 	if commitOperation == nil || commitOperation.Status != OperationStatusCompleted || commitOperation.Summary != "git=committed+pushed branch=task-97" {
 		t.Fatalf("unexpected commit operation: %#v", commitOperation)
 	}
-	if !strings.Contains(result.Summary, "git=committed+pushed branch=task-97") {
-		t.Fatalf("result summary must include commit operation summary: %q", result.Summary)
+	if result.Summary != "launch complete" {
+		t.Fatalf("commit-push must not rewrite launch result summary: %q", result.Summary)
 	}
 }
 
@@ -3084,7 +3068,7 @@ func TestServiceExecuteRecordsCommitPushCancellationInHistory(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	launcher := &stubLauncher{
 		result: model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"}},
-		commit: func(context.Context, model.Invocation, model.Allocation, model.Workplace, *model.StructuredOutput) (string, error) {
+		commit: func(context.Context, model.CommitPushInput) (string, error) {
 			cancel()
 			return "", context.Canceled
 		},
@@ -3732,21 +3716,18 @@ func TestServiceLaunchReturnsResumeUnsupportedForUnsupportedRunner(t *testing.T)
 }
 
 type stubLauncher struct {
-	invocation       model.Invocation
-	profile          model.Profile
-	allocation       model.Allocation
-	workplace        model.Workplace
-	result           model.LaunchResult
-	err              error
-	beforeReturn     func()
-	commitCalled     bool
-	commitInvocation model.Invocation
-	commitAllocation model.Allocation
-	commitWorkplace  model.Workplace
-	commitOutput     *model.StructuredOutput
-	commitSummary    string
-	commitErr        error
-	commit           func(context.Context, model.Invocation, model.Allocation, model.Workplace, *model.StructuredOutput) (string, error)
+	invocation    model.Invocation
+	profile       model.Profile
+	allocation    model.Allocation
+	workplace     model.Workplace
+	result        model.LaunchResult
+	err           error
+	beforeReturn  func()
+	commitCalled  bool
+	commitInput   model.CommitPushInput
+	commitSummary string
+	commitErr     error
+	commit        func(context.Context, model.CommitPushInput) (string, error)
 }
 
 type stubIntegrationExecutor struct {
@@ -3776,14 +3757,11 @@ func (s *stubLauncher) Launch(_ context.Context, in model.Invocation, profile mo
 	return s.result, s.err
 }
 
-func (s *stubLauncher) CommitAndPush(ctx context.Context, in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
+func (s *stubLauncher) CommitAndPush(ctx context.Context, input model.CommitPushInput) (string, error) {
 	s.commitCalled = true
-	s.commitInvocation = in
-	s.commitAllocation = allocation
-	s.commitWorkplace = workplace
-	s.commitOutput = output
+	s.commitInput = input
 	if s.commit != nil {
-		return s.commit(ctx, in, allocation, workplace, output)
+		return s.commit(ctx, input)
 	}
 	if s.commitErr != nil {
 		return "", s.commitErr
@@ -4136,17 +4114,15 @@ func commitPushActionOperation() methodology.ActionOperation {
 		Origin:   OperationOriginBuiltin,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"requires_synthesis": mappingRef("action.requires_synthesis"),
-			"invocation":         mappingRef("data.invocation"),
-			"profile":            mappingRef("data.profile"),
-			"allocation":         mappingRef("data.allocation"),
-			"workplace":          mappingRef("data.workplace"),
-			"result":             mappingRef("data.result"),
-			"structured_output":  mappingRef("data.structured_output"),
+			"directory":      mappingRef("data.workplace.name"),
+			"commit_message": mappingRef("data.structured_output.commit_message"),
+			"fallback_name":  mappingRef("data.invocation.workplace.name"),
+			"git":            mappingRef("data.allocation.git"),
+			"private_store":  mappingRef("data.allocation.private_store"),
+			"config_home":    mappingRef("data.allocation.config_home"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"commit_summary": mappingRef("data.commit_summary"),
-			"result":         mappingRef("data.result"),
 		},
 	}
 }
@@ -4356,17 +4332,15 @@ func commitPushOperationSpec() model.OperationSpec {
 		Kind:   OperationKindCommitPush,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
-			"requires_synthesis": {Ref: "action.requires_synthesis"},
-			"invocation":         {Ref: "data.invocation"},
-			"profile":            {Ref: "data.profile"},
-			"allocation":         {Ref: "data.allocation"},
-			"workplace":          {Ref: "data.workplace"},
-			"result":             {Ref: "data.result"},
-			"structured_output":  {Ref: "data.structured_output"},
+			"directory":      {Ref: "data.workplace.name"},
+			"commit_message": {Ref: "data.structured_output.commit_message"},
+			"fallback_name":  {Ref: "data.invocation.workplace.name"},
+			"git":            {Ref: "data.allocation.git"},
+			"private_store":  {Ref: "data.allocation.private_store"},
+			"config_home":    {Ref: "data.allocation.config_home"},
 		},
 		Out: model.OperationMap{
 			"commit_summary": {Ref: "data.commit_summary"},
-			"result":         {Ref: "data.result"},
 		},
 	}
 }
@@ -4530,7 +4504,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"directory": {"ref": "data.workplace.name"}, "commit_message": {"ref": "data.structured_output.commit_message"}, "fallback_name": {"ref": "data.invocation.workplace.name"}, "git": {"ref": "data.allocation.git"}, "private_store": {"ref": "data.allocation.private_store"}, "config_home": {"ref": "data.allocation.config_home"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}}},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
@@ -4548,7 +4522,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"directory": {"ref": "data.workplace.name"}, "commit_message": {"ref": "data.structured_output.commit_message"}, "fallback_name": {"ref": "data.invocation.workplace.name"}, "git": {"ref": "data.allocation.git"}, "private_store": {"ref": "data.allocation.private_store"}, "config_home": {"ref": "data.allocation.config_home"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}}},
         {"name": "publish-merge-request", "kind": "publish-merge-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"merge_request": {"ref": "data.merge_request"}, "publish_summary": {"ref": "data.publish_summary"}, "result": {"ref": "data.result"}}},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
@@ -4606,7 +4580,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"directory": {"ref": "data.workplace.name"}, "commit_message": {"ref": "data.structured_output.commit_message"}, "fallback_name": {"ref": "data.invocation.workplace.name"}, "git": {"ref": "data.allocation.git"}, "private_store": {"ref": "data.allocation.private_store"}, "config_home": {"ref": "data.allocation.config_home"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}}},
         {"name": "publish-review-responses", "kind": "publish-review-responses", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}, "review_remarks": {"ref": "data.review_remarks"}}, "out": {"review_responses_summary": {"ref": "data.review_responses_summary"}, "result": {"ref": "data.result"}}},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]

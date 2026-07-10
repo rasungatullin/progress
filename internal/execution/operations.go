@@ -34,7 +34,7 @@ type builtinOperationExecutor struct {
 }
 
 type commitPusher interface {
-	CommitAndPush(context.Context, model.Invocation, model.Allocation, model.Workplace, *model.StructuredOutput) (string, error)
+	CommitAndPush(context.Context, model.CommitPushInput) (string, error)
 }
 
 func (s *Service) runActionOperations(ctx context.Context, state *operationExecution) error {
@@ -1561,108 +1561,93 @@ func parseResultOutputSummary(output *StructuredOutput, operation OperationSpec)
 
 func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := commitPushInputFromOperation(state, operation)
-	if !input.requiresSynthesis {
-		writeCommitPushData(state, operation, "", input.result)
-		state.tracker.skipIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary("", input.result, operation), "Создание коммита не требуется для действия без синтеза.")
-		return nil
-	}
-
 	pusher, ok := e.service.launcher.(commitPusher)
 	if !ok {
 		err := fmt.Errorf("commit-push operation is unsupported by launcher")
-		input.result.Status = "failed"
-		if strings.TrimSpace(input.result.Summary) == "" {
-			input.result.Summary = err.Error()
-		}
-		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.fail(name, "Операция commit-push не поддержана модулем запуска.", err, "commit_push_unsupported", false, true)
 		return err
 	}
 
-	summary, err := pusher.CommitAndPush(ctx, input.invocation, input.allocation, input.workplace, input.structuredOutput)
+	summary, err := pusher.CommitAndPush(ctx, input.request)
 	if err != nil {
-		input.result.Status = "failed"
-		if strings.TrimSpace(input.result.Summary) == "" {
-			input.result.Summary = strings.TrimSpace(err.Error())
-		}
-		writeCommitPushData(state, operation, "", input.result)
 		state.tracker.fail(name, "Создание коммита или отправка ветки не выполнены.", err, "commit_push_failed", true, true)
 		return err
 	}
 
-	input.result.Summary = joinExecutionSummaries(input.result.Summary, summary)
-	writeCommitPushData(state, operation, summary, input.result)
-	state.tracker.completeIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary(summary, input.result, operation), summary)
+	writeCommitPushData(state, operation, summary)
+	state.tracker.completeIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary(summary, operation), summary)
 	return nil
 }
 
-func writeCommitPushData(state *operationExecution, operation OperationSpec, summary string, result LaunchResult) {
+func writeCommitPushData(state *operationExecution, operation OperationSpec, summary string) {
 	out := operation.Out
 	if len(out) == 0 {
-		out = model.OperationMap{
-			"commit_summary": {Ref: "data.commit_summary"},
-			"result":         {Ref: "data.result"},
-		}
+		out = model.OperationMap{"commit_summary": {Ref: "data.commit_summary"}}
 	}
 	writeOperationData(state, out, "commit_summary", summary)
-	writeOperationData(state, out, "result", result)
 }
 
 type commitPushInput struct {
-	requiresSynthesis bool
-	invocation        invocation
-	profile           profile
-	allocation        allocation
-	workplace         workplace
-	result            LaunchResult
-	structuredOutput  *StructuredOutput
+	request model.CommitPushInput
 }
 
 func commitPushInputFromOperation(state *operationExecution, operation OperationSpec) commitPushInput {
 	input := commitPushInput{}
-	if state != nil {
-		input.requiresSynthesis = state.action.RequiresSynthesis
-	}
-	if len(operation.In) == 0 {
-		return input
-	}
-	if mapping, ok := operation.In["requires_synthesis"]; ok {
-		if value, ok := boolValueFromParseResultMapping(state, mapping); ok {
-			input.requiresSynthesis = value
-		}
-	}
-	if mapping, ok := operation.In["invocation"]; ok {
-		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.invocation = value
-		}
-	}
-	if mapping, ok := operation.In["profile"]; ok {
-		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.profile = value
-		}
-	}
-	if mapping, ok := operation.In["allocation"]; ok {
-		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.allocation = value
-		}
-	}
-	if mapping, ok := operation.In["workplace"]; ok {
-		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.workplace = value
-		}
-	}
-	if mapping, ok := operation.In["result"]; ok {
-		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
-			input.result = value
-			input.structuredOutput = value.StructuredOutput
-		}
-	}
-	if mapping, ok := operation.In["structured_output"]; ok {
-		if value, ok := structuredOutputValueFromCommitPushMapping(state, mapping); ok {
-			input.structuredOutput = value
-		}
-	}
+	input.request.Directory, _ = stringValueFromCommitPushMapping(state, operation.In["directory"])
+	input.request.CommitMessage, _ = stringValueFromCommitPushMapping(state, operation.In["commit_message"])
+	input.request.FallbackName, _ = stringValueFromCommitPushMapping(state, operation.In["fallback_name"])
+	input.request.Git, _ = gitConfigValueFromCommitPushMapping(state, operation.In["git"])
+	input.request.PrivateStore, _ = privateStoreValueFromCommitPushMapping(state, operation.In["private_store"])
+	input.request.ConfigHome, _ = stringValueFromCommitPushMapping(state, operation.In["config_home"])
 	return input
+}
+
+func stringValueFromCommitPushMapping(state *operationExecution, mapping model.OperationMapping) (string, bool) {
+	if len(mapping.Value) != 0 {
+		var value string
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return strings.TrimSpace(value), true
+		}
+		return "", false
+	}
+	if state == nil {
+		return "", false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.workplace.name":
+		value, ok := state.data["workplace"].(workplace)
+		return strings.TrimSpace(value.Name), ok
+	case "data.invocation.workplace.name":
+		value, ok := state.data["invocation"].(invocation)
+		return strings.TrimSpace(value.Workplace.Name), ok
+	case "data.structured_output.commit_message":
+		value, ok := state.data["structured_output"].(*StructuredOutput)
+		if !ok || value == nil {
+			return "", false
+		}
+		return strings.TrimSpace(value.CommitMessage), true
+	case "data.allocation.config_home":
+		value, ok := state.data["allocation"].(allocation)
+		return strings.TrimSpace(value.ConfigHome), ok
+	default:
+		return "", false
+	}
+}
+
+func gitConfigValueFromCommitPushMapping(state *operationExecution, mapping model.OperationMapping) (*model.GitConfig, bool) {
+	if state == nil || strings.TrimSpace(mapping.Ref) != "data.allocation.git" {
+		return nil, false
+	}
+	value, ok := state.data["allocation"].(allocation)
+	return value.Git, ok
+}
+
+func privateStoreValueFromCommitPushMapping(state *operationExecution, mapping model.OperationMapping) (model.ResourcePrivateStoreConfig, bool) {
+	if state == nil || strings.TrimSpace(mapping.Ref) != "data.allocation.private_store" {
+		return model.ResourcePrivateStoreConfig{}, false
+	}
+	value, ok := state.data["allocation"].(allocation)
+	return value.PrivateStore, ok
 }
 
 func structuredOutputValueFromCommitPushMapping(state *operationExecution, mapping model.OperationMapping) (*StructuredOutput, bool) {
@@ -1673,38 +1658,31 @@ func structuredOutputValueFromCommitPushMapping(state *operationExecution, mappi
 		}
 		return nil, false
 	}
-	switch strings.TrimSpace(mapping.Ref) {
-	case "data.structured_output":
-		if state == nil {
-			return nil, false
-		}
-		value, ok := state.data["structured_output"].(*StructuredOutput)
-		return value, ok
-	default:
+	if state == nil || strings.TrimSpace(mapping.Ref) != "data.structured_output" {
 		return nil, false
 	}
+	value, ok := state.data["structured_output"].(*StructuredOutput)
+	return value, ok
 }
 
 func commitPushInputSummary(input commitPushInput, operation OperationSpec) string {
+	git := ""
+	if input.request.Git != nil {
+		git = "configured"
+	}
 	return operationIOSummary(operation.In, map[string]string{
-		"allocation":         allocationSummary(input.allocation),
-		"invocation":         invocationSummary(input.invocation),
-		"profile":            profileSummary(input.profile),
-		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
-		"result":             resultSummary(input.result),
-		"structured_output":  structuredOutputSummary(input.structuredOutput),
-		"workplace":          workplaceSummary(input.workplace),
+		"directory":      input.request.Directory,
+		"commit_message": presenceSummary(input.request.CommitMessage),
+		"fallback_name":  input.request.FallbackName,
+		"git":            presenceSummary(git),
+		"private_store":  presenceSummary(input.request.PrivateStore.Type),
+		"config_home":    presenceSummary(input.request.ConfigHome),
 	})
 }
 
-func commitPushOutputSummary(commitSummary string, result LaunchResult, operation OperationSpec) string {
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		resultJSON = []byte(fmt.Sprintf(`{"status":%q}`, result.Status))
-	}
+func commitPushOutputSummary(commitSummary string, operation OperationSpec) string {
 	return operationIOSummary(operation.Out, map[string]string{
 		"commit_summary": commitSummary,
-		"result":         string(resultJSON),
 	})
 }
 

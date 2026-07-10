@@ -474,12 +474,10 @@ func executionFailure(code string, err error, retryable bool, manualIntervention
 
 func executionResultFromLaunch(assignment *model.ExecutionAssignment, action model.Action, operations []model.OperationResult, result model.LaunchResult, err error) model.ExecutionResult {
 	status := strings.TrimSpace(result.Status)
-	if status == "" {
-		if err != nil {
-			status = "failed"
-		} else {
-			status = "completed"
-		}
+	if err != nil {
+		status = "failed"
+	} else if status == "" {
+		status = "completed"
 	}
 	executionResult := model.ExecutionResult{
 		Status:          status,

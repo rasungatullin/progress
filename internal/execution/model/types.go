@@ -274,6 +274,15 @@ type GitPushConfig struct {
 	IdentitiesOnly          bool   `json:"identities-only,omitempty"`
 }
 
+type CommitPushInput struct {
+	Directory     string                     `json:"directory,omitempty"`
+	CommitMessage string                     `json:"commit_message,omitempty"`
+	FallbackName  string                     `json:"fallback_name,omitempty"`
+	Git           *GitConfig                 `json:"-"`
+	PrivateStore  ResourcePrivateStoreConfig `json:"-"`
+	ConfigHome    string                     `json:"-"`
+}
+
 type ResourceBindingConfig struct {
 	Runner      string `json:"runner,omitempty"`
 	Model       string `json:"model,omitempty"`

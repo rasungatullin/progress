@@ -305,34 +305,28 @@
     {
       "name": "commit-push",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
+        "directory": {
+          "ref": "data.workplace.name"
         },
-        "invocation": {
-          "ref": "data.invocation"
+        "commit_message": {
+          "ref": "data.structured_output.commit_message"
         },
-        "profile": {
-          "ref": "data.profile"
+        "fallback_name": {
+          "ref": "data.invocation.workplace.name"
         },
-        "allocation": {
-          "ref": "data.allocation"
+        "git": {
+          "ref": "data.allocation.git"
         },
-        "workplace": {
-          "ref": "data.workplace"
+        "private_store": {
+          "ref": "data.allocation.private_store"
         },
-        "result": {
-          "ref": "data.result"
-        },
-        "structured_output": {
-          "ref": "data.structured_output"
+        "config_home": {
+          "ref": "data.allocation.config_home"
         }
       },
       "out": {
         "commit_summary": {
           "ref": "data.commit_summary"
-        },
-        "result": {
-          "ref": "data.result"
         }
       }
     },

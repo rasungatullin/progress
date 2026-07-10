@@ -142,7 +142,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 
 	gitSummary := "git=disabled"
 	if in.Launch.CommitPush {
-		result, err := s.commitAndPush(ctx, in, allocation, workplace, structuredOutput)
+		result, err := s.commitAndPush(ctx, commitPushInputFromLaunch(in, allocation, workplace, structuredOutput))
 		if err != nil {
 			launchResult := model.LaunchResult{
 				Status:              "failed",
@@ -776,17 +776,17 @@ func fallbackHistoryValue(value string) string {
 	return value
 }
 
-func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) (gitResult, error) {
-	if !s.isGitRepository(ctx, in.Launch.Directory) {
+func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput) (gitResult, error) {
+	if !s.isGitRepository(ctx, input.Directory) {
 		return gitResult{}, fmt.Errorf("launch directory is not a git repository")
 	}
 
-	gitRoot, err := s.gitRepositoryRoot(ctx, in.Launch.Directory)
+	gitRoot, err := s.gitRepositoryRoot(ctx, input.Directory)
 	if err != nil {
 		return gitResult{}, err
 	}
 
-	branch, err := s.currentBranch(ctx, in.Launch.Directory)
+	branch, err := s.currentBranch(ctx, input.Directory)
 	if err != nil {
 		return gitResult{}, err
 	}
@@ -800,7 +800,7 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, alloca
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
-	pushEnv, cleanupPushKey, err := gitPushEnv(ctx, allocation.Git, allocation.PrivateStore, allocation.ConfigHome)
+	pushEnv, cleanupPushKey, err := gitPushEnv(ctx, input.Git, input.PrivateStore, input.ConfigHome)
 	if err != nil {
 		return gitResult{}, err
 	}
@@ -820,10 +820,10 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, alloca
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
-	commitMessage := resolveCommitMessage(in, workplace, output)
-	commitArgs, commitEnv := gitCommitInvocation(allocation.Git, commitMessage)
+	commitMessage := resolveCommitMessage(input)
+	commitArgs, commitEnv := gitCommitInvocation(input.Git, commitMessage)
 
-	if _, err := s.runGitOutputWithEnv(ctx, in.Launch.Directory, commitEnv, commitArgs...); err != nil {
+	if _, err := s.runGitOutputWithEnv(ctx, input.Directory, commitEnv, commitArgs...); err != nil {
 		if isNoChangesAfterAddError(err) {
 			return gitResult{status: "no-changes", branch: branch}, nil
 		}
@@ -831,7 +831,7 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, alloca
 		return gitResult{}, fmt.Errorf("git commit failed: %w", err)
 	}
 
-	upstream, err := s.upstreamBranch(ctx, in.Launch.Directory, branch)
+	upstream, err := s.upstreamBranch(ctx, input.Directory, branch)
 	if err != nil {
 		return gitResult{}, err
 	}
@@ -841,15 +841,38 @@ func (s *Service) commitAndPush(ctx context.Context, in model.Invocation, alloca
 		pushArgs = append(pushArgs, "-u", "origin", branch)
 	}
 
-	if _, err := s.runGitOutputWithEnv(ctx, in.Launch.Directory, pushEnv, pushArgs...); err != nil {
+	if _, err := s.runGitOutputWithEnv(ctx, input.Directory, pushEnv, pushArgs...); err != nil {
 		return gitResult{}, fmt.Errorf("git push failed: %w", err)
 	}
 
 	return gitResult{status: "committed+pushed", branch: branch}, nil
 }
 
-func (s *Service) CommitAndPush(ctx context.Context, in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) (string, error) {
-	result, err := s.commitAndPush(ctx, in, allocation, workplace, output)
+func commitPushInputFromLaunch(in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) model.CommitPushInput {
+	input := model.CommitPushInput{
+		Directory:    in.Launch.Directory,
+		FallbackName: firstNonEmpty(in.Workplace.Name, worktreeDirectoryName(workplace.Name)),
+		Git:          allocation.Git,
+		PrivateStore: allocation.PrivateStore,
+		ConfigHome:   allocation.ConfigHome,
+	}
+	if output != nil {
+		input.CommitMessage = output.CommitMessage
+	}
+	return input
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (s *Service) CommitAndPush(ctx context.Context, input model.CommitPushInput) (string, error) {
+	result, err := s.commitAndPush(ctx, input)
 	if err != nil {
 		return "", err
 	}
@@ -1092,18 +1115,16 @@ func isNoChangesAfterAddError(err error) bool {
 	return strings.Contains(message, "nothing to commit") || strings.Contains(message, "no changes added to commit")
 }
 
-func resolveCommitMessage(in model.Invocation, workplace model.Workplace, output *model.StructuredOutput) string {
-	if output != nil {
-		if message := normalizeCommitMessage(output.CommitMessage); message != "" {
-			return message
-		}
+func resolveCommitMessage(input model.CommitPushInput) string {
+	if message := normalizeCommitMessage(input.CommitMessage); message != "" {
+		return message
 	}
 
-	if name := normalizeCommitMessage(in.Workplace.Name); name != "" {
+	if name := normalizeCommitMessage(input.FallbackName); name != "" {
 		return name
 	}
 
-	if name := worktreeDirectoryName(workplace.Name); name != "" {
+	if name := worktreeDirectoryName(input.Directory); name != "" {
 		return name
 	}
 
