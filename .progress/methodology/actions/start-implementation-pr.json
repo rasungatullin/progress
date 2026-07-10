@@ -90,18 +90,6 @@
       "publish_summary": {
         "type": "string",
         "description": "Сводка публикации запроса на слияние."
-      },
-      "prompt": {
-        "type": "string",
-        "description": "Готовая исполнительная директива."
-      },
-      "raw_output": {
-        "type": "string",
-        "description": "Фактический вывод исполнительного модуля."
-      },
-      "session_id": {
-        "type": "string",
-        "description": "Идентификатор сеанса исполнительного модуля."
       }
     }
   },
@@ -206,7 +194,7 @@
       }
     },
     {
-      "name": "build-prompt",
+      "name": "structured-synthesis",
       "in": {
         "prompt": {
           "ref": "in.launch.prompt"
@@ -214,30 +202,11 @@
         "prompt_additions": {
           "ref": "data.profile.prompt_additions"
         },
-        "structured_output": {
-          "ref": "data.profile.structured_output"
-        },
-        "structured_output_required": {
-          "ref": "data.profile.structured_output_required"
+        "structured_input": {
+          "ref": "in.structured_input"
         },
         "structured_output_fields": {
           "ref": "data.profile.structured_output_fields"
-        },
-        "structured_input": {
-          "ref": "in.structured_input"
-        }
-      },
-      "out": {
-        "prompt": {
-          "ref": "data.prompt"
-        }
-      }
-    },
-    {
-      "name": "launch-synthesis",
-      "in": {
-        "prompt": {
-          "ref": "data.prompt"
         },
         "directory": {
           "ref": "data.workplace.name"
@@ -253,30 +222,11 @@
         }
       },
       "out": {
-        "raw_output": {
-          "ref": "data.raw_output"
-        },
-        "session_id": {
-          "ref": "data.session_id"
-        }
-      }
-    },
-    {
-      "name": "parse-result",
-      "in": {
-        "raw_output": {
-          "ref": "data.raw_output"
-        },
-        "session_id": {
-          "ref": "data.session_id"
-        }
-      },
-      "out": {
-        "structured_output": {
-          "ref": "data.structured_output"
-        },
         "result": {
           "ref": "data.result"
+        },
+        "structured_output": {
+          "ref": "data.structured_output"
         }
       }
     },

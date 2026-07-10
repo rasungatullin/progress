@@ -34,6 +34,7 @@ const (
 	OperationKindPrepareWorkplace       = "prepare-workplace"
 	OperationKindBuildDirective         = "build-directive"
 	OperationKindBuildPrompt            = "build-prompt"
+	OperationKindStructuredSynthesis    = "structured-synthesis"
 	OperationKindLaunchSynthesis        = "launch-synthesis"
 	OperationKindParseResult            = "parse-result"
 	OperationKindCommitPush             = "commit-push"

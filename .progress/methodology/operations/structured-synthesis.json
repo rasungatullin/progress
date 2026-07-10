@@ -1,0 +1,24 @@
+{
+  "name": "structured-synthesis",
+  "type": "action",
+  "kind": "structured-synthesis",
+  "title": "Структурированный синтез",
+  "required": true,
+  "contract": {
+    "in": {
+      "prompt": {"type": "string", "description": "Исходная исполнительная директива."},
+      "prompt_additions": {"type": "string_array", "description": "Дополнения исполнительной директивы."},
+      "structured_input": {"type": "object", "required": true, "description": "Структурированный ввод синтеза."},
+      "structured_output_fields": {"type": "string_array", "required": true, "description": "Поля структурированного вывода."},
+      "review_remarks": {"type": "object_array", "description": "Канонические замечания ревизии."},
+      "directory": {"type": "string", "required": true, "description": "Рабочий каталог исполнительного модуля."},
+      "runner": {"type": "string", "required": true, "description": "Исполнительный модуль."},
+      "model": {"type": "string", "required": true, "description": "Модель выполнения."},
+      "resume_session_id": {"type": "string", "description": "Идентификатор возобновляемого сеанса."}
+    },
+    "out": {
+      "result": {"type": "object", "required": true, "description": "Нормализованный результат выполнения."},
+      "structured_output": {"type": "object", "required": true, "description": "Структурированный вывод синтеза."}
+    }
+  }
+}

@@ -3040,6 +3040,15 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 	if operation == nil || operation.Status != OperationStatusCompleted {
 		t.Fatalf("pull request operation must be completed: %#v", result.Operations)
 	}
+	synthesis := findOperationResult(result.Operations, OperationKindStructuredSynthesis)
+	if synthesis == nil || synthesis.Status != OperationStatusCompleted || len(synthesis.Operations) != 3 {
+		t.Fatalf("structured synthesis must keep three nested operations: %#v", synthesis)
+	}
+	for index, name := range []string{OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult} {
+		if synthesis.Operations[index].Name != name || synthesis.Operations[index].Status != OperationStatusCompleted {
+			t.Fatalf("unexpected structured synthesis operation at %d: %#v", index, synthesis.Operations)
+		}
+	}
 	if !strings.Contains(result.Summary, "pull-request=17") {
 		t.Fatalf("result summary must include pull request diagnostics: %q", result.Summary)
 	}
@@ -3736,13 +3745,89 @@ func testExecutionMethodologyCatalog() methodology.Catalog {
 		Actions: []methodology.Action{
 			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
 			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
-			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
+			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindStructuredSynthesis, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
+			structuredSynthesisMethodologyAction(),
 			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
 			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
 			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
 			{Name: ActionClassIntegrationChange, Class: ActionClassIntegrationChange, Profile: "default", RequiresWorkplace: boolRef(false), Operations: testExecutionOperations(OperationKindFinalize)},
 		},
+		Operations: testExecutionOperationRegistry(),
 	}
+}
+
+func structuredSynthesisMethodologyAction() methodology.Action {
+	required := boolRef(true)
+	return methodology.Action{
+		Name:              OperationKindStructuredSynthesis,
+		Class:             ActionClassEngineeringSynthesis,
+		RequiresWorkplace: boolRef(false),
+		Contract: methodology.ActionContract{
+			In: map[string]methodology.ActionContractField{
+				"prompt":                   {Type: "string"},
+				"prompt_additions":         {Type: "string_array"},
+				"structured_input":         {Type: "object", Required: required},
+				"structured_output_fields": {Type: "string_array", Required: required},
+				"review_remarks":           {Type: "object_array"},
+				"directory":                {Type: "string", Required: required},
+				"runner":                   {Type: "string", Required: required},
+				"model":                    {Type: "string", Required: required},
+				"resume_session_id":        {Type: "string"},
+			},
+			Data: map[string]methodology.ActionContractField{
+				"prompt":            {Type: "string"},
+				"raw_output":        {Type: "string"},
+				"session_id":        {Type: "string"},
+				"result":            {Type: "object"},
+				"structured_output": {Type: "object"},
+			},
+			Out: map[string]methodology.ActionContractField{
+				"result":            {Type: "object", Required: required},
+				"structured_output": {Type: "object", Required: required},
+			},
+		},
+		Operations: []methodology.ActionOperation{
+			structuredSynthesisBuildPromptOperation(),
+			structuredSynthesisLaunchOperation(),
+			structuredSynthesisParseOperation(),
+		},
+	}
+}
+
+func testExecutionOperationRegistry() []methodology.Operation {
+	names := []string{
+		OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks,
+		OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace,
+		OperationKindBuildDirective, OperationKindBuildPrompt, OperationKindLaunchSynthesis,
+		OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest,
+		OperationKindPublishReviewRemarks, OperationKindPublishReviewResponses, OperationKindFinalize,
+	}
+	result := make([]methodology.Operation, 0, len(names)+1)
+	for _, name := range names {
+		result = append(result, methodology.Operation{Name: name, Type: OperationTypeBuiltin, Kind: name, Required: boolRef(true)})
+	}
+	required := boolRef(true)
+	result = append(result, methodology.Operation{
+		Name: OperationKindStructuredSynthesis, Type: OperationTypeAction, Kind: OperationKindStructuredSynthesis, Required: required,
+		Contract: methodology.OperationContract{
+			In: map[string]methodology.OperationContractField{
+				"prompt":                   {Type: "string"},
+				"prompt_additions":         {Type: "string_array"},
+				"structured_input":         {Type: "object", Required: required},
+				"structured_output_fields": {Type: "string_array", Required: required},
+				"review_remarks":           {Type: "object_array"},
+				"directory":                {Type: "string", Required: required},
+				"runner":                   {Type: "string", Required: required},
+				"model":                    {Type: "string", Required: required},
+				"resume_session_id":        {Type: "string"},
+			},
+			Out: map[string]methodology.OperationContractField{
+				"result":            {Type: "object", Required: required},
+				"structured_output": {Type: "object", Required: required},
+			},
+		},
+	})
+	return result
 }
 
 func testExecutionOperations(operations ...any) []methodology.ActionOperation {
@@ -3780,6 +3865,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 			}
 			if operation == OperationKindBuildPrompt {
 				result = append(result, buildPromptActionOperation())
+				continue
+			}
+			if operation == OperationKindStructuredSynthesis {
+				result = append(result, structuredSynthesisActionOperation())
 				continue
 			}
 			if operation == OperationKindLaunchSynthesis {
@@ -3949,6 +4038,77 @@ func buildPromptActionOperation() methodology.ActionOperation {
 			"review_remarks":             mappingRef("data.review_remarks"),
 		},
 		Out: map[string]methodology.ActionMapping{"prompt": mappingRef("data.prompt")},
+	}
+}
+
+func structuredSynthesisActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindStructuredSynthesis,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"prompt":                   mappingRef("in.launch.prompt"),
+			"prompt_additions":         mappingRef("data.profile.prompt_additions"),
+			"structured_input":         mappingRef("in.structured_input"),
+			"structured_output_fields": mappingRef("data.profile.structured_output_fields"),
+			"directory":                mappingRef("data.workplace.name"),
+			"runner":                   mappingRef("data.allocation.runner"),
+			"model":                    mappingRef("data.allocation.model"),
+			"resume_session_id":        mappingRef("in.launch.resume.runner_session_id"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"result":            mappingRef("data.result"),
+			"structured_output": mappingRef("data.structured_output"),
+		},
+	}
+}
+
+func structuredSynthesisBuildPromptOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindBuildPrompt,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"prompt":                     mappingRef("in.prompt"),
+			"prompt_additions":           mappingRef("in.prompt_additions"),
+			"structured_output":          mappingValue(true),
+			"structured_output_required": mappingValue(true),
+			"structured_output_fields":   mappingRef("in.structured_output_fields"),
+			"structured_input":           mappingRef("in.structured_input"),
+			"review_remarks":             mappingRef("in.review_remarks"),
+		},
+		Out: map[string]methodology.ActionMapping{"prompt": mappingRef("data.prompt")},
+	}
+}
+
+func structuredSynthesisLaunchOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindLaunchSynthesis,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"prompt":            mappingRef("data.prompt"),
+			"directory":         mappingRef("in.directory"),
+			"runner":            mappingRef("in.runner"),
+			"model":             mappingRef("in.model"),
+			"resume_session_id": mappingRef("in.resume_session_id"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"raw_output": mappingRef("data.raw_output"),
+			"session_id": mappingRef("data.session_id"),
+		},
+	}
+}
+
+func structuredSynthesisParseOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindParseResult,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"raw_output": mappingRef("data.raw_output"),
+			"session_id": mappingRef("data.session_id"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"result":            mappingRef("data.result"),
+			"structured_output": mappingRef("data.structured_output"),
+		},
 	}
 }
 
@@ -4336,6 +4496,15 @@ func boolRef(value bool) *bool {
 
 func mappingRef(value string) methodology.ActionMapping {
 	return methodology.ActionMapping{Ref: &value}
+}
+
+func mappingValue(value any) methodology.ActionMapping {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	raw := json.RawMessage(payload)
+	return methodology.ActionMapping{Value: &raw}
 }
 
 const testExecutionMethodologyCatalogJSON = `{
