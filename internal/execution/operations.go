@@ -45,12 +45,13 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 		}
 	}
 
-	if strings.TrimSpace(resultFromExecutionData(state).Status) == "" {
+	data := executionDataFromState(state)
+	if strings.TrimSpace(data.result.Status) == "" {
 		result := LaunchResult{
 			Status:  "completed",
 			Summary: fmt.Sprintf("action=%s class=%s operations=completed", state.action.Name, state.action.Class),
 		}
-		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
+		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, data.invocation, data.profile, data.allocation, data.workplace, result, nil)
 	}
 
 	return nil
@@ -420,6 +421,26 @@ func writeOperationData(state *operationExecution, mappings model.OperationMap, 
 	state.data[name] = value
 }
 
+type executionDataSnapshot struct {
+	invocation       invocation
+	profile          profile
+	allocation       allocation
+	workplace        workplace
+	result           LaunchResult
+	structuredOutput *StructuredOutput
+}
+
+func executionDataFromState(state *operationExecution) executionDataSnapshot {
+	return executionDataSnapshot{
+		invocation:       invocationFromExecutionData(state),
+		profile:          profileFromExecutionData(state),
+		allocation:       allocationFromExecutionData(state),
+		workplace:        workplaceFromExecutionData(state),
+		result:           resultFromExecutionData(state),
+		structuredOutput: structuredOutputFromExecutionData(state),
+	}
+}
+
 func profileFromExecutionData(state *operationExecution) profile {
 	if state == nil {
 		return profile{}
@@ -427,7 +448,7 @@ func profileFromExecutionData(state *operationExecution) profile {
 	if value, ok := state.data["profile"].(profile); ok {
 		return value
 	}
-	return state.profile
+	return profile{}
 }
 
 func firstResolvedProfile(values ...profile) profile {
@@ -446,7 +467,7 @@ func allocationFromExecutionData(state *operationExecution) allocation {
 	if value, ok := state.data["allocation"].(allocation); ok {
 		return value
 	}
-	return state.allocation
+	return allocation{}
 }
 
 func workplaceFromExecutionData(state *operationExecution) workplace {
@@ -456,7 +477,7 @@ func workplaceFromExecutionData(state *operationExecution) workplace {
 	if value, ok := state.data["workplace"].(workplace); ok {
 		return value
 	}
-	return state.workplace
+	return workplace{}
 }
 
 func directiveFromExecutionData(state *operationExecution) launchSpec {
@@ -466,7 +487,7 @@ func directiveFromExecutionData(state *operationExecution) launchSpec {
 	if value, ok := state.data["directive"].(launchSpec); ok {
 		return value
 	}
-	return state.in.Launch
+	return launchSpec{}
 }
 
 func resultFromExecutionData(state *operationExecution) LaunchResult {
@@ -476,7 +497,7 @@ func resultFromExecutionData(state *operationExecution) LaunchResult {
 	if value, ok := state.data["result"].(LaunchResult); ok {
 		return value
 	}
-	return state.result
+	return LaunchResult{}
 }
 
 func invocationFromExecutionData(state *operationExecution) invocation {
@@ -486,7 +507,7 @@ func invocationFromExecutionData(state *operationExecution) invocation {
 	if value, ok := state.data["invocation"].(invocation); ok {
 		return value
 	}
-	return state.in
+	return invocation{}
 }
 
 func structuredOutputFromExecutionData(state *operationExecution) *StructuredOutput {

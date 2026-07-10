@@ -236,7 +236,8 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 		tracker:       newOperationTracker(action),
 	}
 	err = s.runActionOperations(ctx, state)
-	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), resultFromExecutionData(state), err), err
+	data := executionDataFromState(state)
+	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), data.result, err), err
 }
 
 func invocationFromActionInvocation(request ActionInvocation) invocation {
@@ -433,7 +434,8 @@ func (s *Service) finishOperationHistory(ctx context.Context, state *operationEx
 		return
 	}
 
-	launchResult := resultFromExecutionData(state)
+	data := executionDataFromState(state)
+	launchResult := data.result
 	if strings.TrimSpace(launchResult.Status) == "" {
 		launchResult.Status = "completed"
 		if operationErr != nil {
@@ -447,7 +449,7 @@ func (s *Service) finishOperationHistory(ctx context.Context, state *operationEx
 		launchResult.Summary = strings.TrimSpace(operationErr.Error())
 	}
 
-	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), launchResult, operationErr)
+	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, data.invocation, data.profile, data.allocation, data.workplace, launchResult, operationErr)
 }
 
 func (s *Service) beginStartHistory(ctx context.Context, root string, in invocation) history.Handle {

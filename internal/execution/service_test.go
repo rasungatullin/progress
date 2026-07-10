@@ -2430,6 +2430,30 @@ func TestUnsupportedRequiredOperationWritesResultData(t *testing.T) {
 	}
 }
 
+func TestExecutionDataSnapshotUsesOnlyActionData(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		in:         model.Invocation{Task: "legacy"},
+		profile:    model.Profile{Name: "legacy"},
+		allocation: model.Allocation{Model: "legacy"},
+		workplace:  model.Workplace{Name: "legacy"},
+		result:     model.LaunchResult{Status: "legacy", Summary: "legacy"},
+		data: map[string]any{
+			"invocation": model.Invocation{Task: "task-42"},
+			"profile":    model.Profile{Name: "coder"},
+			"allocation": model.Allocation{Model: "gpt-5"},
+			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":     model.LaunchResult{Status: "completed", Summary: "data"},
+		},
+	}
+
+	snapshot := executionDataFromState(state)
+	if snapshot.invocation.Task != "task-42" || snapshot.profile.Name != "coder" || snapshot.allocation.Model != "gpt-5" || snapshot.workplace.Name != "/tmp/work" || snapshot.result.Summary != "data" {
+		t.Fatalf("execution snapshot must use only action data: %#v", snapshot)
+	}
+}
+
 func TestActionResolutionKeepsProfileFromActionTemplate(t *testing.T) {
 	t.Parallel()
 
