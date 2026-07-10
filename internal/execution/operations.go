@@ -1168,7 +1168,7 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	launchInvocation.Launch.CommitPush = false
 	result, err := e.service.launch(launchCtx, launchInvocation, input.profile, input.allocation, input.workplace)
 	writeLaunchSynthesisData(state, operation, result)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, launchInvocation, firstResolvedProfile(input.profile, profileFromExecutionData(state)), input.allocation, input.workplace, result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, launchInvocation, input.profile, input.allocation, input.workplace, result, err)
 	if err != nil {
 		if result.StructuredOutput != nil {
 			state.tracker.completeIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), fmt.Sprintf("status=%s", result.Status))
@@ -1215,11 +1215,6 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 	input := launchSynthesisInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.invocation = invocationFromExecutionData(state)
-		input.directive = directiveFromExecutionData(state)
-		input.profile = profileFromExecutionData(state)
-		input.allocation = allocationFromExecutionData(state)
-		input.workplace = workplaceFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input

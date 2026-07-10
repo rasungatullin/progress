@@ -315,7 +315,7 @@ func methodologyCatalogJSON() string {
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "required": true},
         {"name": "commit-push", "kind": "commit-push", "required": true},
         {"name": "finalize", "kind": "finalize", "required": true}
@@ -333,7 +333,7 @@ func methodologyCatalogJSON() string {
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "required": true},
         {"name": "finalize", "kind": "finalize", "required": true}
       ]
@@ -350,7 +350,7 @@ func methodologyCatalogJSON() string {
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "required": true},
         {"name": "commit-push", "kind": "commit-push", "required": true},
         {"name": "finalize", "kind": "finalize", "required": true}

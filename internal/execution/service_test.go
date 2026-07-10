@@ -1238,6 +1238,15 @@ func TestLaunchSynthesisFillsOnlyActionData(t *testing.T) {
 	if launcher.profile.Name != "coder" || launcher.allocation.Resource != "binding:coder" || launcher.workplace.Name != "/tmp/work" {
 		t.Fatalf("launcher must receive operation input data: profile=%#v allocation=%#v workplace=%#v", launcher.profile, launcher.allocation, launcher.workplace)
 	}
+	if state.profile.Name != "legacy" || state.profile.ModelBinding != "legacy" {
+		t.Fatalf("launch-synthesis must not read or write implicit state profile: %#v", state.profile)
+	}
+	if state.allocation.Resource != "legacy" || state.allocation.Runner != "legacy" {
+		t.Fatalf("launch-synthesis must not read or write implicit state allocation: %#v", state.allocation)
+	}
+	if state.workplace.Name != "/tmp/legacy" || !state.workplace.Ready {
+		t.Fatalf("launch-synthesis must not read or write implicit state workplace: %#v", state.workplace)
+	}
 }
 
 func TestLaunchSynthesisWritesSkippedResultForActionWithoutSynthesis(t *testing.T) {
@@ -3784,6 +3793,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 				result = append(result, buildDirectiveActionOperation())
 				continue
 			}
+			if operation == OperationKindLaunchSynthesis {
+				result = append(result, launchSynthesisActionOperation())
+				continue
+			}
 			result = append(result, methodology.ActionOperation{Name: operation, Kind: operation, Origin: OperationOriginBuiltin, Required: boolRef(true)})
 		case methodology.ActionOperation:
 			result = append(result, operation)
@@ -3860,6 +3873,26 @@ func buildDirectiveActionOperation() methodology.ActionOperation {
 		},
 		Out: map[string]methodology.ActionMapping{
 			"directive": mappingRef("data.directive"),
+		},
+	}
+}
+
+func launchSynthesisActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindLaunchSynthesis,
+		Kind:     OperationKindLaunchSynthesis,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"requires_synthesis": mappingRef("action.requires_synthesis"),
+			"invocation":         mappingRef("data.invocation"),
+			"directive":          mappingRef("data.directive"),
+			"profile":            mappingRef("data.profile"),
+			"allocation":         mappingRef("data.allocation"),
+			"workplace":          mappingRef("data.workplace"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"result": mappingRef("data.result"),
 		},
 	}
 }
@@ -4123,7 +4156,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
       ]
@@ -4141,7 +4174,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
@@ -4159,7 +4192,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
         {"name": "publish-merge-request", "kind": "publish-merge-request", "origin": "builtin", "required": true},
@@ -4178,7 +4211,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
       ]
@@ -4197,7 +4230,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
         {"name": "publish-review-remarks", "kind": "publish-review-remarks", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
@@ -4217,7 +4250,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
         {"name": "publish-review-responses", "kind": "publish-review-responses", "origin": "builtin", "required": true},
@@ -4236,7 +4269,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
       ]
