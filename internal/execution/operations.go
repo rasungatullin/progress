@@ -1449,7 +1449,6 @@ func parseResultInputFromOperation(state *operationExecution, operation Operatio
 	input := parseResultInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.result = resultFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
