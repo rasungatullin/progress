@@ -1855,12 +1855,45 @@ func (e builtinOperationExecutor) unsupported(ctx context.Context, state *operat
 		return nil
 	}
 
+	input := unsupportedInputFromOperation(state, operation)
 	err := fmt.Errorf("operation %q is unsupported", name)
 	result := failedStartResult(err)
 	writeUnsupportedData(state, operation, result)
 	state.tracker.fail(name, "Операция не поддержана текущей реализацией.", err, "operation_unsupported", false, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, invocationFromExecutionData(state), profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, err)
 	return err
+}
+
+type unsupportedInput struct {
+	invocation invocation
+	profile    profile
+	allocation allocation
+	workplace  workplace
+}
+
+func unsupportedInputFromOperation(state *operationExecution, operation OperationSpec) unsupportedInput {
+	input := unsupportedInput{}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.allocation = value
+		}
+	}
+	if mapping, ok := operation.In["workplace"]; ok {
+		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.workplace = value
+		}
+	}
+	return input
 }
 
 func writeUnsupportedData(state *operationExecution, operation OperationSpec, result LaunchResult) {

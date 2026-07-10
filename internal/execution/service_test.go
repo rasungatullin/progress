@@ -2390,11 +2390,25 @@ func TestUnsupportedRequiredOperationWritesResultData(t *testing.T) {
 		Kind:     model.OperationKind("unknown-operation"),
 		Origin:   OperationOriginBuiltin,
 		Required: true,
-		Out:      model.OperationMap{"result": {Ref: "data.result"}},
+		In: model.OperationMap{
+			"invocation": {Ref: "data.invocation"},
+			"profile":    {Ref: "data.profile"},
+			"allocation": {Ref: "data.allocation"},
+			"workplace":  {Ref: "data.workplace"},
+		},
+		Out: model.OperationMap{"result": {Ref: "data.result"}},
 	}
 	state := &operationExecution{
-		in:      model.Invocation{Task: "task-42"},
-		action:  model.Action{Operations: []model.OperationSpec{operation}},
+		in: model.Invocation{Task: "legacy"},
+		action: model.Action{
+			Operations: []model.OperationSpec{operation},
+		},
+		data: map[string]any{
+			"invocation": model.Invocation{Task: "task-42"},
+			"profile":    model.Profile{Name: "coder"},
+			"allocation": model.Allocation{Model: "gpt-5"},
+			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
+		},
 		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
@@ -2410,6 +2424,9 @@ func TestUnsupportedRequiredOperationWritesResultData(t *testing.T) {
 	}
 	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
 		t.Fatalf("unsupported operation must not write implicit state result: %#v", state.result)
+	}
+	if state.in.Task != "legacy" {
+		t.Fatalf("unsupported operation must not write implicit state invocation: %#v", state.in)
 	}
 }
 
