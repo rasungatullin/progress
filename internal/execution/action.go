@@ -33,6 +33,7 @@ const (
 	OperationKindAllocateResources      = "allocate-resources"
 	OperationKindPrepareWorkplace       = "prepare-workplace"
 	OperationKindBuildDirective         = "build-directive"
+	OperationKindBuildPrompt            = "build-prompt"
 	OperationKindLaunchSynthesis        = "launch-synthesis"
 	OperationKindParseResult            = "parse-result"
 	OperationKindCommitPush             = "commit-push"
@@ -330,6 +331,8 @@ func defaultOperationSpec(kind string) model.OperationSpec {
 		return builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true)
 	case OperationKindBuildDirective:
 		return builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true)
+	case OperationKindBuildPrompt:
+		return builtinOperation(OperationKindBuildPrompt, "Сборка исполнительной директивы", true)
 	case OperationKindLaunchSynthesis:
 		return builtinOperation(OperationKindLaunchSynthesis, "Запуск синтеза", true)
 	case OperationKindParseResult:

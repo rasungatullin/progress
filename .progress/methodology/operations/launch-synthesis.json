@@ -6,76 +6,15 @@
   "required": true,
   "contract": {
     "in": {
-      "task": {
-        "type": "string",
-        "required": true,
-        "description": "Задача для запуска синтеза."
-      },
-      "action": {
-        "type": "string",
-        "description": "Имя действия для запуска."
-      },
-      "directory": {
-        "type": "string",
-        "required": true,
-        "description": "Каталог запуска."
-      },
-      "directive": {
-        "type": "object",
-        "required": true,
-        "description": "Исполнительная директива запуска."
-      },
-      "profile_name": {
-        "type": "string",
-        "description": "Имя исполнительного профиля."
-      },
-      "prompt_additions": {
-        "type": "string_array",
-        "description": "Дополнения исполнительной директивы из профиля."
-      },
-      "profile_structured_output": {
-        "type": "boolean",
-        "description": "Признак структурированного вывода из профиля."
-      },
-      "profile_structured_output_required": {
-        "type": "boolean",
-        "description": "Требование структурированного вывода из профиля."
-      },
-      "profile_structured_output_fields": {
-        "type": "string_array",
-        "description": "Поля структурированного вывода из профиля."
-      },
-      "runner": {
-        "type": "string",
-        "description": "Исполнительный модуль."
-      },
-      "model": {
-        "type": "string",
-        "description": "Модель выполнения."
-      },
-      "model_binding": {
-        "type": "string",
-        "description": "Привязка модели к ресурсу."
-      },
-      "workplace_name": {
-        "type": "string",
-        "description": "Имя рабочего места."
-      },
-      "repository_url": {
-        "type": "string",
-        "description": "Адрес репозитория."
-      },
-      "structured_input": {
-        "type": "object",
-        "description": "Структурированный ввод синтеза."
-      }
+      "prompt": {"type": "string", "required": true, "description": "Готовая исполнительная директива."},
+      "directory": {"type": "string", "required": true, "description": "Рабочий каталог исполнительного модуля."},
+      "runner": {"type": "string", "required": true, "description": "Исполнительный модуль."},
+      "model": {"type": "string", "required": true, "description": "Модель выполнения."},
+      "resume_session_id": {"type": "string", "description": "Идентификатор возобновляемого сеанса."}
     },
     "out": {
-      "result": {
-        "type": "object",
-        "required": true,
-        "description": "Результат запуска выполнения."
-      }
+      "raw_output": {"type": "string", "required": true, "description": "Фактический вывод исполнительного модуля."},
+      "session_id": {"type": "string", "description": "Идентификатор сеанса исполнительного модуля."}
     }
   }
 }

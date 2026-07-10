@@ -56,10 +56,6 @@
         "type": "object",
         "description": "Результат ресурсного снабжения для последующих операций действия."
       },
-      "directive": {
-        "type": "object",
-        "description": "Подготовленная исполнительная директива для запуска выполнения."
-      },
       "result": {
         "type": "object",
         "description": "Результат запуска выполнения."
@@ -67,6 +63,18 @@
       "structured_output": {
         "type": "object",
         "description": "Нормализованный структурированный результат выполнения."
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Готовая исполнительная директива."
+      },
+      "raw_output": {
+        "type": "string",
+        "description": "Фактический вывод исполнительного модуля."
+      },
+      "session_id": {
+        "type": "string",
+        "description": "Идентификатор сеанса исполнительного модуля."
       }
     }
   },
@@ -165,92 +173,77 @@
       }
     },
     {
-      "name": "build-directive",
+      "name": "build-prompt",
       "in": {
-        "directory": {
-          "ref": "data.workplace.name"
-        },
-        "runner": {
-          "ref": "data.allocation.runner"
-        },
-        "model": {
-          "ref": "data.allocation.model"
-        },
-        "model_binding": {
-          "ref": "data.allocation.model_binding"
-        }
-      },
-      "out": {
-        "directive": {
-          "ref": "data.directive"
-        }
-      }
-    },
-    {
-      "name": "launch-synthesis",
-      "in": {
-        "directive": {
-          "ref": "data.directive"
-        },
-        "task": {
-          "ref": "in.task"
-        },
-        "action": {
-          "ref": "in.action"
-        },
-        "directory": {
-          "ref": "data.workplace.name"
-        },
-        "profile_name": {
-          "ref": "data.profile.name"
+        "prompt": {
+          "ref": "in.launch.prompt"
         },
         "prompt_additions": {
           "ref": "data.profile.prompt_additions"
         },
-        "profile_structured_output": {
+        "structured_output": {
           "ref": "data.profile.structured_output"
         },
-        "profile_structured_output_required": {
+        "structured_output_required": {
           "ref": "data.profile.structured_output_required"
         },
-        "profile_structured_output_fields": {
+        "structured_output_fields": {
           "ref": "data.profile.structured_output_fields"
-        },
-        "runner": {
-          "ref": "data.allocation.runner"
-        },
-        "model": {
-          "ref": "data.allocation.model"
-        },
-        "model_binding": {
-          "ref": "data.allocation.model_binding"
-        },
-        "workplace_name": {
-          "ref": "data.workplace.name"
-        },
-        "repository_url": {
-          "ref": "in.repository_url"
         },
         "structured_input": {
           "ref": "in.structured_input"
         }
       },
       "out": {
-        "result": {
-          "ref": "data.result"
+        "prompt": {
+          "ref": "data.prompt"
+        }
+      }
+    },
+    {
+      "name": "launch-synthesis",
+      "in": {
+        "prompt": {
+          "ref": "data.prompt"
+        },
+        "directory": {
+          "ref": "data.workplace.name"
+        },
+        "runner": {
+          "ref": "data.allocation.runner"
+        },
+        "model": {
+          "ref": "data.allocation.model"
+        },
+        "resume_session_id": {
+          "ref": "in.launch.resume.runner_session_id"
+        }
+      },
+      "out": {
+        "raw_output": {
+          "ref": "data.raw_output"
+        },
+        "session_id": {
+          "ref": "data.session_id"
         }
       }
     },
     {
       "name": "parse-result",
       "in": {
-        "structured_output": {
-          "ref": "data.result.structured_output"
+        "raw_output": {
+          "ref": "data.raw_output"
+        },
+        "session_id": {
+          "ref": "data.session_id"
         }
       },
       "out": {
         "structured_output": {
           "ref": "data.structured_output"
+        },
+        "result": {
+          "ref": "data.result"
         }
       }
     },

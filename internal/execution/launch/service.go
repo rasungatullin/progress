@@ -77,6 +77,18 @@ func NewService() *Service {
 	}
 }
 
+func BuildPrompt(spec model.LaunchSpec) (string, error) {
+	return buildRunnerPrompt(spec)
+}
+
+func ParseOutput(output string) (string, string, *model.StructuredOutput, error) {
+	plain, raw, structured, state, err := parseStructuredOutput(output)
+	if state == trailingStructuredBlockInvalid {
+		return plain, raw, nil, err
+	}
+	return plain, raw, structured, nil
+}
+
 func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model.Profile, allocation model.Allocation, workplace model.Workplace) (model.LaunchResult, error) {
 	historyHandle := historyHandleFromContext(ctx)
 	if historyHandle.RunID == 0 {
@@ -125,6 +137,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	result := model.LaunchResult{
 		Status:              "failed",
 		Summary:             strings.TrimSpace(plainRunnerOutput),
+		RawOutput:           runnerOutput,
 		RawOutputPath:       rawOutputPath,
 		RawStructuredOutput: rawStructuredOutput,
 		RunnerSessionID:     runnerSessionID,
@@ -147,6 +160,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			launchResult := model.LaunchResult{
 				Status:              "failed",
 				Summary:             strings.TrimSpace(plainRunnerOutput),
+				RawOutput:           runnerOutput,
 				RawOutputPath:       rawOutputPath,
 				RawStructuredOutput: rawStructuredOutput,
 				StructuredOutput:    structuredOutput,
@@ -174,7 +188,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		gitSummary,
 	)
 
-	result = model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutputPath: rawOutputPath, RawStructuredOutput: rawStructuredOutput}
+	result = model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutput: runnerOutput, RawOutputPath: rawOutputPath, RawStructuredOutput: rawStructuredOutput}
 	result.RunnerSessionID = runnerSessionID
 	if structuredOutputState == trailingStructuredBlockValid {
 		result.StructuredOutput = structuredOutput

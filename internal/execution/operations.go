@@ -263,6 +263,8 @@ func (e builtinOperationExecutor) execute(ctx context.Context, state *operationE
 		return e.prepareWorkplace(ctx, state, operation, name)
 	case OperationKindBuildDirective:
 		return e.buildDirective(ctx, state, operation, name)
+	case OperationKindBuildPrompt:
+		return e.buildPrompt(state, operation, name)
 	case OperationKindLaunchSynthesis:
 		return e.launchSynthesis(ctx, state, operation, name)
 	case OperationKindParseResult:
@@ -1535,32 +1537,40 @@ func buildDirectiveOutputSummary(directive launchSpec, operation OperationSpec) 
 	})
 }
 
+func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operation OperationSpec, name string) error {
+	spec := launchSpec{}
+	spec.Prompt, _ = operationMappingValue[string](state, operation.In["prompt"])
+	spec.PromptAdditions, _ = operationMappingValue[[]string](state, operation.In["prompt_additions"])
+	spec.StructuredInput, _ = operationMappingValue[*StructuredInput](state, operation.In["structured_input"])
+	spec.StructuredOutput, _ = operationMappingValue[bool](state, operation.In["structured_output"])
+	spec.StructuredOutputRequired, _ = operationMappingValue[bool](state, operation.In["structured_output_required"])
+	spec.StructuredOutputFields, _ = operationMappingValue[[]string](state, operation.In["structured_output_fields"])
+	prompt, err := launch.BuildPrompt(spec)
+	if err != nil {
+		state.tracker.fail(name, "Исполнительная директива не сформирована.", err, "prompt_not_built", false, true)
+		return err
+	}
+	writeOperationData(state, operation.Out, "prompt", prompt)
+	state.tracker.completeIO(name, operationIOSummary(operation.In, map[string]string{
+		"prompt":           presenceSummary(spec.Prompt),
+		"structured_input": presenceSummary(fmt.Sprintf("%v", spec.StructuredInput != nil)),
+	}), operationIOSummary(operation.Out, map[string]string{"prompt": presenceSummary(prompt)}), "Исполнительная директива сформирована.")
+	return nil
+}
+
 func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := launchSynthesisInputFromOperation(state, operation)
 	launchCtx := launch.WithHistoryHandle(ctx, state.historyHandle)
-	launchInvocation := input.invocation
-	launchInvocation.Launch = input.directive
-	launchInvocation.Launch.CommitPush = false
-	result, err := e.service.launch(launchCtx, launchInvocation, input.profile, input.allocation, input.workplace)
+	launchInvocation := invocation{Launch: launchSpec{Prompt: input.prompt, Directory: input.directory, Runner: input.runner, Model: input.model}}
+	if input.resumeSessionID != "" {
+		launchInvocation.Launch.Resume = &model.ResumeSpec{RunnerSessionID: input.resumeSessionID}
+	}
+	launchWorkplace := workplace{Name: input.directory, RepositoryRoot: input.directory, Ready: true}
+	launchAllocation := allocation{Runner: input.runner, Model: input.model}
+	result, err := e.service.launch(launchCtx, launchInvocation, profile{}, launchAllocation, launchWorkplace)
 	writeLaunchSynthesisData(state, operation, result)
 	if err != nil {
-		if result.StructuredOutput != nil {
-			state.tracker.completeIO(name, launchSynthesisInputSummary(input, operation), launchSynthesisOutputSummary(result, operation), fmt.Sprintf("status=%s", result.Status))
-			if parseResultName, ok := actionOperationNameByKind(state.action, OperationKindParseResult); ok {
-				state.tracker.completeIO(parseResultName, resultSummary(result), structuredOutputSummary(result.StructuredOutput), "Результат синтеза получен и нормализован.")
-			}
-			if finalizeName, ok := actionOperationNameByKind(state.action, OperationKindFinalize); ok {
-				state.tracker.fail(finalizeName, "Завершающая операция после синтеза не выполнена.", err, "final_operation_failed", true, true)
-			} else {
-				state.tracker.fail(name, "Запуск синтеза завершился отказом после получения результата.", err, "synthesis_failed", true, true)
-			}
-			return err
-		}
-
 		state.tracker.fail(name, "Запуск синтеза завершился отказом.", err, "synthesis_failed", true, true)
-		if parseResultName, ok := actionOperationNameByKind(state.action, OperationKindParseResult); ok {
-			state.tracker.fail(parseResultName, "Результат выполнения не приведён к нормализованной форме.", err, "result_not_parsed", false, true)
-		}
 		return err
 	}
 
@@ -1569,19 +1579,33 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 }
 
 func writeLaunchSynthesisData(state *operationExecution, operation OperationSpec, result LaunchResult) {
-	out := operation.Out
-	if len(out) == 0 {
-		out = model.OperationMap{"result": {Ref: "data.result"}}
+	writeOperationData(state, operation.Out, "raw_output", rawOutputFromLaunchResult(result))
+	writeOperationData(state, operation.Out, "session_id", result.RunnerSessionID)
+	writeOperationData(state, operation.Out, "result", result)
+}
+
+func rawOutputFromLaunchResult(result LaunchResult) string {
+	if result.RawOutput != "" {
+		return result.RawOutput
 	}
-	writeOperationData(state, out, "result", result)
+	parts := []string{}
+	if strings.TrimSpace(result.Summary) != "" {
+		parts = append(parts, strings.TrimSpace(result.Summary))
+	}
+	if result.StructuredOutput != nil {
+		if payload, err := json.Marshal(result.StructuredOutput); err == nil {
+			parts = append(parts, "<progress-structured-output>\n"+string(payload)+"\n</progress-structured-output>")
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 type launchSynthesisInput struct {
-	invocation invocation
-	directive  launchSpec
-	profile    profile
-	allocation allocation
-	workplace  workplace
+	prompt          string
+	directory       string
+	runner          string
+	model           string
+	resumeSessionID string
 }
 
 func launchSynthesisInputFromOperation(state *operationExecution, operation OperationSpec) launchSynthesisInput {
@@ -1589,51 +1613,21 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 	if len(operation.In) == 0 {
 		return input
 	}
-	if mapping, ok := operation.In["invocation"]; ok {
-		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.invocation = value
+	input.prompt, _ = operationMappingValue[string](state, operation.In["prompt"])
+	input.directory, _ = operationMappingValue[string](state, operation.In["directory"])
+	input.runner, _ = operationMappingValue[string](state, operation.In["runner"])
+	input.model, _ = operationMappingValue[string](state, operation.In["model"])
+	input.resumeSessionID, _ = operationMappingValue[string](state, operation.In["resume_session_id"])
+	if strings.TrimSpace(input.prompt) == "" {
+		if directive, ok := directiveValueFromLaunchSynthesisMapping(state, operation.In["directive"]); ok {
+			input.prompt, _ = launch.BuildPrompt(directive)
+			input.directory = directive.Directory
+			input.runner = directive.Runner
+			input.model = directive.Model
+			if directive.Resume != nil {
+				input.resumeSessionID = directive.Resume.RunnerSessionID
+			}
 		}
-	}
-	if mapping, ok := operation.In["directive"]; ok {
-		if value, ok := directiveValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.directive = value
-		}
-	}
-	if mapping, ok := operation.In["profile"]; ok {
-		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.profile = value
-		}
-	}
-	if mapping, ok := operation.In["allocation"]; ok {
-		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.allocation = value
-		}
-	}
-	if mapping, ok := operation.In["workplace"]; ok {
-		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
-			input.workplace = value
-		}
-	}
-	if _, ok := operation.In["invocation"]; !ok {
-		input.invocation.Task = launchStringValue(state, operation.In["task"])
-		input.invocation.Action = launchStringValue(state, operation.In["action"])
-		input.invocation.Repository.URL = launchStringValue(state, operation.In["repository_url"])
-		input.invocation.Workplace.Name = launchStringValue(state, operation.In["workplace_name"])
-		input.profile.Name = launchStringValue(state, operation.In["profile_name"])
-		input.profile.PromptAdditions, _ = launchStringSliceValue(state, operation.In["prompt_additions"])
-		input.profile.StructuredOutput, _ = launchBoolValue(state, operation.In["profile_structured_output"])
-		input.profile.StructuredOutputRequired, _ = launchBoolValue(state, operation.In["profile_structured_output_required"])
-		input.profile.StructuredOutputFields, _ = launchStringSliceValue(state, operation.In["profile_structured_output_fields"])
-		input.allocation.Runner = launchStringValue(state, operation.In["runner"])
-		input.allocation.Model = launchStringValue(state, operation.In["model"])
-		input.allocation.ModelBinding = launchStringValue(state, operation.In["model_binding"])
-		input.workplace.Name = launchStringValue(state, operation.In["workplace_name"])
-		input.workplace.Ready = strings.TrimSpace(input.workplace.Name) != ""
-		input.directive.Directory = launchStringValue(state, operation.In["directory"])
-		input.directive.Runner = input.allocation.Runner
-		input.directive.Model = input.allocation.Model
-		input.directive.ModelBinding = input.allocation.ModelBinding
-		input.directive.StructuredInput, _ = launchStructuredInputValue(state, operation.In["structured_input"])
 	}
 	return input
 }
@@ -1843,21 +1837,18 @@ func workplaceValueFromLaunchSynthesisMapping(state *operationExecution, mapping
 
 func launchSynthesisInputSummary(input launchSynthesisInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
-		"allocation": allocationSummary(input.allocation),
-		"directive":  directiveSummary(input.directive),
-		"invocation": invocationSummary(input.invocation),
-		"profile":    profileSummary(input.profile),
-		"workplace":  workplaceSummary(input.workplace),
+		"prompt":            presenceSummary(input.prompt),
+		"directory":         input.directory,
+		"runner":            input.runner,
+		"model":             input.model,
+		"resume_session_id": presenceSummary(input.resumeSessionID),
 	})
 }
 
 func launchSynthesisOutputSummary(result LaunchResult, operation OperationSpec) string {
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		resultJSON = []byte(fmt.Sprintf(`{"status":%q}`, result.Status))
-	}
 	return operationIOSummary(operation.Out, map[string]string{
-		"result": string(resultJSON),
+		"raw_output": presenceSummary(rawOutputFromLaunchResult(result)),
+		"session_id": presenceSummary(result.RunnerSessionID),
 	})
 }
 
@@ -1898,13 +1889,28 @@ func workplaceSummary(workplace workplace) string {
 
 func (e builtinOperationExecutor) parseResult(state *operationExecution, operation OperationSpec, name string) error {
 	input := parseResultInputFromOperation(state, operation)
-	writeOperationData(state, operation.Out, "structured_output", input.result.StructuredOutput)
-	state.tracker.completeIO(name, parseResultInputSummary(input, operation), parseResultOutputSummary(input.result.StructuredOutput, operation), "Результат выполнения нормализован.")
+	if input.legacyResult != nil {
+		writeOperationData(state, operation.Out, "structured_output", input.legacyResult.StructuredOutput)
+		writeOperationData(state, operation.Out, "result", *input.legacyResult)
+		state.tracker.completeIO(name, parseResultInputSummary(input, operation), parseResultOutputSummary(input.legacyResult.StructuredOutput, operation), "Результат выполнения нормализован.")
+		return nil
+	}
+	plain, rawStructured, structured, err := launch.ParseOutput(input.rawOutput)
+	if err != nil {
+		state.tracker.fail(name, "Результат выполнения не приведён к нормализованной форме.", err, "result_not_parsed", false, true)
+		return err
+	}
+	result := LaunchResult{Status: "completed", Summary: strings.TrimSpace(plain), RawOutput: input.rawOutput, RawStructuredOutput: rawStructured, StructuredOutput: structured, RunnerSessionID: input.sessionID}
+	writeOperationData(state, operation.Out, "structured_output", structured)
+	writeOperationData(state, operation.Out, "result", result)
+	state.tracker.completeIO(name, parseResultInputSummary(input, operation), parseResultOutputSummary(structured, operation), "Результат выполнения нормализован.")
 	return nil
 }
 
 type parseResultInput struct {
-	result LaunchResult
+	rawOutput    string
+	sessionID    string
+	legacyResult *LaunchResult
 }
 
 func parseResultInputFromOperation(state *operationExecution, operation OperationSpec) parseResultInput {
@@ -1912,13 +1918,11 @@ func parseResultInputFromOperation(state *operationExecution, operation Operatio
 	if len(operation.In) == 0 {
 		return input
 	}
-	if mapping, ok := operation.In["structured_output"]; ok {
+	input.rawOutput, _ = operationMappingValue[string](state, operation.In["raw_output"])
+	input.sessionID, _ = operationMappingValue[string](state, operation.In["session_id"])
+	if mapping, ok := operation.In["result"]; ok {
 		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
-			input.result.StructuredOutput = value.StructuredOutput
-		}
-	} else if mapping, ok := operation.In["result"]; ok {
-		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
-			input.result = value
+			input.legacyResult = &value
 		}
 	}
 	return input
@@ -1949,7 +1953,8 @@ func resultValueFromParseResultMapping(state *operationExecution, mapping model.
 
 func parseResultInputSummary(input parseResultInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
-		"result": resultSummary(input.result),
+		"raw_output": presenceSummary(input.rawOutput),
+		"session_id": presenceSummary(input.sessionID),
 	})
 }
 
@@ -1960,6 +1965,7 @@ func parseResultOutputSummary(output *StructuredOutput, operation OperationSpec)
 	}
 	return operationIOSummary(operation.Out, map[string]string{
 		"structured_output": string(outputJSON),
+		"result":            structuredOutputSummary(output),
 	})
 }
 

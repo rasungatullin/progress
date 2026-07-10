@@ -393,6 +393,7 @@ type DiagnosticLink struct {
 type LaunchResult struct {
 	Status              string            `json:"status,omitempty"`
 	Summary             string            `json:"summary,omitempty"`
+	RawOutput           string            `json:"raw_output,omitempty"`
 	RawOutputPath       string            `json:"raw_output_path,omitempty"`
 	RawStructuredOutput string            `json:"raw_structured_output,omitempty"`
 	StructuredOutput    *StructuredOutput `json:"structured_output,omitempty"`

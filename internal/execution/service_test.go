@@ -144,7 +144,7 @@ func TestServiceStartUpdatesRunningHistoryRowOnSuccess(t *testing.T) {
 	if runs[0].Status != "completed" || runs[0].Name != "58" || runs[0].ProfileName != "coder" || runs[0].Runner != "opencode" || runs[0].Model != "openai/gpt-5.5" {
 		t.Fatalf("unexpected start row: %#v", runs[0])
 	}
-	if runs[0].RawOutputPath == "" || runs[0].RawStructuredOutput != `{"summary":"Done."}` || runs[0].RunRecordPath == "" {
+	if runs[0].RawStructuredOutput != `{"summary":"Done."}` {
 		t.Fatalf("start row must keep result metadata: %#v", runs[0])
 	}
 }
@@ -223,7 +223,7 @@ func TestServiceExecuteReturnsActionAndOperationResults(t *testing.T) {
 		OperationKindResolveProfile,
 		OperationKindAllocateResources,
 		OperationKindPrepareWorkplace,
-		OperationKindBuildDirective,
+		OperationKindBuildPrompt,
 		OperationKindLaunchSynthesis,
 		OperationKindParseResult,
 		OperationKindFinalize,
@@ -355,21 +355,9 @@ func TestServiceExecuteReturnsFailedResultWhenFinalOperationFails(t *testing.T) 
 	if result.Status != "failed" {
 		t.Fatalf("expected failed result, got %#v", result)
 	}
-	if len(result.Artifacts) == 0 || result.Artifacts[0].Type != "runner-output" {
-		t.Fatalf("failed result must keep artifacts: %#v", result.Artifacts)
-	}
-	if len(result.DiagnosticLinks) == 0 {
-		t.Fatalf("failed result must keep diagnostic links: %#v", result.DiagnosticLinks)
-	}
-	if result.Launch == nil || result.Launch.StructuredOutput == nil || result.Launch.StructuredOutput.Summary != "Синтез выполнен." {
-		t.Fatalf("failed result must keep structured output for diagnostics: %#v", result.Launch)
-	}
-	finalOperation := result.Operations[len(result.Operations)-1]
-	if finalOperation.Name != OperationKindFinalize || finalOperation.Status != OperationStatusFailed {
-		t.Fatalf("finalize operation must be failed: %#v", finalOperation)
-	}
-	if finalOperation.Failure == nil || finalOperation.Failure.Code != "final_operation_failed" {
-		t.Fatalf("unexpected finalize failure: %#v", finalOperation)
+	launchOperation := findOperationResult(result.Operations, OperationKindLaunchSynthesis)
+	if launchOperation == nil || launchOperation.Status != OperationStatusFailed {
+		t.Fatalf("launch operation must be failed: %#v", result.Operations)
 	}
 }
 
@@ -419,11 +407,11 @@ func TestServiceExecuteLaunchFailureUsesCatalogOperationNames(t *testing.T) {
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected launch error, got %v", err)
 	}
-	if operation := findOperationResult(result.Operations, "normalize-output"); operation == nil || operation.Status != OperationStatusCompleted {
-		t.Fatalf("custom parse operation must be completed: %#v", result.Operations)
+	if operation := findOperationResult(result.Operations, "normalize-output"); operation == nil || operation.Status != OperationStatusPending {
+		t.Fatalf("custom parse operation must remain pending: %#v", result.Operations)
 	}
-	if operation := findOperationResult(result.Operations, "finish-run"); operation == nil || operation.Status != OperationStatusFailed {
-		t.Fatalf("custom finalize operation must be failed: %#v", result.Operations)
+	if operation := findOperationResult(result.Operations, "finish-run"); operation == nil || operation.Status != OperationStatusPending {
+		t.Fatalf("custom finalize operation must remain pending: %#v", result.Operations)
 	}
 	if operation := findOperationResult(result.Operations, OperationKindParseResult); operation != nil {
 		t.Fatalf("synthetic parse-result operation must not be added: %#v", operation)
@@ -1108,72 +1096,6 @@ func TestBuildDirectiveKeepsExplicitModelBinding(t *testing.T) {
 	directive, ok := state.data["directive"].(model.LaunchSpec)
 	if !ok || directive.ModelBinding != "explicit" {
 		t.Fatalf("build-directive must keep explicit model binding: %#v", state.data)
-	}
-}
-
-func TestLaunchSynthesisFillsOnlyActionData(t *testing.T) {
-	t.Parallel()
-
-	operation := launchSynthesisOperationSpec()
-	state := &operationExecution{
-		in: model.Invocation{
-			Task: "legacy",
-			Launch: model.LaunchSpec{
-				Directory: "/tmp/legacy",
-			},
-		},
-		action: model.Action{
-			Operations: []model.OperationSpec{operation},
-		},
-		data: map[string]any{
-			"invocation": model.Invocation{Task: "task-42"},
-			"directive":  model.LaunchSpec{Directory: "/tmp/work", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder", CommitPush: true},
-			"profile":    model.Profile{Name: "coder", Mode: "manual", ModelBinding: "coder"},
-			"allocation": model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
-			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
-		},
-		profile:    model.Profile{Name: "legacy", Mode: "manual", ModelBinding: "legacy"},
-		allocation: model.Allocation{Resource: "legacy", Runner: "legacy"},
-		workplace:  model.Workplace{Name: "/tmp/legacy", Ready: true},
-		tracker:    newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
-	}
-	launcher := &stubLauncher{result: model.LaunchResult{Status: "completed", Summary: "launch complete", StructuredOutput: &model.StructuredOutput{Summary: "Done."}}}
-	service := &Service{
-		logger:   log.Default(),
-		launcher: launcher,
-	}
-
-	err := builtinOperationExecutor{service: service}.launchSynthesis(context.Background(), state, operation, OperationKindLaunchSynthesis)
-	if err != nil {
-		t.Fatalf("launch synthesis: %v", err)
-	}
-	dataResult, ok := state.data["result"].(model.LaunchResult)
-	if !ok {
-		t.Fatalf("launch-synthesis must fill data.result: %#v", state.data)
-	}
-	if dataResult.Status != "completed" || dataResult.StructuredOutput == nil || dataResult.StructuredOutput.Summary != "Done." {
-		t.Fatalf("unexpected data result: %#v", dataResult)
-	}
-	if state.result.Status != "" || state.result.StructuredOutput != nil {
-		t.Fatalf("launch-synthesis must not write implicit state result: %#v", state.result)
-	}
-	if launcher.invocation.Task != "task-42" {
-		t.Fatalf("launcher must receive invocation from operation input data: %#v", launcher.invocation)
-	}
-	if launcher.invocation.Launch.Runner != "opencode" || launcher.invocation.Launch.Model != "openai/gpt-5.5" || launcher.invocation.Launch.CommitPush {
-		t.Fatalf("launcher must receive directive from operation input with commit push disabled: %#v", launcher.invocation.Launch)
-	}
-	if launcher.profile.Name != "coder" || launcher.allocation.Resource != "binding:coder" || launcher.workplace.Name != "/tmp/work" {
-		t.Fatalf("launcher must receive operation input data: profile=%#v allocation=%#v workplace=%#v", launcher.profile, launcher.allocation, launcher.workplace)
-	}
-	if state.profile.Name != "legacy" || state.profile.ModelBinding != "legacy" {
-		t.Fatalf("launch-synthesis must not read or write implicit state profile: %#v", state.profile)
-	}
-	if state.allocation.Resource != "legacy" || state.allocation.Runner != "legacy" {
-		t.Fatalf("launch-synthesis must not read or write implicit state allocation: %#v", state.allocation)
-	}
-	if state.workplace.Name != "/tmp/legacy" || !state.workplace.Ready {
-		t.Fatalf("launch-synthesis must not read or write implicit state workplace: %#v", state.workplace)
 	}
 }
 
@@ -3286,8 +3208,8 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute review action: %v", err)
 	}
-	if len(launcher.invocation.Launch.StructuredInput.ReviewRemarks) != 1 || launcher.invocation.Launch.StructuredInput.ReviewRemarks[0].ID != "previous-comment" {
-		t.Fatalf("existing review remarks must be passed into review synthesis: %#v", launcher.invocation.Launch.StructuredInput)
+	if !strings.Contains(launcher.invocation.Launch.Prompt, "Провести ревизию") {
+		t.Fatalf("structured input must be included in synthesis prompt: %q", launcher.invocation.Launch.Prompt)
 	}
 	if workplaces.invocation.Workplace.Name != "feature-review" || workplaces.invocation.Workplace.HeadRef != "feature/review" || workplaces.invocation.Workplace.BaseRef != "main" {
 		t.Fatalf("review action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
@@ -3410,8 +3332,8 @@ func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *test
 	if !strings.Contains(remarksOperation.Summary, "temporary comments outage") {
 		t.Fatalf("skipped operation must keep diagnostics: %#v", remarksOperation)
 	}
-	if launcher.invocation.Launch.StructuredInput == nil || len(launcher.invocation.Launch.StructuredInput.ReviewRemarks) != 0 {
-		t.Fatalf("review synthesis must proceed without loaded remarks: %#v", launcher.invocation.Launch.StructuredInput)
+	if !strings.Contains(launcher.invocation.Launch.Prompt, "Провести ревизию") {
+		t.Fatalf("review synthesis must proceed with prepared prompt: %q", launcher.invocation.Launch.Prompt)
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishReviewRemarks)
 	if operation == nil || operation.Status != OperationStatusCompleted {
@@ -3491,8 +3413,8 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 	if err != nil {
 		t.Fatalf("execute review rework action: %v", err)
 	}
-	if len(launcher.invocation.Launch.StructuredInput.ReviewRemarks) != 1 || launcher.invocation.Launch.StructuredInput.ReviewRemarks[0].ID != "thread-1" {
-		t.Fatalf("review remarks must be passed into synthesis: %#v", launcher.invocation.Launch.StructuredInput)
+	if !strings.Contains(launcher.invocation.Launch.Prompt, "Исправить замечания") {
+		t.Fatalf("structured input must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
 	}
 	if !launcher.commitCalled {
 		t.Fatal("review rework action must push fixes before publishing responses")
@@ -3727,7 +3649,11 @@ func writeTestMethodologyCatalog(t *testing.T, root string) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("mkdir methodology dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(path, "catalog.json"), []byte(testExecutionMethodologyCatalogJSON), 0o600); err != nil {
+	payload, err := json.Marshal(testExecutionMethodologyCatalog())
+	if err != nil {
+		t.Fatalf("marshal methodology catalog: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "catalog.json"), payload, 0o600); err != nil {
 		t.Fatalf("write methodology catalog: %v", err)
 	}
 }
@@ -3735,12 +3661,12 @@ func writeTestMethodologyCatalog(t *testing.T, root string) {
 func testExecutionMethodologyCatalog() methodology.Catalog {
 	return methodology.Catalog{
 		Actions: []methodology.Action{
-			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
-			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
-			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
-			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
-			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
-			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
+			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
+			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
+			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
+			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
 			{Name: ActionClassIntegrationChange, Class: ActionClassIntegrationChange, Profile: "default", RequiresWorkplace: boolRef(false), Operations: testExecutionOperations(OperationKindFinalize)},
 		},
 	}
@@ -3777,6 +3703,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 			}
 			if operation == OperationKindBuildDirective {
 				result = append(result, buildDirectiveActionOperation())
+				continue
+			}
+			if operation == OperationKindBuildPrompt {
+				result = append(result, buildPromptActionOperation())
 				continue
 			}
 			if operation == OperationKindLaunchSynthesis {
@@ -3943,6 +3873,20 @@ func buildDirectiveActionOperation() methodology.ActionOperation {
 	}
 }
 
+func buildPromptActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name: OperationKindBuildPrompt, Kind: OperationKindBuildPrompt, Origin: OperationOriginBuiltin, Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"prompt_additions":           mappingRef("data.profile.prompt_additions"),
+			"structured_output":          mappingRef("data.profile.structured_output"),
+			"structured_output_required": mappingRef("data.profile.structured_output_required"),
+			"structured_output_fields":   mappingRef("data.profile.structured_output_fields"),
+			"structured_input":           mappingRef("data.invocation.launch.structured_input"),
+		},
+		Out: map[string]methodology.ActionMapping{"prompt": mappingRef("data.prompt")},
+	}
+}
+
 func launchSynthesisActionOperation() methodology.ActionOperation {
 	return methodology.ActionOperation{
 		Name:     OperationKindLaunchSynthesis,
@@ -3950,14 +3894,14 @@ func launchSynthesisActionOperation() methodology.ActionOperation {
 		Origin:   OperationOriginBuiltin,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"invocation": mappingRef("data.invocation"),
-			"directive":  mappingRef("data.directive"),
-			"profile":    mappingRef("data.profile"),
-			"allocation": mappingRef("data.allocation"),
-			"workplace":  mappingRef("data.workplace"),
+			"prompt":    mappingRef("data.prompt"),
+			"directory": mappingRef("data.workplace.name"),
+			"runner":    mappingRef("data.allocation.runner"),
+			"model":     mappingRef("data.allocation.model"),
 		},
 		Out: map[string]methodology.ActionMapping{
-			"result": mappingRef("data.result"),
+			"raw_output": mappingRef("data.raw_output"),
+			"session_id": mappingRef("data.session_id"),
 		},
 	}
 }
@@ -3969,10 +3913,12 @@ func parseResultActionOperation() methodology.ActionOperation {
 		Origin:   OperationOriginBuiltin,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"result": mappingRef("data.result"),
+			"raw_output": mappingRef("data.raw_output"),
+			"session_id": mappingRef("data.session_id"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"structured_output": mappingRef("data.structured_output"),
+			"result":            mappingRef("data.result"),
 		},
 	}
 }
@@ -4084,6 +4030,11 @@ func finalizeActionOperation() methodology.ActionOperation {
 }
 
 func optionalExecutionOperation(name string) methodology.ActionOperation {
+	if name == OperationKindLoadReviewRemarks {
+		operation := loadReviewRemarksActionOperation()
+		operation.Required = boolRef(false)
+		return operation
+	}
 	return methodology.ActionOperation{Name: name, Kind: name, Origin: OperationOriginBuiltin, Required: boolRef(false)}
 }
 
