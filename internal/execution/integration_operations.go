@@ -908,31 +908,6 @@ func (e builtinOperationExecutor) integrationExecutor() (integrationExecutor, er
 	return e.service.integrations, nil
 }
 
-func pullRequestRefFromState(state *operationExecution) pullRequestRef {
-	ref := pullRequestRefFromAssignment(state.assignment)
-	if state != nil && state.pullRequest != nil {
-		if strings.TrimSpace(ref.Repository) == "" {
-			ref.Repository = state.pullRequest.Repository
-		}
-		if ref.Number <= 0 {
-			ref.Number = state.pullRequest.Number
-		}
-		if strings.TrimSpace(ref.Base) == "" {
-			ref.Base = state.pullRequest.BaseRef
-		}
-		if strings.TrimSpace(ref.Head) == "" {
-			ref.Head = state.pullRequest.HeadRef
-		}
-		if strings.TrimSpace(ref.Title) == "" {
-			ref.Title = state.pullRequest.Title
-		}
-	}
-	if strings.TrimSpace(ref.Head) == "" && state != nil && state.assignment != nil && state.assignment.CanonicalTask != nil && state.assignment.CanonicalTask.Number > 0 {
-		ref.Head = strconv.Itoa(state.assignment.CanonicalTask.Number)
-	}
-	return ref
-}
-
 func pullRequestRefFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput) pullRequestRef {
 	ref := pullRequestRefFromAssignment(publishMergeRequestAssignment(state, input))
 	if strings.TrimSpace(ref.Head) == "" {
@@ -1239,26 +1214,6 @@ func mergeRequestSummary(pr integration.MergeRequest) string {
 	return fmt.Sprintf("repository=%s number=%d state=%s base=%s head=%s url=%s", pr.Repository, pr.Number, pr.State, pr.BaseRef, pr.HeadRef, pr.URL)
 }
 
-func pullRequestTitle(state *operationExecution) string {
-	ref := pullRequestRefFromState(state)
-	if strings.TrimSpace(ref.Title) != "" {
-		return strings.TrimSpace(ref.Title)
-	}
-	if state != nil && state.assignment != nil && state.assignment.CanonicalTask != nil {
-		task := state.assignment.CanonicalTask
-		if task.Number > 0 && strings.TrimSpace(task.Title) != "" {
-			return fmt.Sprintf("Задача #%d: %s", task.Number, strings.TrimSpace(task.Title))
-		}
-		if task.Number > 0 {
-			return fmt.Sprintf("Задача #%d", task.Number)
-		}
-	}
-	if state != nil && state.result.StructuredOutput != nil && strings.TrimSpace(state.result.StructuredOutput.CommitMessage) != "" {
-		return strings.TrimSpace(state.result.StructuredOutput.CommitMessage)
-	}
-	return "Инженерное изменение"
-}
-
 func pullRequestTitleFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput, ref pullRequestRef) string {
 	if strings.TrimSpace(ref.Title) != "" {
 		return strings.TrimSpace(ref.Title)
@@ -1277,42 +1232,6 @@ func pullRequestTitleFromPublishMergeRequestInput(state *operationExecution, inp
 		return strings.TrimSpace(input.structuredOutput.CommitMessage)
 	}
 	return "Инженерное изменение"
-}
-
-func pullRequestBody(state *operationExecution) string {
-	parts := []string{}
-	if state != nil && state.assignment != nil && state.assignment.CanonicalTask != nil {
-		task := state.assignment.CanonicalTask
-		if task.Number > 0 {
-			parts = append(parts, fmt.Sprintf("Задача: #%d", task.Number))
-		}
-		if strings.TrimSpace(task.URL) != "" {
-			parts = append(parts, "Ссылка на задачу: "+strings.TrimSpace(task.URL))
-		}
-		if task.Attributes != nil && strings.TrimSpace(task.Attributes["body"]) != "" {
-			parts = append(parts, strings.TrimSpace(task.Attributes["body"]))
-		}
-	}
-	if output := state.result.StructuredOutput; output != nil {
-		if strings.TrimSpace(output.Summary) != "" {
-			parts = append(parts, "Результат:\n"+strings.TrimSpace(output.Summary))
-		}
-		if len(output.Changes) != 0 {
-			lines := []string{"Изменения:"}
-			for _, change := range output.Changes {
-				if strings.TrimSpace(change.Summary) != "" {
-					lines = append(lines, "- "+strings.TrimSpace(change.Summary))
-				}
-			}
-			if len(lines) > 1 {
-				parts = append(parts, strings.Join(lines, "\n"))
-			}
-		}
-	}
-	if len(parts) == 0 {
-		return "Запрос на слияние открыт контуром исполнения."
-	}
-	return strings.Join(parts, "\n\n")
 }
 
 func pullRequestBodyFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput) string {
