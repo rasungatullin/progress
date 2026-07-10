@@ -1372,8 +1372,11 @@ func TestCommitPushFillsOnlyActionData(t *testing.T) {
 			"result":            model.LaunchResult{Status: "completed", Summary: "launch complete"},
 			"structured_output": structuredOutput,
 		},
-		result:  model.LaunchResult{Status: "legacy", Summary: "legacy", StructuredOutput: &model.StructuredOutput{Summary: "Legacy."}},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+		profile:    model.Profile{Name: "legacy", Mode: "manual", ModelBinding: "legacy"},
+		allocation: model.Allocation{Resource: "legacy", Runner: "legacy"},
+		workplace:  model.Workplace{Name: "/tmp/legacy", Ready: true},
+		result:     model.LaunchResult{Status: "legacy", Summary: "legacy", StructuredOutput: &model.StructuredOutput{Summary: "Legacy."}},
+		tracker:    newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
 	launcher := &stubLauncher{commitSummary: "git=committed+pushed branch=task-42"}
 	service := &Service{
@@ -1398,6 +1401,15 @@ func TestCommitPushFillsOnlyActionData(t *testing.T) {
 	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
 		t.Fatalf("commit-push must not write implicit state result: %#v", state.result)
 	}
+	if state.profile.Name != "legacy" || state.profile.ModelBinding != "legacy" {
+		t.Fatalf("commit-push must not read or write implicit state profile: %#v", state.profile)
+	}
+	if state.allocation.Resource != "legacy" || state.allocation.Runner != "legacy" {
+		t.Fatalf("commit-push must not read or write implicit state allocation: %#v", state.allocation)
+	}
+	if state.workplace.Name != "/tmp/legacy" || !state.workplace.Ready {
+		t.Fatalf("commit-push must not read or write implicit state workplace: %#v", state.workplace)
+	}
 	if !launcher.commitCalled || launcher.commitOutput == nil || launcher.commitOutput.Summary != "Done." {
 		t.Fatalf("commit-push must pass structured output from operation input: %#v", launcher)
 	}
@@ -1420,8 +1432,12 @@ func TestCommitPushWritesResultForActionWithoutSynthesis(t *testing.T) {
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
-			"invocation": model.Invocation{Task: "task-42"},
-			"result":     model.LaunchResult{Status: "skipped", Summary: "synthesis=not-required"},
+			"invocation":        model.Invocation{Task: "task-42"},
+			"profile":           model.Profile{Name: "default", Mode: "manual"},
+			"allocation":        model.Allocation{Resource: "not-required"},
+			"workplace":         model.Workplace{Name: "/repo", Ready: true},
+			"result":            model.LaunchResult{Status: "skipped", Summary: "synthesis=not-required"},
+			"structured_output": (*model.StructuredOutput)(nil),
 		},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
@@ -3801,6 +3817,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 				result = append(result, parseResultActionOperation())
 				continue
 			}
+			if operation == OperationKindCommitPush {
+				result = append(result, commitPushActionOperation())
+				continue
+			}
 			result = append(result, methodology.ActionOperation{Name: operation, Kind: operation, Origin: OperationOriginBuiltin, Required: boolRef(true)})
 		case methodology.ActionOperation:
 			result = append(result, operation)
@@ -3913,6 +3933,28 @@ func parseResultActionOperation() methodology.ActionOperation {
 		},
 		Out: map[string]methodology.ActionMapping{
 			"structured_output": mappingRef("data.structured_output"),
+		},
+	}
+}
+
+func commitPushActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindCommitPush,
+		Kind:     OperationKindCommitPush,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"requires_synthesis": mappingRef("action.requires_synthesis"),
+			"invocation":         mappingRef("data.invocation"),
+			"profile":            mappingRef("data.profile"),
+			"allocation":         mappingRef("data.allocation"),
+			"workplace":          mappingRef("data.workplace"),
+			"result":             mappingRef("data.result"),
+			"structured_output":  mappingRef("data.structured_output"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"commit_summary": mappingRef("data.commit_summary"),
+			"result":         mappingRef("data.result"),
 		},
 	}
 }
@@ -4196,7 +4238,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
       ]
     },
@@ -4214,7 +4256,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
         {"name": "publish-merge-request", "kind": "publish-merge-request", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
       ]
@@ -4272,7 +4314,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
-        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true},
+        {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
         {"name": "publish-review-responses", "kind": "publish-review-responses", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true}
       ]

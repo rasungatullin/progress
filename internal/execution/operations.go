@@ -1588,12 +1588,6 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 	input := commitPushInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.invocation = invocationFromExecutionData(state)
-		input.profile = profileFromExecutionData(state)
-		input.allocation = allocationFromExecutionData(state)
-		input.workplace = workplaceFromExecutionData(state)
-		input.result = resultFromExecutionData(state)
-		input.structuredOutput = structuredOutputFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
