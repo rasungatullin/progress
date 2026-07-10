@@ -210,21 +210,19 @@
         "requires_synthesis": {
           "ref": "action.requires_synthesis"
         },
-        "invocation": {
-          "ref": "data.invocation"
-        },
         "directive": {
           "ref": "data.directive"
         },
-        "profile": {
-          "ref": "data.profile"
-        },
-        "allocation": {
-          "ref": "data.allocation"
-        },
-        "workplace": {
-          "ref": "data.workplace"
-        }
+        "task": {"ref": "data.invocation.task"},
+        "action": {"ref": "data.invocation.action"},
+        "directory": {"ref": "data.invocation.launch.directory"},
+        "profile_name": {"ref": "data.profile.name"},
+        "runner": {"ref": "data.allocation.runner"},
+        "model": {"ref": "data.allocation.model"},
+        "model_binding": {"ref": "data.allocation.model_binding"},
+        "workplace_name": {"ref": "data.workplace.name"},
+        "repository_url": {"ref": "data.invocation.repository.url"},
+        "structured_input": {"ref": "data.invocation.launch.structured_input"}
       },
       "out": {
         "result": {

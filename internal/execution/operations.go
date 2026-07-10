@@ -1478,6 +1478,12 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 			input.workplace = value
 		}
 	}
+	if _, ok := operation.In["invocation"]; !ok && state != nil {
+		input.invocation, _ = state.data["invocation"].(invocation)
+		input.profile, _ = state.data["profile"].(profile)
+		input.allocation, _ = state.data["allocation"].(allocation)
+		input.workplace, _ = state.data["workplace"].(workplace)
+	}
 	return input
 }
 
