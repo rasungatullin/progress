@@ -719,11 +719,6 @@ func profileValueFromAllocateResourcesMapping(state *operationExecution, mapping
 		}
 		value, ok := state.data["profile"].(profile)
 		return value, ok
-	case "state.profile":
-		if state == nil {
-			return profile{}, false
-		}
-		return state.profile, true
 	default:
 		return profile{}, false
 	}

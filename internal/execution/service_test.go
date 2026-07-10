@@ -838,6 +838,9 @@ func TestAllocateResourcesFillsOnlyActionData(t *testing.T) {
 	if state.allocation.Resource != "" || state.allocation.ModelBinding != "" {
 		t.Fatalf("allocate-resources must not write implicit state allocation: %#v", state.allocation)
 	}
+	if state.profile.Name != "legacy" || state.profile.ModelBinding != "legacy" {
+		t.Fatalf("allocate-resources must not read or write implicit state profile: %#v", state.profile)
+	}
 	if resources.profile.Name != "coder" || resources.profile.ModelBinding != "coder" {
 		t.Fatalf("resource allocation must use profile from operation input: %#v", resources.profile)
 	}
