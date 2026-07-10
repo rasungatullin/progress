@@ -631,8 +631,6 @@ func allocateResourcesInputFromOperation(state *operationExecution, operation Op
 	input := allocateResourcesInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.invocation = invocationFromExecutionData(state)
-		input.profile = profileFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -683,11 +681,6 @@ func invocationValueFromAllocateResourcesMapping(state *operationExecution, mapp
 		return invocation{}, false
 	}
 	switch strings.TrimSpace(mapping.Ref) {
-	case "in", "invocation":
-		if state == nil {
-			return invocation{}, false
-		}
-		return state.in, true
 	case "data.invocation":
 		if state == nil {
 			return invocation{}, false

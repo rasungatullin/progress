@@ -311,8 +311,8 @@ func methodologyCatalogJSON() string {
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "required": true},
-        {"name": "allocate-resources", "kind": "allocate-resources", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true},
         {"name": "build-directive", "kind": "build-directive", "required": true},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true},
@@ -329,8 +329,8 @@ func methodologyCatalogJSON() string {
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "required": true},
-        {"name": "allocate-resources", "kind": "allocate-resources", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true},
         {"name": "build-directive", "kind": "build-directive", "required": true},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true},
@@ -346,8 +346,8 @@ func methodologyCatalogJSON() string {
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "required": true},
-        {"name": "allocate-resources", "kind": "allocate-resources", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true},
         {"name": "build-directive", "kind": "build-directive", "required": true},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true},
