@@ -900,6 +900,24 @@ func TestAllocateResourcesFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestAllocateResourcesUsesResolvedProfileFields(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{data: map[string]any{
+		"profile": model.Profile{Name: "coder", ModelBinding: "coder", AllowModelFallback: false},
+	}}
+	operation := model.OperationSpec{In: model.OperationMap{
+		"model_binding":        {Ref: "data.profile.model_binding"},
+		"allow_model_fallback": {Ref: "data.profile.allow_model_fallback"},
+	}}
+
+	input := allocateResourcesInputFromOperation(state, operation)
+	resolved := input.resolvedProfile()
+	if resolved.ModelBinding != "coder" || resolved.AllowModelFallback {
+		t.Fatalf("allocate-resources must receive resolved profile fields: %#v", resolved)
+	}
+}
+
 func TestAllocateResourcesFailureDoesNotWriteStateResult(t *testing.T) {
 	t.Parallel()
 

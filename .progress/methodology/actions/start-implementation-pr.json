@@ -118,7 +118,7 @@
       "name": "allocate-resources",
       "in": {
         "model_binding": {
-          "ref": "in.model_binding"
+          "ref": "data.profile.model_binding"
         },
         "allow_model_fallback": {
           "ref": "data.profile.allow_model_fallback"
