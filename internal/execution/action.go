@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -234,11 +235,12 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 	if ok {
 		resolvedOperation = normalizeMethodologyOperation(resolvedOperation)
 		defaultSpec = model.OperationSpec{
-			Name:     resolvedOperation.Name,
-			Kind:     model.OperationKind(resolvedOperation.Kind),
-			Title:    resolvedOperation.Title,
-			Origin:   resolvedOperation.Origin,
-			Required: resolvedOperation.Required != nil && *resolvedOperation.Required,
+			Name:       resolvedOperation.Name,
+			Kind:       model.OperationKind(resolvedOperation.Kind),
+			Title:      resolvedOperation.Title,
+			Origin:     resolvedOperation.Origin,
+			Required:   resolvedOperation.Required != nil && *resolvedOperation.Required,
+			RequiredIn: requiredOperationInputFields(resolvedOperation.Contract),
 		}
 	} else {
 		defaultSpec = defaultOperationSpec(kind)
@@ -266,6 +268,17 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 		defaultSpec.Required = *operation.Required
 	}
 	return defaultSpec, nil
+}
+
+func requiredOperationInputFields(contract methodology.OperationContract) []string {
+	result := make([]string, 0, len(contract.In))
+	for name, field := range contract.In {
+		if field.Required != nil && *field.Required {
+			result = append(result, strings.TrimSpace(name))
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func operationMappingFromMethodology(mappings map[string]methodology.ActionMapping) model.OperationMap {

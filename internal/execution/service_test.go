@@ -1453,6 +1453,48 @@ func TestCommitPushDoesNotReadActionSynthesisFlag(t *testing.T) {
 	}
 }
 
+func TestOperationFailsWhenRequiredInputIsNotResolved(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   model.OperationMap
+	}{
+		{name: "mapping is absent", in: model.OperationMap{}},
+		{name: "referenced data is absent", in: model.OperationMap{"directory": {Ref: "data.workplace.name"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			operation := model.OperationSpec{
+				Name:       OperationKindCommitPush,
+				Kind:       OperationKindCommitPush,
+				Origin:     OperationOriginBuiltin,
+				Required:   true,
+				RequiredIn: []string{"directory"},
+				In:         test.in,
+			}
+			state := &operationExecution{
+				action:  model.Action{Operations: []model.OperationSpec{operation}},
+				data:    map[string]any{},
+				tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+			}
+			service := &Service{logger: log.Default(), launcher: &stubLauncher{}}
+
+			err := (builtinOperationExecutor{service: service}).Execute(context.Background(), state, operation)
+			if err == nil || !strings.Contains(err.Error(), `required input "directory" is not resolved`) {
+				t.Fatalf("expected required input error, got %v", err)
+			}
+			result := findOperationResult(state.tracker.snapshot(), OperationKindCommitPush)
+			if result == nil || result.Status != OperationStatusFailed || result.Failure == nil || result.Failure.Code != "operation_required_input_missing" {
+				t.Fatalf("unexpected operation result: %#v", result)
+			}
+			if service.launcher.(*stubLauncher).commitCalled {
+				t.Fatal("operation implementation must not run after contract validation failure")
+			}
+		})
+	}
+}
+
 func TestLoadPullRequestFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 

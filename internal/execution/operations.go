@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -58,9 +59,83 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 }
 
 func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationExecution, operation OperationSpec) error {
+	if err := validateRequiredOperationInput(state, operation); err != nil {
+		state.tracker.fail(operationResultName(operation), "Обязательное поле входного контракта операции не разрешено.", err, "operation_required_input_missing", false, true)
+		e.service.recordOperationHistory(ctx, state, operation, err)
+		return err
+	}
 	err := e.execute(ctx, state, operation)
 	e.service.recordOperationHistory(ctx, state, operation, err)
 	return err
+}
+
+func validateRequiredOperationInput(state *operationExecution, operation OperationSpec) error {
+	for _, field := range operation.RequiredIn {
+		mapping, ok := operation.In[field]
+		if !ok || !operationMappingResolved(state, mapping) {
+			return fmt.Errorf("operation %q required input %q is not resolved", operationResultName(operation), field)
+		}
+	}
+	return nil
+}
+
+func operationMappingResolved(state *operationExecution, mapping model.OperationMapping) bool {
+	if len(mapping.Value) != 0 {
+		return json.Valid(mapping.Value) && string(mapping.Value) != "null"
+	}
+	ref := strings.TrimSpace(mapping.Ref)
+	if ref == "" || state == nil {
+		return false
+	}
+	parts := strings.Split(ref, ".")
+	switch parts[0] {
+	case "action":
+		return reflectedPathResolved(reflect.ValueOf(state.action), parts[1:])
+	case "data":
+		if len(parts) < 2 || state.data == nil {
+			return false
+		}
+		value, ok := state.data[parts[1]]
+		return ok && reflectedPathResolved(reflect.ValueOf(value), parts[2:])
+	case "in":
+		if ref == "in.invocation" {
+			return true
+		}
+		return reflectedPathResolved(reflect.ValueOf(assignmentFromInvocation(state.in)), parts[1:])
+	default:
+		return false
+	}
+}
+
+func reflectedPathResolved(value reflect.Value, path []string) bool {
+	for value.IsValid() && (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) {
+		if value.IsNil() {
+			return false
+		}
+		value = value.Elem()
+	}
+	if !value.IsValid() {
+		return false
+	}
+	if len(path) == 0 {
+		return true
+	}
+	if value.Kind() != reflect.Struct {
+		return false
+	}
+	name := path[0]
+	for index := 0; index < value.NumField(); index++ {
+		fieldType := value.Type().Field(index)
+		jsonName := strings.Split(fieldType.Tag.Get("json"), ",")[0]
+		if jsonName == "" {
+			jsonName = fieldType.Name
+		}
+		if jsonName != name {
+			continue
+		}
+		return reflectedPathResolved(value.Field(index), path[1:])
+	}
+	return false
 }
 
 func (e builtinOperationExecutor) execute(ctx context.Context, state *operationExecution, operation OperationSpec) error {

@@ -349,13 +349,14 @@ type Action struct {
 }
 
 type OperationSpec struct {
-	Name     string        `json:"name,omitempty"`
-	Kind     OperationKind `json:"kind,omitempty"`
-	Title    string        `json:"title,omitempty"`
-	Origin   string        `json:"origin,omitempty"`
-	In       OperationMap  `json:"in,omitempty"`
-	Out      OperationMap  `json:"out,omitempty"`
-	Required bool          `json:"required,omitempty"`
+	Name       string        `json:"name,omitempty"`
+	Kind       OperationKind `json:"kind,omitempty"`
+	Title      string        `json:"title,omitempty"`
+	Origin     string        `json:"origin,omitempty"`
+	In         OperationMap  `json:"in,omitempty"`
+	Out        OperationMap  `json:"out,omitempty"`
+	Required   bool          `json:"required,omitempty"`
+	RequiredIn []string      `json:"required_in,omitempty"`
 }
 
 type OperationMap map[string]OperationMapping
