@@ -1469,17 +1469,29 @@ func TestLoadPullRequestFillsOnlyActionData(t *testing.T) {
 	operation := loadPullRequestOperationSpec()
 	state := &operationExecution{
 		in: model.Invocation{
+			Action: "legacy",
 			Assignment: &ExecutionAssignment{
-				CanonicalTask: &ObjectRef{Type: "task", Number: 112},
 				RelatedObjects: []ObjectRef{{
 					Type:       "merge-request",
-					Repository: "owner/name",
-					Number:     17,
+					Repository: "legacy/name",
+					Number:     999,
 				}},
 			},
 		},
-		action:  model.Action{Operations: []model.OperationSpec{operation}},
-		data:    map[string]any{},
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation": model.Invocation{
+				Task: "task-112",
+				Assignment: &ExecutionAssignment{
+					CanonicalTask: &ObjectRef{Type: "task", Number: 112},
+					RelatedObjects: []ObjectRef{{
+						Type:       "merge-request",
+						Repository: "owner/name",
+						Number:     17,
+					}},
+				},
+			},
+		},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
 	integrations := &stubIntegrationExecutor{
@@ -3820,6 +3832,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 				result = append(result, prepareWorkplaceActionOperation())
 				continue
 			}
+			if operation == OperationKindLoadPullRequest {
+				result = append(result, loadPullRequestActionOperation())
+				continue
+			}
 			if operation == OperationKindBuildDirective {
 				result = append(result, buildDirectiveActionOperation())
 				continue
@@ -3897,6 +3913,23 @@ func prepareWorkplaceActionOperation() methodology.ActionOperation {
 		Out: map[string]methodology.ActionMapping{
 			"workplace":  mappingRef("data.workplace"),
 			"invocation": mappingRef("data.invocation"),
+		},
+	}
+}
+
+func loadPullRequestActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindLoadPullRequest,
+		Kind:     OperationKindLoadPullRequest,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"invocation": mappingRef("data.invocation"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"pull_request": mappingRef("data.pull_request"),
+			"invocation":   mappingRef("data.invocation"),
+			"result":       mappingRef("data.result"),
 		},
 	}
 }
@@ -4331,7 +4364,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
-        {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true},
+        {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": false},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
@@ -4351,7 +4384,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
-        {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true},
+        {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": true},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},

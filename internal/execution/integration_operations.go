@@ -63,7 +63,7 @@ func (e builtinOperationExecutor) failLoadPullRequestOperation(ctx context.Conte
 	result := failedStartResult(err)
 	writeLoadPullRequestFailureData(state, operation, result)
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, in, model.Profile{}, model.Allocation{}, model.Workplace{}, result, err)
 	return err
 }
 
@@ -93,9 +93,6 @@ type loadPullRequestInput struct {
 
 func loadPullRequestInputFromOperation(state *operationExecution, operation OperationSpec) loadPullRequestInput {
 	input := loadPullRequestInput{}
-	if state != nil {
-		input.invocation = invocationFromExecutionData(state)
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
