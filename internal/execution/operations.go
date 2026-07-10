@@ -816,9 +816,6 @@ func prepareWorkplaceInputFromOperation(state *operationExecution, operation Ope
 	input := prepareWorkplaceInput{}
 	if state != nil {
 		input.requiresWorkplace = state.action.RequiresWorkplace
-		input.invocation = invocationFromExecutionData(state)
-		input.profile = profileFromExecutionData(state)
-		input.allocation = allocationFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -874,11 +871,6 @@ func invocationValueFromPrepareWorkplaceMapping(state *operationExecution, mappi
 		return invocation{}, false
 	}
 	switch strings.TrimSpace(mapping.Ref) {
-	case "in", "invocation":
-		if state == nil {
-			return invocation{}, false
-		}
-		return state.in, true
 	case "data.invocation":
 		if state == nil {
 			return invocation{}, false
