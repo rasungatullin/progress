@@ -6,22 +6,12 @@
   "required": true,
   "contract": {
     "in": {
-      "requires_synthesis": {
-        "type": "boolean",
-        "required": true,
-        "description": "Признак необходимости запуска синтеза для разрешённого действия."
-      },
-      "result": {
-        "type": "object",
-        "required": true,
-        "description": "Результат запуска выполнения."
-      }
+      "raw_output": {"type": "string", "required": true, "description": "Фактический вывод исполнительного модуля."},
+      "session_id": {"type": "string", "description": "Идентификатор сеанса исполнительного модуля."}
     },
     "out": {
-      "structured_output": {
-        "type": "object",
-        "description": "Нормализованный структурированный результат выполнения."
-      }
+      "structured_output": {"type": "object", "description": "Нормализованный структурированный результат выполнения."},
+      "result": {"type": "object", "required": true, "description": "Нормализованный результат выполнения."}
     }
   }
 }

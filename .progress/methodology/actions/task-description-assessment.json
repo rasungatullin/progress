@@ -9,7 +9,6 @@
     "prepare-task"
   ],
   "requires_workplace": true,
-  "requires_synthesis": true,
   "contract": {
     "in": {
       "expected_result": {
@@ -57,10 +56,6 @@
         "type": "object",
         "description": "Результат ресурсного снабжения для последующих операций действия."
       },
-      "directive": {
-        "type": "object",
-        "description": "Подготовленная исполнительная директива для запуска выполнения."
-      },
       "result": {
         "type": "object",
         "description": "Результат запуска выполнения."
@@ -68,55 +63,27 @@
       "structured_output": {
         "type": "object",
         "description": "Нормализованный структурированный результат выполнения."
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Готовая исполнительная директива."
+      },
+      "raw_output": {
+        "type": "string",
+        "description": "Фактический вывод исполнительного модуля."
+      },
+      "session_id": {
+        "type": "string",
+        "description": "Идентификатор сеанса исполнительного модуля."
       }
     }
   },
   "operations": [
     {
-      "name": "prepare-data",
-      "in": {
-        "invocation": {
-          "ref": "in.invocation"
-        },
-        "expected_result": {
-          "ref": "in.expected_result"
-        },
-        "constraints": {
-          "ref": "in.constraints"
-        },
-        "canonical_task": {
-          "ref": "in.canonical_task"
-        },
-        "related_objects": {
-          "ref": "in.related_objects"
-        },
-        "reasons": {
-          "ref": "in.reasons"
-        },
-        "structured_input": {
-          "ref": "in.structured_input"
-        }
-      },
-      "out": {
-        "structured_input": {
-          "ref": "data.structured_input"
-        },
-        "workplace": {
-          "ref": "data.workplace"
-        },
-        "invocation": {
-          "ref": "data.invocation"
-        }
-      }
-    },
-    {
       "name": "resolve-profile",
       "in": {
         "profile_name": {
           "ref": "action.profile"
-        },
-        "invocation": {
-          "ref": "data.invocation"
         }
       },
       "out": {
@@ -131,14 +98,26 @@
     {
       "name": "allocate-resources",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
+        "model_binding": {
+          "ref": "in.model_binding"
         },
-        "invocation": {
-          "ref": "data.invocation"
+        "allow_model_fallback": {
+          "ref": "data.profile.allow_model_fallback"
         },
-        "profile": {
-          "ref": "data.profile"
+        "runner": {
+          "ref": "in.runner"
+        },
+        "model": {
+          "ref": "in.model"
+        },
+        "environment": {
+          "ref": "in.environment"
+        },
+        "workplace_name": {
+          "ref": "in.workplace_name"
+        },
+        "repository_url": {
+          "ref": "in.repository_url"
         }
       },
       "out": {
@@ -153,120 +132,138 @@
         "requires_workplace": {
           "ref": "action.requires_workplace"
         },
-        "invocation": {
-          "ref": "data.invocation"
+        "directory": {
+          "ref": "in.directory"
         },
-        "profile": {
-          "ref": "data.profile"
+        "repository_url": {
+          "ref": "in.repository_url"
         },
-        "allocation": {
-          "ref": "data.allocation"
+        "environment": {
+          "ref": "in.environment"
+        },
+        "workplace_name": {
+          "ref": "in.workplace_name"
+        },
+        "base_ref": {
+          "ref": "in.base_ref"
+        },
+        "head_ref": {
+          "ref": "in.head_ref"
+        },
+        "allocated_environment": {
+          "ref": "data.allocation.environment"
+        },
+        "allocated_environment_type": {
+          "ref": "data.allocation.environment_type"
+        },
+        "action_name": {
+          "ref": "action.name"
+        },
+        "pull_request_base_ref": {
+          "ref": "in.pull_request_base_ref"
+        },
+        "pull_request_head_ref": {
+          "ref": "in.pull_request_head_ref"
         }
       },
       "out": {
         "workplace": {
           "ref": "data.workplace"
-        },
-        "invocation": {
-          "ref": "data.invocation"
         }
       }
     },
     {
-      "name": "build-directive",
+      "name": "build-prompt",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
+        "prompt": {
+          "ref": "in.launch.prompt"
         },
-        "invocation": {
-          "ref": "data.invocation"
+        "prompt_additions": {
+          "ref": "data.profile.prompt_additions"
         },
-        "profile": {
-          "ref": "data.profile"
+        "structured_output": {
+          "ref": "data.profile.structured_output"
         },
-        "allocation": {
-          "ref": "data.allocation"
+        "structured_output_required": {
+          "ref": "data.profile.structured_output_required"
         },
-        "workplace": {
-          "ref": "data.workplace"
+        "structured_output_fields": {
+          "ref": "data.profile.structured_output_fields"
+        },
+        "structured_input": {
+          "ref": "in.structured_input"
         }
       },
       "out": {
-        "directive": {
-          "ref": "data.directive"
+        "prompt": {
+          "ref": "data.prompt"
         }
       }
     },
     {
       "name": "launch-synthesis",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
+        "prompt": {
+          "ref": "data.prompt"
         },
-        "invocation": {
-          "ref": "data.invocation"
+        "directory": {
+          "ref": "data.workplace.name"
         },
-        "directive": {
-          "ref": "data.directive"
+        "runner": {
+          "ref": "data.allocation.runner"
         },
-        "profile": {
-          "ref": "data.profile"
+        "model": {
+          "ref": "data.allocation.model"
         },
-        "allocation": {
-          "ref": "data.allocation"
-        },
-        "workplace": {
-          "ref": "data.workplace"
+        "resume_session_id": {
+          "ref": "in.launch.resume.runner_session_id"
         }
       },
       "out": {
-        "result": {
-          "ref": "data.result"
+        "raw_output": {
+          "ref": "data.raw_output"
+        },
+        "session_id": {
+          "ref": "data.session_id"
         }
       }
     },
     {
       "name": "parse-result",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
+        "raw_output": {
+          "ref": "data.raw_output"
         },
-        "result": {
-          "ref": "data.result"
+        "session_id": {
+          "ref": "data.session_id"
         }
       },
       "out": {
         "structured_output": {
           "ref": "data.structured_output"
+        },
+        "result": {
+          "ref": "data.result"
         }
       }
     },
     {
       "name": "finalize",
       "in": {
-        "requires_synthesis": {
-          "ref": "action.requires_synthesis"
-        },
         "action_name": {
           "ref": "action.name"
         },
         "action_class": {
           "ref": "action.class"
         },
-        "invocation": {
-          "ref": "data.invocation"
+        "result_status": {
+          "ref": "data.result.status"
         },
-        "profile": {
-          "ref": "data.profile"
+        "result_summary": {
+          "ref": "data.result.summary"
         },
-        "allocation": {
-          "ref": "data.allocation"
-        },
-        "workplace": {
-          "ref": "data.workplace"
-        },
-        "result": {
-          "ref": "data.result"
+        "structured_output": {
+          "ref": "data.result.structured_output"
         }
       },
       "out": {

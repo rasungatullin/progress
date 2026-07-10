@@ -5,31 +5,22 @@
   "origin": "builtin",
   "contract": {
     "in": {
-      "invocation": {
-        "type": "object",
+      "repository": {
+        "type": "string",
         "required": true,
-        "description": "Ввод контура исполнения, синхронизированный с параметрами запроса на слияние."
+        "description": "Репозиторий запроса на слияние."
       },
-      "pull_request": {
-        "type": "object",
+      "number": {
+        "type": "integer",
         "required": true,
-        "description": "Загруженный запрос на слияние, по которому нужно получить замечания ревизии."
+        "description": "Номер запроса на слияние."
       }
     },
     "out": {
       "review_remarks": {
         "type": "object_array",
-        "description": "Загруженные замечания ревизии."
-      },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Ввод контура исполнения, дополненный замечаниями ревизии."
-      },
-      "result": {
-        "type": "object",
-        "required": false,
-        "description": "Результат отказа при невозможности получить замечания ревизии."
+        "description": "Загруженные замечания ревизии.",
+        "required": true
       }
     }
   }

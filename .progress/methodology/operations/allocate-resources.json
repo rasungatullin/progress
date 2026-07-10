@@ -6,20 +6,35 @@
   "required": true,
   "contract": {
     "in": {
-      "requires_synthesis": {
+      "model_binding": {
+        "type": "string",
+        "required": true,
+        "description": "Явная привязка модели выполнения к ресурсу."
+      },
+      "allow_model_fallback": {
         "type": "boolean",
         "required": true,
-        "description": "Признак необходимости запуска синтеза для разрешённого действия."
+        "description": "Разрешение резервного выбора модели при недоступности привязки."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
+      "runner": {
+        "type": "string",
+        "description": "Исполнительный модуль для запуска."
       },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
+      "model": {
+        "type": "string",
+        "description": "Модель выполнения."
+      },
+      "environment": {
+        "type": "string",
+        "description": "Среда выполнения."
+      },
+      "workplace_name": {
+        "type": "string",
+        "description": "Имя рабочего места для определения типа среды."
+      },
+      "repository_url": {
+        "type": "string",
+        "description": "Адрес репозитория для определения типа среды."
       }
     },
     "out": {

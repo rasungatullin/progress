@@ -94,7 +94,6 @@ type Action struct {
 	Profile           string            `json:"profile,omitempty"`
 	Aliases           []string          `json:"aliases,omitempty"`
 	RequiresWorkplace *bool             `json:"requires_workplace,omitempty"`
-	RequiresSynthesis *bool             `json:"requires_synthesis,omitempty"`
 	Contract          ActionContract    `json:"contract,omitempty"`
 	Operations        []ActionOperation `json:"operations,omitempty"`
 	Description       string            `json:"description,omitempty"`
@@ -112,15 +111,15 @@ type ActionOperation struct {
 }
 
 type ActionContract struct {
-	In   map[string]ActionContractField `json:"in,omitempty"`
-	Data map[string]ActionContractField `json:"data,omitempty"`
-	Out  map[string]ActionContractField `json:"out,omitempty"`
-	hasIn   bool
-	hasData bool
-	hasOut  bool
-	inNull  bool
+	In       map[string]ActionContractField `json:"in,omitempty"`
+	Data     map[string]ActionContractField `json:"data,omitempty"`
+	Out      map[string]ActionContractField `json:"out,omitempty"`
+	hasIn    bool
+	hasData  bool
+	hasOut   bool
+	inNull   bool
 	dataNull bool
-	outNull bool
+	outNull  bool
 }
 
 type ActionContractField struct {
@@ -266,11 +265,11 @@ type Operation struct {
 }
 
 type OperationContract struct {
-	In  map[string]OperationContractField `json:"in,omitempty"`
-	Out map[string]OperationContractField `json:"out,omitempty"`
-	hasIn  bool
-	hasOut bool
-	inNull bool
+	In      map[string]OperationContractField `json:"in,omitempty"`
+	Out     map[string]OperationContractField `json:"out,omitempty"`
+	hasIn   bool
+	hasOut  bool
+	inNull  bool
 	outNull bool
 }
 
@@ -919,15 +918,15 @@ func normalizeOperation(operation Operation) Operation {
 
 func normalizeActionContract(contract ActionContract) ActionContract {
 	return ActionContract{
-		In:      normalizeActionContractFields(contract.In),
-		Data:    normalizeActionContractFields(contract.Data),
-		Out:     normalizeActionContractFields(contract.Out),
-		hasIn:   contract.hasIn,
-		hasData: contract.hasData,
-		hasOut:  contract.hasOut,
-		inNull:  contract.inNull,
+		In:       normalizeActionContractFields(contract.In),
+		Data:     normalizeActionContractFields(contract.Data),
+		Out:      normalizeActionContractFields(contract.Out),
+		hasIn:    contract.hasIn,
+		hasData:  contract.hasData,
+		hasOut:   contract.hasOut,
+		inNull:   contract.inNull,
 		dataNull: contract.dataNull,
-		outNull: contract.outNull,
+		outNull:  contract.outNull,
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,7 @@ const (
 	OperationKindAllocateResources      = "allocate-resources"
 	OperationKindPrepareWorkplace       = "prepare-workplace"
 	OperationKindBuildDirective         = "build-directive"
+	OperationKindBuildPrompt            = "build-prompt"
 	OperationKindLaunchSynthesis        = "launch-synthesis"
 	OperationKindParseResult            = "parse-result"
 	OperationKindCommitPush             = "commit-push"
@@ -212,7 +214,6 @@ func executionActionFromMethodology(action methodology.Action, operationsByName 
 		Profile:           strings.TrimSpace(action.Profile),
 		ExpectedResult:    strings.TrimSpace(action.ExpectedResult),
 		RequiresWorkplace: actionRequiresWorkplace(action, operations),
-		RequiresSynthesis: actionRequiresSynthesis(action, operations),
 		Operations:        operations,
 	}, nil
 }
@@ -234,11 +235,12 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 	if ok {
 		resolvedOperation = normalizeMethodologyOperation(resolvedOperation)
 		defaultSpec = model.OperationSpec{
-			Name:     resolvedOperation.Name,
-			Kind:     model.OperationKind(resolvedOperation.Kind),
-			Title:    resolvedOperation.Title,
-			Origin:   resolvedOperation.Origin,
-			Required: resolvedOperation.Required != nil && *resolvedOperation.Required,
+			Name:       resolvedOperation.Name,
+			Kind:       model.OperationKind(resolvedOperation.Kind),
+			Title:      resolvedOperation.Title,
+			Origin:     resolvedOperation.Origin,
+			Required:   resolvedOperation.Required != nil && *resolvedOperation.Required,
+			RequiredIn: requiredOperationInputFields(resolvedOperation.Contract),
 		}
 	} else {
 		defaultSpec = defaultOperationSpec(kind)
@@ -266,6 +268,17 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 		defaultSpec.Required = *operation.Required
 	}
 	return defaultSpec, nil
+}
+
+func requiredOperationInputFields(contract methodology.OperationContract) []string {
+	result := make([]string, 0, len(contract.In))
+	for name, field := range contract.In {
+		if field.Required != nil && *field.Required {
+			result = append(result, strings.TrimSpace(name))
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func operationMappingFromMethodology(mappings map[string]methodology.ActionMapping) model.OperationMap {
@@ -318,6 +331,8 @@ func defaultOperationSpec(kind string) model.OperationSpec {
 		return builtinOperation(OperationKindPrepareWorkplace, "Подготовка рабочего места", true)
 	case OperationKindBuildDirective:
 		return builtinOperation(OperationKindBuildDirective, "Сборка исполнительной директивы", true)
+	case OperationKindBuildPrompt:
+		return builtinOperation(OperationKindBuildPrompt, "Сборка исполнительной директивы", true)
 	case OperationKindLaunchSynthesis:
 		return builtinOperation(OperationKindLaunchSynthesis, "Запуск синтеза", true)
 	case OperationKindParseResult:
@@ -344,19 +359,6 @@ func actionRequiresWorkplace(action methodology.Action, operations []model.Opera
 	for _, operation := range operations {
 		switch operationKind(operation) {
 		case OperationKindPrepareWorkplace, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindPublishReviewRemarks, OperationKindPublishReviewResponses:
-			return true
-		}
-	}
-	return false
-}
-
-func actionRequiresSynthesis(action methodology.Action, operations []model.OperationSpec) bool {
-	if action.RequiresSynthesis != nil {
-		return *action.RequiresSynthesis
-	}
-	for _, operation := range operations {
-		switch operationKind(operation) {
-		case OperationKindBuildDirective, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush:
 			return true
 		}
 	}
@@ -474,12 +476,10 @@ func executionFailure(code string, err error, retryable bool, manualIntervention
 
 func executionResultFromLaunch(assignment *model.ExecutionAssignment, action model.Action, operations []model.OperationResult, result model.LaunchResult, err error) model.ExecutionResult {
 	status := strings.TrimSpace(result.Status)
-	if status == "" {
-		if err != nil {
-			status = "failed"
-		} else {
-			status = "completed"
-		}
+	if err != nil {
+		status = "failed"
+	} else if status == "" {
+		status = "completed"
 	}
 	executionResult := model.ExecutionResult{
 		Status:          status,

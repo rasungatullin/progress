@@ -6,43 +6,15 @@
   "required": true,
   "contract": {
     "in": {
-      "requires_synthesis": {
-        "type": "boolean",
-        "required": true,
-        "description": "Признак необходимости запуска синтеза для разрешённого действия."
-      },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
-      },
-      "directive": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленная исполнительная директива."
-      },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
-      },
-      "allocation": {
-        "type": "object",
-        "required": true,
-        "description": "Результат ресурсного снабжения."
-      },
-      "workplace": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленное рабочее место."
-      }
+      "prompt": {"type": "string", "required": true, "description": "Готовая исполнительная директива."},
+      "directory": {"type": "string", "required": true, "description": "Рабочий каталог исполнительного модуля."},
+      "runner": {"type": "string", "required": true, "description": "Исполнительный модуль."},
+      "model": {"type": "string", "required": true, "description": "Модель выполнения."},
+      "resume_session_id": {"type": "string", "description": "Идентификатор возобновляемого сеанса."}
     },
     "out": {
-      "result": {
-        "type": "object",
-        "required": true,
-        "description": "Результат запуска выполнения."
-      }
+      "raw_output": {"type": "string", "required": true, "description": "Фактический вывод исполнительного модуля."},
+      "session_id": {"type": "string", "description": "Идентификатор сеанса исполнительного модуля."}
     }
   }
 }

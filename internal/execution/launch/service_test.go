@@ -1117,7 +1117,7 @@ func TestCommitAndPushRejectsIncompletePushOverrideBeforeGitAdd(t *testing.T) {
 	allocation := validAllocation()
 	allocation.Git = &model.GitConfig{Push: &model.GitPushConfig{KnownHostsFile: "/keys/known_hosts", IdentitiesOnly: true}}
 
-	_, err := service.commitAndPush(context.Background(), validInvocation(t, true), allocation, validWorkplace(t), nil)
+	_, err := service.commitAndPush(context.Background(), commitPushInputFromLaunch(validInvocation(t, true), allocation, validWorkplace(t), nil))
 	if err == nil {
 		t.Fatal("expected incomplete git push override error")
 	}

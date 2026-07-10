@@ -71,6 +71,7 @@ type StructuredRemark struct {
 type StructuredResponse struct {
 	ID       string `json:"id,omitempty"`
 	RemarkID string `json:"remark_id,omitempty"`
+	ThreadID string `json:"thread_id,omitempty"`
 	Status   string `json:"status,omitempty"`
 	Summary  string `json:"summary,omitempty"`
 	Body     string `json:"body,omitempty"`
@@ -274,6 +275,15 @@ type GitPushConfig struct {
 	IdentitiesOnly          bool   `json:"identities-only,omitempty"`
 }
 
+type CommitPushInput struct {
+	Directory     string                     `json:"directory,omitempty"`
+	CommitMessage string                     `json:"commit_message,omitempty"`
+	FallbackName  string                     `json:"fallback_name,omitempty"`
+	Git           *GitConfig                 `json:"-"`
+	PrivateStore  ResourcePrivateStoreConfig `json:"-"`
+	ConfigHome    string                     `json:"-"`
+}
+
 type ResourceBindingConfig struct {
 	Runner      string `json:"runner,omitempty"`
 	Model       string `json:"model,omitempty"`
@@ -335,18 +345,18 @@ type Action struct {
 	Profile           string          `json:"profile,omitempty"`
 	ExpectedResult    string          `json:"expected_result,omitempty"`
 	RequiresWorkplace bool            `json:"requires_workplace,omitempty"`
-	RequiresSynthesis bool            `json:"requires_synthesis,omitempty"`
 	Operations        []OperationSpec `json:"operations,omitempty"`
 }
 
 type OperationSpec struct {
-	Name     string        `json:"name,omitempty"`
-	Kind     OperationKind `json:"kind,omitempty"`
-	Title    string        `json:"title,omitempty"`
-	Origin   string        `json:"origin,omitempty"`
-	In       OperationMap  `json:"in,omitempty"`
-	Out      OperationMap  `json:"out,omitempty"`
-	Required bool          `json:"required,omitempty"`
+	Name       string        `json:"name,omitempty"`
+	Kind       OperationKind `json:"kind,omitempty"`
+	Title      string        `json:"title,omitempty"`
+	Origin     string        `json:"origin,omitempty"`
+	In         OperationMap  `json:"in,omitempty"`
+	Out        OperationMap  `json:"out,omitempty"`
+	Required   bool          `json:"required,omitempty"`
+	RequiredIn []string      `json:"required_in,omitempty"`
 }
 
 type OperationMap map[string]OperationMapping
@@ -384,6 +394,7 @@ type DiagnosticLink struct {
 type LaunchResult struct {
 	Status              string            `json:"status,omitempty"`
 	Summary             string            `json:"summary,omitempty"`
+	RawOutput           string            `json:"raw_output,omitempty"`
 	RawOutputPath       string            `json:"raw_output_path,omitempty"`
 	RawStructuredOutput string            `json:"raw_structured_output,omitempty"`
 	StructuredOutput    *StructuredOutput `json:"structured_output,omitempty"`

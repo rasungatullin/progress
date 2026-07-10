@@ -6,11 +6,6 @@
   "required": true,
   "contract": {
     "in": {
-      "requires_synthesis": {
-        "type": "boolean",
-        "required": true,
-        "description": "Признак необходимости содержательного синтеза для действия."
-      },
       "action_name": {
         "type": "string",
         "required": true,
@@ -21,29 +16,17 @@
         "required": true,
         "description": "Класс завершаемого действия."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
+      "result_status": {
+        "type": "string",
+        "description": "Состояние запуска выполнения перед завершающей фиксацией."
       },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
+      "result_summary": {
+        "type": "string",
+        "description": "Сводка запуска выполнения перед завершающей фиксацией."
       },
-      "allocation": {
+      "structured_output": {
         "type": "object",
-        "required": true,
-        "description": "Результат ресурсного снабжения."
-      },
-      "workplace": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленное рабочее место."
-      },
-      "result": {
-        "type": "object",
-        "description": "Текущий результат выполнения перед завершающей фиксацией."
+        "description": "Структурированный результат запуска выполнения."
       }
     },
     "out": {

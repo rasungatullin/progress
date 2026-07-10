@@ -6,50 +6,36 @@
   "required": true,
   "contract": {
     "in": {
-      "requires_synthesis": {
-        "type": "boolean",
+      "directory": {
+        "type": "string",
         "required": true,
-        "description": "Признак необходимости запуска синтеза для разрешённого действия."
+        "description": "Каталог репозитория для создания коммита и отправки ветки."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
+      "commit_message": {
+        "type": "string",
+        "description": "Сообщение коммита из нормализованного результата выполнения."
       },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
+      "fallback_name": {
+        "type": "string",
+        "description": "Резервное сообщение коммита при отсутствии явно сформированного сообщения."
       },
-      "allocation": {
+      "git": {
         "type": "object",
-        "required": true,
-        "description": "Результат ресурсного снабжения."
+        "description": "Настройки идентичности, подписи и отправки ветки."
       },
-      "workplace": {
+      "private_store": {
         "type": "object",
-        "required": true,
-        "description": "Подготовленное рабочее место."
+        "description": "Настройки хранилища приватных значений для отправки ветки."
       },
-      "result": {
-        "type": "object",
-        "required": true,
-        "description": "Результат запуска выполнения."
-      },
-      "structured_output": {
-        "type": "object",
-        "description": "Нормализованный структурированный результат выполнения."
+      "config_home": {
+        "type": "string",
+        "description": "Каталог настроек, относительно которого разрешаются пути git."
       }
     },
     "out": {
       "commit_summary": {
         "type": "string",
         "description": "Сводка создания коммита и отправки ветки."
-      },
-      "result": {
-        "type": "object",
-        "required": true,
-        "description": "Результат выполнения с учётом создания коммита и отправки ветки."
       }
     }
   }

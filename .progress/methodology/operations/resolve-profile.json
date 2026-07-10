@@ -10,11 +10,6 @@
         "type": "string",
         "required": true,
         "description": "Имя исполнительного профиля из разрешённого действия."
-      },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
       }
     },
     "out": {

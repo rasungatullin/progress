@@ -11,20 +11,50 @@
         "required": true,
         "description": "Признак необходимости подготовки рабочего места для разрешённого действия."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
+      "directory": {
+        "type": "string",
+        "description": "Каталог локального запуска."
       },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
+      "repository_url": {
+        "type": "string",
+        "description": "Адрес репозитория рабочего места."
       },
-      "allocation": {
-        "type": "object",
+      "environment": {
+        "type": "string",
+        "description": "Выбранная среда выполнения."
+      },
+      "workplace_name": {
+        "type": "string",
+        "description": "Имя рабочего места."
+      },
+      "base_ref": {
+        "type": "string",
+        "description": "Базовая ветка рабочего места."
+      },
+      "head_ref": {
+        "type": "string",
+        "description": "Ветка рабочего места."
+      },
+      "allocated_environment": {
+        "type": "string",
+        "description": "Среда, выбранная ресурсным снабжением."
+      },
+      "allocated_environment_type": {
+        "type": "string",
+        "description": "Тип среды, выбранный ресурсным снабжением."
+      },
+      "action_name": {
+        "type": "string",
         "required": true,
-        "description": "Результат ресурсного снабжения."
+        "description": "Имя разрешённого действия для проверки ветки рабочего места."
+      },
+      "pull_request_base_ref": {
+        "type": "string",
+        "description": "Базовая ветка из данных запроса на слияние."
+      },
+      "pull_request_head_ref": {
+        "type": "string",
+        "description": "Ветка источника из данных запроса на слияние."
       }
     },
     "out": {
@@ -32,11 +62,6 @@
         "type": "object",
         "required": true,
         "description": "Подготовленное рабочее место для последующих операций действия."
-      },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Ввод контура исполнения с каталогом запуска подготовленного рабочего места."
       }
     }
   }
