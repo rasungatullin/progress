@@ -6,31 +6,10 @@
   "required": true,
   "contract": {
     "in": {
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
-      },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Профиль исполнения, выбранный для действия."
-      },
-      "allocation": {
-        "type": "object",
-        "required": true,
-        "description": "Выделенные вычислительные ресурсы."
-      },
-      "workplace": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленное рабочее место."
-      },
-      "result": {
-        "type": "object",
-        "required": true,
-        "description": "Результат запуска выполнения."
-      },
+      "repository": {"type": "string", "required": true, "description": "Репозиторий запроса на слияние."},
+      "number": {"type": "integer", "required": true, "description": "Номер запроса на слияние."},
+      "result_status": {"type": "string", "description": "Состояние выполнения."},
+      "result_summary": {"type": "string", "description": "Сводка выполнения."},
       "structured_output": {
         "type": "object",
         "description": "Нормализованный структурированный результат выполнения."
