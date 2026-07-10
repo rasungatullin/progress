@@ -295,7 +295,7 @@ func loadReviewRemarksOutputSummary(remarks []integration.ReviewRemark, in invoc
 
 func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := publishMergeRequestInputFromOperation(state, operation)
-	ref := pullRequestRefFromPublishMergeRequestInput(state, input)
+	ref := pullRequestRefFromPublishMergeRequestInput(input)
 	if ref.Number > 0 {
 		mergeRequest := mergeRequestFromRef(ref)
 		summary := fmt.Sprintf("pull-request=%d", ref.Number)
@@ -310,17 +310,17 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 		return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Ветка запроса на слияние не задана.", fmt.Errorf("head branch is required for pull request creation"), "pull_request_head_required")
 	}
 	if strings.TrimSpace(ref.Base) == "" {
-		base, err := e.defaultMergeRequestBase(ctx, state)
+		base, err := e.defaultMergeRequestBase(ctx, input.workplace)
 		if err != nil {
 			return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Базовая ветка запроса на слияние не определена.", err, "pull_request_base_required")
 		}
 		ref.Base = base
 	}
 	if strings.TrimSpace(ref.Title) == "" {
-		ref.Title = pullRequestTitleFromPublishMergeRequestInput(state, input, ref)
+		ref.Title = pullRequestTitleFromPublishMergeRequestInput(input, ref)
 	}
 	if strings.TrimSpace(ref.Body) == "" {
-		ref.Body = pullRequestBodyFromPublishMergeRequestInput(state, input)
+		ref.Body = pullRequestBodyFromPublishMergeRequestInput(input)
 	}
 
 	executor, err := e.integrationExecutor()
@@ -351,7 +351,7 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	result.Summary = joinExecutionSummaries(result.Summary, summary)
 	writePublishMergeRequestData(state, operation, mergeRequest, summary, result)
 	state.tracker.completeIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(mergeRequest, summary, result, operation), "Запрос на слияние зафиксирован через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), input.workplace, result, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, nil)
 	return nil
 }
 
@@ -359,7 +359,7 @@ func (e builtinOperationExecutor) failPublishMergeRequestOperation(ctx context.C
 	result := failedPublishMergeRequestResult(input, err)
 	writePublishMergeRequestFailureData(state, operation, result)
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), input.workplace, result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, err)
 	return err
 }
 
@@ -403,12 +403,53 @@ func writePublishMergeRequestData(state *operationExecution, operation Operation
 
 type publishMergeRequestInput struct {
 	invocation       invocation
+	profile          profile
+	allocation       allocation
 	workplace        workplace
 	result           LaunchResult
 	structuredOutput *StructuredOutput
 }
 
 func publishMergeRequestInputFromOperation(state *operationExecution, operation OperationSpec) publishMergeRequestInput {
+	input := publishMergeRequestInput{}
+	if len(operation.In) == 0 {
+		return input
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["workplace"]; ok {
+		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.workplace = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.allocation = value
+		}
+	}
+	if mapping, ok := operation.In["result"]; ok {
+		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
+			input.result = value
+			input.structuredOutput = value.StructuredOutput
+		}
+	}
+	if mapping, ok := operation.In["structured_output"]; ok {
+		if value, ok := structuredOutputValueFromCommitPushMapping(state, mapping); ok {
+			input.structuredOutput = value
+		}
+	}
+	return input
+}
+
+func publishReviewRemarksInputFromOperation(state *operationExecution, operation OperationSpec) publishMergeRequestInput {
 	input := publishMergeRequestInput{}
 	if state != nil {
 		input.invocation = invocationFromExecutionData(state)
@@ -446,6 +487,8 @@ func publishMergeRequestInputFromOperation(state *operationExecution, operation 
 func publishMergeRequestInputSummary(input publishMergeRequestInput, ref pullRequestRef, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
 		"invocation":        invocationSummary(input.invocation),
+		"profile":           profileSummary(input.profile),
+		"allocation":        allocationSummary(input.allocation),
 		"result":            resultSummary(input.result),
 		"structured_output": structuredOutputSummary(input.structuredOutput),
 		"workplace":         workplaceSummary(input.workplace),
@@ -469,14 +512,10 @@ func publishMergeRequestOutputSummary(mergeRequest integration.MergeRequest, sum
 	})
 }
 
-func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, state *operationExecution) (string, error) {
-	repoRoot := ""
-	if state != nil {
-		workplace := workplaceFromExecutionData(state)
-		repoRoot = strings.TrimSpace(workplace.RepositoryRoot)
-		if repoRoot == "" {
-			repoRoot = strings.TrimSpace(workplace.Name)
-		}
+func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, workplace workplace) (string, error) {
+	repoRoot := strings.TrimSpace(workplace.RepositoryRoot)
+	if repoRoot == "" {
+		repoRoot = strings.TrimSpace(workplace.Name)
 	}
 	if repoRoot == "" {
 		return "", fmt.Errorf("base branch is required because prepared repository is not available")
@@ -497,7 +536,7 @@ func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, s
 }
 
 func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
-	input := publishMergeRequestInputFromOperation(state, operation)
+	input := publishReviewRemarksInputFromOperation(state, operation)
 	ref := pullRequestRefFromPublishReviewRemarksInput(state, input)
 	if ref.Number <= 0 {
 		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
@@ -899,10 +938,10 @@ func (e builtinOperationExecutor) integrationExecutor() (integrationExecutor, er
 	return e.service.integrations, nil
 }
 
-func pullRequestRefFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput) pullRequestRef {
-	ref := pullRequestRefFromAssignment(publishMergeRequestAssignment(state, input))
+func pullRequestRefFromPublishMergeRequestInput(input publishMergeRequestInput) pullRequestRef {
+	ref := pullRequestRefFromAssignment(publishMergeRequestAssignment(input))
 	if strings.TrimSpace(ref.Head) == "" {
-		assignment := publishMergeRequestAssignment(state, input)
+		assignment := publishMergeRequestAssignment(input)
 		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
 			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
 		}
@@ -910,7 +949,7 @@ func pullRequestRefFromPublishMergeRequestInput(state *operationExecution, input
 	return ref
 }
 
-func publishMergeRequestAssignment(state *operationExecution, input publishMergeRequestInput) *ExecutionAssignment {
+func publishMergeRequestAssignment(input publishMergeRequestInput) *ExecutionAssignment {
 	if input.invocation.Assignment != nil {
 		return assignmentFromInvocation(input.invocation)
 	}
@@ -1205,11 +1244,11 @@ func mergeRequestSummary(pr integration.MergeRequest) string {
 	return fmt.Sprintf("repository=%s number=%d state=%s base=%s head=%s url=%s", pr.Repository, pr.Number, pr.State, pr.BaseRef, pr.HeadRef, pr.URL)
 }
 
-func pullRequestTitleFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput, ref pullRequestRef) string {
+func pullRequestTitleFromPublishMergeRequestInput(input publishMergeRequestInput, ref pullRequestRef) string {
 	if strings.TrimSpace(ref.Title) != "" {
 		return strings.TrimSpace(ref.Title)
 	}
-	assignment := publishMergeRequestAssignment(state, input)
+	assignment := publishMergeRequestAssignment(input)
 	if assignment != nil && assignment.CanonicalTask != nil {
 		task := assignment.CanonicalTask
 		if task.Number > 0 && strings.TrimSpace(task.Title) != "" {
@@ -1225,9 +1264,9 @@ func pullRequestTitleFromPublishMergeRequestInput(state *operationExecution, inp
 	return "Инженерное изменение"
 }
 
-func pullRequestBodyFromPublishMergeRequestInput(state *operationExecution, input publishMergeRequestInput) string {
+func pullRequestBodyFromPublishMergeRequestInput(input publishMergeRequestInput) string {
 	parts := []string{}
-	assignment := publishMergeRequestAssignment(state, input)
+	assignment := publishMergeRequestAssignment(input)
 	if assignment != nil && assignment.CanonicalTask != nil {
 		task := assignment.CanonicalTask
 		if task.Number > 0 {

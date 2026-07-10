@@ -1827,6 +1827,8 @@ func TestPublishMergeRequestFillsOnlyActionData(t *testing.T) {
 				},
 				Workplace: model.WorkplaceSpec{Name: "132"},
 			},
+			"profile":           model.Profile{Name: "coder"},
+			"allocation":        model.Allocation{Model: "gpt-5"},
 			"workplace":         model.Workplace{Name: "/tmp/work", RepositoryRoot: "/tmp/work", Ready: true},
 			"result":            model.LaunchResult{Status: "completed", Summary: "launch complete"},
 			"structured_output": &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"},
@@ -1896,6 +1898,8 @@ func TestPublishMergeRequestFailureFillsOnlyActionData(t *testing.T) {
 				},
 				Workplace: model.WorkplaceSpec{Name: "132"},
 			},
+			"profile":           model.Profile{Name: "coder"},
+			"allocation":        model.Allocation{Model: "gpt-5"},
 			"workplace":         model.Workplace{Name: "/tmp/work", RepositoryRoot: "/tmp/work", Ready: true},
 			"result":            model.LaunchResult{Status: "completed", Summary: "launch complete"},
 			"structured_output": &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"},
@@ -1947,8 +1951,20 @@ func TestPublishMergeRequestWritesOutputsWhenPullRequestAlreadyExists(t *testing
 		},
 		action: model.Action{Operations: []model.OperationSpec{operation}},
 		data: map[string]any{
-			"workplace": model.Workplace{Name: "/tmp/work", Ready: true},
-			"result":    model.LaunchResult{Status: "completed", Summary: "launch complete"},
+			"invocation": model.Invocation{
+				Assignment: &ExecutionAssignment{
+					CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132},
+					RelatedObjects: []ObjectRef{{
+						Type:       "merge-request",
+						Repository: "owner/name",
+						Number:     17,
+					}},
+				},
+			},
+			"profile":    model.Profile{Name: "coder"},
+			"allocation": model.Allocation{Model: "gpt-5"},
+			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":     model.LaunchResult{Status: "completed", Summary: "launch complete"},
 		},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
@@ -3856,6 +3872,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 				result = append(result, commitPushActionOperation())
 				continue
 			}
+			if operation == OperationKindPublishMergeRequest {
+				result = append(result, publishMergeRequestActionOperation())
+				continue
+			}
 			if operation == OperationKindFinalize {
 				result = append(result, finalizeActionOperation())
 				continue
@@ -4029,6 +4049,28 @@ func commitPushActionOperation() methodology.ActionOperation {
 		Out: map[string]methodology.ActionMapping{
 			"commit_summary": mappingRef("data.commit_summary"),
 			"result":         mappingRef("data.result"),
+		},
+	}
+}
+
+func publishMergeRequestActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindPublishMergeRequest,
+		Kind:     OperationKindPublishMergeRequest,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"invocation":        mappingRef("data.invocation"),
+			"profile":           mappingRef("data.profile"),
+			"allocation":        mappingRef("data.allocation"),
+			"workplace":         mappingRef("data.workplace"),
+			"result":            mappingRef("data.result"),
+			"structured_output": mappingRef("data.structured_output"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"merge_request":   mappingRef("data.merge_request"),
+			"publish_summary": mappingRef("data.publish_summary"),
+			"result":          mappingRef("data.result"),
 		},
 	}
 }
@@ -4248,6 +4290,8 @@ func publishMergeRequestOperationSpec() model.OperationSpec {
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
 			"invocation":        {Ref: "data.invocation"},
+			"profile":           {Ref: "data.profile"},
+			"allocation":        {Ref: "data.allocation"},
 			"workplace":         {Ref: "data.workplace"},
 			"result":            {Ref: "data.result"},
 			"structured_output": {Ref: "data.structured_output"},
@@ -4357,7 +4401,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
-        {"name": "publish-merge-request", "kind": "publish-merge-request", "origin": "builtin", "required": true},
+        {"name": "publish-merge-request", "kind": "publish-merge-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"merge_request": {"ref": "data.merge_request"}, "publish_summary": {"ref": "data.publish_summary"}, "result": {"ref": "data.result"}}},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
