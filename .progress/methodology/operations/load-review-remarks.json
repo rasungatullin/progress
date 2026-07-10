@@ -14,26 +14,13 @@
         "type": "integer",
         "required": true,
         "description": "Номер запроса на слияние."
-      },
-      "structured_input": {
-        "type": "object",
-        "description": "Исходный структурированный ввод для дополнения замечаниями ревизии."
       }
     },
     "out": {
       "review_remarks": {
         "type": "object_array",
-        "description": "Загруженные замечания ревизии."
-      },
-      "result": {
-        "type": "object",
-        "required": false,
-        "description": "Результат отказа при невозможности получить замечания ревизии."
-      },
-      "structured_input": {
-        "type": "object",
-        "required": true,
-        "description": "Структурированный ввод, дополненный замечаниями ревизии."
+        "description": "Загруженные замечания ревизии.",
+        "required": true
       }
     }
   }

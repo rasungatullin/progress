@@ -1435,8 +1435,8 @@ func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 		t.Fatalf("load-review-remarks must fill data.review_remarks: %#v", state.data)
 	}
 	dataInvocation, ok := state.data["invocation"].(model.Invocation)
-	if !ok || dataInvocation.Launch.StructuredInput == nil || len(dataInvocation.Launch.StructuredInput.ReviewRemarks) != 1 || dataInvocation.Launch.StructuredInput.ReviewRemarks[0].ID != "comment-1" {
-		t.Fatalf("load-review-remarks must fill enriched data.invocation: %#v", state.data)
+	if !ok || dataInvocation.Launch.StructuredInput != nil {
+		t.Fatalf("load-review-remarks must not modify data.invocation: %#v", state.data)
 	}
 	if len(state.reviewRemarks) != 0 {
 		t.Fatalf("load-review-remarks must not write implicit state review remarks: %#v", state.reviewRemarks)
@@ -1477,9 +1477,8 @@ func TestLoadReviewRemarksFailureDoesNotWriteStateResult(t *testing.T) {
 	if err == nil {
 		t.Fatal("load-review-remarks must return integration error")
 	}
-	dataResult, ok := state.data["result"].(model.LaunchResult)
-	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "remarks failed") {
-		t.Fatalf("load-review-remarks must write failed result to data.result: %#v", state.data)
+	if _, ok := state.data["result"]; ok {
+		t.Fatalf("load-review-remarks must not write data outside its output contract: %#v", state.data)
 	}
 	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
 		t.Fatalf("load-review-remarks must not write implicit state result: %#v", state.result)
@@ -1978,12 +1977,6 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
 	operation := publishReviewResponsesOperationSpec()
-	remarks := []integration.ReviewRemark{{
-		ExternalID: "remark-1",
-		ReplyToID:  "thread-1",
-		State:      "unresolved",
-		Body:       "Исправьте обработку ошибки.",
-	}}
 	state := &operationExecution{
 		in: model.Invocation{
 			Assignment: &ExecutionAssignment{
@@ -2019,11 +2012,11 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 			"result":     model.LaunchResult{Status: "completed", Summary: "apply complete"},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
+				ThreadID: "thread-1",
 				Status:   "resolved",
 				Summary:  "Проверка добавлена.",
 				Body:     "Добавил покрытие отказа.",
 			}}},
-			"review_remarks": remarks,
 		},
 		pullRequest:   &integration.MergeRequest{Repository: "legacy/name", Number: 998, HeadRef: "legacy-head"},
 		result:        model.LaunchResult{Status: "legacy", Summary: "legacy"},
@@ -2098,16 +2091,11 @@ func TestPublishReviewResponsesFailureFillsOnlyActionData(t *testing.T) {
 			"result":     model.LaunchResult{Status: "completed", Summary: "apply complete"},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
+				ThreadID: "thread-1",
 				Status:   "resolved",
 				Summary:  "Проверка добавлена.",
 				Body:     "Добавил покрытие отказа.",
 			}}},
-			"review_remarks": []integration.ReviewRemark{{
-				ExternalID: "remark-1",
-				ReplyToID:  "thread-1",
-				State:      "unresolved",
-				Body:       "Исправьте обработку ошибки.",
-			}},
 		},
 		result:        model.LaunchResult{Status: "legacy", Summary: "legacy"},
 		reviewRemarks: []integration.ReviewRemark{{ExternalID: "legacy", ReplyToID: "legacy-thread"}},
@@ -2677,8 +2665,6 @@ func TestActionResolutionKeepsLoadReviewRemarksMapping(t *testing.T) {
 				},
 				Out: map[string]methodology.ActionMapping{
 					"review_remarks": mappingRef("data.review_remarks"),
-					"invocation":     mappingRef("data.invocation"),
-					"result":         mappingRef("data.result"),
 				},
 			}},
 		}},
@@ -2693,7 +2679,7 @@ func TestActionResolutionKeepsLoadReviewRemarksMapping(t *testing.T) {
 	if operation == nil {
 		t.Fatalf("load-review-remarks operation must be present: %#v", action.Operations)
 	}
-	if operation.In["invocation"].Ref != "data.invocation" || operation.In["pull_request"].Ref != "data.pull_request" || operation.Out["review_remarks"].Ref != "data.review_remarks" || operation.Out["invocation"].Ref != "data.invocation" || operation.Out["result"].Ref != "data.result" {
+	if operation.In["invocation"].Ref != "data.invocation" || operation.In["pull_request"].Ref != "data.pull_request" || operation.Out["review_remarks"].Ref != "data.review_remarks" || len(operation.Out) != 1 {
 		t.Fatalf("load-review-remarks must keep action data mapping: %#v", operation)
 	}
 }
@@ -2785,7 +2771,6 @@ func TestActionResolutionKeepsPublishReviewResponsesMapping(t *testing.T) {
 					"invocation":        mappingRef("data.invocation"),
 					"result":            mappingRef("data.result"),
 					"structured_output": mappingRef("data.structured_output"),
-					"review_remarks":    mappingRef("data.review_remarks"),
 				},
 				Out: map[string]methodology.ActionMapping{
 					"review_responses_summary": mappingRef("data.review_responses_summary"),
@@ -2804,7 +2789,7 @@ func TestActionResolutionKeepsPublishReviewResponsesMapping(t *testing.T) {
 	if operation == nil {
 		t.Fatalf("publish-review-responses operation must be present: %#v", action.Operations)
 	}
-	if operation.In["structured_output"].Ref != "data.structured_output" || operation.In["review_remarks"].Ref != "data.review_remarks" || operation.Out["review_responses_summary"].Ref != "data.review_responses_summary" || operation.Out["result"].Ref != "data.result" {
+	if operation.In["structured_output"].Ref != "data.structured_output" || operation.In["review_remarks"].Ref != "" || operation.Out["review_responses_summary"].Ref != "data.review_responses_summary" || operation.Out["result"].Ref != "data.result" {
 		t.Fatalf("publish-review-responses must keep action data mapping: %#v", operation)
 	}
 }
@@ -3352,6 +3337,7 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 				CommitMessage: "Исправить замечание ревизии",
 				ReviewResponses: []model.StructuredResponse{{
 					RemarkID: "thread-1",
+					ThreadID: "thread-1",
 					Status:   "resolved",
 					Summary:  "Исправлено.",
 				}},
@@ -3415,6 +3401,9 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 	}
 	if !strings.Contains(launcher.invocation.Launch.Prompt, "Исправить замечания") {
 		t.Fatalf("structured input must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
+	}
+	if !strings.Contains(launcher.invocation.Launch.Prompt, `"ExternalID":"thread-1"`) || !strings.Contains(launcher.invocation.Launch.Prompt, `"ReplyToID":"thread-1"`) {
+		t.Fatalf("canonical review remarks must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
 	}
 	if !launcher.commitCalled {
 		t.Fatal("review rework action must push fixes before publishing responses")
@@ -3849,8 +3838,6 @@ func loadReviewRemarksActionOperation() methodology.ActionOperation {
 		},
 		Out: map[string]methodology.ActionMapping{
 			"review_remarks": mappingRef("data.review_remarks"),
-			"invocation":     mappingRef("data.invocation"),
-			"result":         mappingRef("data.result"),
 		},
 	}
 }
@@ -3882,6 +3869,7 @@ func buildPromptActionOperation() methodology.ActionOperation {
 			"structured_output_required": mappingRef("data.profile.structured_output_required"),
 			"structured_output_fields":   mappingRef("data.profile.structured_output_fields"),
 			"structured_input":           mappingRef("data.invocation.launch.structured_input"),
+			"review_remarks":             mappingRef("data.review_remarks"),
 		},
 		Out: map[string]methodology.ActionMapping{"prompt": mappingRef("data.prompt")},
 	}
@@ -3999,7 +3987,6 @@ func publishReviewResponsesActionOperation() methodology.ActionOperation {
 			"workplace":         mappingRef("data.workplace"),
 			"result":            mappingRef("data.result"),
 			"structured_output": mappingRef("data.structured_output"),
-			"review_remarks":    mappingRef("data.review_remarks"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"review_responses_summary": mappingRef("data.review_responses_summary"),
@@ -4188,8 +4175,6 @@ func loadReviewRemarksOperationSpec() model.OperationSpec {
 		},
 		Out: model.OperationMap{
 			"review_remarks": {Ref: "data.review_remarks"},
-			"invocation":     {Ref: "data.invocation"},
-			"result":         {Ref: "data.result"},
 		},
 	}
 }
@@ -4267,7 +4252,6 @@ func publishReviewResponsesOperationSpec() model.OperationSpec {
 			"workplace":         {Ref: "data.workplace"},
 			"result":            {Ref: "data.result"},
 			"structured_output": {Ref: "data.structured_output"},
-			"review_remarks":    {Ref: "data.review_remarks"},
 		},
 		Out: model.OperationMap{
 			"review_responses_summary": {Ref: "data.review_responses_summary"},

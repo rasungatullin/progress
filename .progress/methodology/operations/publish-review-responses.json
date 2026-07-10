@@ -6,17 +6,27 @@
   "required": true,
   "contract": {
     "in": {
-      "repository": {"type": "string", "required": true, "description": "Репозиторий запроса на слияние."},
-      "number": {"type": "integer", "required": true, "description": "Номер запроса на слияние."},
-      "result_status": {"type": "string", "description": "Состояние выполнения."},
-      "result_summary": {"type": "string", "description": "Сводка выполнения."},
+      "repository": {
+        "type": "string",
+        "required": true,
+        "description": "Репозиторий запроса на слияние."
+      },
+      "number": {
+        "type": "integer",
+        "required": true,
+        "description": "Номер запроса на слияние."
+      },
+      "result_status": {
+        "type": "string",
+        "description": "Состояние выполнения."
+      },
+      "result_summary": {
+        "type": "string",
+        "description": "Сводка выполнения."
+      },
       "structured_output": {
         "type": "object",
         "description": "Нормализованный структурированный результат выполнения."
-      },
-      "review_remarks": {
-        "type": "object_array",
-        "description": "Загруженные замечания ревизии для поиска цепочек обсуждения."
       }
     },
     "out": {

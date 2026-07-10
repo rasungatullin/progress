@@ -1550,10 +1550,20 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 		state.tracker.fail(name, "Исполнительная директива не сформирована.", err, "prompt_not_built", false, true)
 		return err
 	}
+	reviewRemarks, _ := operationMappingValue[[]integration.ReviewRemark](state, operation.In["review_remarks"])
+	if len(reviewRemarks) != 0 {
+		payload, err := json.Marshal(reviewRemarks)
+		if err != nil {
+			state.tracker.fail(name, "Замечания ревизии не включены в исполнительную директиву.", err, "review_remarks_not_encoded", false, true)
+			return err
+		}
+		prompt = joinExecutionSummaries(prompt, "Use the canonical review remarks below as execution context. Preserve ExternalID and ReplyToID in review responses as remark_id and thread_id.", string(payload))
+	}
 	writeOperationData(state, operation.Out, "prompt", prompt)
 	state.tracker.completeIO(name, operationIOSummary(operation.In, map[string]string{
 		"prompt":           presenceSummary(spec.Prompt),
 		"structured_input": presenceSummary(fmt.Sprintf("%v", spec.StructuredInput != nil)),
+		"review_remarks":   formatInt(len(reviewRemarks)),
 	}), operationIOSummary(operation.Out, map[string]string{"prompt": presenceSummary(prompt)}), "Исполнительная директива сформирована.")
 	return nil
 }

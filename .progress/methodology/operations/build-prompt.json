@@ -6,15 +6,41 @@
   "required": true,
   "contract": {
     "in": {
-      "prompt": {"type": "string", "description": "Исходная текстовая директива."},
-      "prompt_additions": {"type": "string_array", "description": "Дополнения исполнительной директивы."},
-      "structured_output": {"type": "boolean", "description": "Признак структурированного вывода."},
-      "structured_output_required": {"type": "boolean", "description": "Требование структурированного вывода."},
-      "structured_output_fields": {"type": "string_array", "description": "Поля структурированного вывода."},
-      "structured_input": {"type": "object", "description": "Структурированный ввод синтеза."}
+      "prompt": {
+        "type": "string",
+        "description": "Исходная текстовая директива."
+      },
+      "prompt_additions": {
+        "type": "string_array",
+        "description": "Дополнения исполнительной директивы."
+      },
+      "structured_output": {
+        "type": "boolean",
+        "description": "Признак структурированного вывода."
+      },
+      "structured_output_required": {
+        "type": "boolean",
+        "description": "Требование структурированного вывода."
+      },
+      "structured_output_fields": {
+        "type": "string_array",
+        "description": "Поля структурированного вывода."
+      },
+      "structured_input": {
+        "type": "object",
+        "description": "Структурированный ввод синтеза."
+      },
+      "review_remarks": {
+        "type": "object_array",
+        "description": "Канонические замечания ревизии."
+      }
     },
     "out": {
-      "prompt": {"type": "string", "required": true, "description": "Готовая исполнительная директива в текстовой форме."}
+      "prompt": {
+        "type": "string",
+        "required": true,
+        "description": "Готовая исполнительная директива в текстовой форме."
+      }
     }
   }
 }

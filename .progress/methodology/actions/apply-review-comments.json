@@ -132,20 +132,11 @@
         },
         "number": {
           "ref": "data.pull_request.number"
-        },
-        "structured_input": {
-          "ref": "in.structured_input"
         }
       },
       "out": {
         "review_remarks": {
           "ref": "data.review_remarks"
-        },
-        "result": {
-          "ref": "data.result"
-        },
-        "structured_input": {
-          "ref": "data.structured_input"
         }
       }
     },
@@ -261,7 +252,10 @@
           "ref": "data.profile.structured_output_fields"
         },
         "structured_input": {
-          "ref": "data.structured_input"
+          "ref": "in.structured_input"
+        },
+        "review_remarks": {
+          "ref": "data.review_remarks"
         }
       },
       "out": {
@@ -362,9 +356,6 @@
         },
         "structured_output": {
           "ref": "data.structured_output"
-        },
-        "review_remarks": {
-          "ref": "data.review_remarks"
         }
       },
       "out": {

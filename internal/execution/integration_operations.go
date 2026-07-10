@@ -150,9 +150,8 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 	}
 
 	reviewRemarks := append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
-	invocation := invocationWithReviewRemarks(input.invocation, ref, reviewRemarks)
-	writeLoadReviewRemarksData(state, operation, reviewRemarks, invocation)
-	state.tracker.completeIO(name, loadReviewRemarksInputSummary(input, ref, operation), loadReviewRemarksOutputSummary(reviewRemarks, invocation, operation), "Замечания ревизии получены через контур интеграции.")
+	writeLoadReviewRemarksData(state, operation, reviewRemarks)
+	state.tracker.completeIO(name, loadReviewRemarksInputSummary(input, ref, operation), loadReviewRemarksOutputSummary(reviewRemarks, operation), "Замечания ревизии получены через контур интеграции.")
 	return nil
 }
 
@@ -165,22 +164,18 @@ func (e builtinOperationExecutor) failOrSkipLoadReviewRemarksOperation(ctx conte
 	}
 
 	writeOperationData(state, operation.Out, "review_remarks", []integration.ReviewRemark(nil))
-	writeOperationData(state, operation.Out, "structured_input", in.Launch.StructuredInput)
 	state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
 	return nil
 }
 
-func writeLoadReviewRemarksData(state *operationExecution, operation OperationSpec, remarks []integration.ReviewRemark, invocation invocation) {
+func writeLoadReviewRemarksData(state *operationExecution, operation OperationSpec, remarks []integration.ReviewRemark) {
 	out := operation.Out
 	if len(out) == 0 {
 		out = model.OperationMap{
 			"review_remarks": {Ref: "data.review_remarks"},
-			"invocation":     {Ref: "data.invocation"},
 		}
 	}
 	writeOperationData(state, out, "review_remarks", remarks)
-	writeOperationData(state, out, "structured_input", invocation.Launch.StructuredInput)
-	writeOperationData(state, out, "invocation", invocation)
 }
 
 func writeLoadReviewRemarksFailureData(state *operationExecution, operation OperationSpec, result LaunchResult) {
@@ -189,30 +184,6 @@ func writeLoadReviewRemarksFailureData(state *operationExecution, operation Oper
 		out = model.OperationMap{"result": {Ref: "data.result"}}
 	}
 	writeOperationData(state, out, "result", result)
-}
-
-func invocationWithReviewRemarks(in invocation, ref pullRequestRef, remarks []integration.ReviewRemark) invocation {
-	result := in
-	assignment := assignmentFromInvocation(result)
-	if assignment == nil {
-		assignment = &ExecutionAssignment{}
-	}
-	structuredInput := assignment.StructuredInput
-	if structuredInput == nil {
-		structuredInput = result.Launch.StructuredInput
-	}
-	if structuredInput == nil {
-		structuredInput = &StructuredInput{}
-	}
-	structuredInput.ReviewRemarks = mergeStructuredRemarks(structuredInput.ReviewRemarks, structuredRemarksFromIntegration(remarks))
-	structuredInput.OperationalContext = append(structuredInput.OperationalContext, StructuredContext{
-		Title: "Сведения о замечаниях ревизии",
-		Body:  fmt.Sprintf("repository=%s\npull_request=%d\nremarks=%d", ref.Repository, ref.Number, len(remarks)),
-	})
-	assignment.StructuredInput = structuredInput
-	result.Assignment = assignment
-	result.Launch.StructuredInput = structuredInput
-	return result
 }
 
 type loadReviewRemarksInput struct {
@@ -238,10 +209,8 @@ func loadReviewRemarksInputFromOperation(state *operationExecution, operation Op
 	if _, ok := operation.In["invocation"]; !ok {
 		repository, _ := operationMappingValue[string](state, operation.In["repository"])
 		number, _ := operationMappingValue[int](state, operation.In["number"])
-		structuredInput, _ := operationMappingValue[*StructuredInput](state, operation.In["structured_input"])
 		input.invocation.Repository.URL = repository
-		input.invocation.Assignment = &ExecutionAssignment{CanonicalTask: &ObjectRef{Type: "pull-request", Repository: repository, Number: number}, StructuredInput: structuredInput}
-		input.invocation.Launch.StructuredInput = structuredInput
+		input.invocation.Assignment = &ExecutionAssignment{CanonicalTask: &ObjectRef{Type: "pull-request", Repository: repository, Number: number}}
 	}
 	return input
 }
@@ -301,10 +270,9 @@ func loadReviewRemarksInputSummary(input loadReviewRemarksInput, ref pullRequest
 	})
 }
 
-func loadReviewRemarksOutputSummary(remarks []integration.ReviewRemark, in invocation, operation OperationSpec) string {
+func loadReviewRemarksOutputSummary(remarks []integration.ReviewRemark, operation OperationSpec) string {
 	return operationIOSummary(operation.Out, map[string]string{
 		"review_remarks": formatInt(len(remarks)),
-		"invocation":     invocationSummary(in),
 	})
 }
 
@@ -659,12 +627,16 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 		return nil
 	}
 
-	count, err := e.publishReviewResponseComments(ctx, ref, responses, input.reviewRemarks)
+	if err := validateReviewResponseThreadIDs(responses); err != nil {
+		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы не содержат идентификаторы цепочек обсуждения.", err, "review_response_thread_required")
+	}
+
+	count, err := e.publishReviewResponseComments(ctx, ref, responses)
 	if err != nil {
 		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не записаны.", err, "review_responses_publish_failed")
 	}
 
-	resolved, err := e.resolveReviewThreads(ctx, responses, input.reviewRemarks)
+	resolved, err := e.resolveReviewThreads(ctx, responses)
 	if err != nil {
 		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы записаны, но часть цепочек обсуждения не закрыта.", err, "review_thread_resolve_failed")
 	}
@@ -728,7 +700,6 @@ type publishReviewResponsesInput struct {
 	workplace        workplace
 	result           LaunchResult
 	structuredOutput *StructuredOutput
-	reviewRemarks    []integration.ReviewRemark
 }
 
 func publishReviewResponsesInputFromOperation(state *operationExecution, operation OperationSpec) publishReviewResponsesInput {
@@ -767,42 +738,7 @@ func publishReviewResponsesInputFromOperation(state *operationExecution, operati
 			input.structuredOutput = value
 		}
 	}
-	if mapping, ok := operation.In["review_remarks"]; ok {
-		if value, ok := reviewRemarksValueFromPublishReviewResponsesMapping(state, mapping); ok {
-			input.reviewRemarks = value
-		}
-	}
 	return input
-}
-
-func reviewRemarksFromExecutionData(state *operationExecution) []integration.ReviewRemark {
-	if state == nil {
-		return nil
-	}
-	if value, ok := state.data["review_remarks"].([]integration.ReviewRemark); ok {
-		return append([]integration.ReviewRemark(nil), value...)
-	}
-	return nil
-}
-
-func reviewRemarksValueFromPublishReviewResponsesMapping(state *operationExecution, mapping model.OperationMapping) ([]integration.ReviewRemark, bool) {
-	if len(mapping.Value) != 0 {
-		var value []integration.ReviewRemark
-		if err := json.Unmarshal(mapping.Value, &value); err == nil {
-			return value, true
-		}
-		return nil, false
-	}
-	switch strings.TrimSpace(mapping.Ref) {
-	case "data.review_remarks":
-		if state == nil {
-			return nil, false
-		}
-		value, ok := state.data["review_remarks"].([]integration.ReviewRemark)
-		return value, ok
-	default:
-		return nil, false
-	}
 }
 
 func publishReviewResponsesInputSummary(input publishReviewResponsesInput, operation OperationSpec) string {
@@ -813,7 +749,6 @@ func publishReviewResponsesInputSummary(input publishReviewResponsesInput, opera
 		"workplace":         workplaceSummary(input.workplace),
 		"result":            resultSummary(input.result),
 		"structured_output": structuredOutputSummary(input.structuredOutput),
-		"review_remarks":    formatInt(len(input.reviewRemarks)),
 	})
 }
 
@@ -888,7 +823,7 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 	return count, errors.Join(failures...)
 }
 
-func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, ref pullRequestRef, responses []StructuredResponse, reviewRemarks []integration.ReviewRemark) (int, error) {
+func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, ref pullRequestRef, responses []StructuredResponse) (int, error) {
 	executor, err := e.integrationExecutor()
 	if err != nil {
 		return 0, err
@@ -900,7 +835,7 @@ func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Cont
 		if body == "" {
 			continue
 		}
-		threadID := reviewThreadIDForResponse(reviewRemarks, response)
+		threadID := strings.TrimSpace(response.ThreadID)
 		request := integration.Request{
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
@@ -927,7 +862,7 @@ func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Cont
 	return count, nil
 }
 
-func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, responses []StructuredResponse, reviewRemarks []integration.ReviewRemark) (int, error) {
+func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, responses []StructuredResponse) (int, error) {
 	executor, err := e.integrationExecutor()
 	if err != nil {
 		return 0, err
@@ -939,7 +874,7 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 		if !isResolvedReviewResponse(response) {
 			continue
 		}
-		threadID := reviewThreadIDForResponse(reviewRemarks, response)
+		threadID := strings.TrimSpace(response.ThreadID)
 		if threadID == "" {
 			continue
 		}
@@ -1262,55 +1197,6 @@ func workplaceNameFromRef(ref string) string {
 	return stableIdentifier(ref)
 }
 
-func structuredRemarksFromIntegration(remarks []integration.ReviewRemark) []StructuredRemark {
-	result := make([]StructuredRemark, 0, len(remarks))
-	for index, remark := range remarks {
-		id := firstNonEmptyTrimmed(remark.ExternalID, remark.URL, fmt.Sprintf("remark-%d", index+1))
-		title := "Замечание ревизии"
-		if strings.TrimSpace(remark.Path) != "" {
-			title = fmt.Sprintf("%s:%d", strings.TrimSpace(remark.Path), remark.Line)
-		}
-		body := strings.TrimSpace(remark.Body)
-		if body == "" && strings.TrimSpace(remark.URL) != "" {
-			body = strings.TrimSpace(remark.URL)
-		}
-		result = append(result, StructuredRemark{
-			ID:       id,
-			Status:   firstNonEmptyTrimmed(remark.State, "open"),
-			Type:     "review-remark",
-			Title:    title,
-			Body:     body,
-			Path:     strings.TrimSpace(remark.Path),
-			Line:     remark.Line,
-			Side:     strings.TrimSpace(remark.Side),
-			Severity: "",
-		})
-	}
-	return result
-}
-
-func mergeStructuredRemarks(base []StructuredRemark, additions []StructuredRemark) []StructuredRemark {
-	seen := map[string]struct{}{}
-	result := make([]StructuredRemark, 0, len(base)+len(additions))
-	for _, remark := range base {
-		if strings.TrimSpace(remark.ID) != "" {
-			seen[strings.TrimSpace(remark.ID)] = struct{}{}
-		}
-		result = append(result, remark)
-	}
-	for _, remark := range additions {
-		id := strings.TrimSpace(remark.ID)
-		if id != "" {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-		}
-		result = append(result, remark)
-	}
-	return result
-}
-
 func mergeRequestSummary(pr integration.MergeRequest) string {
 	return fmt.Sprintf("repository=%s number=%d state=%s base=%s head=%s url=%s", pr.Repository, pr.Number, pr.State, pr.BaseRef, pr.HeadRef, pr.URL)
 }
@@ -1493,21 +1379,16 @@ func isResolvedReviewResponse(response StructuredResponse) bool {
 	return status == "resolved" || status == "fixed" || status == "done" || status == "ok"
 }
 
-func reviewThreadIDForResponse(remarks []integration.ReviewRemark, response StructuredResponse) string {
-	remarkID := strings.TrimSpace(response.RemarkID)
-	if remarkID == "" {
-		remarkID = strings.TrimSpace(response.ID)
-	}
-	if remarkID == "" {
-		return ""
-	}
-	for _, remark := range remarks {
-		if remarkID != strings.TrimSpace(remark.ExternalID) && remarkID != strings.TrimSpace(remark.URL) && remarkID != strings.TrimSpace(remark.ReplyToID) {
+func validateReviewResponseThreadIDs(responses []StructuredResponse) error {
+	for index, response := range responses {
+		if strings.TrimSpace(reviewResponseCommentBody(response)) == "" && !isResolvedReviewResponse(response) {
 			continue
 		}
-		return strings.TrimSpace(remark.ReplyToID)
+		if strings.TrimSpace(response.ThreadID) == "" {
+			return fmt.Errorf("review response %d thread_id is required", index)
+		}
 	}
-	return ""
+	return nil
 }
 
 func formatNamedLine(name string, value string) string {
