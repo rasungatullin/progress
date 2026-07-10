@@ -215,6 +215,12 @@ type loadReviewRemarksInput struct {
 
 func loadReviewRemarksInputFromOperation(state *operationExecution, operation OperationSpec) loadReviewRemarksInput {
 	input := loadReviewRemarksInput{}
+	if state != nil {
+		input.invocation, _ = state.data["invocation"].(invocation)
+		if value, ok := state.data["pull_request"].(integration.MergeRequest); ok {
+			input.pullRequest = &value
+		}
+	}
 	if len(operation.In) == 0 {
 		return input
 	}
