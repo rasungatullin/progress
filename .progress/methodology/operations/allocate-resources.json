@@ -11,15 +11,30 @@
         "required": true,
         "description": "Признак необходимости запуска синтеза для разрешённого действия."
       },
-      "invocation": {
-        "type": "object",
+      "model_binding": {
+        "type": "string",
         "required": true,
-        "description": "Подготовленный ввод контура исполнения."
+        "description": "Явная привязка модели выполнения к ресурсу."
       },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
+      "runner": {
+        "type": "string",
+        "description": "Исполнительный модуль для запуска."
+      },
+      "model": {
+        "type": "string",
+        "description": "Модель выполнения."
+      },
+      "environment": {
+        "type": "string",
+        "description": "Среда выполнения."
+      },
+      "workplace_name": {
+        "type": "string",
+        "description": "Имя рабочего места для определения типа среды."
+      },
+      "repository_url": {
+        "type": "string",
+        "description": "Адрес репозитория для определения типа среды."
       }
     },
     "out": {

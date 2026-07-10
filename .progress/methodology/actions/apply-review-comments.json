@@ -195,12 +195,12 @@
         "requires_synthesis": {
           "ref": "action.requires_synthesis"
         },
-        "invocation": {
-          "ref": "data.invocation"
-        },
-        "profile": {
-          "ref": "data.profile"
-        }
+        "model_binding": {"ref": "data.invocation.launch.model_binding"},
+        "runner": {"ref": "data.invocation.launch.runner"},
+        "model": {"ref": "data.invocation.launch.model"},
+        "environment": {"ref": "data.invocation.workplace.environment"},
+        "workplace_name": {"ref": "data.invocation.workplace.name"},
+        "repository_url": {"ref": "data.invocation.repository.url"}
       },
       "out": {
         "allocation": {

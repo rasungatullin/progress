@@ -643,7 +643,7 @@ func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *
 		return nil
 	}
 
-	allocation, err := e.service.allocateResources(ctx, input.invocation, input.profile)
+	allocation, err := e.service.allocateResources(ctx, input.invocation(), input.profile)
 	if err != nil {
 		state.tracker.fail(name, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
 		return err
@@ -664,14 +664,32 @@ func writeAllocateResourcesData(state *operationExecution, operation OperationSp
 
 type allocateResourcesInput struct {
 	requiresSynthesis bool
-	invocation        invocation
+	modelBinding      string
+	runner            string
+	model             string
+	environment       string
+	workplaceName     string
+	repositoryURL     string
 	profile           profile
+	legacyInvocation  invocation
+}
+
+func (input allocateResourcesInput) invocation() invocation {
+	result := input.legacyInvocation
+	result.Repository = model.RepositorySpec{URL: input.repositoryURL}
+	result.Workplace = model.WorkplaceSpec{Name: input.workplaceName, Environment: input.environment}
+	result.Launch = model.LaunchSpec{ModelBinding: input.modelBinding, Runner: input.runner, Model: input.model}
+	return result
 }
 
 func allocateResourcesInputFromOperation(state *operationExecution, operation OperationSpec) allocateResourcesInput {
 	input := allocateResourcesInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
+		input.legacyInvocation, _ = state.data["invocation"].(invocation)
+		if value, ok := state.data["profile"].(profile); ok {
+			input.profile = value
+		}
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -681,17 +699,56 @@ func allocateResourcesInputFromOperation(state *operationExecution, operation Op
 			input.requiresSynthesis = value
 		}
 	}
-	if mapping, ok := operation.In["invocation"]; ok {
-		if value, ok := invocationValueFromAllocateResourcesMapping(state, mapping); ok {
-			input.invocation = value
-		}
-	}
-	if mapping, ok := operation.In["profile"]; ok {
-		if value, ok := profileValueFromAllocateResourcesMapping(state, mapping); ok {
-			input.profile = value
+	input.modelBinding = stringValueFromAllocateResourcesMapping(state, operation.In["model_binding"])
+	input.runner = stringValueFromAllocateResourcesMapping(state, operation.In["runner"])
+	input.model = stringValueFromAllocateResourcesMapping(state, operation.In["model"])
+	input.environment = stringValueFromAllocateResourcesMapping(state, operation.In["environment"])
+	input.workplaceName = stringValueFromAllocateResourcesMapping(state, operation.In["workplace_name"])
+	input.repositoryURL = stringValueFromAllocateResourcesMapping(state, operation.In["repository_url"])
+	if input.invocation().Task == "" && state != nil {
+		if value, ok := state.data["invocation"].(invocation); ok {
+			input.repositoryURL = value.Repository.URL
+			input.workplaceName = value.Workplace.Name
+			input.environment = value.Workplace.Environment
+			input.modelBinding = value.Launch.ModelBinding
+			input.runner = value.Launch.Runner
+			input.model = value.Launch.Model
 		}
 	}
 	return input
+}
+
+func stringValueFromAllocateResourcesMapping(state *operationExecution, mapping model.OperationMapping) string {
+	if len(mapping.Value) != 0 {
+		var value string
+		if json.Unmarshal(mapping.Value, &value) == nil {
+			return strings.TrimSpace(value)
+		}
+		return ""
+	}
+	if state == nil {
+		return ""
+	}
+	inv, ok := state.data["invocation"].(invocation)
+	if !ok {
+		return ""
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.invocation.launch.model_binding":
+		return strings.TrimSpace(inv.Launch.ModelBinding)
+	case "data.invocation.launch.runner":
+		return strings.TrimSpace(inv.Launch.Runner)
+	case "data.invocation.launch.model":
+		return strings.TrimSpace(inv.Launch.Model)
+	case "data.invocation.workplace.environment":
+		return strings.TrimSpace(inv.Workplace.Environment)
+	case "data.invocation.workplace.name":
+		return strings.TrimSpace(inv.Workplace.Name)
+	case "data.invocation.repository.url":
+		return strings.TrimSpace(inv.Repository.URL)
+	default:
+		return ""
+	}
 }
 
 func boolValueFromAllocateResourcesMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
@@ -755,9 +812,13 @@ func profileValueFromAllocateResourcesMapping(state *operationExecution, mapping
 
 func allocateResourcesInputSummary(input allocateResourcesInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
-		"invocation":         invocationSummary(input.invocation),
-		"profile":            profileSummary(input.profile),
 		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+		"model_binding":      input.modelBinding,
+		"runner":             input.runner,
+		"model":              input.model,
+		"environment":        input.environment,
+		"workplace_name":     input.workplaceName,
+		"repository_url":     input.repositoryURL,
 	})
 }
 
