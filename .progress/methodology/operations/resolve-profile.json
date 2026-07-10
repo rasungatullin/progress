@@ -10,6 +10,11 @@
         "type": "string",
         "required": true,
         "description": "Имя исполнительного профиля из разрешённого действия."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
       }
     },
     "out": {
@@ -17,6 +22,11 @@
         "type": "object",
         "required": true,
         "description": "Разрешённый исполнительный профиль с настройками запуска."
+      },
+      "result": {
+        "type": "object",
+        "required": false,
+        "description": "Результат отказа при невозможности разрешить исполнительный профиль."
       }
     }
   }

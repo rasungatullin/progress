@@ -3756,12 +3756,33 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 	for _, value := range operations {
 		switch operation := value.(type) {
 		case string:
+			if operation == OperationKindResolveProfile {
+				result = append(result, resolveProfileActionOperation())
+				continue
+			}
 			result = append(result, methodology.ActionOperation{Name: operation, Kind: operation, Origin: OperationOriginBuiltin, Required: boolRef(true)})
 		case methodology.ActionOperation:
 			result = append(result, operation)
 		}
 	}
 	return result
+}
+
+func resolveProfileActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindResolveProfile,
+		Kind:     OperationKindResolveProfile,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"profile_name": mappingRef("action.profile"),
+			"invocation":   mappingRef("data.invocation"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"profile": mappingRef("data.profile"),
+			"result":  mappingRef("data.result"),
+		},
+	}
 }
 
 func optionalExecutionOperation(name string) methodology.ActionOperation {
@@ -4017,7 +4038,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
@@ -4035,7 +4056,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
@@ -4053,7 +4074,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
@@ -4072,7 +4093,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_synthesis": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
@@ -4091,7 +4112,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": false},
-        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
@@ -4111,7 +4132,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
@@ -4130,7 +4151,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_synthesis": false,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true},
+        {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true},
         {"name": "build-directive", "kind": "build-directive", "origin": "builtin", "required": true},
