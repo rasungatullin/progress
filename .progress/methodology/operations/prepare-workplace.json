@@ -11,21 +11,14 @@
         "required": true,
         "description": "Признак необходимости подготовки рабочего места для разрешённого действия."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
-      },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
-      },
-      "allocation": {
-        "type": "object",
-        "required": true,
-        "description": "Результат ресурсного снабжения."
-      }
+      "directory": {"type": "string", "description": "Каталог локального запуска."},
+      "repository_url": {"type": "string", "description": "Адрес репозитория рабочего места."},
+      "environment": {"type": "string", "description": "Выбранная среда выполнения."},
+      "workplace_name": {"type": "string", "description": "Имя рабочего места."},
+      "base_ref": {"type": "string", "description": "Базовая ветка рабочего места."},
+      "head_ref": {"type": "string", "description": "Ветка рабочего места."},
+      "allocated_environment": {"type": "string", "description": "Среда, выбранная ресурсным снабжением."},
+      "allocated_environment_type": {"type": "string", "description": "Тип среды, выбранный ресурсным снабжением."}
     },
     "out": {
       "workplace": {

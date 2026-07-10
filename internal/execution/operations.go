@@ -874,6 +874,10 @@ func profileSummary(profile profile) string {
 
 func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := prepareWorkplaceInputFromOperation(state, operation)
+	if _, ok := operation.In["invocation"]; !ok {
+		input.invocation = input.resolvedInvocation()
+		input.allocation = input.resolvedAllocation()
+	}
 	if !input.requiresWorkplace {
 		workplace := workplace{Name: strings.TrimSpace(input.invocation.Launch.Directory), Ready: true}
 		writePrepareWorkplaceData(state, operation, workplace, input.invocation)
@@ -909,10 +913,33 @@ func writePrepareWorkplaceData(state *operationExecution, operation OperationSpe
 }
 
 type prepareWorkplaceInput struct {
-	requiresWorkplace bool
-	invocation        invocation
-	profile           profile
-	allocation        allocation
+	requiresWorkplace        bool
+	invocation               invocation
+	profile                  profile
+	allocation               allocation
+	directory                string
+	repositoryURL            string
+	environment              string
+	workplaceName            string
+	baseRef                  string
+	headRef                  string
+	allocatedEnvironment     string
+	allocatedEnvironmentType string
+}
+
+func (input prepareWorkplaceInput) resolvedInvocation() invocation {
+	result := input.invocation
+	result.Repository.URL = input.repositoryURL
+	result.Workplace = model.WorkplaceSpec{Name: input.workplaceName, Environment: input.environment, BaseRef: input.baseRef, HeadRef: input.headRef}
+	result.Launch.Directory = input.directory
+	return result
+}
+
+func (input prepareWorkplaceInput) resolvedAllocation() allocation {
+	result := input.allocation
+	result.Environment = input.allocatedEnvironment
+	result.EnvironmentType = input.allocatedEnvironmentType
+	return result
 }
 
 func prepareWorkplaceInputFromOperation(state *operationExecution, operation OperationSpec) prepareWorkplaceInput {
@@ -943,7 +970,62 @@ func prepareWorkplaceInputFromOperation(state *operationExecution, operation Ope
 			input.allocation = value
 		}
 	}
+	input.directory = stringValueFromPrepareWorkplaceMapping(state, operation.In["directory"])
+	input.repositoryURL = stringValueFromPrepareWorkplaceMapping(state, operation.In["repository_url"])
+	input.environment = stringValueFromPrepareWorkplaceMapping(state, operation.In["environment"])
+	input.workplaceName = stringValueFromPrepareWorkplaceMapping(state, operation.In["workplace_name"])
+	input.baseRef = stringValueFromPrepareWorkplaceMapping(state, operation.In["base_ref"])
+	input.headRef = stringValueFromPrepareWorkplaceMapping(state, operation.In["head_ref"])
+	input.allocatedEnvironment = stringValueFromPrepareWorkplaceMapping(state, operation.In["allocated_environment"])
+	input.allocatedEnvironmentType = stringValueFromPrepareWorkplaceMapping(state, operation.In["allocated_environment_type"])
+	if _, ok := operation.In["invocation"]; ok {
+		return input
+	}
+	input.invocation = input.resolvedInvocation()
+	input.allocation = input.resolvedAllocation()
 	return input
+}
+
+func stringValueFromPrepareWorkplaceMapping(state *operationExecution, mapping model.OperationMapping) string {
+	if len(mapping.Value) != 0 {
+		var value string
+		if json.Unmarshal(mapping.Value, &value) == nil {
+			return strings.TrimSpace(value)
+		}
+		return ""
+	}
+	if state == nil {
+		return ""
+	}
+	value, ok := state.data["invocation"].(invocation)
+	if strings.HasPrefix(mapping.Ref, "data.invocation.") && ok {
+		switch strings.TrimPrefix(mapping.Ref, "data.invocation.") {
+		case "launch.directory":
+			return value.Launch.Directory
+		case "repository.url":
+			return value.Repository.URL
+		case "workplace.environment":
+			return value.Workplace.Environment
+		case "workplace.name":
+			return value.Workplace.Name
+		case "workplace.base_ref":
+			return value.Workplace.BaseRef
+		case "workplace.head_ref":
+			return value.Workplace.HeadRef
+		}
+	}
+	allocationValue, allocationOK := state.data["allocation"].(allocation)
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.allocation.environment":
+		if allocationOK {
+			return allocationValue.Environment
+		}
+	case "data.allocation.environment_type":
+		if allocationOK {
+			return allocationValue.EnvironmentType
+		}
+	}
+	return ""
 }
 
 func boolValueFromPrepareWorkplaceMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {

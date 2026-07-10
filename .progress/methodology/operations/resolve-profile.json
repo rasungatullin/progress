@@ -10,7 +10,7 @@
         "type": "string",
         "required": true,
         "description": "Имя исполнительного профиля из разрешённого действия."
-      },
+      }
     },
     "out": {
       "profile": {

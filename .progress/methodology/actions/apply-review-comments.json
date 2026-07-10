@@ -124,6 +124,9 @@
         "workplace": {
           "ref": "data.workplace"
         },
+        "invocation": {
+          "ref": "data.invocation"
+        }
       }
     },
     {
@@ -208,15 +211,14 @@
         "requires_workplace": {
           "ref": "action.requires_workplace"
         },
-        "invocation": {
-          "ref": "data.invocation"
-        },
-        "profile": {
-          "ref": "data.profile"
-        },
-        "allocation": {
-          "ref": "data.allocation"
-        }
+        "directory": {"ref": "data.invocation.launch.directory"},
+        "repository_url": {"ref": "data.invocation.repository.url"},
+        "environment": {"ref": "data.invocation.workplace.environment"},
+        "workplace_name": {"ref": "data.invocation.workplace.name"},
+        "base_ref": {"ref": "data.invocation.workplace.base_ref"},
+        "head_ref": {"ref": "data.invocation.workplace.head_ref"},
+        "allocated_environment": {"ref": "data.allocation.environment"},
+        "allocated_environment_type": {"ref": "data.allocation.environment_type"}
       },
       "out": {
         "workplace": {
