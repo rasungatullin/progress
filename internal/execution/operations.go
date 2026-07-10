@@ -978,7 +978,7 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	}
 	writeBuildDirectiveData(state, operation, directiveInvocation.Launch)
 	state.tracker.completeIO(name, buildDirectiveInputSummary(input, operation), buildDirectiveOutputSummary(directiveInvocation.Launch, operation), "Исполнительная директива подготовлена к запуску.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, directiveInvocation, profileFromExecutionData(state), input.allocation, workplaceFromExecutionData(state), LaunchResult{Status: "running"}, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, directiveInvocation, input.profile, input.allocation, input.workplace, LaunchResult{Status: "running"}, nil)
 	return nil
 }
 
@@ -993,15 +993,15 @@ func writeBuildDirectiveData(state *operationExecution, operation OperationSpec,
 type buildDirectiveInput struct {
 	requiresSynthesis bool
 	invocation        invocation
+	profile           profile
 	allocation        allocation
+	workplace         workplace
 }
 
 func buildDirectiveInputFromOperation(state *operationExecution, operation OperationSpec) buildDirectiveInput {
 	input := buildDirectiveInput{}
 	if state != nil {
 		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.invocation = invocationFromExecutionData(state)
-		input.allocation = allocationFromExecutionData(state)
 	}
 	if len(operation.In) == 0 {
 		return input
@@ -1019,6 +1019,16 @@ func buildDirectiveInputFromOperation(state *operationExecution, operation Opera
 	if mapping, ok := operation.In["allocation"]; ok {
 		if value, ok := allocationValueFromBuildDirectiveMapping(state, mapping); ok {
 			input.allocation = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromBuildDirectiveMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["workplace"]; ok {
+		if value, ok := workplaceValueFromBuildDirectiveMapping(state, mapping); ok {
+			input.workplace = value
 		}
 	}
 	return input
@@ -1083,11 +1093,53 @@ func allocationValueFromBuildDirectiveMapping(state *operationExecution, mapping
 	}
 }
 
+func profileValueFromBuildDirectiveMapping(state *operationExecution, mapping model.OperationMapping) (profile, bool) {
+	if len(mapping.Value) != 0 {
+		var value profile
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return profile{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.profile":
+		if state == nil {
+			return profile{}, false
+		}
+		value, ok := state.data["profile"].(profile)
+		return value, ok
+	default:
+		return profile{}, false
+	}
+}
+
+func workplaceValueFromBuildDirectiveMapping(state *operationExecution, mapping model.OperationMapping) (workplace, bool) {
+	if len(mapping.Value) != 0 {
+		var value workplace
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return workplace{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.workplace":
+		if state == nil {
+			return workplace{}, false
+		}
+		value, ok := state.data["workplace"].(workplace)
+		return value, ok
+	default:
+		return workplace{}, false
+	}
+}
+
 func buildDirectiveInputSummary(input buildDirectiveInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
 		"allocation":         allocationSummary(input.allocation),
 		"invocation":         invocationSummary(input.invocation),
+		"profile":            profileSummary(input.profile),
 		"requires_synthesis": fmt.Sprintf("%t", input.requiresSynthesis),
+		"workplace":          workplaceSummary(input.workplace),
 	})
 }
 
