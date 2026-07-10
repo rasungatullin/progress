@@ -6,11 +6,12 @@
   "required": true,
   "contract": {
     "in": {
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Исходный ввод контура исполнения из контура реактивности."
-      },
+      "task": {"type": "string", "description": "Текст задачи для подготовки данных."},
+      "action": {"type": "string", "description": "Имя действия задания."},
+      "repository_url": {"type": "string", "description": "Адрес репозитория задания."},
+      "workplace_name": {"type": "string", "description": "Имя рабочего места задания."},
+      "base_ref": {"type": "string", "description": "Базовая ветка задания."},
+      "head_ref": {"type": "string", "description": "Ветка задания."},
       "expected_result": {
         "type": "string",
         "description": "Ожидаемый результат выполнения действия."
