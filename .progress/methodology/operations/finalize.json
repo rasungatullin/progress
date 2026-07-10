@@ -21,9 +21,17 @@
         "required": true,
         "description": "Класс завершаемого действия."
       },
-      "result": {
+      "result_status": {
+        "type": "string",
+        "description": "Состояние запуска выполнения перед завершающей фиксацией."
+      },
+      "result_summary": {
+        "type": "string",
+        "description": "Сводка запуска выполнения перед завершающей фиксацией."
+      },
+      "structured_output": {
         "type": "object",
-        "description": "Текущий результат выполнения перед завершающей фиксацией."
+        "description": "Структурированный результат запуска выполнения."
       }
     },
     "out": {

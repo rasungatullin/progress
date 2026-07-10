@@ -1823,6 +1823,21 @@ func finalizeInputFromOperation(state *operationExecution, operation OperationSp
 			input.result = value
 		}
 	}
+	if mapping, ok := operation.In["result_status"]; ok {
+		if value, ok := finalizeResultStringValue(state, mapping); ok {
+			input.result.Status = value
+		}
+	}
+	if mapping, ok := operation.In["result_summary"]; ok {
+		if value, ok := finalizeResultStringValue(state, mapping); ok {
+			input.result.Summary = value
+		}
+	}
+	if mapping, ok := operation.In["structured_output"]; ok {
+		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
+			input.result.StructuredOutput = value.StructuredOutput
+		}
+	}
 	if mapping, ok := operation.In["invocation"]; ok {
 		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
 			input.invocation = value
@@ -1844,6 +1859,31 @@ func finalizeInputFromOperation(state *operationExecution, operation OperationSp
 		}
 	}
 	return input
+}
+
+func finalizeResultStringValue(state *operationExecution, mapping model.OperationMapping) (string, bool) {
+	if len(mapping.Value) != 0 {
+		var value string
+		if json.Unmarshal(mapping.Value, &value) == nil {
+			return strings.TrimSpace(value), true
+		}
+		return "", false
+	}
+	if state == nil {
+		return "", false
+	}
+	value, ok := state.data["result"].(LaunchResult)
+	if !ok {
+		return "", false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.result.status":
+		return strings.TrimSpace(value.Status), true
+	case "data.result.summary":
+		return strings.TrimSpace(value.Summary), true
+	default:
+		return "", false
+	}
 }
 
 func actionStringValueFromFinalizeMapping(state *operationExecution, mapping model.OperationMapping) (string, bool) {

@@ -245,21 +245,9 @@
         "action_class": {
           "ref": "action.class"
         },
-        "invocation": {
-          "ref": "data.invocation"
-        },
-        "profile": {
-          "ref": "data.profile"
-        },
-        "allocation": {
-          "ref": "data.allocation"
-        },
-        "workplace": {
-          "ref": "data.workplace"
-        },
-        "result": {
-          "ref": "data.result"
-        }
+        "result_status": {"ref": "data.result.status"},
+        "result_summary": {"ref": "data.result.summary"},
+        "structured_output": {"ref": "data.result.structured_output"}
       },
       "out": {
         "result": {
