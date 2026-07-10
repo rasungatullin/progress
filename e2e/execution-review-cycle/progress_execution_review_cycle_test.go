@@ -52,7 +52,7 @@ func TestProgressExecutionReviewFixCycle(t *testing.T) {
 
 	implementation := run(t, repo, env, progressBin,
 		"execution", "action",
-		"--action", "engineering-synthesis-commit",
+		"--action", "start-implementation-pr",
 		"--task-number", "101",
 		"--title", "Проверить цикл исполнения и ревизии",
 		"--task", "Выполнить первичную реализацию локальной проверочной задачи.",
@@ -62,7 +62,7 @@ func TestProgressExecutionReviewFixCycle(t *testing.T) {
 
 	review := run(t, repo, env, progressBin,
 		"execution", "action",
-		"--action", "review",
+		"--action", "review-pull-request",
 		"--task-number", "101",
 		"--title", "Проверить цикл исполнения и ревизии",
 		"--task", "Провести ревизию результата локальной проверочной задачи.",
@@ -73,7 +73,7 @@ func TestProgressExecutionReviewFixCycle(t *testing.T) {
 
 	rework := run(t, repo, env, progressBin,
 		"execution", "action",
-		"--action", "engineering-synthesis-commit",
+		"--action", "apply-review-comments",
 		"--task-number", "101",
 		"--title", "Проверить цикл исполнения и ревизии",
 		"--task", "Исправить замечание ревизии локальной проверочной задачи.",
@@ -304,40 +304,56 @@ func methodologyCatalogJSON() string {
 	return `{
   "actions": [
     {
-      "name": "engineering-synthesis-commit",
+      "name": "start-implementation-pr",
       "class": "engineering-synthesis",
       "profile": "coder",
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "required": true},
-        {"name": "prepare-data", "kind": "prepare-data", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "required": true},
-        {"name": "allocate-resources", "kind": "allocate-resources", "required": true},
-        {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true},
-        {"name": "build-directive", "kind": "build-directive", "required": true},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true},
-        {"name": "parse-result", "kind": "parse-result", "required": true},
-        {"name": "commit-push", "kind": "commit-push", "required": true},
-        {"name": "finalize", "kind": "finalize", "required": true}
+        {"name": "prepare-data", "kind": "prepare-data", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
+        {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
+        {"name": "build-directive", "kind": "build-directive", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "commit-push", "kind": "commit-push", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
+        {"name": "finalize", "kind": "finalize", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
     {
-      "name": "review",
+      "name": "review-pull-request",
       "class": "review",
       "profile": "review",
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "resolve-action", "kind": "resolve-action", "required": true},
-        {"name": "prepare-data", "kind": "prepare-data", "required": true},
-        {"name": "resolve-profile", "kind": "resolve-profile", "required": true},
-        {"name": "allocate-resources", "kind": "allocate-resources", "required": true},
-        {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true},
-        {"name": "build-directive", "kind": "build-directive", "required": true},
-        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true},
-        {"name": "parse-result", "kind": "parse-result", "required": true},
-        {"name": "finalize", "kind": "finalize", "required": true}
+        {"name": "prepare-data", "kind": "prepare-data", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
+        {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
+        {"name": "build-directive", "kind": "build-directive", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "finalize", "kind": "finalize", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
+      ]
+    },
+    {
+      "name": "apply-review-comments",
+      "class": "engineering-synthesis",
+      "profile": "coder",
+      "requires_workplace": true,
+      "requires_synthesis": true,
+      "operations": [
+        {"name": "prepare-data", "kind": "prepare-data", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
+        {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
+        {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
+        {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
+        {"name": "build-directive", "kind": "build-directive", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"directive": {"ref": "data.directive"}}},
+        {"name": "launch-synthesis", "kind": "launch-synthesis", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
+        {"name": "parse-result", "kind": "parse-result", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
+        {"name": "commit-push", "kind": "commit-push", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
+        {"name": "finalize", "kind": "finalize", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     }
   ]

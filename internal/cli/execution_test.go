@@ -146,7 +146,7 @@ func TestExecutionActionAllowsActionOnlyInvocation(t *testing.T) {
 	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
 		return executionCommandServiceStub{
 			executeAction: func(_ context.Context, req execution.ActionInvocation) (execution.ExecutionResult, error) {
-				if req.Assignment == nil || req.Assignment.Action != execution.ActionClassEngineeringSynthesis {
+				if req.Assignment == nil || req.Assignment.Action != execution.ActionStartImplementationPR {
 					t.Fatalf("unexpected action request: %#v", req)
 				}
 				if req.Assignment.StructuredInput != nil {
@@ -268,7 +268,7 @@ func TestExecutionOperationCommandCallsService(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"execution", "operation", "resolve-action", "--action", "review"})
+	cmd.SetArgs([]string{"execution", "operation", "prepare-data", "--action", "review"})
 
 	var captured execution.OperationInvocation
 	setExecutionServiceFactory(cmd, func(*cobra.Command) executionCommandService {
@@ -279,9 +279,9 @@ func TestExecutionOperationCommandCallsService(t *testing.T) {
 				}
 				captured = req
 				return execution.OperationResult{
-					Name:    "resolve-action",
+					Name:    "prepare-data",
 					Status:  "completed",
-					Summary: "action=review class=review",
+					Summary: "Данные задания подготовлены для выполнения.",
 				}, nil
 			},
 		}
@@ -290,14 +290,14 @@ func TestExecutionOperationCommandCallsService(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute operation command: %v", err)
 	}
-	if captured.Operation != "resolve-action" || captured.Assignment == nil || captured.Assignment.Action != "review" {
+	if captured.Operation != "prepare-data" || captured.Assignment == nil || captured.Assignment.Action != "review" {
 		t.Fatalf("unexpected operation request: %#v", captured)
 	}
 	if captured.Assignment.StructuredInput != nil {
 		t.Fatalf("operation request must not require structured input: %#v", captured.Assignment.StructuredInput)
 	}
 	output := stdout.String()
-	for _, fragment := range []string{"operation=resolve-action\n", "status=completed\n", "summary=action=review class=review\n"} {
+	for _, fragment := range []string{"operation=prepare-data\n", "status=completed\n", "summary=Данные задания подготовлены для выполнения.\n"} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("operation output must include %q, got %q", fragment, output)
 		}

@@ -344,7 +344,16 @@ type OperationSpec struct {
 	Kind     OperationKind `json:"kind,omitempty"`
 	Title    string        `json:"title,omitempty"`
 	Origin   string        `json:"origin,omitempty"`
+	In       OperationMap  `json:"in,omitempty"`
+	Out      OperationMap  `json:"out,omitempty"`
 	Required bool          `json:"required,omitempty"`
+}
+
+type OperationMap map[string]OperationMapping
+
+type OperationMapping struct {
+	Ref   string          `json:"ref,omitempty"`
+	Value json.RawMessage `json:"value,omitempty"`
 }
 
 type OperationResult struct {

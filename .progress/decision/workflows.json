@@ -1,6 +1,6 @@
 {
   "defaults": {
-    "action": "implement",
+    "action": "start-implementation-pr",
     "reason_code": "issue_context_ready",
     "reason_message": "Контекст задачи готов к передаче в контур исполнения."
   },

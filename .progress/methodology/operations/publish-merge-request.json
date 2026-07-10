@@ -3,5 +3,53 @@
   "kind": "publish-merge-request",
   "title": "Открытие запроса на слияние",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
+      },
+      "profile": {
+        "type": "object",
+        "required": true,
+        "description": "Профиль исполнения, выбранный для действия."
+      },
+      "allocation": {
+        "type": "object",
+        "required": true,
+        "description": "Выделенные вычислительные ресурсы."
+      },
+      "workplace": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленное рабочее место."
+      },
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Результат выполнения с учётом создания коммита и отправки ветки."
+      },
+      "structured_output": {
+        "type": "object",
+        "description": "Нормализованный структурированный результат выполнения."
+      }
+    },
+    "out": {
+      "merge_request": {
+        "type": "object",
+        "description": "Опубликованный запрос на слияние."
+      },
+      "publish_summary": {
+        "type": "string",
+        "description": "Сводка публикации запроса на слияние."
+      },
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Результат выполнения с учётом публикации запроса на слияние."
+      }
+    }
+  }
 }

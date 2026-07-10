@@ -207,6 +207,54 @@ func TestServiceProcessTaskPassesExplicitRouteToDecision(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskPassesFilledExecutionAssignmentToExecution(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelAwaitingReview})
+	executions := &processingExecutionStub{results: []execution.ExecutionResult{
+		{Status: "completed", Launch: &execution.LaunchResult{Status: "completed", StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "ok"}}}},
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = executions
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(executions.requests) != 1 {
+		t.Fatalf("expected one execution request, got %d", len(executions.requests))
+	}
+	assignment := executions.requests[0].Assignment
+	if assignment == nil {
+		t.Fatal("execution assignment must be passed to execution contour")
+	}
+	if assignment.Action != execution.ActionReviewPullRequest {
+		t.Fatalf("unexpected action: %#v", assignment)
+	}
+	if strings.TrimSpace(assignment.ExpectedResult) == "" {
+		t.Fatalf("expected_result must be filled: %#v", assignment)
+	}
+	if len(assignment.Constraints) == 0 {
+		t.Fatalf("constraints must be filled from selected route: %#v", assignment)
+	}
+	if assignment.CanonicalTask == nil || assignment.CanonicalTask.Type != "task" || assignment.CanonicalTask.Number != 123 || assignment.CanonicalTask.Repository != "owner/name" {
+		t.Fatalf("canonical_task must be filled from issue state: %#v", assignment.CanonicalTask)
+	}
+	if len(assignment.RelatedObjects) != 1 || assignment.RelatedObjects[0].Type != "merge-request" || assignment.RelatedObjects[0].Number != 17 || assignment.RelatedObjects[0].Attributes["head_ref"] != "123" {
+		t.Fatalf("related_objects must include linked merge request: %#v", assignment.RelatedObjects)
+	}
+	if len(assignment.Reasons) == 0 || strings.TrimSpace(assignment.Reasons[0].Code) == "" || strings.TrimSpace(assignment.Reasons[0].Message) == "" {
+		t.Fatalf("reasons must be filled from selected route: %#v", assignment.Reasons)
+	}
+	if assignment.StructuredInput == nil || !strings.Contains(assignment.StructuredInput.Task, "Task #123: Task") {
+		t.Fatalf("structured_input.task must be filled from issue state: %#v", assignment.StructuredInput)
+	}
+	if len(assignment.StructuredInput.Constraints) == 0 {
+		t.Fatalf("structured_input.constraints must mirror route constraints: %#v", assignment.StructuredInput)
+	}
+}
+
 func TestServiceRunTaskActionSkipsDecisionAndMarksRework(t *testing.T) {
 	t.Parallel()
 

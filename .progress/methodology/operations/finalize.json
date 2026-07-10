@@ -3,5 +3,55 @@
   "kind": "finalize",
   "title": "Завершающая фиксация",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "requires_synthesis": {
+        "type": "boolean",
+        "required": true,
+        "description": "Признак необходимости содержательного синтеза для действия."
+      },
+      "action_name": {
+        "type": "string",
+        "required": true,
+        "description": "Имя завершаемого действия."
+      },
+      "action_class": {
+        "type": "string",
+        "required": true,
+        "description": "Класс завершаемого действия."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
+      },
+      "profile": {
+        "type": "object",
+        "required": true,
+        "description": "Разрешённый исполнительный профиль."
+      },
+      "allocation": {
+        "type": "object",
+        "required": true,
+        "description": "Результат ресурсного снабжения."
+      },
+      "workplace": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленное рабочее место."
+      },
+      "result": {
+        "type": "object",
+        "description": "Текущий результат выполнения перед завершающей фиксацией."
+      }
+    },
+    "out": {
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Итоговый результат выполнения действия."
+      }
+    }
+  }
 }

@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +25,6 @@ const (
 	ActionReviewPullRequest     = "review-pull-request"
 	ActionApplyReviewComments   = "apply-review-comments"
 
-	OperationKindResolveAction          = "resolve-action"
 	OperationKindPrepareData            = "prepare-data"
 	OperationKindLoadPullRequest        = "load-pull-request"
 	OperationKindLoadReviewRemarks      = "load-review-remarks"
@@ -257,6 +257,8 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 	if origin := strings.TrimSpace(operation.Origin); origin != "" {
 		defaultSpec.Origin = origin
 	}
+	defaultSpec.In = operationMappingFromMethodology(operation.In)
+	defaultSpec.Out = operationMappingFromMethodology(operation.Out)
 	if operation.Required == nil && strings.TrimSpace(action.Name) == ActionApplyReviewComments && kind == OperationKindLoadReviewRemarks {
 		defaultSpec.Required = true
 	}
@@ -264,6 +266,24 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 		defaultSpec.Required = *operation.Required
 	}
 	return defaultSpec, nil
+}
+
+func operationMappingFromMethodology(mappings map[string]methodology.ActionMapping) model.OperationMap {
+	if len(mappings) == 0 {
+		return nil
+	}
+	result := make(model.OperationMap, len(mappings))
+	for name, mapping := range mappings {
+		field := model.OperationMapping{}
+		if mapping.Ref != nil {
+			field.Ref = strings.TrimSpace(*mapping.Ref)
+		}
+		if mapping.Value != nil {
+			field.Value = append(json.RawMessage(nil), (*mapping.Value)...)
+		}
+		result[strings.TrimSpace(name)] = field
+	}
+	return result
 }
 
 func normalizeMethodologyOperation(operation methodology.Operation) methodology.Operation {
@@ -284,8 +304,6 @@ func normalizeMethodologyOperation(operation methodology.Operation) methodology.
 
 func defaultOperationSpec(kind string) model.OperationSpec {
 	switch strings.TrimSpace(kind) {
-	case OperationKindResolveAction:
-		return builtinOperation(OperationKindResolveAction, "Разрешение действия", true)
 	case OperationKindPrepareData:
 		return builtinOperation(OperationKindPrepareData, "Подготовка данных", true)
 	case OperationKindLoadPullRequest:
@@ -414,6 +432,10 @@ func (t *operationTracker) skip(name string, summary string) {
 	t.set(name, model.OperationStatus(OperationStatusSkipped), "", "", summary, nil)
 }
 
+func (t *operationTracker) skipIO(name string, input string, output string, summary string) {
+	t.set(name, model.OperationStatus(OperationStatusSkipped), input, output, summary, nil)
+}
+
 func (t *operationTracker) fail(name string, summary string, err error, code string, retryable bool, manualIntervention bool) {
 	t.set(name, model.OperationStatus(OperationStatusFailed), "", "", summary, executionFailure(code, err, retryable, manualIntervention))
 }
@@ -470,7 +492,7 @@ func executionResultFromLaunch(assignment *model.ExecutionAssignment, action mod
 		Launch:          &result,
 	}
 	if err != nil {
-		executionResult.Failure = executionFailure(executionFailureCode(operations), err, false, true)
+		executionResult.Failure = executionFailure(executionFailureCode(err, operations), err, false, true)
 	}
 
 	return executionResult
@@ -503,32 +525,25 @@ func cloneAction(action model.Action) model.Action {
 	return cloned
 }
 
-func actionResolutionFailureOperations(err error) []model.OperationResult {
-	tracker := newOperationTracker(model.Action{
-		Operations: []model.OperationSpec{
-			builtinOperation(OperationKindResolveAction, "Разрешение действия", true),
-		},
-	})
-	code := "action_not_found"
-	summary := "Действие не найдено на нулевом этапе исполнения."
+func actionResolutionFailureCode(err error) string {
 	var resolutionErr actionResolutionError
-	if errors.As(err, &resolutionErr) {
-		if strings.TrimSpace(resolutionErr.code) != "" {
-			code = resolutionErr.code
-		}
-		if code != "action_not_found" {
-			summary = "Разрешение действия завершилось диагностируемым отказом."
-		}
+	if !errors.As(err, &resolutionErr) {
+		return ""
 	}
-	tracker.fail(OperationKindResolveAction, summary, err, code, false, true)
-	return tracker.snapshot()
+	if code := strings.TrimSpace(resolutionErr.code); code != "" {
+		return code
+	}
+	return "action_not_found"
 }
 
-func executionFailureCode(operations []model.OperationResult) string {
+func executionFailureCode(err error, operations []model.OperationResult) string {
 	for _, operation := range operations {
 		if operation.Failure != nil && strings.TrimSpace(operation.Failure.Code) != "" {
 			return operation.Failure.Code
 		}
+	}
+	if code := actionResolutionFailureCode(err); code != "" {
+		return code
 	}
 	return "execution_failed"
 }

@@ -15,7 +15,7 @@ func TestServiceRecordsAndFiltersEvents(t *testing.T) {
 	event, err := service.Record(context.Background(), RecordInput{
 		Contour:   "execution",
 		Module:    "dispatcher",
-		Operation: "resolve-action",
+		Operation: "prepare-data",
 		Message:   "Действие определено.",
 		Metadata:  map[string]string{"action": "engineering-synthesis"},
 	})

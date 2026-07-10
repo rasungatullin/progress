@@ -3,5 +3,54 @@
   "kind": "commit-push",
   "title": "Создание коммита и отправка ветки",
   "origin": "builtin",
-  "required": true
+  "required": true,
+  "contract": {
+    "in": {
+      "requires_synthesis": {
+        "type": "boolean",
+        "required": true,
+        "description": "Признак необходимости запуска синтеза для разрешённого действия."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
+      },
+      "profile": {
+        "type": "object",
+        "required": true,
+        "description": "Разрешённый исполнительный профиль."
+      },
+      "allocation": {
+        "type": "object",
+        "required": true,
+        "description": "Результат ресурсного снабжения."
+      },
+      "workplace": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленное рабочее место."
+      },
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Результат запуска выполнения."
+      },
+      "structured_output": {
+        "type": "object",
+        "description": "Нормализованный структурированный результат выполнения."
+      }
+    },
+    "out": {
+      "commit_summary": {
+        "type": "string",
+        "description": "Сводка создания коммита и отправки ветки."
+      },
+      "result": {
+        "type": "object",
+        "required": true,
+        "description": "Результат выполнения с учётом создания коммита и отправки ветки."
+      }
+    }
+  }
 }

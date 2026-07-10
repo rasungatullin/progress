@@ -3,46 +3,364 @@
   "class": "engineering-synthesis",
   "profile": "coder",
   "aliases": [
+    "code",
+    "code-commit",
+    "coder",
+    "coding",
+    "implement",
+    "implement-commit",
     "implement-pr",
+    "implementation",
     "implementation-pr",
     "open-pr",
     "start-implementation"
   ],
   "requires_workplace": true,
   "requires_synthesis": true,
+  "contract": {
+    "in": {
+      "expected_result": {
+        "type": "string",
+        "required": true,
+        "description": "Ожидаемый результат выполнения действия."
+      },
+      "constraints": {
+        "type": "string_array",
+        "description": "Ограничения маршрута обработки."
+      },
+      "canonical_task": {
+        "type": "object",
+        "required": true,
+        "description": "Каноническая задача, восстановленная по внешнему рабочему объекту."
+      },
+      "related_objects": {
+        "type": "object_array",
+        "description": "Связанные канонические объекты."
+      },
+      "reasons": {
+        "type": "object_array",
+        "description": "Основания выбора действия."
+      },
+      "structured_input": {
+        "type": "object",
+        "required": true,
+        "description": "Структурированный ввод для контура исполнения."
+      }
+    },
+    "data": {
+      "profile": {
+        "type": "object",
+        "description": "Разрешённый исполнительный профиль для последующих операций действия."
+      },
+      "structured_input": {
+        "type": "object",
+        "description": "Подготовленный структурированный ввод для запуска исполнения."
+      },
+      "workplace": {
+        "type": "object",
+        "description": "Подготовленная спецификация рабочего места с синхронизированными ветками."
+      },
+      "allocation": {
+        "type": "object",
+        "description": "Результат ресурсного снабжения для последующих операций действия."
+      },
+      "directive": {
+        "type": "object",
+        "description": "Подготовленная исполнительная директива для запуска выполнения."
+      },
+      "result": {
+        "type": "object",
+        "description": "Результат запуска выполнения."
+      },
+      "structured_output": {
+        "type": "object",
+        "description": "Нормализованный структурированный результат выполнения."
+      },
+      "commit_summary": {
+        "type": "string",
+        "description": "Сводка создания коммита и отправки ветки."
+      },
+      "merge_request": {
+        "type": "object",
+        "description": "Опубликованный запрос на слияние."
+      },
+      "publish_summary": {
+        "type": "string",
+        "description": "Сводка публикации запроса на слияние."
+      }
+    }
+  },
   "operations": [
     {
-      "name": "resolve-action"
+      "name": "prepare-data",
+      "in": {
+        "invocation": {
+          "ref": "in.invocation"
+        },
+        "expected_result": {
+          "ref": "in.expected_result"
+        },
+        "constraints": {
+          "ref": "in.constraints"
+        },
+        "canonical_task": {
+          "ref": "in.canonical_task"
+        },
+        "related_objects": {
+          "ref": "in.related_objects"
+        },
+        "reasons": {
+          "ref": "in.reasons"
+        },
+        "structured_input": {
+          "ref": "in.structured_input"
+        }
+      },
+      "out": {
+        "structured_input": {
+          "ref": "data.structured_input"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        }
+      }
     },
     {
-      "name": "prepare-data"
+      "name": "resolve-profile",
+      "in": {
+        "profile_name": {
+          "ref": "action.profile"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        }
+      },
+      "out": {
+        "profile": {
+          "ref": "data.profile"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
-      "name": "resolve-profile"
+      "name": "allocate-resources",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        },
+        "profile": {
+          "ref": "data.profile"
+        }
+      },
+      "out": {
+        "allocation": {
+          "ref": "data.allocation"
+        }
+      }
     },
     {
-      "name": "allocate-resources"
+      "name": "prepare-workplace",
+      "in": {
+        "requires_workplace": {
+          "ref": "action.requires_workplace"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        }
+      },
+      "out": {
+        "workplace": {
+          "ref": "data.workplace"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        }
+      }
     },
     {
-      "name": "prepare-workplace"
+      "name": "build-directive",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        }
+      },
+      "out": {
+        "directive": {
+          "ref": "data.directive"
+        }
+      }
     },
     {
-      "name": "build-directive"
+      "name": "launch-synthesis",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        },
+        "directive": {
+          "ref": "data.directive"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        }
+      },
+      "out": {
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
-      "name": "launch-synthesis"
+      "name": "parse-result",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      },
+      "out": {
+        "structured_output": {
+          "ref": "data.structured_output"
+        }
+      }
     },
     {
-      "name": "parse-result"
+      "name": "commit-push",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        },
+        "result": {
+          "ref": "data.result"
+        },
+        "structured_output": {
+          "ref": "data.structured_output"
+        }
+      },
+      "out": {
+        "commit_summary": {
+          "ref": "data.commit_summary"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
-      "name": "commit-push"
+      "name": "publish-merge-request",
+      "in": {
+        "invocation": {
+          "ref": "data.invocation"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        },
+        "result": {
+          "ref": "data.result"
+        },
+        "structured_output": {
+          "ref": "data.structured_output"
+        }
+      },
+      "out": {
+        "merge_request": {
+          "ref": "data.merge_request"
+        },
+        "publish_summary": {
+          "ref": "data.publish_summary"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      }
     },
     {
-      "name": "publish-merge-request"
-    },
-    {
-      "name": "finalize"
+      "name": "finalize",
+      "in": {
+        "requires_synthesis": {
+          "ref": "action.requires_synthesis"
+        },
+        "action_name": {
+          "ref": "action.name"
+        },
+        "action_class": {
+          "ref": "action.class"
+        },
+        "invocation": {
+          "ref": "data.invocation"
+        },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        },
+        "result": {
+          "ref": "data.result"
+        }
+      },
+      "out": {
+        "result": {
+          "ref": "data.result"
+        }
+      }
     }
   ],
   "description": "Реализация задачи с отправкой ветки и открытием запроса на слияние.",

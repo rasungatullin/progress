@@ -90,19 +90,18 @@
 
 Вызов действия проходит по списку операций, закреплённому в разрешённом `Action.Operations`.
 
-Контур исполнения получает от внешнего инициатора только имя действия в `ExecutionAssignment.Action`. Само разрешение имени выполняется через объединённый каталог методик из глобального и локального слоёв.
+Контур исполнения получает от внешнего инициатора только имя действия в `ExecutionAssignment.Action`. Само разрешение имени выполняется через объединённый каталог методик из глобального и локального слоёв до запуска операций и не входит в `Action.Operations`.
 
 Для действия инженерного синтеза типовой порядок в поставляемом каталоге методик включает:
 
-1. `resolve-action`;
-2. `prepare-data`;
-3. `resolve-profile`;
-4. `allocate-resources`;
-5. `prepare-workplace`;
-6. `build-directive`;
-7. `launch-synthesis`;
-8. `parse-result`;
-9. `finalize`.
+1. `prepare-data`;
+2. `resolve-profile`;
+3. `allocate-resources`;
+4. `prepare-workplace`;
+5. `build-directive`;
+6. `launch-synthesis`;
+7. `parse-result`;
+8. `finalize`.
 
 Эти имена можно использовать для диагностического вызова `progress execution operation <operation>`, но сами стадии не становятся отдельными CLI-командами.
 
@@ -152,7 +151,7 @@ JSON-строки структурированных секций выводят
 
 ```bash
 progress execution action \
-  --action implement \
+  --action start-implementation-pr \
   --task "Подготовить изменение по задаче 123" \
   --constraint "Не менять публичный формат интеграционных ответов"
 ```
@@ -161,7 +160,7 @@ progress execution action \
 
 ```bash
 progress execution action \
-  --action review \
+  --action review-pull-request \
   --input-file .progress/execution/input.json
 ```
 
@@ -202,11 +201,11 @@ progress execution action \
   --task "Исправить замечания ревизии и вернуть ответы на них"
 ```
 
-Диагностический вызов операции разрешения действия:
+Диагностический вызов операции подготовки данных:
 
 ```bash
-progress execution operation resolve-action \
-  --action review \
+progress execution operation prepare-data \
+  --action review-pull-request \
   --task "Проверить изменения по запросу на слияние"
 ```
 

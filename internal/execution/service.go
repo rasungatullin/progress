@@ -131,11 +131,7 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 	action, err := s.resolveAction(ctx, in)
 	if err != nil {
 		result := failedStartResult(err)
-		operations := actionResolutionFailureOperations(err)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile{}, allocation{}, workplace{}, result, err)
-		if operation := findOperationResult(operations, OperationKindResolveAction); operation != nil {
-			return *operation, err
-		}
 		return OperationResult{}, err
 	}
 	if !actionContainsOperation(action, operationName) {
@@ -221,9 +217,8 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 	action, err := s.resolveAction(ctx, in)
 	if err != nil {
 		result := failedStartResult(err)
-		operations := actionResolutionFailureOperations(err)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile{}, allocation{}, workplace{}, result, err)
-		return executionResultFromLaunch(assignment, Action{Name: actionNameFromInvocation(in)}, operations, result, err), err
+		return executionResultFromLaunch(assignment, Action{Name: actionNameFromInvocation(in)}, nil, result, err), err
 	}
 	if strings.TrimSpace(action.Profile) != "" {
 		in.Profile = strings.TrimSpace(action.Profile)
@@ -241,7 +236,8 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 		tracker:       newOperationTracker(action),
 	}
 	err = s.runActionOperations(ctx, state)
-	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), state.result, err), err
+	data := executionDataFromState(state)
+	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), data.result, err), err
 }
 
 func invocationFromActionInvocation(request ActionInvocation) invocation {
@@ -438,7 +434,8 @@ func (s *Service) finishOperationHistory(ctx context.Context, state *operationEx
 		return
 	}
 
-	launchResult := state.result
+	data := executionDataFromState(state)
+	launchResult := data.result
 	if strings.TrimSpace(launchResult.Status) == "" {
 		launchResult.Status = "completed"
 		if operationErr != nil {
@@ -452,7 +449,7 @@ func (s *Service) finishOperationHistory(ctx context.Context, state *operationEx
 		launchResult.Summary = strings.TrimSpace(operationErr.Error())
 	}
 
-	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, launchResult, operationErr)
+	s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, data.invocation, data.profile, data.allocation, data.workplace, launchResult, operationErr)
 }
 
 func (s *Service) beginStartHistory(ctx context.Context, root string, in invocation) history.Handle {
@@ -492,6 +489,12 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 	profileName := profile.Name
 	if strings.TrimSpace(profileName) == "" {
 		profileName = strings.TrimSpace(in.Profile)
+	}
+	if strings.TrimSpace(profileName) == "" {
+		profileName = strings.TrimSpace(in.Launch.ModelBinding)
+	}
+	if strings.TrimSpace(profileName) == "" {
+		profileName = strings.TrimSpace(allocation.ModelBinding)
 	}
 
 	_ = history.Update(ctx, handle, history.Run{

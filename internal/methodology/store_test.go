@@ -255,8 +255,8 @@ func TestLoadCatalogAllowsLegacyActionOperationShortForm(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions": [{"name":"implement","operations":[{"name":"resolve-action"}]}],
-				"operations":[{"name":"resolve-action"}]
+				"actions": [{"name":"implement","operations":[{"name":"prepare-data"}]}],
+				"operations":[{"name":"prepare-data"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -273,8 +273,8 @@ func TestLoadCatalogAcceptsEmptyContracts(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","contract":{},"operations":[{"name":"resolve-action"}]}],
-				"operations":[{"name":"resolve-action","contract":{}}]
+				"actions":[{"name":"implement","contract":{},"operations":[{"name":"prepare-data"}]}],
+				"operations":[{"name":"prepare-data","contract":{}}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -292,7 +292,7 @@ func TestLoadCatalogRejectsInvalidActionContractFieldType(t *testing.T) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
 				"actions":[{"name":"implement","contract":{"in":{"task_id":{}}}}],
-				"operations":[{"name":"resolve-action"}]
+				"operations":[{"name":"prepare-data"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -313,8 +313,8 @@ func TestLoadCatalogAcceptsActionOperationBindingByValue(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"value":"task-123"}}}]}],
-				"operations":[{"name":"resolve-action"}]
+				"actions":[{"name":"implement","operations":[{"name":"prepare-data","in":{"task_id":{"value":"task-123"}}}]}],
+				"operations":[{"name":"prepare-data"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -336,7 +336,7 @@ func TestLoadCatalogAcceptsActionOperationBindingByNullValue(t *testing.T) {
 						"name": "implement",
 						"operations": []any{
 							map[string]any{
-								"name": "resolve-action",
+								"name": "prepare-data",
 								"in": map[string]any{
 									"task_id": map[string]any{
 										"value": nil,
@@ -347,7 +347,7 @@ func TestLoadCatalogAcceptsActionOperationBindingByNullValue(t *testing.T) {
 					},
 				},
 				"operations": []any{
-					map[string]any{"name": "resolve-action"},
+					map[string]any{"name": "prepare-data"},
 				},
 			})), nil
 		}
@@ -365,8 +365,8 @@ func TestLoadCatalogRejectsActionOperationBindingWithoutRefOrValue(t *testing.T)
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{}}}]}],
-				"operations":[{"name":"resolve-action"}]
+				"actions":[{"name":"implement","operations":[{"name":"prepare-data","in":{"task_id":{}}}]}],
+				"operations":[{"name":"prepare-data"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -387,8 +387,8 @@ func TestLoadCatalogRejectsConflictingActionOperationBinding(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":"in.task_id","value":"abc"}}}]}],
-				"operations":[{"name":"resolve-action"}]
+				"actions":[{"name":"implement","operations":[{"name":"prepare-data","in":{"task_id":{"ref":"in.task_id","value":"abc"}}}]}],
+				"operations":[{"name":"prepare-data"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -414,7 +414,7 @@ func TestLoadCatalogRejectsConflictingActionOperationBindingWithNullValue(t *tes
 						"name": "implement",
 						"operations": []any{
 							map[string]any{
-								"name": "resolve-action",
+								"name": "prepare-data",
 								"in": map[string]any{
 									"task_id": map[string]any{
 										"ref":   "in.task_id",
@@ -426,7 +426,7 @@ func TestLoadCatalogRejectsConflictingActionOperationBindingWithNullValue(t *tes
 					},
 				},
 				"operations": []any{
-					map[string]any{"name": "resolve-action"},
+					map[string]any{"name": "prepare-data"},
 				},
 			})), nil
 		}
@@ -448,8 +448,8 @@ func TestLoadCatalogRejectsConflictingActionOperationBindingWithEmptyRef(t *test
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action","in":{"task_id":{"ref":" ","value":"abc"}}}]}],
-				"operations":[{"name":"resolve-action"}]
+				"actions":[{"name":"implement","operations":[{"name":"prepare-data","in":{"task_id":{"ref":" ","value":"abc"}}}]}],
+				"operations":[{"name":"prepare-data"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -470,8 +470,8 @@ func TestLoadCatalogRejectsEmptyOperationContractFieldType(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
-				"operations":[{"name":"resolve-action","contract":{"in":{"task_id":{}}}}]
+				"actions":[{"name":"implement","operations":[{"name":"prepare-data"}]}],
+				"operations":[{"name":"prepare-data","contract":{"in":{"task_id":{}}}}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -481,7 +481,7 @@ func TestLoadCatalogRejectsEmptyOperationContractFieldType(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid operation contract field type error")
 	}
-	if !strings.Contains(err.Error(), "resolve-action.contract.in.task_id.type must be non-empty") {
+	if !strings.Contains(err.Error(), "prepare-data.contract.in.task_id.type must be non-empty") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -492,8 +492,8 @@ func TestLoadCatalogRejectsOperationContractRequiredTypeError(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
-				"operations":[{"name":"resolve-action","contract":{"out":{"workspace":{"type":"string","required":"yes"}}}}
+				"actions":[{"name":"implement","operations":[{"name":"prepare-data"}]}],
+				"operations":[{"name":"prepare-data","contract":{"out":{"workspace":{"type":"string","required":"yes"}}}}
 				]
 			}`), nil
 		}
@@ -516,7 +516,7 @@ func TestLoadCatalogRejectsActionContractSectionType(t *testing.T) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
 				"actions":[{"name":"implement","contract":{"in":[]}}],
-				"operations":[{"name":"resolve-action"}]
+				"operations":[{"name":"prepare-data"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -538,7 +538,7 @@ func TestLoadCatalogRejectsActionContractInNullSection(t *testing.T) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
 				"actions":[{"name":"implement","contract":{"in":null}}],
-				"operations":[{"name":"resolve-action"}]
+				"operations":[{"name":"prepare-data"}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -573,7 +573,7 @@ func TestLoadCatalogRejectsInvalidActionContractRequiredType(t *testing.T) {
 					},
 				},
 				"operations": []any{
-					map[string]any{"name": "resolve-action"},
+					map[string]any{"name": "prepare-data"},
 				},
 			})), nil
 		}
@@ -595,8 +595,8 @@ func TestLoadCatalogRejectsOperationContractOutNullSection(t *testing.T) {
 	readFile := func(path string) ([]byte, error) {
 		if path == "/repo/.progress/methodology/catalog.json" {
 			return []byte(`{
-				"actions":[{"name":"implement","operations":[{"name":"resolve-action"}]}],
-				"operations":[{"name":"resolve-action","contract":{"out":null}}]
+				"actions":[{"name":"implement","operations":[{"name":"prepare-data"}]}],
+				"operations":[{"name":"prepare-data","contract":{"out":null}}]
 			}`), nil
 		}
 		return nil, fs.ErrNotExist
@@ -606,7 +606,7 @@ func TestLoadCatalogRejectsOperationContractOutNullSection(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected contract section type error")
 	}
-	if !strings.Contains(err.Error(), "resolve-action.contract.out must be an object") {
+	if !strings.Contains(err.Error(), "prepare-data.contract.out must be an object") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -616,8 +616,8 @@ func TestLoadCatalogRejectsActionReferenceToUnknownOperation(t *testing.T) {
 
 	root := t.TempDir()
 	methodologyDir := filepath.Join(root, ".progress", "methodology")
-	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"actions":[{"name":"implement","class":"engineering-synthesis","operations":[{"name":"resolve-action"},{"name":"missing-operation"}]}]}`)
-	writeTestFile(t, filepath.Join(methodologyDir, "operations", "resolve-action.json"), `{"name":"resolve-action","kind":"resolve-action","title":"Разрешение действия","origin":"builtin","required":true}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"actions":[{"name":"implement","class":"engineering-synthesis","operations":[{"name":"prepare-data"},{"name":"missing-operation"}]}]}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "operations", "prepare-data.json"), `{"name":"prepare-data","kind":"prepare-data","title":"Подготовка данных","origin":"builtin","required":true}`)
 
 	_, err := LoadCatalogWithHome(root, t.TempDir(), nil)
 	if err == nil {
