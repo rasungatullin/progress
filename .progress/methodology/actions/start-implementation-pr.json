@@ -123,9 +123,6 @@
         "workplace": {
           "ref": "data.workplace"
         },
-        "invocation": {
-          "ref": "data.invocation"
-        }
       }
     },
     {
@@ -133,9 +130,6 @@
       "in": {
         "profile_name": {
           "ref": "action.profile"
-        },
-        "invocation": {
-          "ref": "data.invocation"
         }
       },
       "out": {

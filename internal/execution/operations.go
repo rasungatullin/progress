@@ -341,6 +341,9 @@ func writeResolveProfileData(state *operationExecution, operation OperationSpec,
 
 func resolveProfileInputFromOperation(state *operationExecution, operation OperationSpec) (invocation, string) {
 	profileInput := invocation{}
+	if state != nil {
+		profileInput, _ = state.data["invocation"].(invocation)
+	}
 	if mapping, ok := operation.In["invocation"]; ok {
 		if value, ok := invocationValueFromResolveProfileMapping(state, mapping); ok {
 			profileInput = value
