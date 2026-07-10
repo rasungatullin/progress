@@ -319,6 +319,8 @@ type ResourceDefaultsConfig struct {
 
 type Workplace struct {
 	Name            string `json:"name,omitempty"`
+	BaseRef         string `json:"base_ref,omitempty"`
+	HeadRef         string `json:"head_ref,omitempty"`
 	Environment     string `json:"environment,omitempty"`
 	EnvironmentType string `json:"environment_type,omitempty"`
 	RepositoryURL   string `json:"repository_url,omitempty"`

@@ -33,6 +33,9 @@ func TestPrepareUsesCurrentRepositoryWhenRepoIsOmitted(t *testing.T) {
 	if workplace.RepositoryURL != "" {
 		t.Fatalf("expected empty repository url, got %q", workplace.RepositoryURL)
 	}
+	if workplace.BaseRef != "main" || workplace.HeadRef != "task-49" {
+		t.Fatalf("unexpected resolved branches: %#v", workplace)
+	}
 	assertGitCalls(t, gitCalls, []gitCall{
 		{dir: hostRepoRoot, args: []string{"fetch", "origin", "main"}},
 		{dir: hostRepoRoot, args: []string{"worktree", "add", "-b", "task-49", expectedDir, "origin/main"}},
@@ -58,6 +61,9 @@ func TestPrepareUsesRequestedBaseBranch(t *testing.T) {
 	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "task-49")
 	if workplace.Name != expectedDir {
 		t.Fatalf("unexpected workplace path: %q", workplace.Name)
+	}
+	if workplace.BaseRef != "release" || workplace.HeadRef != "task-49" {
+		t.Fatalf("unexpected resolved branches: %#v", workplace)
 	}
 	assertGitCalls(t, gitCalls, []gitCall{
 		{dir: hostRepoRoot, args: []string{"fetch", "origin", "release"}},
@@ -88,6 +94,9 @@ func TestPrepareUsesRequestedHeadBranch(t *testing.T) {
 	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "feature-foo")
 	if workplace.Name != expectedDir {
 		t.Fatalf("unexpected workplace path: %q", workplace.Name)
+	}
+	if workplace.BaseRef != "main" || workplace.HeadRef != "feature/foo" {
+		t.Fatalf("unexpected resolved branches: %#v", workplace)
 	}
 	assertGitCalls(t, gitCalls, []gitCall{
 		{dir: hostRepoRoot, args: []string{"fetch", "origin", "main"}},

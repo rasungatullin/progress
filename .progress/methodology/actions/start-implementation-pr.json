@@ -63,6 +63,10 @@
         "type": "string",
         "description": "Разрешённая ветка исполнительного рабочего места."
       },
+      "base_ref": {
+        "type": "string",
+        "description": "Фактическая базовая ветка исполнительного рабочего места."
+      },
       "allocation": {
         "type": "object",
         "description": "Результат ресурсного снабжения для последующих операций действия."
@@ -193,6 +197,9 @@
         "workplace": {
           "ref": "data.workplace"
         },
+        "base_ref": {
+          "ref": "data.base_ref"
+        },
         "head_ref": {
           "ref": "data.head_ref"
         }
@@ -314,7 +321,7 @@
           "ref": "data.structured_output.summary"
         },
         "base_ref": {
-          "ref": "in.base_ref"
+          "ref": "data.base_ref"
         },
         "head_ref": {
           "ref": "data.head_ref"
