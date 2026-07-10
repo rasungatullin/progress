@@ -973,8 +973,20 @@ func TestPrepareWorkplaceFillsActionData(t *testing.T) {
 	if state.in.Launch.Directory != "" {
 		t.Fatalf("prepare-workplace must not write implicit state invocation: %#v", state.in.Launch)
 	}
+	if state.profile.Name != "legacy" || state.profile.ModelBinding != "legacy" {
+		t.Fatalf("prepare-workplace must not read or write implicit state profile: %#v", state.profile)
+	}
+	if state.allocation.Resource != "legacy" || state.allocation.Runner != "legacy" {
+		t.Fatalf("prepare-workplace must not read or write implicit state allocation: %#v", state.allocation)
+	}
 	if workplaces.invocation.Workplace.Name != "task-42" {
 		t.Fatalf("workplace manager must receive invocation from operation input: %#v", workplaces.invocation)
+	}
+	if workplaces.profile.Name != "coder" || workplaces.profile.ModelBinding != "coder" {
+		t.Fatalf("workplace manager must receive profile from operation input: %#v", workplaces.profile)
+	}
+	if workplaces.allocation.Resource != "binding:coder" || workplaces.allocation.ModelBinding != "coder" {
+		t.Fatalf("workplace manager must receive allocation from operation input: %#v", workplaces.allocation)
 	}
 }
 
@@ -3663,11 +3675,15 @@ func (s *stubResourceProvider) Allocate(_ context.Context, in model.Invocation, 
 type stubWorkplaceManager struct {
 	workplace  model.Workplace
 	invocation model.Invocation
+	profile    model.Profile
+	allocation model.Allocation
 	err        error
 }
 
-func (s *stubWorkplaceManager) Prepare(_ context.Context, in model.Invocation, _ model.Profile, _ model.Allocation) (model.Workplace, error) {
+func (s *stubWorkplaceManager) Prepare(_ context.Context, in model.Invocation, profile model.Profile, allocation model.Allocation) (model.Workplace, error) {
 	s.invocation = in
+	s.profile = profile
+	s.allocation = allocation
 	if s.err != nil {
 		return model.Workplace{}, s.err
 	}
