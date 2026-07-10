@@ -21,26 +21,6 @@
         "required": true,
         "description": "Класс завершаемого действия."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
-      },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
-      },
-      "allocation": {
-        "type": "object",
-        "required": true,
-        "description": "Результат ресурсного снабжения."
-      },
-      "workplace": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленное рабочее место."
-      },
       "result": {
         "type": "object",
         "description": "Текущий результат выполнения перед завершающей фиксацией."
