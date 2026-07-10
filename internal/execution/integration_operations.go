@@ -100,6 +100,13 @@ func loadPullRequestInputFromOperation(state *operationExecution, operation Oper
 			input.invocation = value
 		}
 	}
+	if _, ok := operation.In["invocation"]; !ok {
+		input.invocation.Repository.URL, _ = operationMappingValue[string](state, operation.In["repository"])
+		input.invocation.Workplace.BaseRef, _ = operationMappingValue[string](state, operation.In["base_ref"])
+		input.invocation.Workplace.HeadRef, _ = operationMappingValue[string](state, operation.In["head_ref"])
+		number, _ := operationMappingValue[int](state, operation.In["number"])
+		input.invocation.Assignment = &ExecutionAssignment{CanonicalTask: &ObjectRef{Type: "pull-request", Repository: input.invocation.Repository.URL, Number: number}}
+	}
 	return input
 }
 
@@ -157,6 +164,8 @@ func (e builtinOperationExecutor) failOrSkipLoadReviewRemarksOperation(ctx conte
 		return err
 	}
 
+	writeOperationData(state, operation.Out, "review_remarks", []integration.ReviewRemark(nil))
+	writeOperationData(state, operation.Out, "structured_input", in.Launch.StructuredInput)
 	state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
 	return nil
 }
@@ -170,6 +179,7 @@ func writeLoadReviewRemarksData(state *operationExecution, operation OperationSp
 		}
 	}
 	writeOperationData(state, out, "review_remarks", remarks)
+	writeOperationData(state, out, "structured_input", invocation.Launch.StructuredInput)
 	writeOperationData(state, out, "invocation", invocation)
 }
 
@@ -224,6 +234,14 @@ func loadReviewRemarksInputFromOperation(state *operationExecution, operation Op
 		if value, ok := mergeRequestValueFromLoadReviewRemarksMapping(state, mapping); ok {
 			input.pullRequest = &value
 		}
+	}
+	if _, ok := operation.In["invocation"]; !ok {
+		repository, _ := operationMappingValue[string](state, operation.In["repository"])
+		number, _ := operationMappingValue[int](state, operation.In["number"])
+		structuredInput, _ := operationMappingValue[*StructuredInput](state, operation.In["structured_input"])
+		input.invocation.Repository.URL = repository
+		input.invocation.Assignment = &ExecutionAssignment{CanonicalTask: &ObjectRef{Type: "pull-request", Repository: repository, Number: number}, StructuredInput: structuredInput}
+		input.invocation.Launch.StructuredInput = structuredInput
 	}
 	return input
 }
@@ -397,6 +415,7 @@ func writePublishMergeRequestData(state *operationExecution, operation Operation
 }
 
 type publishMergeRequestInput struct {
+	ref              pullRequestRef
 	invocation       invocation
 	profile          profile
 	allocation       allocation
@@ -406,7 +425,7 @@ type publishMergeRequestInput struct {
 }
 
 func publishMergeRequestInputFromOperation(state *operationExecution, operation OperationSpec) publishMergeRequestInput {
-	input := publishMergeRequestInput{}
+	input := publishMergeRequestInput{ref: pullRequestRefFromOperation(state, operation)}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -445,7 +464,7 @@ func publishMergeRequestInputFromOperation(state *operationExecution, operation 
 }
 
 func publishReviewRemarksInputFromOperation(state *operationExecution, operation OperationSpec) publishMergeRequestInput {
-	input := publishMergeRequestInput{}
+	input := publishMergeRequestInput{ref: pullRequestRefFromOperation(state, operation)}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -702,6 +721,7 @@ func writePublishReviewResponsesData(state *operationExecution, operation Operat
 }
 
 type publishReviewResponsesInput struct {
+	ref              pullRequestRef
 	invocation       invocation
 	profile          profile
 	allocation       allocation
@@ -712,7 +732,7 @@ type publishReviewResponsesInput struct {
 }
 
 func publishReviewResponsesInputFromOperation(state *operationExecution, operation OperationSpec) publishReviewResponsesInput {
-	input := publishReviewResponsesInput{}
+	input := publishReviewResponsesInput{ref: pullRequestRefFromOperation(state, operation)}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -953,6 +973,7 @@ func (e builtinOperationExecutor) integrationExecutor() (integrationExecutor, er
 
 func pullRequestRefFromPublishMergeRequestInput(input publishMergeRequestInput) pullRequestRef {
 	ref := pullRequestRefFromAssignment(publishMergeRequestAssignment(input))
+	ref = mergePullRequestRefs(ref, input.ref)
 	if strings.TrimSpace(ref.Head) == "" {
 		assignment := publishMergeRequestAssignment(input)
 		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
@@ -971,6 +992,7 @@ func publishMergeRequestAssignment(input publishMergeRequestInput) *ExecutionAss
 
 func pullRequestRefFromPublishReviewRemarksInput(input publishMergeRequestInput) pullRequestRef {
 	ref := pullRequestRefFromAssignment(publishReviewRemarksAssignment(input))
+	ref = mergePullRequestRefs(ref, input.ref)
 	if strings.TrimSpace(ref.Head) == "" {
 		assignment := publishReviewRemarksAssignment(input)
 		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
@@ -989,6 +1011,7 @@ func publishReviewRemarksAssignment(input publishMergeRequestInput) *ExecutionAs
 
 func pullRequestRefFromPublishReviewResponsesInput(input publishReviewResponsesInput) pullRequestRef {
 	ref := pullRequestRefFromAssignment(publishReviewResponsesAssignment(input))
+	ref = mergePullRequestRefs(ref, input.ref)
 	if strings.TrimSpace(ref.Head) == "" {
 		assignment := publishReviewResponsesAssignment(input)
 		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
@@ -996,6 +1019,41 @@ func pullRequestRefFromPublishReviewResponsesInput(input publishReviewResponsesI
 		}
 	}
 	return ref
+}
+
+func pullRequestRefFromOperation(state *operationExecution, operation OperationSpec) pullRequestRef {
+	ref := pullRequestRef{}
+	ref.Repository, _ = operationMappingValue[string](state, operation.In["repository"])
+	ref.Number, _ = operationMappingValue[int](state, operation.In["number"])
+	ref.Base, _ = operationMappingValue[string](state, operation.In["base_ref"])
+	ref.Head, _ = operationMappingValue[string](state, operation.In["head_ref"])
+	ref.Title, _ = operationMappingValue[string](state, operation.In["title"])
+	ref.Body, _ = operationMappingValue[string](state, operation.In["body"])
+	ref.Draft, _ = operationMappingValue[bool](state, operation.In["draft"])
+	return ref
+}
+
+func mergePullRequestRefs(base pullRequestRef, override pullRequestRef) pullRequestRef {
+	if strings.TrimSpace(override.Repository) != "" {
+		base.Repository = override.Repository
+	}
+	if override.Number > 0 {
+		base.Number = override.Number
+	}
+	if strings.TrimSpace(override.Base) != "" {
+		base.Base = override.Base
+	}
+	if strings.TrimSpace(override.Head) != "" {
+		base.Head = override.Head
+	}
+	if strings.TrimSpace(override.Title) != "" {
+		base.Title = override.Title
+	}
+	if strings.TrimSpace(override.Body) != "" {
+		base.Body = override.Body
+	}
+	base.Draft = base.Draft || override.Draft
+	return base
 }
 
 func publishReviewResponsesAssignment(input publishReviewResponsesInput) *ExecutionAssignment {

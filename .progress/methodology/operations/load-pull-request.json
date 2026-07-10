@@ -6,21 +6,30 @@
   "required": true,
   "contract": {
     "in": {
-      "repository": {"type": "string", "required": true, "description": "Репозиторий запроса на слияние."},
-      "number": {"type": "integer", "required": true, "description": "Номер запроса на слияние."},
-      "base_ref": {"type": "string", "description": "Базовая ветка запроса на слияние."},
-      "head_ref": {"type": "string", "description": "Ветка источника запроса на слияние."}
+      "repository": {
+        "type": "string",
+        "required": true,
+        "description": "Репозиторий запроса на слияние."
+      },
+      "number": {
+        "type": "integer",
+        "required": true,
+        "description": "Номер запроса на слияние."
+      },
+      "base_ref": {
+        "type": "string",
+        "description": "Базовая ветка запроса на слияние."
+      },
+      "head_ref": {
+        "type": "string",
+        "description": "Ветка источника запроса на слияние."
+      }
     },
     "out": {
       "pull_request": {
         "type": "object",
         "required": true,
         "description": "Загруженный запрос на слияние из контура интеграции."
-      },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Ввод контура исполнения, синхронизированный с параметрами запроса на слияние."
       },
       "result": {
         "type": "object",

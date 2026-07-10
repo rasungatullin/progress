@@ -80,31 +80,139 @@ func validateRequiredOperationInput(state *operationExecution, operation Operati
 }
 
 func operationMappingResolved(state *operationExecution, mapping model.OperationMapping) bool {
+	_, ok := operationMappingRawValue(state, mapping)
+	return ok
+}
+
+func operationMappingValue[T any](state *operationExecution, mapping model.OperationMapping) (T, bool) {
+	var zero T
+	raw, ok := operationMappingRawValue(state, mapping)
+	if !ok {
+		return zero, false
+	}
+	if value, ok := raw.(T); ok {
+		return value, true
+	}
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		return zero, false
+	}
+	var value T
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return zero, false
+	}
+	return value, true
+}
+
+func operationMappingRawValue(state *operationExecution, mapping model.OperationMapping) (any, bool) {
 	if len(mapping.Value) != 0 {
-		return json.Valid(mapping.Value) && string(mapping.Value) != "null"
+		if !json.Valid(mapping.Value) || string(mapping.Value) == "null" {
+			return nil, false
+		}
+		var value any
+		if err := json.Unmarshal(mapping.Value, &value); err != nil {
+			return nil, false
+		}
+		return value, true
+	}
+	if state == nil {
+		return nil, false
 	}
 	ref := strings.TrimSpace(mapping.Ref)
-	if ref == "" || state == nil {
-		return false
-	}
 	parts := strings.Split(ref, ".")
+	if len(parts) < 2 {
+		return nil, false
+	}
 	switch parts[0] {
 	case "action":
-		return reflectedPathResolved(reflect.ValueOf(state.action), parts[1:])
+		return reflectedPathValue(reflect.ValueOf(state.action), parts[1:])
 	case "data":
-		if len(parts) < 2 || state.data == nil {
-			return false
+		if state.data == nil {
+			return nil, false
 		}
 		value, ok := state.data[parts[1]]
-		return ok && reflectedPathResolved(reflect.ValueOf(value), parts[2:])
-	case "in":
-		if ref == "in.invocation" {
-			return true
+		if !ok {
+			return nil, false
 		}
-		return reflectedPathResolved(reflect.ValueOf(assignmentFromInvocation(state.in)), parts[1:])
+		return reflectedPathValue(reflect.ValueOf(value), parts[2:])
+	case "in":
+		return invocationInputValue(state.in, parts[1:])
 	default:
-		return false
+		return nil, false
 	}
+}
+
+func invocationInputValue(in invocation, path []string) (any, bool) {
+	if len(path) == 1 {
+		switch path[0] {
+		case "invocation":
+			return in, true
+		case "repository_url":
+			return in.Repository.URL, true
+		case "workplace_name":
+			return in.Workplace.Name, true
+		case "environment":
+			return in.Workplace.Environment, true
+		case "base_ref":
+			return in.Workplace.BaseRef, true
+		case "head_ref":
+			return in.Workplace.HeadRef, true
+		case "directory":
+			return in.Launch.Directory, true
+		case "runner":
+			return in.Launch.Runner, true
+		case "model":
+			return in.Launch.Model, true
+		case "model_binding":
+			return in.Launch.ModelBinding, true
+		case "structured_input":
+			if assignment := assignmentFromInvocation(in); assignment != nil && assignment.StructuredInput != nil {
+				return assignment.StructuredInput, true
+			}
+			return in.Launch.StructuredInput, in.Launch.StructuredInput != nil
+		case "number":
+			if assignment := assignmentFromInvocation(in); assignment != nil && assignment.CanonicalTask != nil {
+				return assignment.CanonicalTask.Number, true
+			}
+		case "pull_request_base_ref":
+			return pullRequestRefFromAssignment(assignmentFromInvocation(in)).Base, true
+		case "pull_request_head_ref":
+			return explicitPullRequestHeadFromAssignment(assignmentFromInvocation(in)), true
+		}
+	}
+	if value, ok := reflectedPathValue(reflect.ValueOf(in), path); ok {
+		return value, true
+	}
+	return reflectedPathValue(reflect.ValueOf(assignmentFromInvocation(in)), path)
+}
+
+func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
+	for value.IsValid() && (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) {
+		if value.IsNil() {
+			return nil, false
+		}
+		value = value.Elem()
+	}
+	if !value.IsValid() {
+		return nil, false
+	}
+	if len(path) == 0 {
+		return value.Interface(), true
+	}
+	if value.Kind() != reflect.Struct {
+		return nil, false
+	}
+	for index := 0; index < value.NumField(); index++ {
+		fieldType := value.Type().Field(index)
+		jsonName := strings.Split(fieldType.Tag.Get("json"), ",")[0]
+		if jsonName == "" {
+			jsonName = fieldType.Name
+		}
+		if jsonName == path[0] {
+			return reflectedPathValue(value.Field(index), path[1:])
+		}
+	}
+	return nil, false
 }
 
 func reflectedPathResolved(value reflect.Value, path []string) bool {
@@ -810,6 +918,9 @@ func boolValueFromProfileMapping(state *operationExecution, mapping model.Operat
 }
 
 func stringValueFromAllocateResourcesMapping(state *operationExecution, mapping model.OperationMapping) string {
+	if value, ok := operationMappingValue[string](state, mapping); ok {
+		return strings.TrimSpace(value)
+	}
 	if len(mapping.Value) != 0 {
 		var value string
 		if json.Unmarshal(mapping.Value, &value) == nil {
@@ -962,6 +1073,11 @@ func profileSummary(profile profile) string {
 
 func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := prepareWorkplaceInputFromOperation(state, operation)
+	if input.actionName == ActionStartImplementationPR && strings.TrimSpace(input.pullRequestHeadRef) != "" && strings.TrimSpace(input.workplaceName) != "" && strings.TrimSpace(input.pullRequestHeadRef) != strings.TrimSpace(input.workplaceName) {
+		err := fmt.Errorf("head branch %q does not match workplace branch %q for %s", input.pullRequestHeadRef, input.workplaceName, ActionStartImplementationPR)
+		state.tracker.fail(name, "Данные задания не согласованы с веткой рабочего места.", err, "pull_request_branch_mismatch", true, true)
+		return err
+	}
 	if _, ok := operation.In["invocation"]; !ok {
 		input.invocation = input.resolvedInvocation()
 		input.allocation = input.resolvedAllocation()
@@ -1011,14 +1127,25 @@ type prepareWorkplaceInput struct {
 	workplaceName            string
 	baseRef                  string
 	headRef                  string
+	pullRequestBaseRef       string
+	pullRequestHeadRef       string
+	actionName               string
 	allocatedEnvironment     string
 	allocatedEnvironmentType string
 }
 
 func (input prepareWorkplaceInput) resolvedInvocation() invocation {
 	result := input.invocation
+	baseRef := input.baseRef
+	if strings.TrimSpace(baseRef) == "" {
+		baseRef = input.pullRequestBaseRef
+	}
+	headRef := input.headRef
+	if strings.TrimSpace(headRef) == "" {
+		headRef = input.pullRequestHeadRef
+	}
 	result.Repository.URL = input.repositoryURL
-	result.Workplace = model.WorkplaceSpec{Name: input.workplaceName, Environment: input.environment, BaseRef: input.baseRef, HeadRef: input.headRef}
+	result.Workplace = model.WorkplaceSpec{Name: input.workplaceName, Environment: input.environment, BaseRef: baseRef, HeadRef: headRef}
 	result.Launch.Directory = input.directory
 	return result
 }
@@ -1061,6 +1188,9 @@ func prepareWorkplaceInputFromOperation(state *operationExecution, operation Ope
 	input.workplaceName = stringValueFromPrepareWorkplaceMapping(state, operation.In["workplace_name"])
 	input.baseRef = stringValueFromPrepareWorkplaceMapping(state, operation.In["base_ref"])
 	input.headRef = stringValueFromPrepareWorkplaceMapping(state, operation.In["head_ref"])
+	input.pullRequestBaseRef = stringValueFromPrepareWorkplaceMapping(state, operation.In["pull_request_base_ref"])
+	input.pullRequestHeadRef = stringValueFromPrepareWorkplaceMapping(state, operation.In["pull_request_head_ref"])
+	input.actionName = stringValueFromPrepareWorkplaceMapping(state, operation.In["action_name"])
 	input.allocatedEnvironment = stringValueFromPrepareWorkplaceMapping(state, operation.In["allocated_environment"])
 	input.allocatedEnvironmentType = stringValueFromPrepareWorkplaceMapping(state, operation.In["allocated_environment_type"])
 	if _, ok := operation.In["invocation"]; ok {
@@ -1072,6 +1202,9 @@ func prepareWorkplaceInputFromOperation(state *operationExecution, operation Ope
 }
 
 func stringValueFromPrepareWorkplaceMapping(state *operationExecution, mapping model.OperationMapping) string {
+	if value, ok := operationMappingValue[string](state, mapping); ok {
+		return strings.TrimSpace(value)
+	}
 	if len(mapping.Value) != 0 {
 		var value string
 		if json.Unmarshal(mapping.Value, &value) == nil {
@@ -1313,6 +1446,9 @@ func buildDirectiveInputFromOperation(state *operationExecution, operation Opera
 }
 
 func stringValueFromBuildDirectiveMapping(state *operationExecution, mapping model.OperationMapping) string {
+	if value, ok := operationMappingValue[string](state, mapping); ok {
+		return strings.TrimSpace(value)
+	}
 	if len(mapping.Value) != 0 {
 		var value string
 		if json.Unmarshal(mapping.Value, &value) == nil {
@@ -1582,6 +1718,9 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 }
 
 func launchStringValue(state *operationExecution, mapping model.OperationMapping) string {
+	if value, ok := operationMappingValue[string](state, mapping); ok {
+		return strings.TrimSpace(value)
+	}
 	if len(mapping.Value) != 0 {
 		var value string
 		if json.Unmarshal(mapping.Value, &value) == nil {
@@ -1671,6 +1810,9 @@ func launchStringSliceValue(state *operationExecution, mapping model.OperationMa
 }
 
 func launchStructuredInputValue(state *operationExecution, mapping model.OperationMapping) (*StructuredInput, bool) {
+	if value, ok := operationMappingValue[*StructuredInput](state, mapping); ok {
+		return value, true
+	}
 	if state == nil || strings.TrimSpace(mapping.Ref) != "data.invocation.launch.structured_input" {
 		return nil, false
 	}
@@ -1996,6 +2138,9 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 }
 
 func stringValueFromCommitPushMapping(state *operationExecution, mapping model.OperationMapping) (string, bool) {
+	if value, ok := operationMappingValue[string](state, mapping); ok {
+		return strings.TrimSpace(value), true
+	}
 	if len(mapping.Value) != 0 {
 		var value string
 		if err := json.Unmarshal(mapping.Value, &value); err == nil {

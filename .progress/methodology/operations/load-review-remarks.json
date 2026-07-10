@@ -5,23 +5,35 @@
   "origin": "builtin",
   "contract": {
     "in": {
-      "repository": {"type": "string", "required": true, "description": "Репозиторий запроса на слияние."},
-      "number": {"type": "integer", "required": true, "description": "Номер запроса на слияние."}
+      "repository": {
+        "type": "string",
+        "required": true,
+        "description": "Репозиторий запроса на слияние."
+      },
+      "number": {
+        "type": "integer",
+        "required": true,
+        "description": "Номер запроса на слияние."
+      },
+      "structured_input": {
+        "type": "object",
+        "description": "Исходный структурированный ввод для дополнения замечаниями ревизии."
+      }
     },
     "out": {
       "review_remarks": {
         "type": "object_array",
         "description": "Загруженные замечания ревизии."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Ввод контура исполнения, дополненный замечаниями ревизии."
-      },
       "result": {
         "type": "object",
         "required": false,
         "description": "Результат отказа при невозможности получить замечания ревизии."
+      },
+      "structured_input": {
+        "type": "object",
+        "required": true,
+        "description": "Структурированный ввод, дополненный замечаниями ревизии."
       }
     }
   }

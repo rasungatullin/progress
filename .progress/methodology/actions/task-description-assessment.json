@@ -73,46 +73,6 @@
   },
   "operations": [
     {
-      "name": "prepare-data",
-      "in": {
-        "task": {"ref": "in.task"},
-        "action": {"ref": "in.action"},
-        "repository_url": {"ref": "in.repository_url"},
-        "workplace_name": {"ref": "in.workplace_name"},
-        "base_ref": {"ref": "in.base_ref"},
-        "head_ref": {"ref": "in.head_ref"},
-        "expected_result": {
-          "ref": "in.expected_result"
-        },
-        "constraints": {
-          "ref": "in.constraints"
-        },
-        "canonical_task": {
-          "ref": "in.canonical_task"
-        },
-        "related_objects": {
-          "ref": "in.related_objects"
-        },
-        "reasons": {
-          "ref": "in.reasons"
-        },
-        "structured_input": {
-          "ref": "in.structured_input"
-        }
-      },
-      "out": {
-        "structured_input": {
-          "ref": "data.structured_input"
-        },
-        "workplace": {
-          "ref": "data.workplace"
-        },
-        "invocation": {
-          "ref": "data.invocation"
-        }
-      }
-    },
-    {
       "name": "resolve-profile",
       "in": {
         "profile_name": {
@@ -134,13 +94,27 @@
         "requires_synthesis": {
           "ref": "action.requires_synthesis"
         },
-        "model_binding": {"ref": "data.invocation.launch.model_binding"},
-        "allow_model_fallback": {"ref": "data.profile.allow_model_fallback"},
-        "runner": {"ref": "data.invocation.launch.runner"},
-        "model": {"ref": "data.invocation.launch.model"},
-        "environment": {"ref": "data.invocation.workplace.environment"},
-        "workplace_name": {"ref": "data.invocation.workplace.name"},
-        "repository_url": {"ref": "data.invocation.repository.url"}
+        "model_binding": {
+          "ref": "in.model_binding"
+        },
+        "allow_model_fallback": {
+          "ref": "data.profile.allow_model_fallback"
+        },
+        "runner": {
+          "ref": "in.runner"
+        },
+        "model": {
+          "ref": "in.model"
+        },
+        "environment": {
+          "ref": "in.environment"
+        },
+        "workplace_name": {
+          "ref": "in.workplace_name"
+        },
+        "repository_url": {
+          "ref": "in.repository_url"
+        }
       },
       "out": {
         "allocation": {
@@ -154,21 +128,43 @@
         "requires_workplace": {
           "ref": "action.requires_workplace"
         },
-        "directory": {"ref": "data.invocation.launch.directory"},
-        "repository_url": {"ref": "data.invocation.repository.url"},
-        "environment": {"ref": "data.invocation.workplace.environment"},
-        "workplace_name": {"ref": "data.invocation.workplace.name"},
-        "base_ref": {"ref": "data.invocation.workplace.base_ref"},
-        "head_ref": {"ref": "data.invocation.workplace.head_ref"},
-        "allocated_environment": {"ref": "data.allocation.environment"},
-        "allocated_environment_type": {"ref": "data.allocation.environment_type"}
+        "directory": {
+          "ref": "in.directory"
+        },
+        "repository_url": {
+          "ref": "in.repository_url"
+        },
+        "environment": {
+          "ref": "in.environment"
+        },
+        "workplace_name": {
+          "ref": "in.workplace_name"
+        },
+        "base_ref": {
+          "ref": "in.base_ref"
+        },
+        "head_ref": {
+          "ref": "in.head_ref"
+        },
+        "allocated_environment": {
+          "ref": "data.allocation.environment"
+        },
+        "allocated_environment_type": {
+          "ref": "data.allocation.environment_type"
+        },
+        "action_name": {
+          "ref": "action.name"
+        },
+        "pull_request_base_ref": {
+          "ref": "in.pull_request_base_ref"
+        },
+        "pull_request_head_ref": {
+          "ref": "in.pull_request_head_ref"
+        }
       },
       "out": {
         "workplace": {
           "ref": "data.workplace"
-        },
-        "invocation": {
-          "ref": "data.invocation"
         }
       }
     },
@@ -178,10 +174,18 @@
         "requires_synthesis": {
           "ref": "action.requires_synthesis"
         },
-        "directory": {"ref": "data.invocation.launch.directory"},
-        "runner": {"ref": "data.allocation.runner"},
-        "model": {"ref": "data.allocation.model"},
-        "model_binding": {"ref": "data.allocation.model_binding"}
+        "directory": {
+          "ref": "data.workplace.name"
+        },
+        "runner": {
+          "ref": "data.allocation.runner"
+        },
+        "model": {
+          "ref": "data.allocation.model"
+        },
+        "model_binding": {
+          "ref": "data.allocation.model_binding"
+        }
       },
       "out": {
         "directive": {
@@ -198,20 +202,48 @@
         "directive": {
           "ref": "data.directive"
         },
-        "task": {"ref": "data.invocation.task"},
-        "action": {"ref": "data.invocation.action"},
-        "directory": {"ref": "data.invocation.launch.directory"},
-        "profile_name": {"ref": "data.profile.name"},
-        "prompt_additions": {"ref": "data.profile.prompt_additions"},
-        "profile_structured_output": {"ref": "data.profile.structured_output"},
-        "profile_structured_output_required": {"ref": "data.profile.structured_output_required"},
-        "profile_structured_output_fields": {"ref": "data.profile.structured_output_fields"},
-        "runner": {"ref": "data.allocation.runner"},
-        "model": {"ref": "data.allocation.model"},
-        "model_binding": {"ref": "data.allocation.model_binding"},
-        "workplace_name": {"ref": "data.workplace.name"},
-        "repository_url": {"ref": "data.invocation.repository.url"},
-        "structured_input": {"ref": "data.invocation.launch.structured_input"}
+        "task": {
+          "ref": "in.task"
+        },
+        "action": {
+          "ref": "in.action"
+        },
+        "directory": {
+          "ref": "data.workplace.name"
+        },
+        "profile_name": {
+          "ref": "data.profile.name"
+        },
+        "prompt_additions": {
+          "ref": "data.profile.prompt_additions"
+        },
+        "profile_structured_output": {
+          "ref": "data.profile.structured_output"
+        },
+        "profile_structured_output_required": {
+          "ref": "data.profile.structured_output_required"
+        },
+        "profile_structured_output_fields": {
+          "ref": "data.profile.structured_output_fields"
+        },
+        "runner": {
+          "ref": "data.allocation.runner"
+        },
+        "model": {
+          "ref": "data.allocation.model"
+        },
+        "model_binding": {
+          "ref": "data.allocation.model_binding"
+        },
+        "workplace_name": {
+          "ref": "data.workplace.name"
+        },
+        "repository_url": {
+          "ref": "in.repository_url"
+        },
+        "structured_input": {
+          "ref": "in.structured_input"
+        }
       },
       "out": {
         "result": {
@@ -247,9 +279,15 @@
         "action_class": {
           "ref": "action.class"
         },
-        "result_status": {"ref": "data.result.status"},
-        "result_summary": {"ref": "data.result.summary"},
-        "structured_output": {"ref": "data.result.structured_output"}
+        "result_status": {
+          "ref": "data.result.status"
+        },
+        "result_summary": {
+          "ref": "data.result.summary"
+        },
+        "structured_output": {
+          "ref": "data.result.structured_output"
+        }
       },
       "out": {
         "result": {
