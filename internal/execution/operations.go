@@ -1146,7 +1146,7 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 	}
 	if !input.requiresWorkplace {
 		workplace := workplace{Name: strings.TrimSpace(input.invocation.Launch.Directory), Ready: true}
-		writePrepareWorkplaceData(state, operation, workplace, input.invocation)
+		writePrepareWorkplaceData(state, operation, workplace, input.invocation, input.resolvedHeadRef())
 		state.tracker.skipIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), "Рабочее место не требуется для разрешённого действия.")
 		return nil
 	}
@@ -1161,12 +1161,12 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 	if strings.TrimSpace(preparedInvocation.Launch.Directory) == "" {
 		preparedInvocation.Launch.Directory = workplace.Name
 	}
-	writePrepareWorkplaceData(state, operation, workplace, preparedInvocation)
+	writePrepareWorkplaceData(state, operation, workplace, preparedInvocation, input.resolvedHeadRef())
 	state.tracker.completeIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
 	return nil
 }
 
-func writePrepareWorkplaceData(state *operationExecution, operation OperationSpec, workplace workplace, in invocation) {
+func writePrepareWorkplaceData(state *operationExecution, operation OperationSpec, workplace workplace, in invocation, headRef string) {
 	out := operation.Out
 	if len(out) == 0 {
 		out = model.OperationMap{
@@ -1176,6 +1176,7 @@ func writePrepareWorkplaceData(state *operationExecution, operation OperationSpe
 	}
 	writeOperationData(state, out, "workplace", workplace)
 	writeOperationData(state, out, "invocation", in)
+	writeOperationData(state, out, "head_ref", strings.TrimSpace(headRef))
 }
 
 type prepareWorkplaceInput struct {
@@ -1194,6 +1195,10 @@ type prepareWorkplaceInput struct {
 	actionName               string
 	allocatedEnvironment     string
 	allocatedEnvironmentType string
+}
+
+func (input prepareWorkplaceInput) resolvedHeadRef() string {
+	return firstNonEmptyTrimmed(input.headRef, input.pullRequestHeadRef, input.workplaceName)
 }
 
 func (input prepareWorkplaceInput) resolvedInvocation() invocation {

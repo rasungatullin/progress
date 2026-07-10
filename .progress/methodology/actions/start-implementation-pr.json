@@ -59,6 +59,10 @@
         "type": "object",
         "description": "Подготовленная спецификация рабочего места с синхронизированными ветками."
       },
+      "head_ref": {
+        "type": "string",
+        "description": "Разрешённая ветка исполнительного рабочего места."
+      },
       "allocation": {
         "type": "object",
         "description": "Результат ресурсного снабжения для последующих операций действия."
@@ -188,6 +192,9 @@
       "out": {
         "workplace": {
           "ref": "data.workplace"
+        },
+        "head_ref": {
+          "ref": "data.head_ref"
         }
       }
     },
@@ -310,7 +317,7 @@
           "ref": "in.base_ref"
         },
         "head_ref": {
-          "ref": "in.head_ref"
+          "ref": "data.head_ref"
         },
         "draft": {
           "ref": "data.pull_request.draft"
