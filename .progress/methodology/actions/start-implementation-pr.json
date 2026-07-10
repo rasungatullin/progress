@@ -94,6 +94,9 @@
     {
       "name": "prepare-data",
       "in": {
+        "invocation": {
+          "ref": "in.invocation"
+        },
         "expected_result": {
           "ref": "in.expected_result"
         },

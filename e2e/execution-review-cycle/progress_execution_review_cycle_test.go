@@ -310,7 +310,7 @@ func methodologyCatalogJSON() string {
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
@@ -328,7 +328,7 @@ func methodologyCatalogJSON() string {
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
@@ -345,7 +345,7 @@ func methodologyCatalogJSON() string {
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},

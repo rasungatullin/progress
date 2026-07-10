@@ -93,8 +93,9 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 }
 
 func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
-	preparedAssignment := prepareDataInputFromOperation(state, operation)
-	preparedInvocation := invocationFromExecutionData(state)
+	input := prepareDataInputFromOperation(state, operation)
+	preparedAssignment := input.assignment
+	preparedInvocation := input.invocation
 	preparedInvocation.Assignment = preparedAssignment
 	if preparedAssignment != nil {
 		preparedInvocation.Launch.StructuredInput = preparedAssignment.StructuredInput
@@ -113,6 +114,11 @@ func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operat
 	return nil
 }
 
+type prepareDataInput struct {
+	invocation invocation
+	assignment *ExecutionAssignment
+}
+
 func writePrepareData(state *operationExecution, operation OperationSpec, in invocation) {
 	out := operation.Out
 	if len(out) == 0 {
@@ -127,65 +133,85 @@ func writePrepareData(state *operationExecution, operation OperationSpec, in inv
 	writeOperationData(state, out, "invocation", in)
 }
 
-func prepareDataInputFromOperation(state *operationExecution, operation OperationSpec) *ExecutionAssignment {
-	if state == nil {
-		return &ExecutionAssignment{}
+func prepareDataInputFromOperation(state *operationExecution, operation OperationSpec) prepareDataInput {
+	input := prepareDataInput{}
+	if mapping, ok := operation.In["invocation"]; ok {
+		if value, ok := invocationValueFromPrepareDataMapping(state, mapping); ok {
+			input.invocation = value
+		}
 	}
-	source := state.assignment
-	if source == nil {
-		source = invocationFromExecutionData(state).Assignment
-	}
-	assignment := cloneAssignment(source)
+	assignment := cloneAssignment(assignmentFromInvocation(input.invocation))
 	if assignment == nil {
 		assignment = &ExecutionAssignment{}
 	}
 	if len(operation.In) == 0 {
-		return assignment
+		input.assignment = assignment
+		return input
 	}
 
 	if mapping, ok := operation.In["expected_result"]; ok {
-		assignment.ExpectedResult = stringValueFromPrepareDataMapping(state, mapping)
+		assignment.ExpectedResult = stringValueFromPrepareDataMapping(assignment, mapping)
 	}
 	if mapping, ok := operation.In["constraints"]; ok {
-		if constraints, ok := valueFromPrepareDataMapping[[]string](state, mapping); ok {
+		if constraints, ok := valueFromPrepareDataMapping[[]string](assignment, mapping); ok {
 			assignment.Constraints = constraints
 		}
 	}
 	if mapping, ok := operation.In["canonical_task"]; ok {
-		if canonicalTask, ok := valueFromPrepareDataMapping[*ObjectRef](state, mapping); ok {
+		if canonicalTask, ok := valueFromPrepareDataMapping[*ObjectRef](assignment, mapping); ok {
 			assignment.CanonicalTask = canonicalTask
-		} else if canonicalTask, ok := valueFromPrepareDataMapping[ObjectRef](state, mapping); ok {
+		} else if canonicalTask, ok := valueFromPrepareDataMapping[ObjectRef](assignment, mapping); ok {
 			assignment.CanonicalTask = &canonicalTask
 		}
 	}
 	if mapping, ok := operation.In["related_objects"]; ok {
-		if relatedObjects, ok := valueFromPrepareDataMapping[[]ObjectRef](state, mapping); ok {
+		if relatedObjects, ok := valueFromPrepareDataMapping[[]ObjectRef](assignment, mapping); ok {
 			assignment.RelatedObjects = relatedObjects
 		}
 	}
 	if mapping, ok := operation.In["reasons"]; ok {
-		if reasons, ok := valueFromPrepareDataMapping[[]AssignmentReason](state, mapping); ok {
+		if reasons, ok := valueFromPrepareDataMapping[[]AssignmentReason](assignment, mapping); ok {
 			assignment.Reasons = reasons
 		}
 	}
 	if mapping, ok := operation.In["structured_input"]; ok {
-		if structuredInput, ok := valueFromPrepareDataMapping[*StructuredInput](state, mapping); ok {
+		if structuredInput, ok := valueFromPrepareDataMapping[*StructuredInput](assignment, mapping); ok {
 			assignment.StructuredInput = structuredInput
-		} else if structuredInput, ok := valueFromPrepareDataMapping[StructuredInput](state, mapping); ok {
+		} else if structuredInput, ok := valueFromPrepareDataMapping[StructuredInput](assignment, mapping); ok {
 			assignment.StructuredInput = &structuredInput
 		}
 	}
-	return assignment
+	input.assignment = assignment
+	return input
 }
 
-func stringValueFromPrepareDataMapping(state *operationExecution, mapping model.OperationMapping) string {
-	if value, ok := valueFromPrepareDataMapping[string](state, mapping); ok {
+func invocationValueFromPrepareDataMapping(state *operationExecution, mapping model.OperationMapping) (invocation, bool) {
+	if len(mapping.Value) != 0 {
+		var value invocation
+		if err := json.Unmarshal(mapping.Value, &value); err == nil {
+			return value, true
+		}
+		return invocation{}, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "in.invocation", "invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		return state.in, true
+	default:
+		return invocation{}, false
+	}
+}
+
+func stringValueFromPrepareDataMapping(assignment *ExecutionAssignment, mapping model.OperationMapping) string {
+	if value, ok := valueFromPrepareDataMapping[string](assignment, mapping); ok {
 		return strings.TrimSpace(value)
 	}
 	return ""
 }
 
-func valueFromPrepareDataMapping[T any](state *operationExecution, mapping model.OperationMapping) (T, bool) {
+func valueFromPrepareDataMapping[T any](assignment *ExecutionAssignment, mapping model.OperationMapping) (T, bool) {
 	var zero T
 	if len(mapping.Value) != 0 {
 		var value T
@@ -194,7 +220,7 @@ func valueFromPrepareDataMapping[T any](state *operationExecution, mapping model
 		}
 		return zero, false
 	}
-	raw, ok := prepareDataRefValue(state, mapping.Ref)
+	raw, ok := prepareDataRefValue(assignment, mapping.Ref)
 	if !ok {
 		return zero, false
 	}
@@ -213,14 +239,7 @@ func valueFromPrepareDataMapping[T any](state *operationExecution, mapping model
 	return decoded, true
 }
 
-func prepareDataRefValue(state *operationExecution, ref string) (any, bool) {
-	if state == nil {
-		return nil, false
-	}
-	assignment := state.assignment
-	if assignment == nil {
-		assignment = invocationFromExecutionData(state).Assignment
-	}
+func prepareDataRefValue(assignment *ExecutionAssignment, ref string) (any, bool) {
 	if assignment == nil {
 		return nil, false
 	}

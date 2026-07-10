@@ -6,6 +6,11 @@
   "required": true,
   "contract": {
     "in": {
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Исходный ввод контура исполнения из контура реактивности."
+      },
       "expected_result": {
         "type": "string",
         "description": "Ожидаемый результат выполнения действия."
@@ -39,6 +44,11 @@
       "workplace": {
         "type": "object",
         "description": "Подготовленная спецификация рабочего места с синхронизированными ветками."
+      },
+      "invocation": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленный ввод контура исполнения."
       }
     }
   }

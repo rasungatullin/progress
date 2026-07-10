@@ -730,7 +730,11 @@ func TestPrepareDataFillsActionData(t *testing.T) {
 			Assignment: assignment,
 			Workplace:  model.WorkplaceSpec{Name: "112"},
 		},
-		assignment: assignment,
+		assignment: &ExecutionAssignment{
+			ExpectedResult:  "Старый результат.",
+			CanonicalTask:   &ObjectRef{Type: "task", Repository: "legacy/name", Number: 999},
+			StructuredInput: &StructuredInput{Task: "Legacy."},
+		},
 		action: model.Action{
 			Name:       ActionStartImplementationPR,
 			Operations: []model.OperationSpec{operation},
@@ -3854,6 +3858,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 	for _, value := range operations {
 		switch operation := value.(type) {
 		case string:
+			if operation == OperationKindPrepareData {
+				result = append(result, prepareDataActionOperation())
+				continue
+			}
 			if operation == OperationKindResolveProfile {
 				result = append(result, resolveProfileActionOperation())
 				continue
@@ -3912,6 +3920,29 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 		}
 	}
 	return result
+}
+
+func prepareDataActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindPrepareData,
+		Kind:     OperationKindPrepareData,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"invocation":       mappingRef("in.invocation"),
+			"expected_result":  mappingRef("in.expected_result"),
+			"constraints":      mappingRef("in.constraints"),
+			"canonical_task":   mappingRef("in.canonical_task"),
+			"related_objects":  mappingRef("in.related_objects"),
+			"reasons":          mappingRef("in.reasons"),
+			"structured_input": mappingRef("in.structured_input"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"structured_input": mappingRef("data.structured_input"),
+			"workplace":        mappingRef("data.workplace"),
+			"invocation":       mappingRef("data.invocation"),
+		},
+	}
 }
 
 func resolveProfileActionOperation() methodology.ActionOperation {
@@ -4176,6 +4207,7 @@ func prepareDataOperationSpec() model.OperationSpec {
 		Kind:   OperationKindPrepareData,
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
+			"invocation":       {Ref: "in.invocation"},
 			"expected_result":  {Ref: "in.expected_result"},
 			"constraints":      {Ref: "in.constraints"},
 			"canonical_task":   {Ref: "in.canonical_task"},
@@ -4432,7 +4464,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
@@ -4450,7 +4482,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
@@ -4468,7 +4500,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
@@ -4487,7 +4519,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
@@ -4504,7 +4536,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": false, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
@@ -4524,7 +4556,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "requires_synthesis": true,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "load-pull-request", "kind": "load-pull-request", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "load-review-remarks", "kind": "load-review-remarks", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
@@ -4545,7 +4577,7 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": false,
       "requires_synthesis": false,
       "operations": [
-        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true},
+        {"name": "prepare-data", "kind": "prepare-data", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "origin": "builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "origin": "builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
