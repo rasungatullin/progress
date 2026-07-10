@@ -11,26 +11,10 @@
         "required": true,
         "description": "Признак необходимости запуска синтеза для разрешённого действия."
       },
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
-      },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Разрешённый исполнительный профиль."
-      },
-      "allocation": {
-        "type": "object",
-        "required": true,
-        "description": "Результат ресурсного снабжения."
-      },
-      "workplace": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленное рабочее место."
-      }
+      "directory": {"type": "string", "required": true, "description": "Каталог запуска."},
+      "runner": {"type": "string", "description": "Исполнительный модуль."},
+      "model": {"type": "string", "description": "Модель выполнения."},
+      "model_binding": {"type": "string", "description": "Привязка модели к ресурсу."}
     },
     "out": {
       "directive": {

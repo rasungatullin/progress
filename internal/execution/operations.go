@@ -1180,6 +1180,10 @@ type buildDirectiveInput struct {
 	profile           profile
 	allocation        allocation
 	workplace         workplace
+	directory         string
+	runner            string
+	model             string
+	modelBinding      string
 }
 
 func buildDirectiveInputFromOperation(state *operationExecution, operation OperationSpec) buildDirectiveInput {
@@ -1215,7 +1219,49 @@ func buildDirectiveInputFromOperation(state *operationExecution, operation Opera
 			input.workplace = value
 		}
 	}
+	input.directory = stringValueFromBuildDirectiveMapping(state, operation.In["directory"])
+	input.runner = stringValueFromBuildDirectiveMapping(state, operation.In["runner"])
+	input.model = stringValueFromBuildDirectiveMapping(state, operation.In["model"])
+	input.modelBinding = stringValueFromBuildDirectiveMapping(state, operation.In["model_binding"])
+	if _, ok := operation.In["invocation"]; !ok {
+		input.invocation = invocation{Launch: model.LaunchSpec{Directory: input.directory}}
+		input.allocation = allocation{Runner: input.runner, Model: input.model, ModelBinding: input.modelBinding}
+	}
 	return input
+}
+
+func stringValueFromBuildDirectiveMapping(state *operationExecution, mapping model.OperationMapping) string {
+	if len(mapping.Value) != 0 {
+		var value string
+		if json.Unmarshal(mapping.Value, &value) == nil {
+			return strings.TrimSpace(value)
+		}
+		return ""
+	}
+	if state == nil {
+		return ""
+	}
+	invocationValue, invocationOK := state.data["invocation"].(invocation)
+	allocationValue, allocationOK := state.data["allocation"].(allocation)
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.invocation.launch.directory":
+		if invocationOK {
+			return invocationValue.Launch.Directory
+		}
+	case "data.allocation.runner":
+		if allocationOK {
+			return allocationValue.Runner
+		}
+	case "data.allocation.model":
+		if allocationOK {
+			return allocationValue.Model
+		}
+	case "data.allocation.model_binding":
+		if allocationOK {
+			return allocationValue.ModelBinding
+		}
+	}
+	return ""
 }
 
 func boolValueFromBuildDirectiveMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {

@@ -171,18 +171,10 @@
         "requires_synthesis": {
           "ref": "action.requires_synthesis"
         },
-        "invocation": {
-          "ref": "data.invocation"
-        },
-        "profile": {
-          "ref": "data.profile"
-        },
-        "allocation": {
-          "ref": "data.allocation"
-        },
-        "workplace": {
-          "ref": "data.workplace"
-        }
+        "directory": {"ref": "data.invocation.launch.directory"},
+        "runner": {"ref": "data.allocation.runner"},
+        "model": {"ref": "data.allocation.model"},
+        "model_binding": {"ref": "data.allocation.model_binding"}
       },
       "out": {
         "directive": {
