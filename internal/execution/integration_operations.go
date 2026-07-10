@@ -722,6 +722,15 @@ type publishReviewResponsesInput struct {
 
 func publishReviewResponsesInputFromOperation(state *operationExecution, operation OperationSpec) publishReviewResponsesInput {
 	input := publishReviewResponsesInput{}
+	if state != nil {
+		input.invocation, _ = state.data["invocation"].(invocation)
+		input.profile, _ = state.data["profile"].(profile)
+		input.allocation, _ = state.data["allocation"].(allocation)
+		input.workplace, _ = state.data["workplace"].(workplace)
+		input.result, _ = state.data["result"].(LaunchResult)
+		input.reviewRemarks = reviewRemarksFromExecutionData(state)
+		input.structuredOutput = input.result.StructuredOutput
+	}
 	if len(operation.In) == 0 {
 		return input
 	}
