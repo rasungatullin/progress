@@ -6,31 +6,14 @@
   "required": true,
   "contract": {
     "in": {
-      "invocation": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленный ввод контура исполнения."
-      },
-      "profile": {
-        "type": "object",
-        "required": true,
-        "description": "Профиль исполнения, выбранный для действия."
-      },
-      "allocation": {
-        "type": "object",
-        "required": true,
-        "description": "Выделенные вычислительные ресурсы."
-      },
-      "workplace": {
-        "type": "object",
-        "required": true,
-        "description": "Подготовленное рабочее место."
-      },
-      "result": {
-        "type": "object",
-        "required": true,
-        "description": "Результат выполнения с учётом создания коммита и отправки ветки."
-      },
+      "repository": {"type": "string", "required": true, "description": "Репозиторий запроса на слияние."},
+      "title": {"type": "string", "description": "Заголовок запроса на слияние."},
+      "body": {"type": "string", "description": "Описание запроса на слияние."},
+      "base_ref": {"type": "string", "description": "Базовая ветка запроса."},
+      "head_ref": {"type": "string", "description": "Ветка источника запроса."},
+      "draft": {"type": "boolean", "description": "Признак чернового запроса."},
+      "result_status": {"type": "string", "description": "Состояние выполнения перед публикацией."},
+      "result_summary": {"type": "string", "description": "Сводка выполнения перед публикацией."},
       "structured_output": {
         "type": "object",
         "description": "Нормализованный структурированный результат выполнения."
