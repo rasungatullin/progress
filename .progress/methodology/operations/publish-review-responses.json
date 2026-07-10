@@ -11,6 +11,21 @@
         "required": true,
         "description": "Подготовленный ввод контура исполнения."
       },
+      "profile": {
+        "type": "object",
+        "required": true,
+        "description": "Профиль исполнения, выбранный для действия."
+      },
+      "allocation": {
+        "type": "object",
+        "required": true,
+        "description": "Выделенные вычислительные ресурсы."
+      },
+      "workplace": {
+        "type": "object",
+        "required": true,
+        "description": "Подготовленное рабочее место."
+      },
       "result": {
         "type": "object",
         "required": true,

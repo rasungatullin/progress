@@ -635,7 +635,7 @@ func publishReviewRemarksOutputSummary(summary string, result LaunchResult, oper
 
 func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := publishReviewResponsesInputFromOperation(state, operation)
-	ref := pullRequestRefFromPublishReviewResponsesInput(state, input)
+	ref := pullRequestRefFromPublishReviewResponsesInput(input)
 	if ref.Number <= 0 {
 		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
@@ -662,7 +662,7 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 	result.Summary = joinExecutionSummaries(result.Summary, summary)
 	writePublishReviewResponsesData(state, operation, summary, result)
 	state.tracker.completeIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary(summary, result, operation), "Ответы на замечания записаны через контур интеграции.")
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, nil)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, nil)
 	return nil
 }
 
@@ -670,7 +670,7 @@ func (e builtinOperationExecutor) failPublishReviewResponsesOperation(ctx contex
 	result := failedPublishReviewResponsesResult(input, err)
 	writePublishReviewResponsesFailureData(state, operation, result)
 	state.tracker.fail(name, summary, err, code, true, true)
-	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, profileFromExecutionData(state), allocationFromExecutionData(state), workplaceFromExecutionData(state), result, err)
+	e.service.updateStartHistory(ctx, state.historyRoot, state.historyHandle, input.invocation, input.profile, input.allocation, input.workplace, result, err)
 	return err
 }
 
@@ -712,6 +712,9 @@ func writePublishReviewResponsesData(state *operationExecution, operation Operat
 
 type publishReviewResponsesInput struct {
 	invocation       invocation
+	profile          profile
+	allocation       allocation
+	workplace        workplace
 	result           LaunchResult
 	structuredOutput *StructuredOutput
 	reviewRemarks    []integration.ReviewRemark
@@ -719,18 +722,27 @@ type publishReviewResponsesInput struct {
 
 func publishReviewResponsesInputFromOperation(state *operationExecution, operation OperationSpec) publishReviewResponsesInput {
 	input := publishReviewResponsesInput{}
-	if state != nil {
-		input.invocation = invocationFromExecutionData(state)
-		input.result = resultFromExecutionData(state)
-		input.structuredOutput = structuredOutputFromExecutionData(state)
-		input.reviewRemarks = reviewRemarksFromExecutionData(state)
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
 	if mapping, ok := operation.In["invocation"]; ok {
 		if value, ok := invocationValueFromLaunchSynthesisMapping(state, mapping); ok {
 			input.invocation = value
+		}
+	}
+	if mapping, ok := operation.In["profile"]; ok {
+		if value, ok := profileValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.profile = value
+		}
+	}
+	if mapping, ok := operation.In["allocation"]; ok {
+		if value, ok := allocationValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.allocation = value
+		}
+	}
+	if mapping, ok := operation.In["workplace"]; ok {
+		if value, ok := workplaceValueFromLaunchSynthesisMapping(state, mapping); ok {
+			input.workplace = value
 		}
 	}
 	if mapping, ok := operation.In["result"]; ok {
@@ -785,6 +797,9 @@ func reviewRemarksValueFromPublishReviewResponsesMapping(state *operationExecuti
 func publishReviewResponsesInputSummary(input publishReviewResponsesInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
 		"invocation":        invocationSummary(input.invocation),
+		"profile":           profileSummary(input.profile),
+		"allocation":        allocationSummary(input.allocation),
+		"workplace":         workplaceSummary(input.workplace),
 		"result":            resultSummary(input.result),
 		"structured_output": structuredOutputSummary(input.structuredOutput),
 		"review_remarks":    formatInt(len(input.reviewRemarks)),
@@ -981,10 +996,10 @@ func publishReviewRemarksAssignment(input publishMergeRequestInput) *ExecutionAs
 	return nil
 }
 
-func pullRequestRefFromPublishReviewResponsesInput(state *operationExecution, input publishReviewResponsesInput) pullRequestRef {
-	ref := pullRequestRefFromAssignment(publishReviewResponsesAssignment(state, input))
+func pullRequestRefFromPublishReviewResponsesInput(input publishReviewResponsesInput) pullRequestRef {
+	ref := pullRequestRefFromAssignment(publishReviewResponsesAssignment(input))
 	if strings.TrimSpace(ref.Head) == "" {
-		assignment := publishReviewResponsesAssignment(state, input)
+		assignment := publishReviewResponsesAssignment(input)
 		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
 			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
 		}
@@ -992,7 +1007,7 @@ func pullRequestRefFromPublishReviewResponsesInput(state *operationExecution, in
 	return ref
 }
 
-func publishReviewResponsesAssignment(state *operationExecution, input publishReviewResponsesInput) *ExecutionAssignment {
+func publishReviewResponsesAssignment(input publishReviewResponsesInput) *ExecutionAssignment {
 	if input.invocation.Assignment != nil {
 		return assignmentFromInvocation(input.invocation)
 	}

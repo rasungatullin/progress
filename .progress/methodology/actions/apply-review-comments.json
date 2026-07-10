@@ -339,6 +339,15 @@
         "invocation": {
           "ref": "data.invocation"
         },
+        "profile": {
+          "ref": "data.profile"
+        },
+        "allocation": {
+          "ref": "data.allocation"
+        },
+        "workplace": {
+          "ref": "data.workplace"
+        },
         "result": {
           "ref": "data.result"
         },

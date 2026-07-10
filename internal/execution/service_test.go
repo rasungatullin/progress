@@ -2209,7 +2209,10 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 					Number:     17,
 				}},
 			}},
-			"result": model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"profile":    model.Profile{Name: "coder"},
+			"allocation": model.Allocation{Model: "gpt-5"},
+			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":     model.LaunchResult{Status: "completed", Summary: "apply complete"},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
 				Status:   "resolved",
@@ -2285,7 +2288,10 @@ func TestPublishReviewResponsesFailureFillsOnlyActionData(t *testing.T) {
 					}},
 				},
 			},
-			"result": model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"profile":    model.Profile{Name: "coder"},
+			"allocation": model.Allocation{Model: "gpt-5"},
+			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":     model.LaunchResult{Status: "completed", Summary: "apply complete"},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
 				Status:   "resolved",
@@ -2340,6 +2346,9 @@ func TestPublishReviewResponsesWritesOutputsWhenNoResponses(t *testing.T) {
 		action:     model.Action{Operations: []model.OperationSpec{operation}},
 		data: map[string]any{
 			"invocation":        model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"profile":           model.Profile{Name: "coder"},
+			"allocation":        model.Allocation{Model: "gpt-5"},
+			"workplace":         model.Workplace{Name: "/tmp/work", Ready: true},
 			"result":            model.LaunchResult{Status: "completed", Summary: "apply complete"},
 			"structured_output": &model.StructuredOutput{Summary: "No responses."},
 			"review_remarks":    []integration.ReviewRemark{{ExternalID: "remark-1", ReplyToID: "thread-1"}},
@@ -3889,6 +3898,10 @@ func testExecutionOperations(operations ...any) []methodology.ActionOperation {
 				result = append(result, publishReviewRemarksActionOperation())
 				continue
 			}
+			if operation == OperationKindPublishReviewResponses {
+				result = append(result, publishReviewResponsesActionOperation())
+				continue
+			}
 			if operation == OperationKindFinalize {
 				result = append(result, finalizeActionOperation())
 				continue
@@ -4105,6 +4118,28 @@ func publishReviewRemarksActionOperation() methodology.ActionOperation {
 		Out: map[string]methodology.ActionMapping{
 			"review_remarks_summary": mappingRef("data.review_remarks_summary"),
 			"result":                 mappingRef("data.result"),
+		},
+	}
+}
+
+func publishReviewResponsesActionOperation() methodology.ActionOperation {
+	return methodology.ActionOperation{
+		Name:     OperationKindPublishReviewResponses,
+		Kind:     OperationKindPublishReviewResponses,
+		Origin:   OperationOriginBuiltin,
+		Required: boolRef(true),
+		In: map[string]methodology.ActionMapping{
+			"invocation":        mappingRef("data.invocation"),
+			"profile":           mappingRef("data.profile"),
+			"allocation":        mappingRef("data.allocation"),
+			"workplace":         mappingRef("data.workplace"),
+			"result":            mappingRef("data.result"),
+			"structured_output": mappingRef("data.structured_output"),
+			"review_remarks":    mappingRef("data.review_remarks"),
+		},
+		Out: map[string]methodology.ActionMapping{
+			"review_responses_summary": mappingRef("data.review_responses_summary"),
+			"result":                   mappingRef("data.result"),
 		},
 	}
 }
@@ -4365,6 +4400,9 @@ func publishReviewResponsesOperationSpec() model.OperationSpec {
 		Origin: OperationOriginBuiltin,
 		In: model.OperationMap{
 			"invocation":        {Ref: "data.invocation"},
+			"profile":           {Ref: "data.profile"},
+			"allocation":        {Ref: "data.allocation"},
+			"workplace":         {Ref: "data.workplace"},
 			"result":            {Ref: "data.result"},
 			"structured_output": {Ref: "data.structured_output"},
 			"review_remarks":    {Ref: "data.review_remarks"},
@@ -4496,7 +4534,7 @@ const testExecutionMethodologyCatalogJSON = `{
         {"name": "launch-synthesis", "kind": "launch-synthesis", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "directive": {"ref": "data.directive"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}}, "out": {"result": {"ref": "data.result"}}},
         {"name": "parse-result", "kind": "parse-result", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "result": {"ref": "data.result"}}, "out": {"structured_output": {"ref": "data.structured_output"}}},
         {"name": "commit-push", "kind": "commit-push", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}}, "out": {"commit_summary": {"ref": "data.commit_summary"}, "result": {"ref": "data.result"}}},
-        {"name": "publish-review-responses", "kind": "publish-review-responses", "origin": "builtin", "required": true},
+        {"name": "publish-review-responses", "kind": "publish-review-responses", "origin": "builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}, "structured_output": {"ref": "data.structured_output"}, "review_remarks": {"ref": "data.review_remarks"}}, "out": {"review_responses_summary": {"ref": "data.review_responses_summary"}, "result": {"ref": "data.result"}}},
         {"name": "finalize", "kind": "finalize", "origin": "builtin", "required": true, "in": {"requires_synthesis": {"ref": "action.requires_synthesis"}, "action_name": {"ref": "action.name"}, "action_class": {"ref": "action.class"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}, "workplace": {"ref": "data.workplace"}, "result": {"ref": "data.result"}}, "out": {"result": {"ref": "data.result"}}}
       ]
     },
