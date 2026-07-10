@@ -16,6 +16,11 @@
         "required": true,
         "description": "Явная привязка модели выполнения к ресурсу."
       },
+      "allow_model_fallback": {
+        "type": "boolean",
+        "required": true,
+        "description": "Разрешение резервного выбора модели при недоступности привязки."
+      },
       "runner": {
         "type": "string",
         "description": "Исполнительный модуль для запуска."

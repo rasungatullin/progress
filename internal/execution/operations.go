@@ -108,7 +108,7 @@ func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operat
 		preparedInvocation.Launch.StructuredInput = preparedAssignment.StructuredInput
 	}
 	var err error
-	preparedInvocation, err = syncPullRequestRefsWithWorkplace(state, preparedInvocation, preparedAssignment)
+	preparedInvocation, err = syncPullRequestRefsWithWorkplace(preparedInvocation, preparedAssignment)
 	if err != nil {
 		state.tracker.fail(name, "Данные задания не согласованы с веткой рабочего места.", err, "pull_request_branch_mismatch", true, true)
 		return err
@@ -140,9 +140,6 @@ func writePrepareData(state *operationExecution, operation OperationSpec, in inv
 
 func prepareDataInputFromOperation(state *operationExecution, operation OperationSpec) prepareDataInput {
 	input := prepareDataInput{}
-	if state != nil {
-		input.invocation, _ = state.data["invocation"].(invocation)
-	}
 	if mapping, ok := operation.In["invocation"]; ok {
 		if value, ok := invocationValueFromPrepareDataMapping(state, mapping); ok {
 			input.invocation = value
@@ -270,11 +267,7 @@ func prepareDataRefValue(assignment *ExecutionAssignment, ref string) (any, bool
 	}
 }
 
-func syncPullRequestRefsWithWorkplace(state *operationExecution, in invocation, assignment *ExecutionAssignment) (invocation, error) {
-	if state == nil {
-		return in, nil
-	}
-
+func syncPullRequestRefsWithWorkplace(in invocation, assignment *ExecutionAssignment) (invocation, error) {
 	ref := pullRequestRefFromAssignment(assignment)
 	if base := strings.TrimSpace(ref.Base); base != "" && strings.TrimSpace(in.Workplace.BaseRef) == "" {
 		in.Workplace.BaseRef = base
@@ -286,7 +279,7 @@ func syncPullRequestRefsWithWorkplace(state *operationExecution, in invocation, 
 	if strings.TrimSpace(in.Workplace.HeadRef) == "" {
 		in.Workplace.HeadRef = explicitHead
 	}
-	if state.action.Name != ActionStartImplementationPR {
+	if strings.TrimSpace(in.Action) != ActionStartImplementationPR {
 		return in, nil
 	}
 
@@ -344,9 +337,6 @@ func writeResolveProfileData(state *operationExecution, operation OperationSpec,
 
 func resolveProfileInputFromOperation(state *operationExecution, operation OperationSpec) (invocation, string) {
 	profileInput := invocation{}
-	if state != nil {
-		profileInput, _ = state.data["invocation"].(invocation)
-	}
 	if mapping, ok := operation.In["invocation"]; ok {
 		if value, ok := invocationValueFromResolveProfileMapping(state, mapping); ok {
 			profileInput = value
@@ -649,7 +639,7 @@ func (e builtinOperationExecutor) allocateResources(ctx context.Context, state *
 		return nil
 	}
 
-	allocation, err := e.service.allocateResources(ctx, input.invocation(), input.profile)
+	allocation, err := e.service.allocateResources(ctx, input.invocation(), input.resolvedProfile())
 	if err != nil {
 		state.tracker.fail(name, "Ресурсы недоступны.", err, "resources_unavailable", true, false)
 		return err
@@ -669,19 +659,21 @@ func writeAllocateResourcesData(state *operationExecution, operation OperationSp
 }
 
 type allocateResourcesInput struct {
-	requiresSynthesis bool
-	modelBinding      string
-	runner            string
-	model             string
-	environment       string
-	workplaceName     string
-	repositoryURL     string
-	profile           profile
-	legacyInvocation  invocation
+	requiresSynthesis     bool
+	allowModelFallback    bool
+	allowModelFallbackSet bool
+	modelBinding          string
+	runner                string
+	model                 string
+	environment           string
+	workplaceName         string
+	repositoryURL         string
+	profile               profile
+	invocationValue       invocation
 }
 
 func (input allocateResourcesInput) invocation() invocation {
-	result := input.legacyInvocation
+	result := input.invocationValue
 	result.Repository = model.RepositorySpec{URL: input.repositoryURL}
 	result.Workplace = model.WorkplaceSpec{Name: input.workplaceName, Environment: input.environment}
 	result.Launch = model.LaunchSpec{ModelBinding: input.modelBinding, Runner: input.runner, Model: input.model}
@@ -690,13 +682,6 @@ func (input allocateResourcesInput) invocation() invocation {
 
 func allocateResourcesInputFromOperation(state *operationExecution, operation OperationSpec) allocateResourcesInput {
 	input := allocateResourcesInput{}
-	if state != nil {
-		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.legacyInvocation, _ = state.data["invocation"].(invocation)
-		if value, ok := state.data["profile"].(profile); ok {
-			input.profile = value
-		}
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -705,23 +690,48 @@ func allocateResourcesInputFromOperation(state *operationExecution, operation Op
 			input.requiresSynthesis = value
 		}
 	}
+	if mapping, ok := operation.In["profile"]; ok {
+		input.profile, _ = profileValueFromAllocateResourcesMapping(state, mapping)
+	}
+	if mapping, ok := operation.In["invocation"]; ok {
+		input.invocationValue, _ = invocationValueFromAllocateResourcesMapping(state, mapping)
+	}
 	input.modelBinding = stringValueFromAllocateResourcesMapping(state, operation.In["model_binding"])
 	input.runner = stringValueFromAllocateResourcesMapping(state, operation.In["runner"])
 	input.model = stringValueFromAllocateResourcesMapping(state, operation.In["model"])
 	input.environment = stringValueFromAllocateResourcesMapping(state, operation.In["environment"])
 	input.workplaceName = stringValueFromAllocateResourcesMapping(state, operation.In["workplace_name"])
 	input.repositoryURL = stringValueFromAllocateResourcesMapping(state, operation.In["repository_url"])
-	if input.invocation().Task == "" && state != nil {
-		if value, ok := state.data["invocation"].(invocation); ok {
-			input.repositoryURL = value.Repository.URL
-			input.workplaceName = value.Workplace.Name
-			input.environment = value.Workplace.Environment
-			input.modelBinding = value.Launch.ModelBinding
-			input.runner = value.Launch.Runner
-			input.model = value.Launch.Model
-		}
+	if mapping, ok := operation.In["allow_model_fallback"]; ok {
+		input.allowModelFallback, input.allowModelFallbackSet = boolValueFromProfileMapping(state, mapping)
 	}
 	return input
+}
+
+func (input allocateResourcesInput) resolvedProfile() profile {
+	result := input.profile
+	if strings.TrimSpace(input.modelBinding) != "" {
+		result.ModelBinding = input.modelBinding
+	}
+	if input.allowModelFallbackSet {
+		result.AllowModelFallback = input.allowModelFallback
+	}
+	return result
+}
+
+func boolValueFromProfileMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
+	if len(mapping.Value) != 0 {
+		var value bool
+		if json.Unmarshal(mapping.Value, &value) == nil {
+			return value, true
+		}
+		return false, false
+	}
+	if state == nil || strings.TrimSpace(mapping.Ref) != "data.profile.allow_model_fallback" {
+		return false, false
+	}
+	value, ok := state.data["profile"].(profile)
+	return value.AllowModelFallback, ok
 }
 
 func stringValueFromAllocateResourcesMapping(state *operationExecution, mapping model.OperationMapping) string {
@@ -947,9 +957,6 @@ func (input prepareWorkplaceInput) resolvedAllocation() allocation {
 
 func prepareWorkplaceInputFromOperation(state *operationExecution, operation OperationSpec) prepareWorkplaceInput {
 	input := prepareWorkplaceInput{}
-	if state != nil {
-		input.requiresWorkplace = state.action.RequiresWorkplace
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -1191,9 +1198,6 @@ type buildDirectiveInput struct {
 
 func buildDirectiveInputFromOperation(state *operationExecution, operation OperationSpec) buildDirectiveInput {
 	input := buildDirectiveInput{}
-	if state != nil {
-		input.requiresSynthesis = state.action.RequiresSynthesis
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -1445,9 +1449,6 @@ type launchSynthesisInput struct {
 
 func launchSynthesisInputFromOperation(state *operationExecution, operation OperationSpec) launchSynthesisInput {
 	input := launchSynthesisInput{}
-	if state != nil {
-		input.requiresSynthesis = state.action.RequiresSynthesis
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -1481,13 +1482,125 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 			input.workplace = value
 		}
 	}
-	if _, ok := operation.In["invocation"]; !ok && state != nil {
-		input.invocation, _ = state.data["invocation"].(invocation)
-		input.profile, _ = state.data["profile"].(profile)
-		input.allocation, _ = state.data["allocation"].(allocation)
-		input.workplace, _ = state.data["workplace"].(workplace)
+	if _, ok := operation.In["invocation"]; !ok {
+		input.invocation.Task = launchStringValue(state, operation.In["task"])
+		input.invocation.Action = launchStringValue(state, operation.In["action"])
+		input.invocation.Repository.URL = launchStringValue(state, operation.In["repository_url"])
+		input.invocation.Workplace.Name = launchStringValue(state, operation.In["workplace_name"])
+		input.profile.Name = launchStringValue(state, operation.In["profile_name"])
+		input.profile.PromptAdditions, _ = launchStringSliceValue(state, operation.In["prompt_additions"])
+		input.profile.StructuredOutput, _ = launchBoolValue(state, operation.In["profile_structured_output"])
+		input.profile.StructuredOutputRequired, _ = launchBoolValue(state, operation.In["profile_structured_output_required"])
+		input.profile.StructuredOutputFields, _ = launchStringSliceValue(state, operation.In["profile_structured_output_fields"])
+		input.allocation.Runner = launchStringValue(state, operation.In["runner"])
+		input.allocation.Model = launchStringValue(state, operation.In["model"])
+		input.allocation.ModelBinding = launchStringValue(state, operation.In["model_binding"])
+		input.workplace.Name = launchStringValue(state, operation.In["workplace_name"])
+		input.workplace.Ready = strings.TrimSpace(input.workplace.Name) != ""
+		input.directive.Directory = launchStringValue(state, operation.In["directory"])
+		input.directive.Runner = input.allocation.Runner
+		input.directive.Model = input.allocation.Model
+		input.directive.ModelBinding = input.allocation.ModelBinding
+		input.directive.StructuredInput, _ = launchStructuredInputValue(state, operation.In["structured_input"])
 	}
 	return input
+}
+
+func launchStringValue(state *operationExecution, mapping model.OperationMapping) string {
+	if len(mapping.Value) != 0 {
+		var value string
+		if json.Unmarshal(mapping.Value, &value) == nil {
+			return strings.TrimSpace(value)
+		}
+		return ""
+	}
+	if state == nil {
+		return ""
+	}
+	ref := strings.TrimSpace(mapping.Ref)
+	if value, ok := state.data["invocation"].(invocation); ok {
+		switch ref {
+		case "data.invocation.task":
+			return value.Task
+		case "data.invocation.action":
+			return value.Action
+		case "data.invocation.repository.url":
+			return value.Repository.URL
+		case "data.invocation.launch.directory":
+			return value.Launch.Directory
+		}
+	}
+	if value, ok := state.data["profile"].(profile); ok && ref == "data.profile.name" {
+		return value.Name
+	}
+	if value, ok := state.data["allocation"].(allocation); ok {
+		switch ref {
+		case "data.allocation.runner":
+			return value.Runner
+		case "data.allocation.model":
+			return value.Model
+		case "data.allocation.model_binding":
+			return value.ModelBinding
+		}
+	}
+	if value, ok := state.data["workplace"].(workplace); ok && ref == "data.workplace.name" {
+		return value.Name
+	}
+	return ""
+}
+
+func launchBoolValue(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
+	if len(mapping.Value) != 0 {
+		var value bool
+		err := json.Unmarshal(mapping.Value, &value)
+		return value, err == nil
+	}
+	if state == nil {
+		return false, false
+	}
+	value, ok := state.data["profile"].(profile)
+	if !ok {
+		return false, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.profile.structured_output":
+		return value.StructuredOutput, true
+	case "data.profile.structured_output_required":
+		return value.StructuredOutputRequired, true
+	default:
+		return false, false
+	}
+}
+
+func launchStringSliceValue(state *operationExecution, mapping model.OperationMapping) ([]string, bool) {
+	if len(mapping.Value) != 0 {
+		var value []string
+		err := json.Unmarshal(mapping.Value, &value)
+		return value, err == nil
+	}
+	if state == nil {
+		return nil, false
+	}
+	value, ok := state.data["profile"].(profile)
+	if !ok {
+		return nil, false
+	}
+	switch strings.TrimSpace(mapping.Ref) {
+	case "data.profile.prompt_additions":
+		return append([]string(nil), value.PromptAdditions...), true
+	case "data.profile.structured_output_fields":
+		return append([]string(nil), value.StructuredOutputFields...), true
+	default:
+		return nil, false
+	}
+}
+
+func launchStructuredInputValue(state *operationExecution, mapping model.OperationMapping) (*StructuredInput, bool) {
+	if state == nil || strings.TrimSpace(mapping.Ref) != "data.invocation.launch.structured_input" {
+		return nil, false
+	}
+	value, ok := state.data["invocation"].(invocation)
+	return value.Launch.StructuredInput, ok
 }
 
 func boolValueFromLaunchSynthesisMapping(state *operationExecution, mapping model.OperationMapping) (bool, bool) {
@@ -1685,9 +1798,6 @@ type parseResultInput struct {
 
 func parseResultInputFromOperation(state *operationExecution, operation OperationSpec) parseResultInput {
 	input := parseResultInput{}
-	if state != nil {
-		input.requiresSynthesis = state.action.RequiresSynthesis
-	}
 	if len(operation.In) == 0 {
 		return input
 	}
@@ -1932,11 +2042,6 @@ type finalizeInput struct {
 
 func finalizeInputFromOperation(state *operationExecution, operation OperationSpec) finalizeInput {
 	input := finalizeInput{}
-	if state != nil {
-		input.requiresSynthesis = state.action.RequiresSynthesis
-		input.actionName = state.action.Name
-		input.actionClass = string(state.action.Class)
-	}
 	if len(operation.In) == 0 {
 		return input
 	}

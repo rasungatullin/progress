@@ -190,6 +190,7 @@
           "ref": "action.requires_synthesis"
         },
         "model_binding": {"ref": "data.invocation.launch.model_binding"},
+        "allow_model_fallback": {"ref": "data.profile.allow_model_fallback"},
         "runner": {"ref": "data.invocation.launch.runner"},
         "model": {"ref": "data.invocation.launch.model"},
         "environment": {"ref": "data.invocation.workplace.environment"},
@@ -256,6 +257,10 @@
         "action": {"ref": "data.invocation.action"},
         "directory": {"ref": "data.invocation.launch.directory"},
         "profile_name": {"ref": "data.profile.name"},
+        "prompt_additions": {"ref": "data.profile.prompt_additions"},
+        "profile_structured_output": {"ref": "data.profile.structured_output"},
+        "profile_structured_output_required": {"ref": "data.profile.structured_output_required"},
+        "profile_structured_output_fields": {"ref": "data.profile.structured_output_fields"},
         "runner": {"ref": "data.allocation.runner"},
         "model": {"ref": "data.allocation.model"},
         "model_binding": {"ref": "data.allocation.model_binding"},
