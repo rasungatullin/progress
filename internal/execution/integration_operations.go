@@ -92,6 +92,9 @@ type loadPullRequestInput struct {
 
 func loadPullRequestInputFromOperation(state *operationExecution, operation OperationSpec) loadPullRequestInput {
 	input := loadPullRequestInput{}
+	if state != nil {
+		input.invocation, _ = state.data["invocation"].(invocation)
+	}
 	if len(operation.In) == 0 {
 		return input
 	}

@@ -127,9 +127,10 @@
         "workplace": {
           "ref": "data.workplace"
         },
-        "invocation": {
-          "ref": "data.invocation"
-        }
+        "repository": {"ref": "data.invocation.repository.url"},
+        "number": {"ref": "data.invocation.assignment.canonical_task.number"},
+        "base_ref": {"ref": "data.invocation.workplace.base_ref"},
+        "head_ref": {"ref": "data.invocation.workplace.head_ref"}
       }
     },
     {
