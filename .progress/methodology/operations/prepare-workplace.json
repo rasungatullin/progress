@@ -2,7 +2,7 @@
   "name": "prepare-workplace",
   "kind": "prepare-workplace",
   "title": "Подготовка рабочего места",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

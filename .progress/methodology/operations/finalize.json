@@ -2,7 +2,7 @@
   "name": "finalize",
   "kind": "finalize",
   "title": "Завершающая фиксация",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

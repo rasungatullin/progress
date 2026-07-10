@@ -2,7 +2,7 @@
   "name": "parse-result",
   "kind": "parse-result",
   "title": "Разбор результата",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

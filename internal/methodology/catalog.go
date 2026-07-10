@@ -102,9 +102,7 @@ type Action struct {
 
 type ActionOperation struct {
 	Name     string                   `json:"name,omitempty"`
-	Kind     string                   `json:"kind,omitempty"`
 	Title    string                   `json:"title,omitempty"`
-	Origin   string                   `json:"origin,omitempty"`
 	In       map[string]ActionMapping `json:"in,omitempty"`
 	Out      map[string]ActionMapping `json:"out,omitempty"`
 	Required *bool                    `json:"required,omitempty"`
@@ -232,7 +230,7 @@ func (o *ActionOperation) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(trimmed, &name); err != nil {
 			return err
 		}
-		*o = ActionOperation{Name: name, Kind: name}
+		*o = ActionOperation{Name: name}
 		return nil
 	}
 
@@ -257,9 +255,9 @@ type Instruction struct {
 
 type Operation struct {
 	Name     string            `json:"name"`
+	Type     string            `json:"type"`
 	Kind     string            `json:"kind,omitempty"`
 	Title    string            `json:"title,omitempty"`
-	Origin   string            `json:"origin,omitempty"`
 	Contract OperationContract `json:"contract,omitempty"`
 	Required *bool             `json:"required,omitempty"`
 }
@@ -634,6 +632,7 @@ func validateCatalog(catalog Catalog) error {
 	}
 
 	seenOperations := map[string]struct{}{}
+	operationsByName := map[string]Operation{}
 	for index, rawOperation := range catalog.Operations {
 		operation := normalizeOperation(rawOperation)
 		if operation.Name == "" {
@@ -643,6 +642,13 @@ func validateCatalog(catalog Catalog) error {
 			return fmt.Errorf("operations contains duplicate name %q", operation.Name)
 		}
 		seenOperations[operation.Name] = struct{}{}
+		operationsByName[operation.Name] = operation
+		if operation.Type != "builtin" && operation.Type != "action" {
+			return fmt.Errorf("operation %q type must be builtin or action", operation.Name)
+		}
+		if operation.Kind == "" {
+			return fmt.Errorf("operation %q kind must be non-empty", operation.Name)
+		}
 		if err := validateOperationContract(operation.Contract, operation.Name); err != nil {
 			return err
 		}
@@ -671,8 +677,8 @@ func validateCatalog(catalog Catalog) error {
 		}
 		for operationIndex, operation := range catalog.Actions[actionIndex].Operations {
 			operation = normalizeActionOperation(operation)
-			if operation.Name == "" && operation.Kind == "" {
-				return fmt.Errorf("action %q operations[%d] must define name or kind", action.Name, operationIndex)
+			if operation.Name == "" {
+				return fmt.Errorf("action %q operations[%d] must define name", action.Name, operationIndex)
 			}
 			if err := validateActionOperationBinding(action.Name, operationIndex, operation); err != nil {
 				return err
@@ -681,7 +687,7 @@ func validateCatalog(catalog Catalog) error {
 				return fmt.Errorf("action %q operations contains duplicate name %q", action.Name, operation.Name)
 			}
 			seenOperationRefs[operation.Name] = struct{}{}
-			if hasOperationRegistry && operation.Name != "" && operation.Origin == "" && operation.Title == "" && operation.Required == nil {
+			if hasOperationRegistry {
 				if _, ok := seenOperations[operation.Name]; !ok {
 					return fmt.Errorf("action %q operations[%d] references unknown operation %q", action.Name, operationIndex, operation.Name)
 				}
@@ -703,6 +709,9 @@ func validateCatalog(catalog Catalog) error {
 			}
 			seenActionAliases[alias] = action.Name
 		}
+	}
+	if err := validateActionOperationHandlers(normalizedActions, operationsByName); err != nil {
+		return err
 	}
 
 	seenInstructions := map[string]struct{}{}
@@ -874,7 +883,7 @@ func normalizeActionOperations(operations []ActionOperation) []ActionOperation {
 	result := make([]ActionOperation, 0, len(operations))
 	for _, operation := range operations {
 		operation = normalizeActionOperation(operation)
-		if operation.Name == "" && operation.Kind == "" {
+		if operation.Name == "" {
 			continue
 		}
 		result = append(result, operation)
@@ -887,15 +896,7 @@ func normalizeActionOperations(operations []ActionOperation) []ActionOperation {
 
 func normalizeActionOperation(operation ActionOperation) ActionOperation {
 	operation.Name = normalizeName(operation.Name)
-	operation.Kind = normalizeName(operation.Kind)
-	if operation.Name == "" {
-		operation.Name = operation.Kind
-	}
-	if operation.Kind == "" {
-		operation.Kind = operation.Name
-	}
 	operation.Title = strings.TrimSpace(operation.Title)
-	operation.Origin = strings.TrimSpace(operation.Origin)
 	operation.In = normalizeActionOperationMapping(operation.In)
 	operation.Out = normalizeActionOperationMapping(operation.Out)
 	return operation
@@ -903,6 +904,10 @@ func normalizeActionOperation(operation ActionOperation) ActionOperation {
 
 func normalizeOperation(operation Operation) Operation {
 	operation.Name = normalizeName(operation.Name)
+	operation.Type = normalizeName(operation.Type)
+	if operation.Type == "" {
+		operation.Type = "builtin"
+	}
 	operation.Kind = normalizeName(operation.Kind)
 	if operation.Name == "" {
 		operation.Name = operation.Kind
@@ -911,7 +916,6 @@ func normalizeOperation(operation Operation) Operation {
 		operation.Kind = operation.Name
 	}
 	operation.Title = strings.TrimSpace(operation.Title)
-	operation.Origin = strings.TrimSpace(operation.Origin)
 	operation.Contract = normalizeOperationContract(operation.Contract)
 	return operation
 }
@@ -1053,6 +1057,120 @@ func validateActionOperationBinding(actionName string, operationIndex int, opera
 	}
 	if err := validateActionMapping(fmt.Sprintf("action %q operations[%d].out", actionName, operationIndex), operation.Out); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateActionOperationHandlers(actions []Action, operations map[string]Operation) error {
+	actionsByName := make(map[string]Action, len(actions))
+	for _, action := range actions {
+		actionsByName[action.Name] = action
+	}
+	for _, operation := range operations {
+		if operation.Type != "action" {
+			continue
+		}
+		handler, ok := actionsByName[operation.Kind]
+		if !ok {
+			return fmt.Errorf("operation %q references unknown action %q", operation.Name, operation.Kind)
+		}
+		if err := validateActionHandlerContract(operation, handler); err != nil {
+			return err
+		}
+	}
+	for _, action := range actions {
+		for index, binding := range action.Operations {
+			operation, ok := operations[binding.Name]
+			if !ok {
+				continue
+			}
+			if err := validateOperationBindingContract(action.Name, index, binding, operation); err != nil {
+				return err
+			}
+		}
+	}
+	return validateActionHandlerCycles(actionsByName, operations)
+}
+
+func validateOperationBindingContract(actionName string, index int, binding ActionOperation, operation Operation) error {
+	for name := range binding.In {
+		if _, ok := operation.Contract.In[name]; len(operation.Contract.In) != 0 && !ok {
+			return fmt.Errorf("action %q operations[%d].in.%s is not declared by operation %q", actionName, index, name, operation.Name)
+		}
+	}
+	for name, field := range operation.Contract.In {
+		if field.Required != nil && *field.Required {
+			if _, ok := binding.In[name]; !ok {
+				return fmt.Errorf("action %q operations[%d] does not bind required input %q", actionName, index, name)
+			}
+		}
+	}
+	for name := range binding.Out {
+		if _, ok := operation.Contract.Out[name]; len(operation.Contract.Out) != 0 && !ok {
+			return fmt.Errorf("action %q operations[%d].out.%s is not declared by operation %q", actionName, index, name, operation.Name)
+		}
+	}
+	return nil
+}
+
+func validateActionHandlerContract(operation Operation, action Action) error {
+	for name, field := range action.Contract.In {
+		operationField, ok := operation.Contract.In[name]
+		if field.Required != nil && *field.Required && !ok {
+			return fmt.Errorf("operation %q does not provide required input %q of action %q", operation.Name, name, action.Name)
+		}
+		if ok && operationField.Type != field.Type {
+			return fmt.Errorf("operation %q input %q type %q does not match action %q type %q", operation.Name, name, operationField.Type, action.Name, field.Type)
+		}
+	}
+	for name := range operation.Contract.In {
+		if _, ok := action.Contract.In[name]; !ok {
+			return fmt.Errorf("operation %q input %q is not declared by action %q", operation.Name, name, action.Name)
+		}
+	}
+	for name, field := range operation.Contract.Out {
+		actionField, ok := action.Contract.Out[name]
+		if !ok {
+			return fmt.Errorf("operation %q output %q is not declared by action %q", operation.Name, name, action.Name)
+		}
+		if actionField.Type != field.Type {
+			return fmt.Errorf("operation %q output %q type %q does not match action %q type %q", operation.Name, name, field.Type, action.Name, actionField.Type)
+		}
+		if field.Required != nil && *field.Required && (actionField.Required == nil || !*actionField.Required) {
+			return fmt.Errorf("operation %q required output %q is not required by action %q", operation.Name, name, action.Name)
+		}
+	}
+	return nil
+}
+
+func validateActionHandlerCycles(actions map[string]Action, operations map[string]Operation) error {
+	visiting := map[string]bool{}
+	visited := map[string]bool{}
+	var visit func(string, []string) error
+	visit = func(name string, path []string) error {
+		if visiting[name] {
+			return fmt.Errorf("action operation cycle: %s", strings.Join(append(path, name), " -> "))
+		}
+		if visited[name] {
+			return nil
+		}
+		visiting[name] = true
+		for _, binding := range actions[name].Operations {
+			operation, ok := operations[binding.Name]
+			if ok && operation.Type == "action" {
+				if err := visit(operation.Kind, append(path, name, operation.Name)); err != nil {
+					return err
+				}
+			}
+		}
+		visiting[name] = false
+		visited[name] = true
+		return nil
+	}
+	for name := range actions {
+		if err := visit(name, nil); err != nil {
+			return err
+		}
 	}
 	return nil
 }

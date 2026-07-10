@@ -47,7 +47,8 @@ const (
 	OperationStatusFailed    = "failed"
 	OperationStatusSkipped   = "skipped"
 
-	OperationOriginBuiltin = "builtin"
+	OperationTypeBuiltin = "builtin"
+	OperationTypeAction  = "action"
 )
 
 type actionResolver interface {
@@ -215,20 +216,15 @@ func executionActionFromMethodology(action methodology.Action, operationsByName 
 		ExpectedResult:    strings.TrimSpace(action.ExpectedResult),
 		RequiresWorkplace: actionRequiresWorkplace(action, operations),
 		Operations:        operations,
+		OutputFields:      actionContractFieldNames(action.Contract.Out),
+		RequiredOut:       requiredActionContractFields(action.Contract.Out),
 	}, nil
 }
 
 func operationSpecFromMethodology(action methodology.Action, operation methodology.ActionOperation, operationsByName map[string]methodology.Operation) (model.OperationSpec, error) {
 	name := strings.TrimSpace(operation.Name)
-	kind := strings.TrimSpace(operation.Kind)
 	if name == "" {
-		name = kind
-	}
-	if kind == "" {
-		kind = name
-	}
-	if name == "" || kind == "" {
-		return model.OperationSpec{}, fmt.Errorf("операция должна задавать name или kind")
+		return model.OperationSpec{}, fmt.Errorf("операция должна задавать name")
 	}
 	resolvedOperation, ok := operationsByName[name]
 	var defaultSpec model.OperationSpec
@@ -236,32 +232,28 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 		resolvedOperation = normalizeMethodologyOperation(resolvedOperation)
 		defaultSpec = model.OperationSpec{
 			Name:       resolvedOperation.Name,
+			Type:       model.OperationType(resolvedOperation.Type),
 			Kind:       model.OperationKind(resolvedOperation.Kind),
 			Title:      resolvedOperation.Title,
-			Origin:     resolvedOperation.Origin,
 			Required:   resolvedOperation.Required != nil && *resolvedOperation.Required,
 			RequiredIn: requiredOperationInputFields(resolvedOperation.Contract),
 		}
 	} else {
-		defaultSpec = defaultOperationSpec(kind)
+		defaultSpec = defaultOperationSpec(name)
 	}
 	if strings.TrimSpace(defaultSpec.Name) == "" {
 		defaultSpec.Name = name
-		defaultSpec.Kind = model.OperationKind(kind)
-		defaultSpec.Origin = OperationOriginBuiltin
+		defaultSpec.Type = model.OperationType(OperationTypeBuiltin)
+		defaultSpec.Kind = model.OperationKind(name)
 		defaultSpec.Required = true
 	}
 	defaultSpec.Name = name
-	defaultSpec.Kind = model.OperationKind(kind)
 	if title := strings.TrimSpace(operation.Title); title != "" {
 		defaultSpec.Title = title
 	}
-	if origin := strings.TrimSpace(operation.Origin); origin != "" {
-		defaultSpec.Origin = origin
-	}
 	defaultSpec.In = operationMappingFromMethodology(operation.In)
 	defaultSpec.Out = operationMappingFromMethodology(operation.Out)
-	if operation.Required == nil && strings.TrimSpace(action.Name) == ActionApplyReviewComments && kind == OperationKindLoadReviewRemarks {
+	if operation.Required == nil && strings.TrimSpace(action.Name) == ActionApplyReviewComments && string(defaultSpec.Kind) == OperationKindLoadReviewRemarks {
 		defaultSpec.Required = true
 	}
 	if operation.Required != nil {
@@ -302,6 +294,7 @@ func operationMappingFromMethodology(mappings map[string]methodology.ActionMappi
 func normalizeMethodologyOperation(operation methodology.Operation) methodology.Operation {
 	operation.Name = strings.TrimSpace(operation.Name)
 	operation.Name = strings.TrimSpace(strings.ToLower(operation.Name))
+	operation.Type = strings.TrimSpace(strings.ToLower(operation.Type))
 	operation.Kind = strings.TrimSpace(operation.Kind)
 	operation.Kind = strings.TrimSpace(strings.ToLower(operation.Kind))
 	if operation.Name == "" {
@@ -311,8 +304,27 @@ func normalizeMethodologyOperation(operation methodology.Operation) methodology.
 		operation.Kind = operation.Name
 	}
 	operation.Title = strings.TrimSpace(operation.Title)
-	operation.Origin = strings.TrimSpace(operation.Origin)
 	return operation
+}
+
+func actionContractFieldNames(fields map[string]methodology.ActionContractField) []string {
+	result := make([]string, 0, len(fields))
+	for name := range fields {
+		result = append(result, strings.TrimSpace(name))
+	}
+	sort.Strings(result)
+	return result
+}
+
+func requiredActionContractFields(fields map[string]methodology.ActionContractField) []string {
+	result := make([]string, 0, len(fields))
+	for name, field := range fields {
+		if field.Required != nil && *field.Required {
+			result = append(result, strings.TrimSpace(name))
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func defaultOperationSpec(kind string) model.OperationSpec {
@@ -409,9 +421,9 @@ func newOperationTracker(action model.Action) *operationTracker {
 	for _, operation := range action.Operations {
 		result := model.OperationResult{
 			Name:     operation.Name,
+			Type:     operation.Type,
 			Kind:     operation.Kind,
 			Title:    operation.Title,
-			Origin:   operation.Origin,
 			Required: operation.Required,
 			Status:   model.OperationStatus(OperationStatusPending),
 		}
@@ -447,7 +459,7 @@ func (t *operationTracker) set(name string, status model.OperationStatus, input 
 	if !ok {
 		index = len(t.results)
 		t.index[name] = index
-		t.results = append(t.results, model.OperationResult{Name: name, Origin: OperationOriginBuiltin, Required: true})
+		t.results = append(t.results, model.OperationResult{Name: name, Type: model.OperationType(OperationTypeBuiltin), Required: true})
 	}
 
 	t.results[index].Status = status
@@ -455,6 +467,12 @@ func (t *operationTracker) set(name string, status model.OperationStatus, input 
 	t.results[index].Output = strings.TrimSpace(output)
 	t.results[index].Summary = strings.TrimSpace(summary)
 	t.results[index].Failure = failure
+}
+
+func (t *operationTracker) setOperations(name string, operations []model.OperationResult) {
+	if index, ok := t.index[name]; ok {
+		t.results[index].Operations = append([]model.OperationResult(nil), operations...)
+	}
 }
 
 func (t *operationTracker) snapshot() []model.OperationResult {
@@ -501,9 +519,9 @@ func executionResultFromLaunch(assignment *model.ExecutionAssignment, action mod
 func builtinOperation(kind string, title string, required bool) model.OperationSpec {
 	return model.OperationSpec{
 		Name:     kind,
+		Type:     model.OperationType(OperationTypeBuiltin),
 		Kind:     model.OperationKind(kind),
 		Title:    title,
-		Origin:   OperationOriginBuiltin,
 		Required: required,
 	}
 }
@@ -522,6 +540,8 @@ func defaultActionName() string {
 func cloneAction(action model.Action) model.Action {
 	cloned := action
 	cloned.Operations = append([]model.OperationSpec(nil), action.Operations...)
+	cloned.OutputFields = append([]string(nil), action.OutputFields...)
+	cloned.RequiredOut = append([]string(nil), action.RequiredOut...)
 	return cloned
 }
 

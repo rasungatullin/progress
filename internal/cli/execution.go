@@ -405,6 +405,12 @@ func printExecutionResultOnError(cmd *cobra.Command, result execution.ExecutionR
 
 func printOperationResult(cmd *cobra.Command, result execution.OperationResult) {
 	cmd.Printf("operation=%s\n", result.Name)
+	if strings.TrimSpace(string(result.Type)) != "" {
+		cmd.Printf("type=%s\n", result.Type)
+	}
+	if strings.TrimSpace(string(result.Kind)) != "" {
+		cmd.Printf("kind=%s\n", result.Kind)
+	}
 	cmd.Printf("status=%s\n", result.Status)
 	if strings.TrimSpace(result.Summary) != "" {
 		cmd.Printf("summary=%s\n", normalizeStructuredValue(result.Summary))

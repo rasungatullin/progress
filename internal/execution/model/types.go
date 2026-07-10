@@ -330,6 +330,8 @@ type ActionClass string
 
 type OperationKind string
 
+type OperationType string
+
 type OperationStatus string
 
 type Failure struct {
@@ -346,13 +348,15 @@ type Action struct {
 	ExpectedResult    string          `json:"expected_result,omitempty"`
 	RequiresWorkplace bool            `json:"requires_workplace,omitempty"`
 	Operations        []OperationSpec `json:"operations,omitempty"`
+	OutputFields      []string        `json:"output_fields,omitempty"`
+	RequiredOut       []string        `json:"required_out,omitempty"`
 }
 
 type OperationSpec struct {
 	Name       string        `json:"name,omitempty"`
+	Type       OperationType `json:"type,omitempty"`
 	Kind       OperationKind `json:"kind,omitempty"`
 	Title      string        `json:"title,omitempty"`
-	Origin     string        `json:"origin,omitempty"`
 	In         OperationMap  `json:"in,omitempty"`
 	Out        OperationMap  `json:"out,omitempty"`
 	Required   bool          `json:"required,omitempty"`
@@ -367,16 +371,17 @@ type OperationMapping struct {
 }
 
 type OperationResult struct {
-	Name     string          `json:"name,omitempty"`
-	Kind     OperationKind   `json:"kind,omitempty"`
-	Title    string          `json:"title,omitempty"`
-	Origin   string          `json:"origin,omitempty"`
-	Required bool            `json:"required,omitempty"`
-	Input    string          `json:"input,omitempty"`
-	Output   string          `json:"output,omitempty"`
-	Status   OperationStatus `json:"status,omitempty"`
-	Summary  string          `json:"summary,omitempty"`
-	Failure  *Failure        `json:"failure,omitempty"`
+	Name       string            `json:"name,omitempty"`
+	Type       OperationType     `json:"type,omitempty"`
+	Kind       OperationKind     `json:"kind,omitempty"`
+	Title      string            `json:"title,omitempty"`
+	Required   bool              `json:"required,omitempty"`
+	Input      string            `json:"input,omitempty"`
+	Output     string            `json:"output,omitempty"`
+	Status     OperationStatus   `json:"status,omitempty"`
+	Summary    string            `json:"summary,omitempty"`
+	Failure    *Failure          `json:"failure,omitempty"`
+	Operations []OperationResult `json:"operations,omitempty"`
 }
 
 type Artifact struct {

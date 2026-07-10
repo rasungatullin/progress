@@ -216,7 +216,7 @@ func TestLoadCatalogRejectsInvalidActionOperations(t *testing.T) {
 			actions: `[
 				{"name": "implement", "operations": [{}]}
 			]`,
-			wantError: `action "implement" operations[0] must define name or kind`,
+			wantError: `action "implement" operations[0] must define name`,
 		},
 		{
 			name: "duplicate operation",
@@ -617,7 +617,7 @@ func TestLoadCatalogRejectsActionReferenceToUnknownOperation(t *testing.T) {
 	root := t.TempDir()
 	methodologyDir := filepath.Join(root, ".progress", "methodology")
 	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"actions":[{"name":"implement","class":"engineering-synthesis","operations":[{"name":"prepare-data"},{"name":"missing-operation"}]}]}`)
-	writeTestFile(t, filepath.Join(methodologyDir, "operations", "prepare-data.json"), `{"name":"prepare-data","kind":"prepare-data","title":"Подготовка данных","origin":"builtin","required":true}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "operations", "prepare-data.json"), `{"name":"prepare-data","kind":"prepare-data","title":"Подготовка данных","type":"builtin","required":true}`)
 
 	_, err := LoadCatalogWithHome(root, t.TempDir(), nil)
 	if err == nil {
@@ -667,7 +667,7 @@ func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 			Name:        "implement",
 			Class:       "engineering-synthesis",
 			Profile:     "coder",
-			Operations:  []ActionOperation{{Name: "prepare-data", Kind: "prepare-data"}, {Name: "launch-synthesis", Kind: "launch-synthesis"}},
+			Operations:  []ActionOperation{{Name: "prepare-data"}, {Name: "launch-synthesis"}},
 			Description: "Выполнение инженерного изменения.",
 		}},
 	})
@@ -696,7 +696,7 @@ func TestLoadCatalogReadsFileRegistries(t *testing.T) {
 	writeTestFile(t, filepath.Join(methodologyDir, "routes", "task-processing.json"), `{"name":"task-processing","action":"implement"}`)
 	writeTestFile(t, filepath.Join(methodologyDir, "actions", "implement.json"), `{"name":"implement","profile":"coder"}`)
 	writeTestFile(t, filepath.Join(methodologyDir, "instructions", "implement-directive.json"), `{"name":"implement-directive","action":"implement","profile":"coder","body":"Сформировать изменение."}`)
-	writeTestFile(t, filepath.Join(methodologyDir, "operations", "prepare-data.json"), `{"name":"prepare-data","kind":"prepare-data","title":"Подготовка данных","origin":"builtin","required":true}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "operations", "prepare-data.json"), `{"name":"prepare-data","kind":"prepare-data","title":"Подготовка данных","type":"builtin","required":true}`)
 	writeTestFile(t, filepath.Join(methodologyDir, "entities", "decision-rule--description-assessment.json"), `{"kind":"decision-rule","name":"description-assessment","target_contour":"decision","payload":{"label":"description-assessment"}}`)
 
 	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
@@ -751,7 +751,7 @@ func TestServiceUpsertRejectsEmptyActionOperation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected empty operation error")
 	}
-	if !strings.Contains(err.Error(), `action "implement" operations[0] must define name or kind`) {
+	if !strings.Contains(err.Error(), `action "implement" operations[0] must define name`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
