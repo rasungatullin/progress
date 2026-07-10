@@ -280,21 +280,14 @@
     {
       "name": "publish-merge-request",
       "in": {
-        "invocation": {
-          "ref": "data.invocation"
-        },
-        "profile": {
-          "ref": "data.profile"
-        },
-        "allocation": {
-          "ref": "data.allocation"
-        },
-        "workplace": {
-          "ref": "data.workplace"
-        },
-        "result": {
-          "ref": "data.result"
-        },
+        "repository": {"ref": "data.invocation.repository.url"},
+        "title": {"ref": "data.structured_output.summary"},
+        "body": {"ref": "data.structured_output.summary"},
+        "base_ref": {"ref": "data.invocation.workplace.base_ref"},
+        "head_ref": {"ref": "data.invocation.workplace.head_ref"},
+        "draft": {"ref": "data.pull_request.draft"},
+        "result_status": {"ref": "data.result.status"},
+        "result_summary": {"ref": "data.result.summary"},
         "structured_output": {
           "ref": "data.structured_output"
         }
