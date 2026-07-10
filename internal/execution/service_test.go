@@ -1072,9 +1072,9 @@ func TestBuildDirectiveFillsOnlyActionData(t *testing.T) {
 	operation := buildDirectiveOperationSpec()
 	state := &operationExecution{
 		in: model.Invocation{
-			Task: "task-42",
+			Task: "legacy",
 			Launch: model.LaunchSpec{
-				StructuredInput: &StructuredInput{Task: "Ship it."},
+				StructuredInput: &StructuredInput{Task: "Legacy."},
 			},
 		},
 		action: model.Action{
@@ -1082,6 +1082,7 @@ func TestBuildDirectiveFillsOnlyActionData(t *testing.T) {
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
+			"invocation": model.Invocation{Task: "task-42", Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "Ship it."}}},
 			"allocation": model.Allocation{Resource: "binding:coder", Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
 		},
 		allocation: model.Allocation{Resource: "legacy", Runner: "legacy", Model: "legacy"},
@@ -1103,6 +1104,9 @@ func TestBuildDirectiveFillsOnlyActionData(t *testing.T) {
 	if state.in.Launch.Runner != "" || state.in.Launch.Model != "" || state.in.Launch.ModelBinding != "" {
 		t.Fatalf("build-directive must not write implicit state launch: %#v", state.in.Launch)
 	}
+	if state.allocation.Resource != "legacy" || state.allocation.Runner != "legacy" {
+		t.Fatalf("build-directive must not read or write implicit state allocation: %#v", state.allocation)
+	}
 }
 
 func TestBuildDirectiveKeepsExplicitModelBinding(t *testing.T) {
@@ -1111,13 +1115,14 @@ func TestBuildDirectiveKeepsExplicitModelBinding(t *testing.T) {
 	operation := buildDirectiveOperationSpec()
 	state := &operationExecution{
 		in: model.Invocation{
-			Launch: model.LaunchSpec{ModelBinding: "explicit"},
+			Launch: model.LaunchSpec{ModelBinding: "legacy"},
 		},
 		action: model.Action{
 			RequiresSynthesis: true,
 			Operations:        []model.OperationSpec{operation},
 		},
 		data: map[string]any{
+			"invocation": model.Invocation{Launch: model.LaunchSpec{ModelBinding: "explicit"}},
 			"allocation": model.Allocation{Runner: "opencode", Model: "openai/gpt-5.5", ModelBinding: "coder"},
 		},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
@@ -1140,13 +1145,13 @@ func TestBuildDirectiveWritesDirectiveForActionWithoutSynthesis(t *testing.T) {
 	operation := buildDirectiveOperationSpec()
 	state := &operationExecution{
 		in: model.Invocation{
-			Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "No synthesis."}},
+			Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "Legacy."}},
 		},
 		action: model.Action{
 			RequiresSynthesis: false,
 			Operations:        []model.OperationSpec{operation},
 		},
-		data:    map[string]any{"allocation": model.Allocation{Resource: "not-required"}},
+		data:    map[string]any{"invocation": model.Invocation{Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "No synthesis."}}}, "allocation": model.Allocation{Resource: "not-required"}},
 		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
 	}
 	service := &Service{logger: log.Default()}

@@ -1072,11 +1072,12 @@ func invocationValueFromBuildDirectiveMapping(state *operationExecution, mapping
 		return invocation{}, false
 	}
 	switch strings.TrimSpace(mapping.Ref) {
-	case "in", "invocation":
+	case "data.invocation":
 		if state == nil {
 			return invocation{}, false
 		}
-		return state.in, true
+		value, ok := state.data["invocation"].(invocation)
+		return value, ok
 	default:
 		return invocation{}, false
 	}
@@ -1097,11 +1098,6 @@ func allocationValueFromBuildDirectiveMapping(state *operationExecution, mapping
 		}
 		value, ok := state.data["allocation"].(allocation)
 		return value, ok
-	case "state.allocation":
-		if state == nil {
-			return allocation{}, false
-		}
-		return state.allocation, true
 	default:
 		return allocation{}, false
 	}
