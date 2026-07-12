@@ -840,7 +840,7 @@ func TestAPITransportMapsGraphQLErrors(t *testing.T) {
 	}
 }
 
-func TestAPITransportPRCommentCreateRequestsThreadAndPayloadErrors(t *testing.T) {
+func TestAPITransportPRCommentCreateRequestsThreadAndComment(t *testing.T) {
 	t.Parallel()
 
 	var mutation string
@@ -853,7 +853,7 @@ func TestAPITransportPRCommentCreateRequestsThreadAndPayloadErrors(t *testing.T)
 		}
 		if strings.Contains(request.Query, "addPullRequestReviewThread") {
 			mutation = request.Query
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"addPullRequestReviewThread": map[string]any{"thread": map[string]any{"id": "thread-1", "comments": map[string]any{"nodes": []map[string]any{{"id": "comment-1"}}}}, "userErrors": []any{}}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"addPullRequestReviewThread": map[string]any{"thread": map[string]any{"id": "thread-1", "comments": map[string]any{"nodes": []map[string]any{{"id": "comment-1"}}}}}}})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"id": "pr-1"}}}})
@@ -865,8 +865,8 @@ func TestAPITransportPRCommentCreateRequestsThreadAndPayloadErrors(t *testing.T)
 	if err != nil {
 		t.Fatalf("create inline comment: %v", err)
 	}
-	if !strings.Contains(mutation, "thread") || !strings.Contains(mutation, "comments(first: 1)") || !strings.Contains(mutation, "userErrors: errors") {
-		t.Fatalf("mutation does not request stable identifiers and payload errors: %s", mutation)
+	if !strings.Contains(mutation, "thread") || !strings.Contains(mutation, "comments(first: 1)") || strings.Contains(mutation, "userErrors") || strings.Contains(mutation, "errors {") {
+		t.Fatalf("mutation does not match the GitHub schema: %s", mutation)
 	}
 	if !strings.Contains(result.Stdout, "thread-1") || !strings.Contains(result.Stdout, "comment-1") {
 		t.Fatalf("unexpected mutation response: %s", result.Stdout)

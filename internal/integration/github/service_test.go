@@ -1604,11 +1604,11 @@ func TestServicePRCommentCreateInlineAcceptsThreadOnlyPayload(t *testing.T) {
 	}
 }
 
-func TestServicePRCommentCreateInlineChecksExistingRemarkAfterPartialPayload(t *testing.T) {
+func TestServicePRCommentCreateInlineChecksExistingRemarkBeforeCreate(t *testing.T) {
 	t.Parallel()
 
 	stub := &stubRunner{
-		result:       CommandResult{ExitCode: 0, Stdout: `{"data":{"addPullRequestReviewThread":{}}}`},
+		result:       CommandResult{ExitCode: 0, Stdout: `{"data":{"addPullRequestReviewThread":{"thread":{"id":"unexpected"}}}}`},
 		reviewResult: CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
 	}
 	service := NewService()
@@ -1618,7 +1618,7 @@ func TestServicePRCommentCreateInlineChecksExistingRemarkAfterPartialPayload(t *
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if stub.prCommentCalls != 1 || stub.prReviewCalls != 1 || response.OperationResult == nil || response.OperationResult.ExternalID != "comment-1" {
+	if stub.prCommentCalls != 0 || stub.prReviewCalls != 1 || response.OperationResult == nil || response.OperationResult.ExternalID != "comment-1" {
 		t.Fatalf("unexpected idempotency result: calls=%d/%d result=%#v", stub.prCommentCalls, stub.prReviewCalls, response.OperationResult)
 	}
 }

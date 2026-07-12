@@ -613,7 +613,6 @@ func (r *Runner) RunPRCommentCreate(ctx context.Context, repository string, numb
         }
       }
     }
-    userErrors: errors { message path type }
   }
 }`
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + mutation, "-f", "pullRequestId=" + pullRequestID, "-f", "body=" + request.Body, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side})

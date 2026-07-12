@@ -139,15 +139,11 @@ type ghPRReviewThreadCreateResponse struct {
 	Data struct {
 		AddPullRequestReviewThread struct {
 			Thread ghPRReviewThread `json:"thread"`
-			Errors []ghPayloadError `json:"userErrors"`
 		} `json:"addPullRequestReviewThread"`
 	} `json:"data"`
-}
-
-type ghPayloadError struct {
-	Message string   `json:"message"`
-	Path    []string `json:"path"`
-	Type    string   `json:"type"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
 }
 
 type ghPRReviewThreadResolveResponse struct {
@@ -474,6 +470,11 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 	if err != nil {
 		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comment create request rejected before invoking gh")
 	}
+	if commentRequest.Path != "" {
+		if existing, config, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
+			return successfulPRCommentCreate(response, existing, config, repository, number)
+		}
+	}
 
 	result, config, err := s.runner.RunPRCommentCreate(ctx, repository, number, commentRequest)
 	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
@@ -497,9 +498,9 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub GraphQL JSON response: %v", err), Result: result, Err: err}, "gh pull request inline comment create returned malformed JSON")
 		}
 		payload := raw.Data.AddPullRequestReviewThread
-		if len(payload.Errors) > 0 {
+		if len(raw.Errors) > 0 {
 			reference := githubPullRequestReference(repository, number)
-			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned payload errors: %s (operation=addPullRequestReviewThread reference=%s)", payloadErrorsMessage(payload.Errors), reference), Result: result}, "code=external-failure operation=addPullRequestReviewThread reference="+reference+"; GitHub returned payload errors")
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned GraphQL errors (operation=addPullRequestReviewThread reference=%s response=%s)", reference, safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=external-failure operation=addPullRequestReviewThread reference="+reference+"; GitHub returned GraphQL errors")
 		}
 		remarks := reviewRemarksFromThreads(repository, number, []ghPRReviewThread{payload.Thread})
 		if len(remarks) > 0 {
@@ -507,13 +508,17 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		}
 	}
 	if remark.ExternalID == "" && remark.URL == "" {
-		if existing, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
+		if existing, _, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
 			remark = existing
 		} else {
 			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned no stable identifier for %s#%d (operation=addPullRequestReviewThread reference=%s response=%s)", repository, number, githubPullRequestReference(repository, number), safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=partial-payload operation=addPullRequestReviewThread reference="+githubPullRequestReference(repository, number)+"; existing remarks were checked before retry")
 		}
 	}
 
+	return successfulPRCommentCreate(response, remark, config, repository, number)
+}
+
+func successfulPRCommentCreate(response model.Response, remark model.ReviewRemark, config resolvedConfig, repository string, number int) (model.Response, error) {
 	response.ReviewRemarks = []model.ReviewRemark{remark}
 	response.OperationResult = &model.OperationResult{
 		System:     "github",
@@ -530,35 +535,21 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 	return response, nil
 }
 
-func (s *Service) findExistingPRRemark(ctx context.Context, repository string, number int, request PRCommentCreateRequest) (model.ReviewRemark, bool) {
-	result, _, err := s.runner.RunPRReviewThreads(ctx, repository, number)
+func (s *Service) findExistingPRRemark(ctx context.Context, repository string, number int, request PRCommentCreateRequest) (model.ReviewRemark, resolvedConfig, bool) {
+	result, config, err := s.runner.RunPRReviewThreads(ctx, repository, number)
 	if err != nil || result.ExitCode != 0 {
-		return model.ReviewRemark{}, false
+		return model.ReviewRemark{}, config, false
 	}
 	var raw ghPRReviewThreadsResponse
 	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil || raw.Data.Repository.PullRequest == nil {
-		return model.ReviewRemark{}, false
+		return model.ReviewRemark{}, config, false
 	}
 	for _, remark := range reviewRemarksFromThreads(repository, number, raw.Data.Repository.PullRequest.ReviewThreads.Nodes) {
 		if remark.Path == request.Path && remark.Line == request.Line && remark.Body == request.Body {
-			return remark, true
+			return remark, config, true
 		}
 	}
-	return model.ReviewRemark{}, false
-}
-
-func payloadErrorsMessage(items []ghPayloadError) string {
-	messages := make([]string, 0, len(items))
-	for _, item := range items {
-		message := strings.TrimSpace(item.Message)
-		if message == "" {
-			message = strings.TrimSpace(item.Type)
-		}
-		if message != "" {
-			messages = append(messages, message)
-		}
-	}
-	return strings.Join(messages, "; ")
+	return model.ReviewRemark{}, config, false
 }
 
 func safeGitHubResponseDiagnostic(raw string) string {
