@@ -464,7 +464,7 @@ func TestServiceProcessTaskIgnoresClosedGeneralRemarkConfirmationByID(t *testing
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
 	integrations.reviewRemarks = []integration.ReviewRemark{
 		{ExternalID: "comment-1", State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-1\n\nИсправить обработку"},
-		{ExternalID: "comment-2", State: "conversation", Body: "Идентификатор: remark-1\n\nЗамечание закрыто: исправление подтверждено"},
+		{ExternalID: "comment-2", State: "conversation", Body: "## Ответ на замечание ревизии\n\nЗамечание: remark-1\n\nСостояние: resolved\n\nЗамечание закрыто: исправление подтверждено"},
 	}
 	service := NewService(nil)
 	service.integration = integrations
@@ -489,7 +489,7 @@ func TestServiceProcessTaskReworksForNewRemarkAlongsideClosedConfirmation(t *tes
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
 	integrations.reviewRemarks = []integration.ReviewRemark{
 		{ExternalID: "comment-1", State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-1\n\nИсправить обработку"},
-		{ExternalID: "comment-2", State: "conversation", Body: "Идентификатор: remark-1\n\nЗамечание закрыто: исправление подтверждено"},
+		{ExternalID: "comment-2", State: "conversation", Body: "## Ответ на замечание ревизии\n\nЗамечание: remark-1\n\nСостояние: resolved\n\nЗамечание закрыто: исправление подтверждено"},
 		{ExternalID: "comment-3", State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-2\n\nДобавить проверку"},
 	}
 	service := NewService(nil)
@@ -532,6 +532,32 @@ func TestServiceProcessTaskReworksForClosureMentionInNewRemark(t *testing.T) {
 	cycle := result.Cycles[0]
 	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasUnresolvedReviewRemarks {
 		t.Fatalf("new remark with closure mention must remain unresolved: %#v", cycle.MergeRequestExternalState)
+	}
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	}
+}
+
+func TestServiceProcessTaskReworksForClosureLikeTextWithoutState(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{{
+		ExternalID: "comment-1",
+		State:      "conversation",
+		Body:       "## Замечание ревизии\n\nИдентификатор: remark-2\n\nЗамечание закрыто: исправление не выполнено; требуется исправление",
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	cycle := result.Cycles[0]
+	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasUnresolvedReviewRemarks {
+		t.Fatalf("remark with closure-like text must remain unresolved: %#v", cycle.MergeRequestExternalState)
 	}
 	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
 		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)

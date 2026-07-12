@@ -1290,7 +1290,8 @@ func TestHasUnresolvedExternalReviewRemarksIgnoresResolvedGeneralRemarkByID(t *t
 		{name: "resolved", state: "resolved", body: "Замечание закрыто", want: false},
 		{name: "closed", state: "closed", body: "Замечание закрыто", want: false},
 		{name: "fixed", state: "fixed", body: "Замечание закрыто", want: false},
-		{name: "explicit closure", body: "Замечание закрыто: исправление подтверждено", want: false},
+		{name: "explicit closure with normalized state", state: "resolved", body: "Замечание закрыто: исправление подтверждено", want: false},
+		{name: "closure-like text without normalized state", body: "Замечание закрыто: исправление подтверждено", want: true},
 		{name: "closure mention in open remark", body: "Замечание закрыто не было; требуется исправление", want: true},
 		{name: "negative closure statement", body: "Замечание закрыто: не было подтверждено", want: true},
 		{name: "open", state: "open", body: "Ожидается исправление", want: true},
@@ -1313,7 +1314,7 @@ func TestHasUnresolvedExternalReviewRemarksIgnoresConfirmationByID(t *testing.T)
 
 	remarks := []integration.ReviewRemark{
 		{State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-1\n\nИсправить обработку"},
-		{State: "conversation", Body: "Идентификатор: remark-1\n\nЗамечание закрыто: исправление подтверждено"},
+		{State: "conversation", Body: "## Ответ на замечание ревизии\n\nЗамечание: remark-1\n\nСостояние: resolved\n\nЗамечание закрыто: исправление подтверждено"},
 	}
 	if got := hasUnresolvedExternalReviewRemarks(remarks); got {
 		t.Fatal("resolved confirmation must suppress the original general remark")

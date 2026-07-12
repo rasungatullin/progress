@@ -362,20 +362,6 @@ func isResolvedExternalReviewRemark(body string) bool {
 	case "resolved", "fixed", "done", "ok", "closed", "outdated":
 		return true
 	}
-	normalizedBody := strings.ToLower(body)
-	for _, prefix := range []string{"замечание закрыто:", "remark closed:"} {
-		for _, line := range strings.Split(normalizedBody, "\n") {
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, prefix) {
-				continue
-			}
-			confirmation := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-			if confirmation == "" || strings.HasPrefix(confirmation, "не ") || strings.HasPrefix(confirmation, "not ") {
-				continue
-			}
-			return true
-		}
-	}
 	return false
 }
 
