@@ -16,6 +16,31 @@ import (
 	"github.com/rasungatullin/progress/internal/methodology"
 )
 
+func TestPublishTaskCommentUsesTaskRepository(t *testing.T) {
+	t.Parallel()
+
+	integrations := &stubIntegrationExecutor{}
+	action := model.Action{Operations: []model.OperationSpec{{Name: OperationKindPublishTaskComment, Kind: OperationKindPublishTaskComment}}}
+	state := &operationExecution{
+		assignment: &ExecutionAssignment{CanonicalTask: &ObjectRef{Repository: "owner/name", Number: 143}},
+		action:     action,
+		result:     LaunchResult{StructuredOutput: &StructuredOutput{Summary: "Комментарий задачи."}},
+		tracker:    newOperationTracker(action),
+	}
+
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+	if err := executor.publishTaskComment(context.Background(), state, OperationKindPublishTaskComment); err != nil {
+		t.Fatalf("publish task comment: %v", err)
+	}
+	if len(integrations.calls) != 1 {
+		t.Fatalf("expected one integration request, got %#v", integrations.calls)
+	}
+	request := integrations.calls[0]
+	if request.Repository != "owner/name" || !request.RepoProvided {
+		t.Fatalf("task comment must keep task repository: %#v", request)
+	}
+}
+
 func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 	t.Parallel()
 

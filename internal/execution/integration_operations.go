@@ -172,6 +172,8 @@ func (e builtinOperationExecutor) publishTaskComment(ctx context.Context, state 
 		Resource:        "task-comment",
 		ObjectType:      "task-comment",
 		Operation:       "create",
+		Repository:      strings.TrimSpace(task.Repository),
+		RepoProvided:    strings.TrimSpace(task.Repository) != "",
 		Number:          task.Number,
 		Body:            body,
 		Text:            body,
