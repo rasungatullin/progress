@@ -764,10 +764,12 @@ func publishReviewResponsesOutputSummary(summary string, result LaunchResult, op
 }
 
 type reviewRemarkComment struct {
-	Body string
-	Path string
-	Line int
-	Side string
+	Body       string
+	Path       string
+	Line       int
+	Side       string
+	ExternalID string
+	ThreadID   string
 }
 
 func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context, state *operationExecution, ref pullRequestRef, comments []reviewRemarkComment) (int, error) {
@@ -803,10 +805,12 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
 			ObjectType:      "comment",
-			Operation:       "create",
+			Operation:       reviewRemarkCommentOperation(comment),
 			Repository:      ref.Repository,
 			RepoProvided:    strings.TrimSpace(ref.Repository) != "",
 			Number:          ref.Number,
+			ExternalID:      strings.TrimSpace(comment.ExternalID),
+			ThreadID:        strings.TrimSpace(comment.ThreadID),
 			Body:            body,
 			Text:            body,
 			Path:            path,
@@ -1310,14 +1314,23 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 		}), "\n\n"))
 		if body != "" {
 			comments = append(comments, reviewRemarkComment{
-				Body: body,
-				Path: strings.TrimSpace(remark.Path),
-				Line: remark.Line,
-				Side: strings.TrimSpace(remark.Side),
+				Body:       body,
+				Path:       strings.TrimSpace(remark.Path),
+				Line:       remark.Line,
+				Side:       strings.TrimSpace(remark.Side),
+				ExternalID: strings.TrimSpace(remark.ExternalID),
+				ThreadID:   strings.TrimSpace(remark.ThreadID),
 			})
 		}
 	}
 	return comments
+}
+
+func reviewRemarkCommentOperation(comment reviewRemarkComment) string {
+	if strings.TrimSpace(comment.ThreadID) != "" {
+		return "reply"
+	}
+	return "create"
 }
 
 func reviewRemarkCommentTarget(comment reviewRemarkComment) string {

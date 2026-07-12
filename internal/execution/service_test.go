@@ -3401,6 +3401,43 @@ func TestPublishPullRequestCommentsRejectsNegativeInlineLine(t *testing.T) {
 	}
 }
 
+func TestPublishPullRequestCommentsContinuesExistingReviewThread(t *testing.T) {
+	integrations := &stubIntegrationExecutor{}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body:       "## Замечание ревизии\n\nПроверка после исправления.",
+		ExternalID: "PRRC_comment-1",
+		ThreadID:   "PRRT_thread-1",
+	}})
+	if err != nil {
+		t.Fatalf("publish review thread continuation: %v", err)
+	}
+	if count != 1 || len(integrations.calls) != 1 {
+		t.Fatalf("expected one published continuation, count=%d calls=%#v", count, integrations.calls)
+	}
+	request := integrations.calls[0]
+	if request.Operation != "reply" || request.ExternalID != "PRRC_comment-1" || request.ThreadID != "PRRT_thread-1" {
+		t.Fatalf("review thread identifiers must be preserved: %#v", request)
+	}
+}
+
+func TestReviewRemarkCommentsPreservesExternalIdentifiers(t *testing.T) {
+	comments := reviewRemarkComments(&model.StructuredOutput{Remarks: []model.StructuredRemark{{
+		ID:         "remark-2-follow-up",
+		ExternalID: "PRRC_comment-1",
+		ThreadID:   "PRRT_thread-1",
+		Status:     "open",
+		Body:       "Проверка после исправления.",
+	}}})
+	if len(comments) != 1 || comments[0].ExternalID != "PRRC_comment-1" || comments[0].ThreadID != "PRRT_thread-1" {
+		t.Fatalf("review remark external identifiers were lost: %#v", comments)
+	}
+	if got := reviewRemarkCommentOperation(comments[0]); got != "reply" {
+		t.Fatalf("existing review thread must be published as reply, got %q", got)
+	}
+}
+
 func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
