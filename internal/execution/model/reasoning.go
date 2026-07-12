@@ -1,6 +1,9 @@
 package model
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 var reasoningEffortCapabilities = map[string]map[string][]string{
 	"codex": {
@@ -26,4 +29,29 @@ func ReasoningEffortValues(runner, modelName string) []string {
 	}
 
 	return append([]string(nil), values...)
+}
+
+// ValidateReasoningEffort проверяет значение reasoning-effort по возможностям
+// конкретной связки исполнительного модуля и модели.
+func ValidateReasoningEffort(runner, modelName, effort string) error {
+	effort = strings.TrimSpace(effort)
+	if effort == "" {
+		return nil
+	}
+
+	values := ReasoningEffortValues(runner, modelName)
+	if len(values) == 0 {
+		if strings.TrimSpace(runner) != "codex" {
+			return fmt.Errorf("runner %q does not support reasoning-effort", runner)
+		}
+		return fmt.Errorf("model %q does not support reasoning-effort", modelName)
+	}
+
+	for _, supported := range values {
+		if effort == supported {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("unsupported reasoning-effort value %q", effort)
 }

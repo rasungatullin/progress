@@ -717,22 +717,7 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 }
 
 func validateReasoningEffort(spec model.LaunchSpec) error {
-	effort := strings.TrimSpace(spec.ReasoningEffort)
-	if effort == "" {
-		return nil
-	}
-	if !model.ReasoningEffortSupported(spec.Runner, spec.Model) {
-		if spec.Runner != RunnerCodex {
-			return fmt.Errorf("runner %q does not support reasoning-effort", spec.Runner)
-		}
-		return fmt.Errorf("model %q does not support reasoning-effort", spec.Model)
-	}
-	for _, supported := range model.ReasoningEffortValues(spec.Runner, spec.Model) {
-		if effort == supported {
-			return nil
-		}
-	}
-	return fmt.Errorf("unsupported reasoning-effort value %q", spec.ReasoningEffort)
+	return model.ValidateReasoningEffort(spec.Runner, spec.Model, spec.ReasoningEffort)
 }
 
 func isSupportedRunner(runner string) bool {

@@ -1,0 +1,31 @@
+package model
+
+import "testing"
+
+func TestValidateReasoningEffortUsesRunnerModelCapabilities(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		runner string
+		model  string
+		effort string
+		want   bool
+	}{
+		{name: "supported model", runner: "codex", model: "gpt-5.3-codex-spark", effort: "medium", want: true},
+		{name: "unknown codex model", runner: "codex", model: "gpt-5-future", effort: "medium"},
+		{name: "unsupported runner", runner: "opencode", model: "gpt-5.5", effort: "medium"},
+		{name: "unsupported value", runner: "codex", model: "gpt-5.3-codex", effort: "ultra"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ValidateReasoningEffort(tt.runner, tt.model, tt.effort)
+			if (err == nil) != tt.want {
+				t.Fatalf("ValidateReasoningEffort() error = %v, want success %t", err, tt.want)
+			}
+		})
+	}
+}

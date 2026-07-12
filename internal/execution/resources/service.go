@@ -211,22 +211,7 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 }
 
 func validateReasoningEffort(runner, modelName, effort string) error {
-	effort = strings.TrimSpace(effort)
-	if effort == "" {
-		return nil
-	}
-	if !model.ReasoningEffortSupported(runner, modelName) {
-		if strings.TrimSpace(runner) != "codex" {
-			return fmt.Errorf("runner %q does not support reasoning-effort", runner)
-		}
-		return fmt.Errorf("model %q does not support reasoning-effort", modelName)
-	}
-	for _, supported := range model.ReasoningEffortValues(runner, modelName) {
-		if effort == supported {
-			return nil
-		}
-	}
-	return fmt.Errorf("unsupported value %q", effort)
+	return model.ValidateReasoningEffort(runner, modelName, effort)
 }
 
 func resolveDefaultBinding(config resourceConfig, in model.Invocation) (model.Allocation, error) {
