@@ -483,6 +483,35 @@ func TestServiceProcessTaskIgnoresClosedGeneralRemarkConfirmationByID(t *testing
 	}
 }
 
+func TestServiceProcessTaskReworksForNewRemarkAlongsideClosedConfirmation(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{
+		{ExternalID: "comment-1", State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-1\n\nИсправить обработку"},
+		{ExternalID: "comment-2", State: "conversation", Body: "Идентификатор: remark-1\n\nЗамечание закрыто: исправление подтверждено"},
+		{ExternalID: "comment-3", State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-2\n\nДобавить проверку"},
+	}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(result.Cycles) != 1 {
+		t.Fatalf("expected one cycle, got %#v", result.Cycles)
+	}
+	cycle := result.Cycles[0]
+	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasUnresolvedReviewRemarks {
+		t.Fatalf("expected new general remark to remain unresolved: %#v", cycle.MergeRequestExternalState)
+	}
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	}
+}
+
 func TestServiceProcessTaskReworksReviewPassedTaskWithMergeConflict(t *testing.T) {
 	t.Parallel()
 
