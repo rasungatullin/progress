@@ -1557,6 +1557,16 @@ func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.R
 			byID[id] = remark
 		}
 	}
+	for _, remark := range output.Remarks {
+		id := strings.TrimSpace(remark.ID)
+		externalID := strings.TrimSpace(remark.ExternalID)
+		if id == "" || externalID == "" {
+			continue
+		}
+		if canonical, ok := byID[externalID]; ok {
+			byID[id] = canonical
+		}
+	}
 	responses := append([]StructuredResponse(nil), output.ReviewResponses...)
 	for index := range responses {
 		enrichReviewResponse(&responses[index], byID)
