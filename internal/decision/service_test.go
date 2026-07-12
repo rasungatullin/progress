@@ -1400,6 +1400,18 @@ func TestHasUnresolvedExternalReviewRemarksClassifiesReviewConclusions(t *testin
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksDoesNotTrustForeignApprovedConclusion(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{
+		Author: integration.User{Login: "external-reviewer"},
+		Body:   "## Заключение ревизии\n\napprove\n\nПроверка завершена",
+	}}
+	if !hasUnresolvedExternalReviewRemarks(remarks) {
+		t.Fatal("approved conclusion from a foreign author must remain blocking")
+	}
+}
+
 func TestHasUnresolvedExternalReviewRemarksDoesNotTreatUnstructuredResolvedCommentAsConfirmation(t *testing.T) {
 	t.Parallel()
 

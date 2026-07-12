@@ -1526,6 +1526,7 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 		}
 		body := strings.TrimSpace(strings.Join(nonEmptyParts([]string{
 			"## Заключение ревизии",
+			"Источник: исполнительный контур",
 			output.Conclusion.Status,
 			output.Conclusion.Summary,
 			output.Conclusion.Body,

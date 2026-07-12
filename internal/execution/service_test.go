@@ -4161,6 +4161,15 @@ func TestPublishPullRequestCommentsDoesNotUseReviewCommentIDAsThread(t *testing.
 	}
 }
 
+func TestReviewRemarkCommentsMarksExecutionContourConclusion(t *testing.T) {
+	comments := reviewRemarkComments(&model.StructuredOutput{Conclusion: &model.StructuredConclusion{
+		Status: "approve",
+	}})
+	if len(comments) != 1 || !strings.Contains(comments[0].Body, "Источник: исполнительный контур") {
+		t.Fatalf("execution conclusion must contain its publication source: %#v", comments)
+	}
+}
+
 func TestUpdateReviewRemarkThreadsReopensExistingChain(t *testing.T) {
 	integrations := &stubIntegrationExecutor{}
 	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}

@@ -129,8 +129,11 @@ func orderReviewRemarksByCreatedAt(remarks []integration.ReviewRemark) []integra
 	sort.SliceStable(ordered, func(i, j int) bool {
 		left, leftErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(ordered[i].CreatedAt))
 		right, rightErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(ordered[j].CreatedAt))
-		if leftErr != nil || rightErr != nil {
+		if leftErr != nil {
 			return false
+		}
+		if rightErr != nil {
+			return true
 		}
 		return left.Before(right)
 	})
@@ -372,7 +375,7 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 	respondedRemarkIDs := map[string]struct{}{}
 	start := 0
 	for index, remark := range remarks {
-		if isExternalReviewConclusion(remark.Body) && isApprovedExternalReviewConclusion(remark.Body) {
+		if isOwnExternalReviewConclusion(remark) && isApprovedExternalReviewConclusion(remark.Body) {
 			start = index + 1
 		}
 	}
@@ -386,6 +389,9 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 	for _, remark := range remarks[start:] {
 		if isExternalReviewConclusion(remark.Body) {
 			if isApprovedExternalReviewConclusion(remark.Body) {
+				if !isOwnExternalReviewConclusion(remark) {
+					return true
+				}
 				continue
 			}
 			// Неизвестное заключение обрабатывается как нерешённое.
@@ -411,6 +417,16 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 		}
 	}
 	return false
+}
+
+func isOwnExternalReviewConclusion(remark integration.ReviewRemark) bool {
+	if !isExternalReviewConclusion(remark.Body) {
+		return false
+	}
+	if strings.Contains(remark.Body, "Источник: исполнительный контур") || remark.Author.IsBot {
+		return true
+	}
+	return strings.TrimSpace(remark.Author.Login) == "" && strings.TrimSpace(remark.Author.Name) == ""
 }
 
 func isExternalReviewConclusion(body string) bool {
