@@ -206,8 +206,15 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 	}
 
 	for _, remark := range remarks {
+		if isExternalReviewConclusion(remark.Body) {
+			if isApprovedExternalReviewConclusion(remark.Body) {
+				continue
+			}
+			// Неизвестное заключение обрабатывается как нерешённое.
+			return true
+		}
 		if strings.TrimSpace(remark.ReplyToID) == "" {
-			if strings.Contains(remark.Body, "## Ответ на замечание ревизии") || strings.Contains(remark.Body, "## Заключение ревизии") {
+			if strings.Contains(remark.Body, "## Ответ на замечание ревизии") {
 				continue
 			}
 			if id := externalReviewRemarkReferenceID(remark.Body); id != "" {
@@ -226,6 +233,59 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 		}
 	}
 	return false
+}
+
+func isExternalReviewConclusion(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		return line == "## Заключение ревизии"
+	}
+	return false
+}
+
+func externalReviewConclusionStatus(body string) string {
+	seenHeader := false
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "## Заключение ревизии" {
+			seenHeader = true
+			continue
+		}
+		if !seenHeader || line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "Статус:") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "Статус:"))
+		}
+		status := strings.ToLower(strings.ReplaceAll(line, "_", "-"))
+		switch status {
+		case "ok", "ready", "passed", "approved", "approve", "success", "completed",
+			"request-changes", "changes-requested", "needs-work", "needs-rework", "needs-follow-up", "rejected", "failed", "blocked":
+			return status
+		}
+	}
+	return ""
+}
+
+func isApprovedExternalReviewConclusion(body string) bool {
+	switch externalReviewConclusionStatus(body) {
+	case "ok", "ready", "passed", "approved", "approve", "success", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func isReworkExternalReviewConclusion(body string) bool {
+	switch externalReviewConclusionStatus(body) {
+	case "request-changes", "changes-requested", "needs-work", "needs-rework", "needs-follow-up", "rejected", "failed", "blocked":
+		return true
+	default:
+		return false
+	}
 }
 
 func isResolvedExternalReviewRemark(body string) bool {

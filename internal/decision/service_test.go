@@ -1321,6 +1321,28 @@ func TestHasUnresolvedExternalReviewRemarksIgnoresConfirmationByID(t *testing.T)
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksClassifiesReviewConclusions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "approve", body: "## Заключение ревизии\n\napprove\n\nПроверка завершена", want: false},
+		{name: "approve in thread", body: "## Заключение ревизии\n\nСтатус: approve", want: false},
+		{name: "request changes", body: "## Заключение ревизии\n\nrequest-changes\n\nТребуется доработка", want: true},
+		{name: "unknown status", body: "## Заключение ревизии\n\nunknown", want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := hasUnresolvedExternalReviewRemarks([]integration.ReviewRemark{{ReplyToID: "thread-1", Body: test.body}}); got != test.want {
+				t.Fatalf("hasUnresolvedExternalReviewRemarks() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestHasUnresolvedExternalReviewRemarksDoesNotTreatUnstructuredResolvedCommentAsConfirmation(t *testing.T) {
 	t.Parallel()
 
@@ -1330,6 +1352,30 @@ func TestHasUnresolvedExternalReviewRemarksDoesNotTreatUnstructuredResolvedComme
 	}}
 	if got := hasUnresolvedExternalReviewRemarks(remarks); !got {
 		t.Fatal("unstructured resolved comment must remain unresolved")
+	}
+}
+
+func TestHasUnresolvedExternalReviewRemarksKeepsQuotedConclusionHeaderAsRemark(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{
+		State: "conversation",
+		Body:  "## Замечание ревизии\n\nВ тексте цитируется заголовок: ## Заключение ревизии\n\nИсправить обработку",
+	}}
+	if got := hasUnresolvedExternalReviewRemarks(remarks); !got {
+		t.Fatal("remark quoting the conclusion header must remain unresolved")
+	}
+}
+
+func TestHasUnresolvedExternalReviewRemarksKeepsRemarkWithQuotedConclusionOnSeparateLine(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{
+		State: "conversation",
+		Body:  "## Замечание ревизии\n\nВ цитате:\n## Заключение ревизии\n\napprove\n\nИсправить обработку",
+	}}
+	if got := hasUnresolvedExternalReviewRemarks(remarks); !got {
+		t.Fatal("remark quoting the conclusion on a separate line must remain unresolved")
 	}
 }
 
