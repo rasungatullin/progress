@@ -441,6 +441,9 @@ func TestLaunchCommitPushFailureKeepsRunnerSessionID(t *testing.T) {
 	if record.RunnerSessionID != "session-commit-failure" {
 		t.Fatalf("run record must keep runner session id: %#v", record)
 	}
+	if record.Result.WorktreeDiagnostic == nil || !record.Result.WorktreeDiagnostic.DirtyWorktree || record.Result.WorktreeDiagnostic.Path != workplace.Name {
+		t.Fatalf("commit-push failure must keep dirty-worktree diagnostic: %#v", record.Result)
+	}
 
 	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
 	if err != nil {
@@ -448,6 +451,32 @@ func TestLaunchCommitPushFailureKeepsRunnerSessionID(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].RunnerSessionID != "session-commit-failure" {
 		t.Fatalf("sqlite history must keep runner session id: %#v", runs)
+	}
+}
+
+func TestEnrichFailedLaunchWithWorktreeUsesWorkplacePath(t *testing.T) {
+	t.Parallel()
+
+	workplacePath := filepath.Join(t.TempDir(), "workplace")
+	repositoryRoot := filepath.Join(t.TempDir(), "repository")
+	var inspectedPath string
+	service := &Service{
+		runGitOutput: func(_ context.Context, path string, args ...string) (string, error) {
+			inspectedPath = path
+			switch strings.Join(args, " ") {
+			case "status --porcelain -z -uall":
+				return " M partial.go\x00", nil
+			case "branch --show-current":
+				return "136\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+	result := model.LaunchResult{Status: "failed", Summary: "runner failed"}
+	enrichFailedLaunchWithWorktree(context.Background(), service, &result, model.Workplace{Name: workplacePath, RepositoryRoot: repositoryRoot})
+	if inspectedPath != workplacePath || result.WorktreeDiagnostic == nil || result.WorktreeDiagnostic.Path != workplacePath {
+		t.Fatalf("diagnostic must inspect workplace path: path=%q diagnostic=%#v", inspectedPath, result.WorktreeDiagnostic)
 	}
 }
 
@@ -1817,10 +1846,7 @@ func TestLaunchStructuredOutputRequiredMissingFails(t *testing.T) {
 		runRunner: func(context.Context, model.Invocation) (string, error) {
 			return "Applied the requested changes.", nil
 		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
+		runGitOutput: failedLaunchDiagnosticGitOutput,
 	}
 
 	invocation := validInvocation(t, false)
@@ -1858,10 +1884,7 @@ func TestLaunchStructuredOutputRequiredFromProfileUsesORSemantics(t *testing.T) 
 		runRunner: func(context.Context, model.Invocation) (string, error) {
 			return "Applied the requested changes.", nil
 		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when commit-push is disabled")
-			return "", nil
-		},
+		runGitOutput: failedLaunchDiagnosticGitOutput,
 	}
 
 	result, err := service.Launch(context.Background(), validInvocation(t, false), model.Profile{
@@ -1958,10 +1981,7 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 						structuredOutputEnd,
 					}, "\n"), nil
 				},
-				runGitOutput: func(context.Context, string, ...string) (string, error) {
-					t.Fatal("git must not be called when commit-push is disabled")
-					return "", nil
-				},
+				runGitOutput: failedLaunchDiagnosticGitOutput,
 			}
 
 			invocation := validInvocation(t, false)
@@ -2549,6 +2569,17 @@ func validAllocation() model.Allocation {
 func validWorkplace(t *testing.T) model.Workplace {
 	t.Helper()
 	return model.Workplace{Name: tempDir(t), Ready: true}
+}
+
+func failedLaunchDiagnosticGitOutput(_ context.Context, _ string, args ...string) (string, error) {
+	switch strings.Join(args, " ") {
+	case "status --porcelain -z -uall":
+		return " M partial.go\x00", nil
+	case "branch --show-current":
+		return "136\n", nil
+	default:
+		return "", fmt.Errorf("unexpected git command: %v", args)
+	}
 }
 
 func tempDir(t *testing.T) string {

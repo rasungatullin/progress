@@ -185,6 +185,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		if structuredOutputState != trailingStructuredBlockValid {
 			result.StructuredOutput = nil
 		}
+		enrichFailedLaunchWithWorktree(ctx, s, &result, workplace)
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, err, err)
 		return result, err
 	}
@@ -207,6 +208,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			if structuredOutputState != trailingStructuredBlockValid {
 				launchResult.StructuredOutput = nil
 			}
+			enrichFailedLaunchWithWorktree(ctx, s, &launchResult, workplace)
 			launchResult.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, launchResult, rawStructuredOutput, structuredOutput, structuredOutputErr, err)
 			return launchResult, err
 		}
@@ -821,7 +823,7 @@ func enrichFailedLaunchWithWorktree(ctx context.Context, service *Service, resul
 		return
 	}
 
-	path := firstNonEmptyPath(workplace.RepositoryRoot, workplace.Name)
+	path := firstNonEmptyPath(workplace.Name, workplace.RepositoryRoot)
 	diagnostic := &model.WorktreeDiagnostic{Path: path, Recommendation: "Продолжить вручную, очистить рабочее место или создать новый запуск."}
 	inspectContext := context.WithoutCancel(ctx)
 	statusOutput, err := service.runGitOutput(inspectContext, path, "status", "--porcelain", "-z", "-uall")
