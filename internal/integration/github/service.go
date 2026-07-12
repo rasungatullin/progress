@@ -135,15 +135,17 @@ type ghPRReviewComment struct {
 	UpdatedAt string       `json:"updatedAt"`
 }
 
-type ghPRReviewThreadCreateResponse struct {
-	Data struct {
-		AddPullRequestReviewThread struct {
-			Thread ghPRReviewThread `json:"thread"`
-		} `json:"addPullRequestReviewThread"`
-	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
+type ghPRReviewCommentCreateResponse struct {
+	ID        int64        `json:"id"`
+	NodeID    string       `json:"node_id"`
+	Body      string       `json:"body"`
+	HTMLURL   string       `json:"html_url"`
+	Path      string       `json:"path"`
+	Line      int          `json:"line"`
+	Side      string       `json:"side"`
+	User      *ghIssueUser `json:"user"`
+	CreatedAt string       `json:"created_at"`
+	UpdatedAt string       `json:"updated_at"`
 }
 
 type ghPRReviewThreadResolveResponse struct {
@@ -493,29 +495,46 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		}
 		remark = reviewRemarkFromIssueComment(repository, number, raw)
 	} else {
-		var raw ghPRReviewThreadCreateResponse
+		var raw ghPRReviewCommentCreateResponse
 		if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
-			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub GraphQL JSON response: %v", err), Result: result, Err: err}, "gh pull request inline comment create returned malformed JSON")
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub REST JSON response: %v", err), Result: result, Err: err}, "gh pull request inline comment create returned malformed JSON")
 		}
-		payload := raw.Data.AddPullRequestReviewThread
-		if len(raw.Errors) > 0 {
-			reference := githubPullRequestReference(repository, number)
-			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned GraphQL errors (operation=addPullRequestReviewThread reference=%s response=%s)", reference, safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=external-failure operation=addPullRequestReviewThread reference="+reference+"; GitHub returned GraphQL errors")
-		}
-		remarks := reviewRemarksFromThreads(repository, number, []ghPRReviewThread{payload.Thread})
-		if len(remarks) > 0 {
-			remark = remarks[0]
-		}
+		remark = reviewRemarkFromRESTComment(repository, number, raw)
 	}
 	if remark.ExternalID == "" && remark.URL == "" {
 		if existing, _, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
 			remark = existing
 		} else {
-			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned no stable identifier for %s#%d (operation=addPullRequestReviewThread reference=%s response=%s)", repository, number, githubPullRequestReference(repository, number), safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=partial-payload operation=addPullRequestReviewThread reference="+githubPullRequestReference(repository, number)+"; existing remarks were checked before retry")
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review comment endpoint returned no stable identifier for %s#%d (operation=createReviewComment reference=%s response=%s)", repository, number, githubPullRequestReference(repository, number), safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=partial-payload operation=createReviewComment reference="+githubPullRequestReference(repository, number)+"; existing remarks were checked before retry")
 		}
 	}
 
 	return successfulPRCommentCreate(response, remark, config, repository, number)
+}
+
+func reviewRemarkFromRESTComment(repository string, number int, comment ghPRReviewCommentCreateResponse) model.ReviewRemark {
+	externalID := strings.TrimSpace(comment.NodeID)
+	if externalID == "" && comment.ID > 0 {
+		externalID = strconv.FormatInt(comment.ID, 10)
+	}
+	remark := model.ReviewRemark{
+		System:             "github",
+		Repository:         repository,
+		MergeRequestNumber: number,
+		ExternalID:         externalID,
+		Body:               comment.Body,
+		URL:                comment.HTMLURL,
+		Path:               comment.Path,
+		Line:               comment.Line,
+		Side:               comment.Side,
+		State:              "unresolved",
+		CreatedAt:          comment.CreatedAt,
+		UpdatedAt:          comment.UpdatedAt,
+	}
+	if comment.User != nil {
+		remark.Author = userFromTrackerUser(normalizeTrackerUser(*comment.User))
+	}
+	return remark
 }
 
 func successfulPRCommentCreate(response model.Response, remark model.ReviewRemark, config resolvedConfig, repository string, number int) (model.Response, error) {

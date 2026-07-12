@@ -1533,24 +1533,14 @@ func TestServicePRCommentCreateInline(t *testing.T) {
 
 	stub := &stubRunner{
 		result: CommandResult{Command: "gh", Path: "/usr/bin/gh", ExitCode: 0, Stdout: `{
-			"data": {
-				"addPullRequestReviewThread": {
-					"thread": {
-						"id": "thread-1",
-						"isResolved": false,
-						"comments": {
-							"nodes": [{
-								"id": "comment-1",
-								"body": "Inline remark",
-								"url": "https://github.com/owner/name/pull/42#discussion_r1",
-								"path": "file.go",
-								"line": 12,
-								"author": {"login": "alice", "url": "https://github.com/alice"}
-							}]
-						}
-					}
-				}
-			}
+			"id": 101,
+			"node_id": "PRRC_comment-1",
+			"body": "Inline remark",
+			"html_url": "https://github.com/owner/name/pull/42#discussion_r101",
+			"path": "file.go",
+			"line": 12,
+			"side": "RIGHT",
+			"user": {"login": "alice", "html_url": "https://github.com/alice"}
 		}`},
 	}
 	service := NewService()
@@ -1580,7 +1570,7 @@ func TestServicePRCommentCreateInline(t *testing.T) {
 	if stub.prCommentRequest.Path != "file.go" || stub.prCommentRequest.Line != 12 {
 		t.Fatalf("unexpected comment request: %#v", stub.prCommentRequest)
 	}
-	if len(response.ReviewRemarks) != 1 || response.ReviewRemarks[0].ReplyToID != "thread-1" {
+	if len(response.ReviewRemarks) != 1 || response.ReviewRemarks[0].ExternalID != "PRRC_comment-1" || response.ReviewRemarks[0].Path != "file.go" || response.ReviewRemarks[0].Line != 12 {
 		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
 	}
 	if response.OperationResult == nil || response.OperationResult.Operation != "create" {
@@ -1588,10 +1578,10 @@ func TestServicePRCommentCreateInline(t *testing.T) {
 	}
 }
 
-func TestServicePRCommentCreateInlineAcceptsThreadOnlyPayload(t *testing.T) {
+func TestServicePRCommentCreateInlineAcceptsNumericRESTIdentifier(t *testing.T) {
 	t.Parallel()
 
-	stub := &stubRunner{result: CommandResult{ExitCode: 0, Stdout: `{"data":{"addPullRequestReviewThread":{"thread":{"id":"thread-1","path":"file.go","line":12}}}}`}}
+	stub := &stubRunner{result: CommandResult{ExitCode: 0, Stdout: `{"id":101,"path":"file.go","line":12}`}}
 	service := NewService()
 	service.runner = stub
 
@@ -1599,8 +1589,8 @@ func TestServicePRCommentCreateInlineAcceptsThreadOnlyPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.OperationResult == nil || response.OperationResult.ExternalID != "thread-1" {
-		t.Fatalf("expected thread identifier: %#v", response.OperationResult)
+	if response.OperationResult == nil || response.OperationResult.ExternalID != "101" {
+		t.Fatalf("expected comment identifier: %#v", response.OperationResult)
 	}
 }
 
@@ -1626,13 +1616,13 @@ func TestServicePRCommentCreateInlineChecksExistingRemarkBeforeCreate(t *testing
 func TestServicePRCommentCreateInlineClassifiesPartialPayload(t *testing.T) {
 	t.Parallel()
 
-	stub := &stubRunner{result: CommandResult{ExitCode: 0, Stdout: `{"data":{"addPullRequestReviewThread":{}}}`}, reviewResult: CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`}}
+	stub := &stubRunner{result: CommandResult{ExitCode: 0, Stdout: `{}`}, reviewResult: CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`}}
 	service := NewService()
 	service.runner = stub
 
 	_, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	var ghErr *Error
-	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || !strings.Contains(ghErr.Message, "addPullRequestReviewThread") || !strings.Contains(ghErr.Message, "https://github.com/owner/name/pull/42") || strings.Contains(ghErr.Message, "secret") {
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || !strings.Contains(ghErr.Message, "createReviewComment") || !strings.Contains(ghErr.Message, "https://github.com/owner/name/pull/42") || strings.Contains(ghErr.Message, "secret") {
 		t.Fatalf("unexpected partial payload error: %#v", err)
 	}
 }

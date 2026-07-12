@@ -723,6 +723,33 @@ func TestRunnerRunPRReviewThreadResolveBuildsGraphQLCommand(t *testing.T) {
 	}
 }
 
+func TestRunnerRunPRCommentCreateUsesRESTEndpoint(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"api", "--method", "POST", "repos/owner/name/pulls/42/comments", "-f", "body=Inline remark", "-f", "path=file.go", "-F", "line=12", "-f", "side=RIGHT"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `{"id":101,"node_id":"PRRC_comment-1"}`}
+	}
+
+	result, _, err := runner.RunPRCommentCreate(context.Background(), "owner/name", 42, PRCommentCreateRequest{Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("create inline comment: %v", err)
+	}
+	if !strings.Contains(result.Stdout, "PRRC_comment-1") {
+		t.Fatalf("unexpected response: %s", result.Stdout)
+	}
+}
+
 func TestRunnerRunPRReviewThreadReplyBuildsGraphQLCommand(t *testing.T) {
 	t.Parallel()
 
