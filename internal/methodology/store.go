@@ -164,6 +164,9 @@ func SaveCatalogWithHomeFS(repoRoot, configHome string, scope configuration.Conf
 	if err := validateCatalog(catalog); err != nil {
 		return CatalogWriteResult{}, fmt.Errorf("invalid methodology catalog: %w", err)
 	}
+	if err := validateCatalogInstructionBodyFiles(path, catalog); err != nil {
+		return CatalogWriteResult{}, fmt.Errorf("invalid methodology catalog: %w", err)
+	}
 	catalog = normalizeCatalog(catalog)
 	if err := writeCatalogFiles(path, catalog, writeFile, mkdirAll, removeAll); err != nil {
 		return CatalogWriteResult{}, err
@@ -213,6 +216,9 @@ func UpsertCatalogElementWithHomeFS(repoRoot, configHome string, scope configura
 	catalog, err = applyElementUpsert(catalog, element)
 	if err != nil {
 		return CatalogWriteResult{}, err
+	}
+	if err := validateCatalogInstructionBodyFiles(path, catalog); err != nil {
+		return CatalogWriteResult{}, fmt.Errorf("invalid methodology catalog: %w", err)
 	}
 	if legacy {
 		err = writeCatalogFiles(path, catalog, writeFile, mkdirAll, removeAll)
@@ -431,12 +437,54 @@ func loadInstructionBody(instruction Instruction, descriptionPath, methodologyRo
 		return Instruction{}, fmt.Errorf("read instruction body file %s: %w", bodyPath, err)
 	}
 	instruction.Body = strings.TrimSpace(string(content))
+	instruction.bodyLoaded = true
 	relativeBodyPath, err := filepath.Rel(root, bodyPath)
 	if err != nil {
 		return Instruction{}, fmt.Errorf("relativize instruction body file %s: %w", bodyPath, err)
 	}
 	instruction.BodyFile = relativeBodyPath
 	return instruction, nil
+}
+
+func validateCatalogInstructionBodyFiles(catalogPath string, catalog Catalog) error {
+	methodologyRoot := filepath.Dir(catalogPath)
+	lexicalRoot := filepath.Clean(methodologyRoot)
+	root := lexicalRoot
+	if evaluatedRoot, err := filepath.EvalSymlinks(lexicalRoot); err == nil {
+		root = evaluatedRoot
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("resolve methodology catalog root %s: %w", root, err)
+	}
+
+	for _, rawInstruction := range catalog.Instructions {
+		instruction := normalizeInstruction(rawInstruction)
+		if instruction.BodyFile == "" {
+			continue
+		}
+		if filepath.IsAbs(instruction.BodyFile) {
+			return fmt.Errorf("instruction %q body_file %q must stay inside methodology catalog", instruction.Name, instruction.BodyFile)
+		}
+		bodyPath := filepath.Clean(filepath.Join(methodologyRoot, instruction.BodyFile))
+		if err := ensurePathInsideRoot(lexicalRoot, bodyPath); err != nil {
+			return fmt.Errorf("instruction %q body_file %q: %w", instruction.Name, instruction.BodyFile, err)
+		}
+		if evaluatedPath, err := filepath.EvalSymlinks(bodyPath); err == nil {
+			if err := ensurePathInsideRoot(root, evaluatedPath); err != nil {
+				return fmt.Errorf("instruction %q body_file %q: %w", instruction.Name, instruction.BodyFile, err)
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("resolve instruction body file %s: %w", bodyPath, err)
+		}
+	}
+	return nil
+}
+
+func ensurePathInsideRoot(root, path string) error {
+	relative, err := filepath.Rel(root, filepath.Clean(path))
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("escapes methodology catalog")
+	}
+	return nil
 }
 
 func writeCatalog(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) error {
@@ -546,6 +594,9 @@ func writeCatalogElement(path string, element ElementUpsert, writeFile WriteFile
 		return writeRegistryObject(path, action, writeFile, mkdirAll)
 	case element.Instruction != nil:
 		instruction := normalizeInstruction(*element.Instruction)
+		if err := validateCatalog(Catalog{Instructions: []Instruction{instruction}}); err != nil {
+			return err
+		}
 		if instruction.BodyFile != "" {
 			instruction.Body = ""
 		}

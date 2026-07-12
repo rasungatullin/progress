@@ -221,7 +221,7 @@ func TestWriteCatalogFilesOmitsLoadedInstructionBody(t *testing.T) {
 	}
 }
 
-func TestWriteCatalogElementOmitsInstructionBodyWhenBodyFileIsSet(t *testing.T) {
+func TestWriteCatalogElementRejectsInstructionBodyWhenBodyFileIsSet(t *testing.T) {
 	written := map[string][]byte{}
 	writeFile := func(path string, content []byte, _ fs.FileMode) error {
 		written[path] = append([]byte(nil), content...)
@@ -231,13 +231,29 @@ func TestWriteCatalogElementOmitsInstructionBodyWhenBodyFileIsSet(t *testing.T) 
 	err := writeCatalogElement("/repo/.progress/methodology/catalog.json", ElementUpsert{
 		Instruction: &Instruction{Name: "directive", Body: "inline", BodyFile: "texts/directive.md"},
 	}, writeFile, func(string, fs.FileMode) error { return nil })
-	if err != nil {
-		t.Fatalf("write catalog element: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "has both body and body_file") {
+		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(written) != 0 {
+		t.Fatalf("invalid instruction must not be written: %#v", written)
+	}
+}
 
-	content := string(written["/repo/.progress/methodology/instructions/directive.json"])
-	if strings.Contains(content, `"body"`) || !strings.Contains(content, `"body_file": "texts/directive.md"`) {
-		t.Fatalf("unexpected instruction content: %s", content)
+func TestSaveCatalogRejectsUnsafeInstructionBodyFileBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	writes := 0
+	_, err := SaveCatalogWithHome("/repo", "/config-home", CatalogWriteScopeLocal, Catalog{
+		Instructions: []Instruction{{Name: "directive", BodyFile: "../../directive.md"}},
+	}, nil, func(string, []byte, fs.FileMode) error {
+		writes++
+		return nil
+	}, func(string, fs.FileMode) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "escapes methodology catalog") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if writes != 0 {
+		t.Fatalf("invalid instruction must not be written: %d writes", writes)
 	}
 }
 

@@ -252,6 +252,7 @@ type Instruction struct {
 	Description   string `json:"description,omitempty"`
 	Body          string `json:"body,omitempty"`
 	BodyFile      string `json:"body_file,omitempty"`
+	bodyLoaded    bool
 }
 
 type Operation struct {
@@ -728,6 +729,12 @@ func validateCatalog(catalog Catalog) error {
 	}
 
 	seenEntities := map[string]struct{}{}
+	for index, rawInstruction := range catalog.Instructions {
+		instruction := normalizeInstruction(rawInstruction)
+		if instruction.BodyFile != "" && instruction.Body != "" && !instruction.bodyLoaded {
+			return fmt.Errorf("instructions[%d] has both body and body_file", index)
+		}
+	}
 	for index, entity := range catalog.Entities {
 		entity = normalizeEntity(entity)
 		if entity.Kind == "" {
