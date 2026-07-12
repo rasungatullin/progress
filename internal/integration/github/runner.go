@@ -550,72 +550,8 @@ func (r *Runner) RunPRCommentCreate(ctx context.Context, repository string, numb
 			Result:  result,
 		}
 	}
-	owner, name, err := splitRepository(repository)
-	if err != nil {
-		result := CommandResult{Command: config.Command, ExitCode: -1}
-		return result, config, &Error{
-			Code:    ErrorCodeInvalidRequest,
-			Message: err.Error(),
-			Result:  result,
-		}
-	}
-
-	nodeQuery := `query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      id
-    }
-  }
-}`
-	nodeResult, config, err := r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + nodeQuery, "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)})
-	if err != nil || nodeResult.ExitCode != 0 {
-		return nodeResult, config, err
-	}
-
-	var nodeResponse ghPullRequestNodeResponse
-	if err := json.Unmarshal([]byte(nodeResult.Stdout), &nodeResponse); err != nil {
-		return nodeResult, config, &Error{
-			Code:    ErrorCodeExternalFailure,
-			Message: fmt.Sprintf("parse GitHub pull request node response: %v", err),
-			Result:  nodeResult,
-			Err:     err,
-		}
-	}
-	pullRequestID := strings.TrimSpace(nodeResponse.Data.Repository.PullRequest.ID)
-	if pullRequestID == "" {
-		return nodeResult, config, &Error{
-			Code:    ErrorCodeNotFound,
-			Message: fmt.Sprintf("GitHub pull request not found: %s#%d", repository, number),
-			Result:  nodeResult,
-		}
-	}
-
-	mutation := `mutation($pullRequestId: ID!, $body: String!, $path: String!, $line: Int!, $side: DiffSide!) {
-  addPullRequestReviewThread(input: {pullRequestId: $pullRequestId, body: $body, path: $path, line: $line, side: $side}) {
-    thread {
-      id
-      isResolved
-      path
-      line
-      comments(first: 1) {
-        nodes {
-          id
-          body
-          url
-          path
-          line
-          author {
-            login
-            url
-          }
-          createdAt
-          updatedAt
-        }
-      }
-    }
-  }
-}`
-	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + mutation, "-f", "pullRequestId=" + pullRequestID, "-f", "body=" + request.Body, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side})
+	endpoint := fmt.Sprintf("repos/%s/pulls/%d/comments", repository, number)
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--method", "POST", endpoint, "-f", "body=" + request.Body, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side})
 }
 
 func (r *Runner) RunPRReviewThreadResolve(ctx context.Context, threadID string) (CommandResult, resolvedConfig, error) {

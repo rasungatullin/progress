@@ -840,36 +840,64 @@ func TestAPITransportMapsGraphQLErrors(t *testing.T) {
 	}
 }
 
-func TestAPITransportPRCommentCreateRequestsThreadAndComment(t *testing.T) {
+func TestAPITransportPRCommentCreateUsesRESTAndNormalizesSubsequentRead(t *testing.T) {
 	t.Parallel()
 
-	var mutation string
+	var createCalls int
+	var threadReads int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Query string `json:"query"`
+		switch r.URL.Path {
+		case "/repos/owner/name/pulls/42/comments":
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			createCalls++
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode REST request: %v", err)
+			}
+			if request["body"] != "remark" || request["path"] != "file.go" || request["line"] != float64(12) || request["side"] != "RIGHT" {
+				t.Fatalf("unexpected REST request: %#v", request)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 101, "node_id": "PRRC_comment-1", "html_url": "https://github.com/owner/name/pull/42#discussion_r101", "body": "remark", "path": "file.go", "line": 12, "side": "RIGHT"})
+		case "/repos/owner/name/issues/42/comments":
+			_ = json.NewEncoder(w).Encode([]any{})
+		case "/graphql":
+			var request struct {
+				Query string `json:"query"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode GraphQL request: %v", err)
+			}
+			if strings.Contains(request.Query, "addPullRequestReviewThread") {
+				t.Fatalf("creation must not use addPullRequestReviewThread: %s", request.Query)
+			}
+			threadReads++
+			if threadReads == 1 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"reviewThreads": map[string]any{"nodes": []any{}}}}}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"reviewThreads": map[string]any{"nodes": []map[string]any{{"id": "thread-1", "path": "file.go", "line": 12, "comments": map[string]any{"nodes": []map[string]any{{"id": "PRRC_comment-1", "body": "remark", "url": "https://github.com/owner/name/pull/42#discussion_r101", "path": "file.go", "line": 12}}}}}}}}}})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("decode graphql request: %v", err)
-		}
-		if strings.Contains(request.Query, "addPullRequestReviewThread") {
-			mutation = request.Query
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"addPullRequestReviewThread": map[string]any{"thread": map[string]any{"id": "thread-1", "comments": map[string]any{"nodes": []map[string]any{{"id": "comment-1"}}}}}}})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"id": "pr-1"}}}})
 	}))
 	defer server.Close()
 
-	runner := &APIRunner{systemConfig: model.IntegrationSystemConfig{BaseURL: server.URL, Token: "secret", Repository: "owner/name"}, client: server.Client()}
-	result, _, err := runner.RunPRCommentCreate(context.Background(), "", 42, PRCommentCreateRequest{Body: "remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	service := NewServiceWithConfig(model.IntegrationSystemConfig{Transport: "api", BaseURL: server.URL, Token: "secret", Repository: "owner/name"})
+	created, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Number: 42, Body: "remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil {
 		t.Fatalf("create inline comment: %v", err)
 	}
-	if !strings.Contains(mutation, "thread") || !strings.Contains(mutation, "comments(first: 1)") || strings.Contains(mutation, "userErrors") || strings.Contains(mutation, "errors {") {
-		t.Fatalf("mutation does not match the GitHub schema: %s", mutation)
+	if createCalls != 1 || len(created.ReviewRemarks) != 1 || created.ReviewRemarks[0].ExternalID != "PRRC_comment-1" || created.ReviewRemarks[0].Path != "file.go" || created.ReviewRemarks[0].Line != 12 {
+		t.Fatalf("unexpected create response: calls=%d response=%#v", createCalls, created)
 	}
-	if !strings.Contains(result.Stdout, "thread-1") || !strings.Contains(result.Stdout, "comment-1") {
-		t.Fatalf("unexpected mutation response: %s", result.Stdout)
+	read, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "pull-request", ObjectType: "pull-request", Operation: "comments", Number: 42})
+	if err != nil {
+		t.Fatalf("read comments: %v", err)
+	}
+	if len(read.ReviewRemarks) != 1 || read.ReviewRemarks[0].ExternalID != "PRRC_comment-1" || read.ReviewRemarks[0].ReplyToID != "thread-1" || read.ReviewRemarks[0].Path != "file.go" || read.ReviewRemarks[0].Line != 12 {
+		t.Fatalf("unexpected normalized read: %#v", read.ReviewRemarks)
 	}
 }
 

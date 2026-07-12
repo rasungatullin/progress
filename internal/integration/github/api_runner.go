@@ -530,26 +530,13 @@ func (r *APIRunner) RunPRCommentCreate(ctx context.Context, repository string, n
 	if err != nil {
 		return apiErrorResult("pr comment create", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	owner, name, err := splitRepository(repository)
-	if err != nil {
-		return apiErrorResult("pr comment create", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
-	}
-	nodeQuery := `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }`
-	var node ghPullRequestNodeResponse
-	if _, err := r.graphql(ctx, config, nodeQuery, map[string]any{"owner": owner, "name": name, "number": number}, &node); err != nil {
-		return apiErrorResult("pr comment create", config, err)
-	}
-	pullRequestID := strings.TrimSpace(node.Data.Repository.PullRequest.ID)
-	if pullRequestID == "" {
-		return apiErrorResult("pr comment create", config, &Error{Code: ErrorCodeNotFound, Message: fmt.Sprintf("GitHub pull request not found: %s#%d", repository, number)})
-	}
-	mutation := `mutation($pullRequestId: ID!, $body: String!, $path: String!, $line: Int!, $side: DiffSide!) { addPullRequestReviewThread(input: {pullRequestId: $pullRequestId, body: $body, path: $path, line: $line, side: $side}) { thread { id isResolved path line comments(first: 1) { nodes { id body url path line author { login url } createdAt updatedAt } } } } }`
-	var raw json.RawMessage
-	result, err := r.graphql(ctx, config, mutation, map[string]any{"pullRequestId": pullRequestID, "body": request.Body, "path": request.Path, "line": request.Line, "side": request.Side}, &raw)
+	payload := map[string]any{"body": request.Body, "path": request.Path, "line": request.Line, "side": request.Side}
+	var raw ghPRReviewCommentCreateResponse
+	result, err := r.do(ctx, config, http.MethodPost, fmt.Sprintf("repos/%s/pulls/%d/comments", repository, number), payload, &raw)
 	if err != nil {
 		return result, apiResolvedConfig(config), err
 	}
-	result.Stdout = string(raw)
+	result.Stdout = mustJSON(raw)
 	return result, apiResolvedConfig(config), nil
 }
 
