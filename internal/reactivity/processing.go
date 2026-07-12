@@ -328,7 +328,7 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 	respondedRemarkIDs := map[string]struct{}{}
 	for _, remark := range remarks {
 		if strings.Contains(remark.Body, "## Ответ на замечание ревизии") {
-			if id := externalReviewRemarkID(remark.Body, "Замечание:"); id != "" {
+			if id := externalReviewRemarkID(remark.Body, "Замечание:"); id != "" && isResolvedExternalReviewResponse(remark.Body) {
 				respondedRemarkIDs[id] = struct{}{}
 			}
 		}
@@ -355,6 +355,16 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 		}
 	}
 	return false
+}
+
+func isResolvedExternalReviewResponse(body string) bool {
+	state := strings.ToLower(strings.TrimSpace(externalReviewRemarkID(body, "Состояние:")))
+	switch state {
+	case "resolved", "fixed", "done", "ok", "closed", "outdated":
+		return true
+	default:
+		return false
+	}
 }
 
 func externalReviewRemarkID(body string, prefix string) string {

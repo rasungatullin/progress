@@ -1238,6 +1238,46 @@ func TestServiceStartRoutesReviewPassedTaskToReworkForExternalRemarks(t *testing
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksRequiresResolvedResponseState(t *testing.T) {
+	t.Parallel()
+
+	const original = "Идентификатор: remark-2\n\nНабор проверок завершается ошибкой"
+
+	tests := []struct {
+		name     string
+		response string
+		want     bool
+	}{
+		{
+			name:     "resolved response suppresses processed comment",
+			response: "## Ответ на замечание ревизии\n\nЗамечание: remark-2\n\nСостояние: resolved",
+			want:     false,
+		},
+		{
+			name:     "open response keeps comment unresolved",
+			response: "## Ответ на замечание ревизии\n\nЗамечание: remark-2\n\nСостояние: open",
+			want:     true,
+		},
+		{
+			name:     "new ordinary comment remains unresolved",
+			response: "## Ответ на замечание ревизии\n\nЗамечание: remark-1\n\nСостояние: resolved",
+			want:     true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			remarks := []integration.ReviewRemark{
+				{State: "conversation", Body: original},
+				{State: "conversation", Body: test.response},
+			}
+			if got := hasUnresolvedExternalReviewRemarks(remarks); got != test.want {
+				t.Fatalf("hasUnresolvedExternalReviewRemarks() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *testing.T) {
 	t.Parallel()
 
