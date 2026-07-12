@@ -364,7 +364,9 @@ func readSkill(root, path string) (string, string, error) {
 	var content strings.Builder
 	for _, file := range files {
 		rel, _ := filepath.Rel(path, file)
-		_, _ = io.WriteString(h, rel+"\x00")
+		if info.IsDir() {
+			_, _ = io.WriteString(h, rel+"\x00")
+		}
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return "", "", err

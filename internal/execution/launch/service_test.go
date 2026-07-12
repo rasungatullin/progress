@@ -2,6 +2,7 @@ package launch
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,29 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
+
+func TestReadSkillSingleFileChecksumMatchesCatalogSnapshot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, "skill.md")
+	data := []byte("single-file skill")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	checksum, content, err := readSkill(root, path)
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	want := fmt.Sprintf("sha256:%x", sha256.Sum256(data))
+	if checksum != want {
+		t.Fatalf("unexpected checksum: got %q, want %q", checksum, want)
+	}
+	if !strings.Contains(content, string(data)) {
+		t.Fatalf("skill content does not contain file data: %q", content)
+	}
+}
 
 const (
 	codexRunnerStartupTimeout = "10s"
