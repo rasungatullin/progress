@@ -234,7 +234,10 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 
 	config := workflowConfigFile{DefaultRoute: strings.TrimSpace(snapshot.Catalog.DefaultRoute)}
 	legacyChecks := make([]workflowRouteCheckConfig, 0, len(snapshot.Catalog.Routes))
-	legacyCheckRefs := workflowCheckReferencesFromMethodology(snapshot)
+	legacyCheckRefs, err := workflowCheckReferencesFromMethodology(snapshot, repoRoot)
+	if err != nil {
+		return workflowConfigFile{}, err
+	}
 	for _, route := range snapshot.Catalog.Routes {
 		routeSkills, err := executionSkillRefs(snapshot, repoRoot, route.Skills)
 		if err != nil {
@@ -431,11 +434,15 @@ type workflowCheckReference struct {
 	source string
 }
 
-func workflowCheckReferencesFromMethodology(snapshot methodology.CatalogSnapshot) map[string]workflowCheckReference {
+func workflowCheckReferencesFromMethodology(snapshot methodology.CatalogSnapshot, repoRoot string) (map[string]workflowCheckReference, error) {
 	result := make(map[string]workflowCheckReference, len(snapshot.Catalog.Routes))
 	for _, route := range snapshot.Catalog.Routes {
 		if len(route.Checks) != 0 {
 			continue
+		}
+		routeSkills, err := executionSkillRefs(snapshot, repoRoot, route.Skills)
+		if err != nil {
+			return nil, err
 		}
 		check := workflowRouteCheckConfig{
 			Name:            route.Name,
@@ -451,6 +458,7 @@ func workflowCheckReferencesFromMethodology(snapshot methodology.CatalogSnapshot
 			Constraints:     append([]string(nil), route.Constraints...),
 			ReasonCode:      route.ReasonCode,
 			ReasonMessage:   route.ReasonMessage,
+			Skills:          routeSkills,
 			Source:          string(snapshot.Sources.Routes[route.Name]),
 		}
 		if check.Name == "" || (strings.TrimSpace(check.Action) == "" && strings.TrimSpace(check.Outcome) == "") {
@@ -458,7 +466,7 @@ func workflowCheckReferencesFromMethodology(snapshot methodology.CatalogSnapshot
 		}
 		result[check.Name] = workflowCheckReference{check: check, source: check.Source}
 	}
-	return result
+	return result, nil
 }
 
 func workflowChecksFromMethodologyChecks(checks []methodology.RouteCheck, refs map[string]workflowCheckReference, source string) []workflowRouteCheckConfig {

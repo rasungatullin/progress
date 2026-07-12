@@ -517,7 +517,10 @@ func writeCatalog(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAl
 
 func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc, removeAll RemoveAllFunc) error {
 	root := filepath.Dir(path)
-	for _, dir := range []string{"routes", "actions", "instructions", "operations", "entities", "skills"} {
+	// Каталог skills содержит установленные файлы и каталоги навыков, а не
+	// только JSON-реестр. Удалять его целиком при миграции нельзя: это
+	// уничтожает источники, на которые ссылается каталог.
+	for _, dir := range []string{"routes", "actions", "instructions", "operations", "entities"} {
 		dirPath := filepath.Join(root, dir)
 		if err := removeAll(dirPath); err != nil {
 			return fmt.Errorf("remove methodology registry directory %s: %w", dirPath, err)
