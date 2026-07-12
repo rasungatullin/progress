@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -1365,13 +1364,8 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
 	cmd.Dir = spec.Directory
 	cmd.Env = sanitizedEnv()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	configureRunnerProcess(cmd)
+	cmd.Cancel = func() error { return terminateRunnerProcess(cmd) }
 	writer := &runnerOutputWriter{activity: make(chan struct{}, 1)}
 	cmd.Stdout = writer
 	cmd.Stderr = writer
