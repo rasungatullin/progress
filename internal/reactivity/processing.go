@@ -536,7 +536,7 @@ func hasReviewRemarks(remarks []execution.StructuredRemark) bool {
 func isResolvedReviewRemark(remark execution.StructuredRemark) bool {
 	status := strings.ToLower(strings.TrimSpace(remark.Status))
 	switch status {
-	case "resolved", "fixed", "done", "ok":
+	case "resolved", "fixed", "done", "ok", "closed", "outdated":
 		return true
 	default:
 		return false

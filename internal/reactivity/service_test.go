@@ -625,6 +625,19 @@ func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 		t.Fatal("expected review to pass with resolved remark")
 	}
 
+	if !reviewExecutionPassed(&execution.ExecutionResult{
+		Status: "completed",
+		Launch: &execution.LaunchResult{
+			Status: "completed",
+			StructuredOutput: &execution.StructuredOutput{
+				Conclusion: &execution.StructuredConclusion{Status: "approve"},
+				Remarks:    []execution.StructuredRemark{{ID: "remark-3", Status: "closed", Title: "Замечание"}},
+			},
+		},
+	}) {
+		t.Fatal("expected review to pass with closed remark")
+	}
+
 	if reviewExecutionPassed(&execution.ExecutionResult{
 		Status: "completed",
 		Launch: &execution.LaunchResult{
@@ -636,6 +649,22 @@ func TestReviewExecutionPassedRequiresConclusionStatus(t *testing.T) {
 		},
 	}) {
 		t.Fatal("expected review to fail on unresolved remark")
+	}
+
+	if reviewExecutionPassed(&execution.ExecutionResult{
+		Status: "completed",
+		Launch: &execution.LaunchResult{
+			Status: "completed",
+			StructuredOutput: &execution.StructuredOutput{
+				Conclusion: &execution.StructuredConclusion{Status: "approve"},
+				Remarks: []execution.StructuredRemark{
+					{ID: "remark-4", Status: "open", Title: "Открытое замечание"},
+					{ID: "remark-5", Status: "resolved", Title: "Разрешённое замечание"},
+				},
+			},
+		},
+	}) {
+		t.Fatal("expected review to fail with an open remark")
 	}
 }
 
