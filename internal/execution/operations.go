@@ -1670,12 +1670,24 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 	}
 	reviewRemarks, _ := operationMappingValue[[]integration.ReviewRemark](state, operation.In["review_remarks"])
 	if len(reviewRemarks) != 0 {
+		remarksAllowed := spec.StructuredOutputFields == nil
+		for _, field := range spec.StructuredOutputFields {
+			if strings.TrimSpace(field) == "remarks" {
+				remarksAllowed = true
+				break
+			}
+		}
+		if !remarksAllowed {
+			writeOperationData(state, operation.Out, "prompt", prompt)
+			state.tracker.fail(name, "Исполнительная директива не согласована со схемой структурированного вывода.", fmt.Errorf("previous review remarks require structured output field %q", "remarks"), "review_remarks_field_not_allowed", false, true)
+			return fmt.Errorf("previous review remarks require structured output field %q", "remarks")
+		}
 		payload, err := json.Marshal(reviewRemarks)
 		if err != nil {
 			state.tracker.fail(name, "Замечания ревизии не включены в исполнительную директиву.", err, "review_remarks_not_encoded", false, true)
 			return err
 		}
-		prompt = joinExecutionSummaries(prompt, "Use the canonical review remarks below as execution context. Preserve ExternalID and ReplyToID in review responses as remark_id and thread_id.", string(payload))
+		prompt = joinExecutionSummaries(prompt, "Use the canonical review remarks below as execution context. Return new findings with a new id. When a finding continues or reopens an existing remark, preserve its external_id and thread_id in that remarks element. Do not return review_responses unless that field is explicitly allowed by the structured output schema.", string(payload))
 	}
 	writeOperationData(state, operation.Out, "prompt", prompt)
 	state.tracker.completeIO(name, operationIOSummary(operation.In, map[string]string{

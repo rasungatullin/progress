@@ -501,7 +501,7 @@ func hasNonEmptyStructuredField(values ...string) bool {
 }
 
 func hasNonEmptyStructuredRemark(value model.StructuredRemark) bool {
-	return hasNonEmptyStructuredField(value.ID, value.Status, value.Severity, value.Type, value.Title, value.Body, value.Answer, value.Resolution)
+	return hasNonEmptyStructuredField(value.ID, value.ExternalID, value.ThreadID, value.Status, value.Severity, value.Type, value.Title, value.Body, value.Answer, value.Resolution)
 }
 
 func decodeJSONStrict(raw string, target any) error {
@@ -553,7 +553,7 @@ func strictExpectedShapeForField(field string) (string, bool) {
 
 	switch strings.ToLower(segment) {
 	case "remarks":
-		return "array of objects with id/status/severity/type/title/body/path/line/side/answer/resolution", true
+		return "array of objects with id/external_id/thread_id/status/severity/type/title/body/path/line/side/answer/resolution", true
 	case "questions":
 		return "array of objects with id/status/title/body/answer", true
 	case "follow_up_actions":
@@ -1584,7 +1584,7 @@ func selectedStructuredObjectForms(fields []string) []string {
 		field string
 		form  string
 	}{
-		{field: "remarks", form: "remarks[{id,status,severity,type,title,body,path,line,side,answer,resolution}]"},
+		{field: "remarks", form: "remarks[{id,external_id,thread_id,status,severity,type,title,body,path,line,side,answer,resolution}]"},
 		{field: "review_responses", form: "review_responses[{id,remark_id,thread_id,status,summary,body}]"},
 		{field: "questions", form: "questions[{id,status,title,body,answer}]"},
 		{field: "follow_up_actions", form: "follow_up_actions[{id,status,type,title,body}]"},
