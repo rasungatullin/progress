@@ -58,12 +58,12 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			continue
 		}
 		descriptor := OperationDescriptor{
-			Name:            canonicalOperationName(template.IntegrationType, template.ObjectType, template.Operation),
+			Name:            canonicalConfiguredOperationName(template.Name),
 			IntegrationType: template.IntegrationType,
 			System:          state.Name,
 			AdapterType:     state.Type,
-			ObjectType:      canonicalObjectType(template.ObjectType),
-			Operation:       template.Operation,
+			ObjectType:      operationObjectPath(template.Name),
+			Operation:       operationAction(template.Name),
 			Enabled:         state.Enabled,
 			Available:       state.Enabled && state.Registered,
 			SideEffect:      template.SideEffect,
@@ -73,8 +73,6 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			FailureKinds:    append([]string(nil), template.FailureKinds...),
 		}
 		descriptor.Diagnostics = operationDiagnostics(state, descriptor.Available)
-		descriptor.Output.Resource = canonicalObjectType(descriptor.Output.Resource)
-		descriptor.Output.Shape = operationOutputShape(descriptor.IntegrationType, descriptor.ObjectType, descriptor.Operation)
 		result = append(result, descriptor)
 	}
 
@@ -154,7 +152,7 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 	if integrationType == "" {
 		return OperationDescriptor{}
 	}
-	canonicalName := integrationType + "." + objectType + "." + action
+	canonicalName := canonicalConfiguredOperationName(name)
 
 	required := operationFields(operation.Required, operation.Defaults)
 	optional := operationFields(operation.Optional, operation.Defaults)
@@ -177,8 +175,8 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 		IntegrationType: integrationType,
 		System:          state.Name,
 		AdapterType:     state.Type,
-		ObjectType:      objectType,
-		Operation:       action,
+		ObjectType:      operationObjectPath(canonicalName),
+		Operation:       operationAction(canonicalName),
 		Enabled:         state.Enabled,
 		Available:       available,
 		SideEffect:      isSideEffectOperation(action),
@@ -346,6 +344,38 @@ func canonicalOperationName(integrationType, objectType, operation string) strin
 	return normalizeIntegrationType(integrationType) + "." + canonicalObjectType(objectType) + "." + normalizeOperation(operation)
 }
 
+func canonicalConfiguredOperationName(name string) string {
+	parts := strings.Split(strings.TrimSpace(strings.ToLower(name)), ".")
+	if len(parts) < 3 {
+		return ""
+	}
+	parts[0] = normalizeIntegrationType(parts[0])
+	if parts[0] == model.IntegrationTypeIssue && parts[1] == "task" {
+		parts[1] = "issue"
+	}
+	parts[len(parts)-1] = normalizeOperation(parts[len(parts)-1])
+	if parts[len(parts)-1] == "comments" {
+		parts[len(parts)-1] = "list"
+	}
+	return strings.Join(parts, ".")
+}
+
+func operationObjectPath(name string) string {
+	parts := strings.Split(canonicalConfiguredOperationName(name), ".")
+	if len(parts) < 3 {
+		return ""
+	}
+	return strings.Join(parts[1:len(parts)-1], ".")
+}
+
+func operationAction(name string) string {
+	parts := strings.Split(canonicalConfiguredOperationName(name), ".")
+	if len(parts) < 3 {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
 func canonicalObjectType(objectType string) string {
 	objectType = normalizeObjectType(objectType)
 	switch objectType {
@@ -365,6 +395,7 @@ func normalizeOperationFilter(filter OperationFilter) OperationFilter {
 	filter.Name = strings.Replace(filter.Name, "tracker.", "issue.", 1)
 	filter.Name = strings.Replace(filter.Name, "repository.", "repo.", 1)
 	filter.Name = strings.Replace(filter.Name, "issue.task.", "issue.issue.", 1)
+	filter.Name = canonicalConfiguredOperationName(filter.Name)
 	return filter
 }
 

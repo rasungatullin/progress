@@ -55,6 +55,7 @@ type scriptResponse struct {
 type scriptTask struct {
 	System     string            `json:"system"`
 	Repository string            `json:"repository"`
+	ID         string            `json:"id"`
 	Number     int               `json:"number"`
 	ExternalID string            `json:"external_id"`
 	Title      string            `json:"title"`
@@ -73,6 +74,7 @@ type scriptTask struct {
 type scriptComment struct {
 	System     string     `json:"system"`
 	Repository string     `json:"repository"`
+	TaskID     string     `json:"task_id"`
 	TaskNumber int        `json:"task_number"`
 	Number     int        `json:"number"`
 	ExternalID string     `json:"external_id"`
@@ -97,6 +99,7 @@ type scriptSearchResult struct {
 	System     string `json:"system"`
 	Repository string `json:"repository"`
 	Kind       string `json:"kind"`
+	ID         string `json:"id"`
 	Number     int    `json:"number"`
 	ExternalID string `json:"external_id"`
 	Title      string `json:"title"`
@@ -251,11 +254,13 @@ func requestMap(req model.ProviderRequest) map[string]any {
 	putString(request, "system", req.System)
 	putString(request, "repository", req.Repository)
 	putString(request, "id", req.ID)
-	// Новый контракт передаёт идентификатор как непрозрачную строку. Числовое
-	// поле сохраняется только для старых внутренних вызовов, которые явно
-	// заполнили Number и не передали ID.
-	if req.Number > 0 && strings.TrimSpace(req.ID) == "" {
-		request["number"] = req.Number
+	// Числовая форма передаётся только как совместимый вход старого сценария;
+	// каноническим значением остаётся непрозрачная строка id.
+	if number, err := strconv.Atoi(strings.TrimSpace(req.ID)); err == nil && number > 0 {
+		request["number"] = number
+	}
+	if req.MergeRequestNumber > 0 {
+		request["number"] = req.MergeRequestNumber
 	}
 	putString(request, "external_id", req.ExternalID)
 	putString(request, "base", req.Base)
@@ -522,8 +527,7 @@ func (task scriptTask) toCanonicalTask() model.CanonicalTask {
 	return model.CanonicalTask{
 		System:     task.System,
 		Repository: task.Repository,
-		Number:     task.Number,
-		ID:         firstNonEmpty(task.ExternalID, strconv.Itoa(task.Number)),
+		ID:         firstNonEmpty(task.ID, task.ExternalID, positiveIntString(task.Number)),
 		ExternalID: task.ExternalID,
 		Title:      strings.TrimSpace(task.Title),
 		Body:       task.Body,
@@ -539,11 +543,10 @@ func (task scriptTask) toCanonicalTask() model.CanonicalTask {
 }
 
 func (comment scriptComment) toTaskComment() model.TaskComment {
-	taskID := firstNonEmpty(strconv.Itoa(comment.TaskNumber), strconv.Itoa(comment.Number))
+	taskID := firstNonEmpty(comment.TaskID, positiveIntString(comment.TaskNumber), positiveIntString(comment.Number))
 	return model.TaskComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		TaskNumber: comment.TaskNumber,
 		TaskID:     taskID,
 		ExternalID: comment.ExternalID,
 		Author:     comment.Author.toUser(),
@@ -571,7 +574,7 @@ func (result scriptSearchResult) toTrackerSearchResult() model.TrackerSearchResu
 		System:     result.System,
 		Repository: result.Repository,
 		Kind:       firstNonEmpty(result.Kind, "task"),
-		Number:     result.Number,
+		ID:         firstNonEmpty(result.ID, result.ExternalID, positiveIntString(result.Number)),
 		Title:      result.Title,
 		State:      result.State,
 		URL:        result.URL,
@@ -602,7 +605,8 @@ func trackerIssueFromTask(task model.CanonicalTask) model.TrackerIssue {
 	return model.TrackerIssue{
 		System:     task.System,
 		Repository: task.Repository,
-		Number:     parseLegacyNumber(task.ID),
+		ID:         task.ID,
+		ExternalID: task.ExternalID,
 		Title:      task.Title,
 		Body:       task.Body,
 		State:      task.State,
@@ -619,7 +623,7 @@ func trackerCommentFromTaskComment(comment model.TaskComment) model.TrackerComme
 	return model.TrackerComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		Number:     parseLegacyNumber(comment.TaskID),
+		TaskID:     comment.TaskID,
 		Author:     trackerUserFromUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,
@@ -633,7 +637,7 @@ func searchResultFromTask(task model.CanonicalTask) model.TrackerSearchResult {
 		System:     task.System,
 		Repository: task.Repository,
 		Kind:       "task",
-		Number:     parseLegacyNumber(task.ID),
+		ID:         task.ID,
 		Title:      task.Title,
 		State:      task.State,
 		URL:        task.URL,
@@ -760,6 +764,13 @@ func firstNonEmpty(values ...string) string {
 func parseLegacyNumber(value string) int {
 	number, _ := strconv.Atoi(strings.TrimSpace(value))
 	return number
+}
+
+func positiveIntString(value int) string {
+	if value <= 0 {
+		return ""
+	}
+	return strconv.Itoa(value)
 }
 
 func resolveRepoRoot(ctx context.Context) (string, error) {

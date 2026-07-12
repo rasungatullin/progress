@@ -1029,7 +1029,7 @@ func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
 		issue: integration.TrackerIssue{
 			System:     "github",
 			Repository: "owner/name",
-			Number:     123,
+			ID:         "123",
 			Title:      "Task",
 			State:      "OPEN",
 			Labels:     append([]string(nil), labels...),

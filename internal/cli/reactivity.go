@@ -134,7 +134,7 @@ func printReactivityResult(cmd *cobra.Command, result reactivity.TaskProcessingR
 	for _, cycle := range result.Cycles {
 		cmd.Printf("cycle=%d\n", cycle.Index)
 		if cycle.Issue != nil {
-			cmd.Printf("cycle-issue-number=%d\ncycle-issue-title=%s\ncycle-issue-state=%s\n", cycle.Issue.Number, cycle.Issue.Title, cycle.Issue.State)
+			cmd.Printf("cycle-issue-id=%s\ncycle-issue-title=%s\ncycle-issue-state=%s\n", cycle.Issue.ID, cycle.Issue.Title, cycle.Issue.State)
 			if len(cycle.Issue.Labels) != 0 {
 				cmd.Printf("cycle-issue-labels=%s\n", strings.Join(cycle.Issue.Labels, ","))
 			}
@@ -171,7 +171,7 @@ func printReactivityResult(cmd *cobra.Command, result reactivity.TaskProcessingR
 		}
 	}
 	if result.FinalIssue != nil {
-		cmd.Printf("final-issue-number=%d\n", result.FinalIssue.Number)
+		cmd.Printf("final-issue-id=%s\n", result.FinalIssue.ID)
 		if len(result.FinalIssue.Labels) != 0 {
 			cmd.Printf("final-issue-labels=%s\n", strings.Join(result.FinalIssue.Labels, ","))
 		}

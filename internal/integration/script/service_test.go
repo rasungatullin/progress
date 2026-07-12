@@ -21,9 +21,9 @@ func TestServiceExecutesConfiguredOperation(t *testing.T) {
 		Project:         "ABC",
 		Settings:        map[string]string{"tracker_url": "https://tracker.example"},
 		Operations: map[string]model.IntegrationOperationConfig{
-			"tracker.task.get": {
+			"issue.issue.get": {
 				Script:   "task-get.sh",
-				Required: []string{"number", "project"},
+				Required: []string{"id", "project"},
 				Optional: []string{"tracker_url"},
 				Defaults: map[string]string{
 					"project":     "${system.project}",
@@ -49,13 +49,13 @@ func TestServiceExecutesConfiguredOperation(t *testing.T) {
 		if err := json.Unmarshal(content, &envelope); err != nil {
 			t.Fatalf("decode request envelope: %v", err)
 		}
-		if envelope.OperationName != "tracker.task.get" || envelope.Request["project"] != "ABC" || envelope.Request["tracker_url"] != "https://tracker.example" {
+		if envelope.OperationName != "issue.issue.get" || envelope.Request["project"] != "ABC" || envelope.Request["tracker_url"] != "https://tracker.example" {
 			t.Fatalf("unexpected request envelope: %#v", envelope)
 		}
-		if envelope.Request["number"].(float64) != 123 {
-			t.Fatalf("unexpected request number: %#v", envelope.Request["number"])
+		if envelope.Request["id"] != "ABC-123" {
+			t.Fatalf("unexpected request id: %#v", envelope.Request["id"])
 		}
-		return commandResult{stdout: `{"status":"ok","task":{"system":"work-tracker","number":123,"title":"Задача","body":"Описание","state":"open","traits":["backend"],"author":{"login":"alice"}}}`}
+		return commandResult{stdout: `{"status":"ok","task":{"system":"work-tracker","id":"ABC-123","title":"Задача","body":"Описание","state":"open","traits":["backend"],"author":{"login":"alice"}}}`}
 	}
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
@@ -64,15 +64,15 @@ func TestServiceExecutesConfiguredOperation(t *testing.T) {
 		Resource:        "task",
 		ObjectType:      "task",
 		Operation:       "get",
-		Number:          123,
+		ID:              "ABC-123",
 	})
 	if err != nil {
 		t.Fatalf("execute script operation: %v", err)
 	}
-	if response.Task == nil || response.Task.Number != 123 || response.Task.Title != "Задача" {
+	if response.Task == nil || response.Task.ID != "ABC-123" || response.Task.Title != "Задача" {
 		t.Fatalf("unexpected task response: %#v", response.Task)
 	}
-	if response.Issue == nil || response.Issue.Number != 123 || response.Issue.Labels[0] != "backend" {
+	if response.Issue == nil || response.Issue.ID != "ABC-123" || response.Issue.Labels[0] != "backend" {
 		t.Fatalf("unexpected compatible issue response: %#v", response.Issue)
 	}
 }
@@ -84,7 +84,7 @@ func TestServiceRunsConfiguredCommandWithoutJoiningWorkdir(t *testing.T) {
 	service := NewService(model.IntegrationSystemConfig{
 		IntegrationType: model.IntegrationTypeTracker,
 		Operations: map[string]model.IntegrationOperationConfig{
-			"tracker.task.get": {Command: "tracker-get"},
+			"issue.issue.get": {Command: "tracker-get"},
 		},
 	})
 	service.resolveWorkdir = func(context.Context) (string, error) { return root, nil }
@@ -95,7 +95,7 @@ func TestServiceRunsConfiguredCommandWithoutJoiningWorkdir(t *testing.T) {
 		if dir != root {
 			t.Fatalf("unexpected command workdir: %q", dir)
 		}
-		return commandResult{stdout: `{"status":"ok","task":{"system":"work-tracker","number":123,"title":"Задача","state":"open"}}`}
+		return commandResult{stdout: `{"status":"ok","task":{"system":"work-tracker","id":"ABC-123","title":"Задача","state":"open"}}`}
 	}
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
@@ -104,12 +104,12 @@ func TestServiceRunsConfiguredCommandWithoutJoiningWorkdir(t *testing.T) {
 		Resource:        "task",
 		ObjectType:      "task",
 		Operation:       "get",
-		Number:          123,
+		ID:              "ABC-123",
 	})
 	if err != nil {
 		t.Fatalf("execute script operation: %v", err)
 	}
-	if response.Task == nil || response.Task.Number != 123 {
+	if response.Task == nil || response.Task.ID != "ABC-123" {
 		t.Fatalf("unexpected task response: %#v", response.Task)
 	}
 }
@@ -124,7 +124,7 @@ func TestOperationNameForTaskCommentsRequest(t *testing.T) {
 		Operation:       "comments",
 	})
 
-	if name != "tracker.task.comment.list" {
+	if name != "issue.issue.comment.list" {
 		t.Fatalf("unexpected operation name: %q", name)
 	}
 }
@@ -139,7 +139,7 @@ func TestOperationNameForTaskListRequest(t *testing.T) {
 		Operation:       "list",
 	})
 
-	if name != "tracker.task.list" {
+	if name != "issue.issue.list" {
 		t.Fatalf("unexpected operation name: %q", name)
 	}
 }
@@ -154,7 +154,7 @@ func TestOperationNameForTaskCommentCreateRequest(t *testing.T) {
 		Operation:       "create",
 	})
 
-	if name != "tracker.task.comment.create" {
+	if name != "issue.issue.comment.create" {
 		t.Fatalf("unexpected operation name: %q", name)
 	}
 }
@@ -165,7 +165,7 @@ func TestServiceRejectsMissingRequiredFieldBeforeScript(t *testing.T) {
 	service := NewService(model.IntegrationSystemConfig{
 		IntegrationType: model.IntegrationTypeTracker,
 		Operations: map[string]model.IntegrationOperationConfig{
-			"tracker.task.get": {Script: "task-get.sh", Required: []string{"number"}},
+			"issue.issue.get": {Script: "task-get.sh", Required: []string{"id"}},
 		},
 	})
 	service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
@@ -195,7 +195,7 @@ func TestServiceRejectsEmptySuccessfulTaskResponse(t *testing.T) {
 	service := NewService(model.IntegrationSystemConfig{
 		IntegrationType: model.IntegrationTypeTracker,
 		Operations: map[string]model.IntegrationOperationConfig{
-			"tracker.task.get": {Script: "task-get.sh"},
+			"issue.issue.get": {Script: "task-get.sh"},
 		},
 	})
 	service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
@@ -209,7 +209,7 @@ func TestServiceRejectsEmptySuccessfulTaskResponse(t *testing.T) {
 		Resource:        "task",
 		ObjectType:      "task",
 		Operation:       "get",
-		Number:          123,
+		ID:              "ABC-123",
 	})
 	if err == nil {
 		t.Fatal("expected empty successful response error")
@@ -225,7 +225,7 @@ func TestServiceNormalizesInvalidJSONResponse(t *testing.T) {
 	service := NewService(model.IntegrationSystemConfig{
 		IntegrationType: model.IntegrationTypeTracker,
 		Operations: map[string]model.IntegrationOperationConfig{
-			"tracker.task.get": {Script: "task-get.sh"},
+			"issue.issue.get": {Script: "task-get.sh"},
 		},
 	})
 	service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
@@ -254,7 +254,7 @@ func TestServiceNormalizesTimeout(t *testing.T) {
 	service := NewService(model.IntegrationSystemConfig{
 		IntegrationType: model.IntegrationTypeTracker,
 		Operations: map[string]model.IntegrationOperationConfig{
-			"tracker.task.get": {Script: "task-get.sh", Timeout: "1ms"},
+			"issue.issue.get": {Script: "task-get.sh", Timeout: "1ms"},
 		},
 	})
 	service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
@@ -284,7 +284,7 @@ func TestServiceUsesScriptFailureResponse(t *testing.T) {
 	service := NewService(model.IntegrationSystemConfig{
 		IntegrationType: model.IntegrationTypeTracker,
 		Operations: map[string]model.IntegrationOperationConfig{
-			"tracker.task.get": {Script: "task-get.sh"},
+			"issue.issue.get": {Script: "task-get.sh"},
 		},
 	})
 	service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }

@@ -18,10 +18,19 @@ type contractCaptureProvider struct {
 
 func (p *contractCaptureProvider) Execute(_ context.Context, request model.ProviderRequest) (model.Response, error) {
 	p.request = request
-	return model.Response{
+	response := model.Response{
 		Status: model.ResponseStatusOK,
 		Task:   &model.CanonicalTask{ID: request.ID, ExternalID: request.ID, Title: "issue"},
-	}, nil
+	}
+	switch request.IntegrationType {
+	case model.IntegrationTypeRepo:
+		response.Repository = &model.Repository{FullName: request.Repository}
+	case model.IntegrationTypeMessenger:
+		response.Message = &model.Message{MessageID: "message-1", Body: request.Text}
+	case model.IntegrationTypeWiki:
+		response.WikiPages = []model.WikiPage{{ExternalID: "page-1", Title: "Page"}}
+	}
+	return response, nil
 }
 
 func TestIntegrationIssueCommandsUseOpaqueIDAndSystemSelection(t *testing.T) {
@@ -112,5 +121,74 @@ func TestIntegrationTypeOrientedTreeExcludesDispatcherAndPrivate(t *testing.T) {
 		if !found {
 			t.Fatalf("type-oriented command %q is missing", name)
 		}
+	}
+}
+
+func TestIntegrationTypeOrientedCommandsResolveConfiguredSystems(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{
+			model.IntegrationTypeRepo:      "github-main",
+			model.IntegrationTypeMessenger: "mattermost-main",
+			model.IntegrationTypeWiki:      "confluence-main",
+		},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github-main":     {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}},
+			"mattermost-main": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeMessenger}},
+			"confluence-main": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeWiki}},
+			"wiki-explicit":   {Type: "script", IntegrationTypes: []string{model.IntegrationTypeWiki}},
+		},
+	})
+	for _, system := range []string{"github-main", "mattermost-main", "confluence-main", "wiki-explicit"} {
+		service.RegisterProvider(system, provider)
+	}
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	for _, tc := range []struct {
+		args       []string
+		wantType   string
+		wantSystem string
+	}{
+		{args: []string{"integration", "repo", "get", "--repo", "owner/name"}, wantType: model.IntegrationTypeRepo, wantSystem: "github-main"},
+		{args: []string{"integration", "messenger", "message", "--text", "Состояние обновлено"}, wantType: model.IntegrationTypeMessenger, wantSystem: "mattermost-main"},
+		{args: []string{"integration", "wiki", "search", "--query", "эксплуатация"}, wantType: model.IntegrationTypeWiki, wantSystem: "confluence-main"},
+		{args: []string{"integration", "wiki", "search", "--query", "эксплуатация", "--system", "wiki-explicit"}, wantType: model.IntegrationTypeWiki, wantSystem: "wiki-explicit"},
+	} {
+		cmd := NewRootCommand()
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs(tc.args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("выполнить %v: %v", tc.args, err)
+		}
+		if provider.request.IntegrationType != tc.wantType || provider.request.System != tc.wantSystem {
+			t.Fatalf("неожиданный разрешённый запрос для %v: %#v", tc.args, provider.request)
+		}
+	}
+}
+
+func TestLegacySystemCommandReportsTypeOrientedReplacement(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewService(log.New(io.Discard, "", 0))
+	service.RegisterProvider("github", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	cmd := NewRootCommand()
+	var stderr strings.Builder
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--number", "123", "--repo", "owner/name"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("выполнить переходную команду: %v", err)
+	}
+	if provider.request.ID != "123" {
+		t.Fatalf("числовая форма не преобразована в строковый идентификатор: %#v", provider.request)
+	}
+	if !strings.Contains(stderr.String(), "форма integration github устарела") {
+		t.Fatalf("отсутствует диагностика перехода: %q", stderr.String())
 	}
 }

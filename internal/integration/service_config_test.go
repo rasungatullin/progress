@@ -42,7 +42,7 @@ func TestNewConfiguredServiceDisablesProvidersOnInvalidConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected execute error")
 	}
-	if err.Error() != "integration provider not registered: github" {
+	if err.Error() != "integration system is not configured: github" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -269,7 +269,7 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 		Resource:        "issue",
 		ObjectType:      "issue",
 		Operation:       "get",
-		Number:          taskNumber,
+		ID:              strconv.Itoa(taskNumber),
 	})
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -302,13 +302,13 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		HasMergeConflict: mergeRequestHasConflict(mergeRequest),
 	}
 	response, err := s.integration.Execute(ctx, integration.Request{
-		IntegrationType: integrationTypeRepository,
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "comments",
-		Repository:      mergeRequest.Repository,
-		RepoProvided:    strings.TrimSpace(mergeRequest.Repository) != "",
-		Number:          mergeRequest.Number,
+		IntegrationType:    integrationTypeRepository,
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "comments",
+		Repository:         mergeRequest.Repository,
+		RepoProvided:       strings.TrimSpace(mergeRequest.Repository) != "",
+		MergeRequestNumber: mergeRequest.Number,
 	})
 	if err != nil {
 		if state.HasMergeConflict {
@@ -511,11 +511,11 @@ func isFalsyExternalState(value string) bool {
 }
 
 func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.TrackerIssue) (*integration.MergeRequest, error) {
-	if issue == nil || issue.Number <= 0 || strings.TrimSpace(issue.Repository) == "" {
+	if issue == nil || strings.TrimSpace(issue.ID) == "" || strings.TrimSpace(issue.Repository) == "" {
 		return nil, nil
 	}
 
-	head := strconv.Itoa(issue.Number)
+	head := issue.ID
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType: integrationTypeRepository,
 		Resource:        "merge-request",
@@ -574,7 +574,7 @@ func (s *Service) changeTaskLabels(ctx context.Context, issue *integration.Track
 		Operation:       operation,
 		Repository:      issue.Repository,
 		RepoProvided:    strings.TrimSpace(issue.Repository) != "",
-		Number:          issue.Number,
+		ID:              issue.ID,
 		Labels:          append([]string(nil), labels...),
 	})
 	return err
@@ -723,7 +723,7 @@ func executionObjectRefFromIssue(issue *integration.TrackerIssue) *execution.Obj
 		Type:       "task",
 		System:     issue.System,
 		Repository: issue.Repository,
-		Number:     issue.Number,
+		Number:     numericIssueID(issue.ID),
 		Title:      issue.Title,
 		URL:        issue.URL,
 		Attributes: attributes,
@@ -770,11 +770,16 @@ func taskTextFromIssue(issue *integration.TrackerIssue) string {
 	if title == "" {
 		title = "Без названия"
 	}
-	parts := []string{fmt.Sprintf("Task #%d: %s", issue.Number, title)}
+	parts := []string{fmt.Sprintf("Task #%s: %s", issue.ID, title)}
 	if body := strings.TrimSpace(issue.Body); body != "" {
 		parts = append(parts, body)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func numericIssueID(id string) int {
+	number, _ := strconv.Atoi(strings.TrimSpace(id))
+	return number
 }
 
 func expectedResultForAction(action string) string {

@@ -434,7 +434,7 @@ func (s *Service) executePullRequestGet(ctx context.Context, response model.Resp
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
 		return response, err
 	}
-	if req.Number <= 0 {
+	if req.MergeRequestNumber <= 0 {
 		err := fmt.Errorf("Bitbucket pull request number must be greater than zero")
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
@@ -444,7 +444,7 @@ func (s *Service) executePullRequestGet(ctx context.Context, response model.Resp
 		return s.executeServerPullRequestGet(ctx, response, req, repository)
 	}
 
-	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number)
+	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber)
 	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		response.Status = model.ResponseStatusFailed
@@ -463,7 +463,7 @@ func (s *Service) executePullRequestGet(ctx context.Context, response model.Resp
 }
 
 func (s *Service) executeServerPullRequestGet(ctx context.Context, response model.Response, req model.ProviderRequest, repository repositoryRef) (model.Response, error) {
-	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number))
+	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber))
 	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		response.Status = model.ResponseStatusFailed
@@ -572,7 +572,7 @@ func (s *Service) executePullRequestList(ctx context.Context, response model.Res
 			System:     "bitbucket",
 			Repository: repository.fullName,
 			Kind:       "merge-request",
-			Number:     pr.Number,
+			ID:         strconv.Itoa(pr.Number),
 			Title:      pr.Title,
 			State:      pr.State,
 			URL:        pr.URL,
@@ -642,7 +642,7 @@ func (s *Service) executeServerPullRequestList(ctx context.Context, response mod
 			System:     "bitbucket",
 			Repository: repository.fullName,
 			Kind:       "merge-request",
-			Number:     pr.Number,
+			ID:         strconv.Itoa(pr.Number),
 			Title:      pr.Title,
 			State:      pr.State,
 			URL:        pr.URL,
@@ -778,7 +778,7 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
 		return response, err
 	}
-	if req.Number <= 0 {
+	if req.MergeRequestNumber <= 0 {
 		err := fmt.Errorf("Bitbucket pull request number must be greater than zero")
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
@@ -788,7 +788,7 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 		return s.executeServerPullRequestComments(ctx, response, req, repository)
 	}
 
-	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number)
+	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber)
 	response.ReviewRemarks = []model.ReviewRemark{}
 	for endpoint != "" {
 		status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
@@ -804,7 +804,7 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 			return responseWithDecodeFailure(response, err)
 		}
 		for _, item := range raw.Values {
-			response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarkFromAPIComment(repository.fullName, req.Number, item))
+			response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, item))
 		}
 		endpoint = strings.TrimSpace(raw.Next)
 	}
@@ -819,7 +819,7 @@ func (s *Service) executePullRequestCommentCreate(ctx context.Context, response 
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
 		return response, err
 	}
-	if req.Number <= 0 {
+	if req.MergeRequestNumber <= 0 {
 		err := fmt.Errorf("Bitbucket pull request number must be greater than zero")
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
@@ -864,7 +864,7 @@ func (s *Service) executePullRequestCommentCreate(ctx context.Context, response 
 		payload["inline"] = inline
 	}
 	content, _ := json.Marshal(payload)
-	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number)
+	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber)
 	status, responseBody, err := s.do(ctx, http.MethodPost, endpoint, content)
 	if err != nil {
 		response.Status = model.ResponseStatusFailed
@@ -877,7 +877,7 @@ func (s *Service) executePullRequestCommentCreate(ctx context.Context, response 
 	if err := json.Unmarshal(responseBody, &raw); err != nil {
 		return responseWithDecodeFailure(response, err)
 	}
-	remark := reviewRemarkFromAPIComment(repository.fullName, req.Number, raw)
+	remark := reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, raw)
 	response.ReviewRemarks = []model.ReviewRemark{remark}
 	response.OperationResult = &model.OperationResult{
 		System:     "bitbucket",
@@ -889,7 +889,7 @@ func (s *Service) executePullRequestCommentCreate(ctx context.Context, response 
 		HTTPStatus: status,
 		Method:     http.MethodPost,
 		Endpoint:   endpoint,
-		Message:    fmt.Sprintf("Bitbucket pull request comment created for %s#%d", repository.fullName, req.Number),
+		Message:    fmt.Sprintf("Bitbucket pull request comment created for %s#%d", repository.fullName, req.MergeRequestNumber),
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
@@ -900,7 +900,7 @@ func (s *Service) executeServerPullRequestComments(ctx context.Context, response
 	if limit <= 0 {
 		limit = 100
 	}
-	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d/activities?limit=%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.Number, limit))
+	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d/activities?limit=%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber, limit))
 	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		response.Status = model.ResponseStatusFailed
@@ -918,7 +918,7 @@ func (s *Service) executeServerPullRequestComments(ctx context.Context, response
 		if item.Comment == nil {
 			continue
 		}
-		response.ReviewRemarks = appendServerCommentRemarks(response.ReviewRemarks, repository.fullName, req.Number, *item.Comment)
+		response.ReviewRemarks = appendServerCommentRemarks(response.ReviewRemarks, repository.fullName, req.MergeRequestNumber, *item.Comment)
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil

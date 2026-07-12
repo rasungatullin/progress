@@ -36,13 +36,13 @@ func (e builtinOperationExecutor) loadPullRequest(ctx context.Context, state *op
 	}
 
 	response, err := executor.Execute(ctx, integration.Request{
-		IntegrationType: integrationmodel.IntegrationTypeRepository,
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "get",
-		Repository:      ref.Repository,
-		RepoProvided:    strings.TrimSpace(ref.Repository) != "",
-		Number:          ref.Number,
+		IntegrationType:    integrationmodel.IntegrationTypeRepository,
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "get",
+		Repository:         ref.Repository,
+		RepoProvided:       strings.TrimSpace(ref.Repository) != "",
+		MergeRequestNumber: ref.Number,
 	})
 	if err != nil {
 		return e.failLoadPullRequestOperation(ctx, state, operation, input.invocation, name, "Запрос на слияние не получен.", err, "pull_request_load_failed")
@@ -137,13 +137,13 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 	}
 
 	response, err := executor.Execute(ctx, integration.Request{
-		IntegrationType: integrationmodel.IntegrationTypeRepository,
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "comments",
-		Repository:      ref.Repository,
-		RepoProvided:    strings.TrimSpace(ref.Repository) != "",
-		Number:          ref.Number,
+		IntegrationType:    integrationmodel.IntegrationTypeRepository,
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "comments",
+		Repository:         ref.Repository,
+		RepoProvided:       strings.TrimSpace(ref.Repository) != "",
+		MergeRequestNumber: ref.Number,
 	})
 	if err != nil {
 		return e.failOrSkipLoadReviewRemarksOperation(ctx, state, operation, input.invocation, name, "Замечания ревизии не получены.", err, "review_remarks_load_failed", required)
@@ -811,20 +811,20 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 			side = ""
 		}
 		request := integration.Request{
-			IntegrationType: integrationmodel.IntegrationTypeRepository,
-			Resource:        "comment",
-			ObjectType:      "comment",
-			Operation:       reviewRemarkCommentOperation(comment),
-			Repository:      ref.Repository,
-			RepoProvided:    strings.TrimSpace(ref.Repository) != "",
-			Number:          ref.Number,
-			ExternalID:      strings.TrimSpace(comment.ExternalID),
-			ThreadID:        strings.TrimSpace(comment.ThreadID),
-			Body:            body,
-			Text:            body,
-			Path:            path,
-			Line:            line,
-			Side:            side,
+			IntegrationType:    integrationmodel.IntegrationTypeRepository,
+			Resource:           "comment",
+			ObjectType:         "comment",
+			Operation:          reviewRemarkCommentOperation(comment),
+			Repository:         ref.Repository,
+			RepoProvided:       strings.TrimSpace(ref.Repository) != "",
+			MergeRequestNumber: ref.Number,
+			ExternalID:         strings.TrimSpace(comment.ExternalID),
+			ThreadID:           strings.TrimSpace(comment.ThreadID),
+			Body:               body,
+			Text:               body,
+			Path:               path,
+			Line:               line,
+			Side:               side,
 		}
 		response, err := executor.Execute(ctx, request)
 		if err != nil {
@@ -905,13 +905,13 @@ func reviewRemarkFallbackBody(body, path string, line int, side string) string {
 
 func (e builtinOperationExecutor) publishReviewRemarkFallback(ctx context.Context, executor integrationExecutor, ref pullRequestRef, body string) (bool, error) {
 	commentsResponse, err := executor.Execute(ctx, integration.Request{
-		IntegrationType: integrationmodel.IntegrationTypeRepository,
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "comments",
-		Repository:      ref.Repository,
-		RepoProvided:    strings.TrimSpace(ref.Repository) != "",
-		Number:          ref.Number,
+		IntegrationType:    integrationmodel.IntegrationTypeRepository,
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "comments",
+		Repository:         ref.Repository,
+		RepoProvided:       strings.TrimSpace(ref.Repository) != "",
+		MergeRequestNumber: ref.Number,
 	})
 	if err != nil {
 		return false, fmt.Errorf("check existing pull request comments: %w", err)
@@ -923,15 +923,15 @@ func (e builtinOperationExecutor) publishReviewRemarkFallback(ctx context.Contex
 	}
 
 	_, err = executor.Execute(ctx, integration.Request{
-		IntegrationType: integrationmodel.IntegrationTypeRepository,
-		Resource:        "comment",
-		ObjectType:      "comment",
-		Operation:       "create",
-		Repository:      ref.Repository,
-		RepoProvided:    strings.TrimSpace(ref.Repository) != "",
-		Number:          ref.Number,
-		Body:            body,
-		Text:            body,
+		IntegrationType:    integrationmodel.IntegrationTypeRepository,
+		Resource:           "comment",
+		ObjectType:         "comment",
+		Operation:          "create",
+		Repository:         ref.Repository,
+		RepoProvided:       strings.TrimSpace(ref.Repository) != "",
+		MergeRequestNumber: ref.Number,
+		Body:               body,
+		Text:               body,
 	})
 	if err != nil {
 		return false, fmt.Errorf("create pull request fallback comment: %w", err)
@@ -967,15 +967,15 @@ func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Cont
 			continue
 		}
 		request := integration.Request{
-			IntegrationType: integrationmodel.IntegrationTypeRepository,
-			Resource:        "comment",
-			ObjectType:      "comment",
-			Operation:       "create",
-			Repository:      ref.Repository,
-			RepoProvided:    strings.TrimSpace(ref.Repository) != "",
-			Number:          ref.Number,
-			Body:            body,
-			Text:            body,
+			IntegrationType:    integrationmodel.IntegrationTypeRepository,
+			Resource:           "comment",
+			ObjectType:         "comment",
+			Operation:          "create",
+			Repository:         ref.Repository,
+			RepoProvided:       strings.TrimSpace(ref.Repository) != "",
+			MergeRequestNumber: ref.Number,
+			Body:               body,
+			Text:               body,
 		}
 		if typ == "inline" {
 			request.Operation = "reply"

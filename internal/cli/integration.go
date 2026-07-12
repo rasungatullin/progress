@@ -523,14 +523,14 @@ func newIntegrationMergeRequestGetCommand(system string, label string) *cobra.Co
 			}
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				IntegrationType: "repository",
-				System:          system,
-				Resource:        "merge-request",
-				ObjectType:      "merge-request",
-				Operation:       "get",
-				Repository:      flags.repo,
-				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
+				IntegrationType:    "repository",
+				System:             system,
+				Resource:           "merge-request",
+				ObjectType:         "merge-request",
+				Operation:          "get",
+				Repository:         flags.repo,
+				RepoProvided:       cmd.Flags().Changed("repo"),
+				MergeRequestNumber: flags.number,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationMergeRequest); printErr != nil {
 				return printErr
@@ -661,14 +661,14 @@ func newIntegrationMergeRequestCommentsCommand(system string, label string) *cob
 			}
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				IntegrationType: "repository",
-				System:          system,
-				Resource:        "merge-request",
-				ObjectType:      "merge-request",
-				Operation:       "comments",
-				Repository:      flags.repo,
-				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
+				IntegrationType:    "repository",
+				System:             system,
+				Resource:           "merge-request",
+				ObjectType:         "merge-request",
+				Operation:          "comments",
+				Repository:         flags.repo,
+				RepoProvided:       cmd.Flags().Changed("repo"),
+				MergeRequestNumber: flags.number,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationReviewRemarks); printErr != nil {
 				return printErr
@@ -713,18 +713,18 @@ func newIntegrationMergeRequestCommentCreateCommand(system string, label string)
 			}
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				IntegrationType: "repository",
-				System:          system,
-				Resource:        "comment",
-				ObjectType:      "comment",
-				Operation:       "create",
-				Repository:      flags.repo,
-				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
-				Body:            flags.body,
-				Path:            flags.path,
-				Line:            flags.line,
-				Side:            flags.side,
+				IntegrationType:    "repository",
+				System:             system,
+				Resource:           "comment",
+				ObjectType:         "comment",
+				Operation:          "create",
+				Repository:         flags.repo,
+				RepoProvided:       cmd.Flags().Changed("repo"),
+				MergeRequestNumber: flags.number,
+				Body:               flags.body,
+				Path:               flags.path,
+				Line:               flags.line,
+				Side:               flags.side,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationReviewRemarkOperation); printErr != nil {
 				return printErr
@@ -1052,7 +1052,7 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 				Operation:    "get",
 				Repository:   flags.repo,
 				RepoProvided: cmd.Flags().Changed("repo"),
-				Number:       flags.number,
+				ID:           strconv.Itoa(flags.number),
 			})
 			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssue); err != nil {
 				return err
@@ -1139,7 +1139,7 @@ func newIntegrationGitHubIssueCommentsCommand() *cobra.Command {
 				Operation:    "comments",
 				Repository:   flags.repo,
 				RepoProvided: cmd.Flags().Changed("repo"),
-				Number:       flags.number,
+				ID:           strconv.Itoa(flags.number),
 			})
 			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssueComments); err != nil {
 				return err
@@ -1184,7 +1184,7 @@ func newIntegrationGitHubIssueCommentCreateCommand() *cobra.Command {
 				Operation:       "create",
 				Repository:      flags.repo,
 				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
+				ID:              strconv.Itoa(flags.number),
 				Body:            flags.body,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssueComments); printErr != nil {
@@ -1235,7 +1235,7 @@ func newIntegrationGitHubIssueLabelChangeCommand(operation string) *cobra.Comman
 				Operation:       operation,
 				Repository:      flags.repo,
 				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
+				ID:              strconv.Itoa(flags.number),
 				Labels:          flags.labels,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationOperationResult); printErr != nil {
@@ -1331,12 +1331,12 @@ func newIntegrationGitHubPRGetCommand() *cobra.Command {
 
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				System:       "github",
-				Resource:     "pr",
-				Operation:    "get",
-				Repository:   flags.repo,
-				RepoProvided: cmd.Flags().Changed("repo"),
-				Number:       flags.number,
+				System:             "github",
+				Resource:           "pr",
+				Operation:          "get",
+				Repository:         flags.repo,
+				RepoProvided:       cmd.Flags().Changed("repo"),
+				MergeRequestNumber: flags.number,
 			})
 			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubPullRequest); err != nil {
 				return err
@@ -1491,7 +1491,7 @@ func printGitHubRepository(cmd *cobra.Command, response integration.Response) {
 func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 	issue := response.Issue
 	if issue != nil {
-		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\ntitle=%s\nstate=%s\nauthor_login=%s\nauthor_name=%s\nauthor_url=%s\nurl=%s\ncreated_at=%s\nupdated_at=%s\n", issue.System, response.Resource, response.Operation, issue.Repository, issue.Number, issue.Title, issue.State, issue.Author.Login, issue.Author.Name, issue.Author.URL, issue.URL, issue.CreatedAt, issue.UpdatedAt)
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nid=%s\ntitle=%s\nstate=%s\nauthor_login=%s\nauthor_name=%s\nauthor_url=%s\nurl=%s\ncreated_at=%s\nupdated_at=%s\n", issue.System, response.Resource, response.Operation, issue.Repository, issue.ID, issue.Title, issue.State, issue.Author.Login, issue.Author.Name, issue.Author.URL, issue.URL, issue.CreatedAt, issue.UpdatedAt)
 		for _, label := range issue.Labels {
 			cmd.Printf("label=%s\n", label)
 		}
@@ -1514,7 +1514,7 @@ func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 		return
 	}
 
-	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nid=%s\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.ID, status.State, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}
@@ -1535,7 +1535,7 @@ func printGitHubIssueSearchResults(cmd *cobra.Command, response integration.Resp
 		}
 		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nissue_count=%d\n", response.System, response.Resource, response.Operation, repository, len(response.SearchResults))
 		for _, issue := range response.SearchResults {
-			cmd.Printf("number=%d\ntitle=%s\nstate=%s\n", issue.Number, issue.Title, issue.State)
+			cmd.Printf("id=%s\ntitle=%s\nstate=%s\n", issue.ID, issue.Title, issue.State)
 			for _, label := range issue.Labels {
 				cmd.Printf("label=%s\n", label)
 			}
@@ -1576,7 +1576,7 @@ func printGitHubIssueComments(cmd *cobra.Command, response integration.Response)
 		number := 0
 		if len(response.Comments) > 0 {
 			repository = response.Comments[0].Repository
-			number = response.Comments[0].Number
+			number, _ = strconv.Atoi(response.Comments[0].TaskID)
 		} else if response.Metadata != nil {
 			repository = response.Metadata["repository"]
 			number, _ = strconv.Atoi(response.Metadata["number"])
@@ -1595,7 +1595,7 @@ func printGitHubIssueComments(cmd *cobra.Command, response integration.Response)
 		return
 	}
 
-	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nid=%s\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.ID, status.State, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}

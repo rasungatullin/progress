@@ -28,10 +28,10 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 			Context: decision.DecisionContext{
 				Signal: decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: 123},
 				Issue: &integration.TrackerIssue{
-					Number: 123,
-					Title:  "Implement stage 1",
-					State:  "OPEN",
-					URL:    "https://github.com/owner/name/issues/123",
+					ID:    "123",
+					Title: "Implement stage 1",
+					State: "OPEN",
+					URL:   "https://github.com/owner/name/issues/123",
 				},
 			},
 			Consideration: &decision.ConsiderationResult{
@@ -82,7 +82,7 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 		"execution-operation=prepare-data:completed\n",
 		"execution-status=completed\n",
 		"execution-summary=profile=default runner=opencode\n",
-		"issue-number=123\n",
+		"issue-id=123\n",
 		"issue-title=Implement stage 1\n",
 		"issue-state=OPEN\n",
 		"issue-url=https://github.com/owner/name/issues/123\n",
@@ -199,7 +199,7 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 			result: decision.StartResult{
 				Context: decision.DecisionContext{
 					Signal: decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: 77},
-					Issue:  &integration.TrackerIssue{Number: 77, Title: "Fix execution handoff", State: "OPEN"},
+					Issue:  &integration.TrackerIssue{ID: "77", Title: "Fix execution handoff", State: "OPEN"},
 				},
 				Ready: true,
 				Decision: &decision.Decision{

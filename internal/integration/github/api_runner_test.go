@@ -55,7 +55,7 @@ func TestServiceUsesAPITransportForIssueGet(t *testing.T) {
 		Resource:   "issue",
 		ObjectType: "issue",
 		Operation:  "get",
-		Number:     123,
+		ID:         "123",
 	})
 	if err != nil {
 		t.Fatalf("execute issue get through api transport: %v", err)
@@ -85,7 +85,7 @@ func TestAPITransportRequiresToken(t *testing.T) {
 		Resource:   "issue",
 		ObjectType: "issue",
 		Operation:  "get",
-		Number:     123,
+		ID:         "123",
 	})
 	if err == nil {
 		t.Fatal("expected token error")
@@ -484,7 +484,7 @@ func TestAPITransportMapsNotFound(t *testing.T) {
 		Resource:   "issue",
 		ObjectType: "issue",
 		Operation:  "get",
-		Number:     123,
+		ID:         "123",
 	})
 	if err == nil {
 		t.Fatal("expected not-found error")
@@ -531,7 +531,7 @@ func TestAPITransportRemovesMissingLabelIdempotentlyAndContinues(t *testing.T) {
 		Resource:        "label",
 		ObjectType:      "label",
 		Operation:       "remove",
-		Number:          123,
+		ID:              "123",
 		Labels:          []string{"missing", "existing"},
 	})
 	if err != nil {
@@ -587,7 +587,7 @@ func TestAPITransportRemovesOnlyMissingLabelSuccessfully(t *testing.T) {
 		Resource:        "label",
 		ObjectType:      "label",
 		Operation:       "remove",
-		Number:          123,
+		ID:              "123",
 		Labels:          []string{"missing"},
 	})
 	if err != nil || response.Status != model.ResponseStatusOK {
@@ -640,11 +640,11 @@ func TestAPITransportPRGetEnrichesLabelsAndReviewDecision(t *testing.T) {
 	})
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
-		System:     "github",
-		Resource:   "pr",
-		ObjectType: "pr",
-		Operation:  "get",
-		Number:     7,
+		System:             "github",
+		Resource:           "pr",
+		ObjectType:         "pr",
+		Operation:          "get",
+		MergeRequestNumber: 7,
 	})
 	if err != nil {
 		t.Fatalf("execute pr get through api transport: %v", err)
@@ -674,11 +674,11 @@ func TestAPITransportPRGetPreservesHTTPFailureKind(t *testing.T) {
 	})
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
-		System:     "github",
-		Resource:   "pr",
-		ObjectType: "pr",
-		Operation:  "get",
-		Number:     7,
+		System:             "github",
+		Resource:           "pr",
+		ObjectType:         "pr",
+		Operation:          "get",
+		MergeRequestNumber: 7,
 	})
 	if err == nil {
 		t.Fatal("expected permission error")
@@ -712,7 +712,7 @@ func TestAPITransportMapsRateLimit(t *testing.T) {
 		Resource:   "issue",
 		ObjectType: "issue",
 		Operation:  "get",
-		Number:     123,
+		ID:         "123",
 	})
 	if err == nil {
 		t.Fatal("expected rate-limit error")
@@ -748,7 +748,7 @@ func TestAPITransportMapsTimeout(t *testing.T) {
 		Resource:   "issue",
 		ObjectType: "issue",
 		Operation:  "get",
-		Number:     123,
+		ID:         "123",
 	})
 	if err == nil {
 		t.Fatal("expected timeout error")
@@ -793,7 +793,7 @@ func TestAPITransportOperationResultUsesHTTPMethod(t *testing.T) {
 		Resource:        "comment",
 		ObjectType:      "comment",
 		Operation:       "create",
-		Number:          123,
+		ID:              "123",
 		Text:            "created",
 	})
 	if err != nil {
@@ -1036,14 +1036,14 @@ func TestAPITransportPRCommentCreateUsesRESTAndNormalizesSubsequentRead(t *testi
 	defer server.Close()
 
 	service := NewServiceWithConfig(model.IntegrationSystemConfig{Transport: "api", BaseURL: server.URL, Token: "secret", Repository: "owner/name"})
-	created, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Number: 42, Body: "remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	created, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", MergeRequestNumber: 42, Body: "remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil {
 		t.Fatalf("create inline comment: %v", err)
 	}
 	if createCalls != 1 || len(created.ReviewRemarks) != 1 || created.ReviewRemarks[0].ExternalID != "PRRC_comment-1" || created.ReviewRemarks[0].Path != "file.go" || created.ReviewRemarks[0].Line != 12 {
 		t.Fatalf("unexpected create response: calls=%d response=%#v", createCalls, created)
 	}
-	read, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "pull-request", ObjectType: "pull-request", Operation: "comments", Number: 42})
+	read, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "pull-request", ObjectType: "pull-request", Operation: "comments", MergeRequestNumber: 42})
 	if err != nil {
 		t.Fatalf("read comments: %v", err)
 	}

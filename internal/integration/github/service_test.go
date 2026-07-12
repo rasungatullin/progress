@@ -173,7 +173,7 @@ func TestServiceIssueSearchReturnsNormalizedResults(t *testing.T) {
 		t.Fatalf("unexpected search results: %#v", response.SearchResults)
 	}
 	result := response.SearchResults[0]
-	if result.Kind != "issue" || result.Number != 123 || result.Title != "Fix integration" || result.Labels[0] != "ready" {
+	if result.Kind != "issue" || result.ID != "123" || result.Title != "Fix integration" || result.Labels[0] != "ready" {
 		t.Fatalf("unexpected search result: %#v", result)
 	}
 	if result.Author.Login != "bob" || len(result.Assignees) != 1 || result.Assignees[0].Login != "alice" {
@@ -196,7 +196,7 @@ func TestServiceIssueGetSuccess(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", ID: "123"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -206,8 +206,8 @@ func TestServiceIssueGetSuccess(t *testing.T) {
 	if response.Issue.Repository != "owner/name" {
 		t.Fatalf("unexpected repository: %q", response.Issue.Repository)
 	}
-	if response.Issue.Number != 123 {
-		t.Fatalf("unexpected number: %d", response.Issue.Number)
+	if response.Issue.ID != "123" {
+		t.Fatalf("unexpected id: %s", response.Issue.ID)
 	}
 	if len(response.Issue.Labels) != 2 || response.Issue.Labels[0] != "bug" || response.Issue.Labels[1] != "integration" {
 		t.Fatalf("unexpected labels: %#v", response.Issue.Labels)
@@ -232,7 +232,7 @@ func TestServiceIssueGetRejectsInvalidRepository(t *testing.T) {
 	service := NewService()
 	service.runner = &stubRunner{}
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner", RepoProvided: true, Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner", RepoProvided: true, ID: "123"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -251,7 +251,7 @@ func TestServiceIssueGetRejectsNonPositiveNumber(t *testing.T) {
 	service := NewService()
 	service.runner = &stubRunner{}
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 0})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", ID: "0"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -278,7 +278,7 @@ func TestServiceIssueGetMapsNotFound(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", ID: "123"})
 	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -286,7 +286,7 @@ func TestServiceIssueGetMapsNotFound(t *testing.T) {
 	if response.IssueStatus.State != ErrorCodeNotFound {
 		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
 	}
-	if response.IssueStatus.Repository != "owner/name" || response.IssueStatus.Number != 123 {
+	if response.IssueStatus.Repository != "owner/name" || response.IssueStatus.ID != "123" {
 		t.Fatalf("unexpected issue target: %#v", response.IssueStatus)
 	}
 }
@@ -305,7 +305,7 @@ func TestServiceIssueGetMapsRepositoryNotFound(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "missing/repo", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "missing/repo", ID: "123"})
 	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -313,7 +313,7 @@ func TestServiceIssueGetMapsRepositoryNotFound(t *testing.T) {
 	if response.IssueStatus.State != ErrorCodeNotFound {
 		t.Fatalf("unexpected state: %q", response.IssueStatus.State)
 	}
-	if response.IssueStatus.Repository != "missing/repo" || response.IssueStatus.Number != 123 {
+	if response.IssueStatus.Repository != "missing/repo" || response.IssueStatus.ID != "123" {
 		t.Fatalf("unexpected issue target: %#v", response.IssueStatus)
 	}
 }
@@ -332,7 +332,7 @@ func TestServiceIssueGetMapsAuthRequired(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", ID: "123"})
 	assertGitHubErrorCode(t, err, ErrorCodeAuthRequired)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -357,7 +357,7 @@ func TestServiceIssueGetMapsMalformedJSONToNormalizedError(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", ID: "123"})
 	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -388,7 +388,7 @@ func TestServiceIssueGetUsesConfiguredDefaultRepository(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", ID: "123"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestServiceIssueGetRejectsExplicitEmptyRepositoryWithoutUsingDefault(t *tes
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Number: 123, RepoProvided: true})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", ID: "123", RepoProvided: true})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -443,7 +443,7 @@ func TestServiceIssueGetAllowsNilAuthor(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "get", Repository: "owner/name", ID: "123"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestServiceIssueCommentsSuccess(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", ID: "123"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestServiceIssueCommentsSuccess(t *testing.T) {
 		t.Fatalf("expected one comment, got %#v", response.Comments)
 	}
 	comment := response.Comments[0]
-	if comment.Repository != "owner/name" || comment.Number != 123 {
+	if comment.Repository != "owner/name" || comment.TaskID != "123" {
 		t.Fatalf("unexpected target: %#v", comment)
 	}
 	if comment.Author.Login != "alice" || comment.Author.URL != "https://github.com/alice" {
@@ -522,7 +522,7 @@ func TestServiceIssueCommentsFlattensPaginatedSlurpPayload(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", ID: "123"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestServiceIssueCommentsUsesConfiguredDefaultRepository(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", ID: "123"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestServiceIssueCommentsRejectsExplicitEmptyRepositoryWithoutUsingDefault(t
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Number: 123, RepoProvided: true})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", ID: "123", RepoProvided: true})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -607,7 +607,7 @@ func TestServiceIssueCommentsMapsMalformedJSONToNormalizedError(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", Number: 123})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "issue", Operation: "comments", Repository: "owner/name", ID: "123"})
 	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
 	if response.IssueStatus == nil {
 		t.Fatal("expected issue status")
@@ -640,7 +640,7 @@ func TestServiceIssueLabelAddSuccess(t *testing.T) {
 		ObjectType:      "label",
 		Operation:       "add",
 		Repository:      "owner/name",
-		Number:          123,
+		ID:              "123",
 		Labels:          []string{"external-bug", "backend"},
 	})
 	if err != nil {
@@ -677,7 +677,7 @@ func TestServiceIssueLabelAddFailureUsesIssueEditDiagnostics(t *testing.T) {
 		ObjectType:      "label",
 		Operation:       "add",
 		Repository:      "owner/name",
-		Number:          123,
+		ID:              "123",
 		Labels:          []string{"external-bug"},
 	})
 	assertGitHubErrorCode(t, err, StateExternalFailure)
@@ -707,7 +707,7 @@ func TestServiceIssueLabelRemoveRequiresLabels(t *testing.T) {
 		ObjectType:      "label",
 		Operation:       "remove",
 		Repository:      "owner/name",
-		Number:          123,
+		ID:              "123",
 	})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if stub.issueLabelCalls != 0 {
@@ -733,7 +733,7 @@ func TestServicePRGetSuccess(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Repository: "owner/name", Number: 321})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Repository: "owner/name", MergeRequestNumber: 321})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -778,7 +778,7 @@ func TestServicePRGetUsesConfiguredDefaultRepository(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Number: 321})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", MergeRequestNumber: 321})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -802,7 +802,7 @@ func TestServicePRGetRejectsExplicitEmptyRepositoryWithoutUsingDefault(t *testin
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Number: 321, RepoProvided: true})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", MergeRequestNumber: 321, RepoProvided: true})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
 	if response.PullRequestStatus == nil {
 		t.Fatal("expected pull request status")
@@ -833,7 +833,7 @@ func TestServicePRGetMapsMissingPullRequestToNotFound(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Repository: "owner/name", Number: 321})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Repository: "owner/name", MergeRequestNumber: 321})
 	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
 	if response.PullRequestStatus == nil {
 		t.Fatal("expected pull request status")
@@ -864,7 +864,7 @@ func TestServicePullRequestGetAliasUsesPRHandler(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pull-request", Operation: "get", Repository: "owner/name", Number: 321})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pull-request", Operation: "get", Repository: "owner/name", MergeRequestNumber: 321})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1502,14 +1502,14 @@ func TestServicePRCommentsCombinesConversationAndReviewThreads(t *testing.T) {
 	service.runner = stub
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
-		IntegrationType: model.IntegrationTypeRepository,
-		System:          "github",
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "comments",
-		Repository:      "owner/name",
-		RepoProvided:    true,
-		Number:          42,
+		IntegrationType:    model.IntegrationTypeRepository,
+		System:             "github",
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "comments",
+		Repository:         "owner/name",
+		RepoProvided:       true,
+		MergeRequestNumber: 42,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -1548,18 +1548,18 @@ func TestServicePRCommentCreateInline(t *testing.T) {
 	service.runner = stub
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
-		IntegrationType: model.IntegrationTypeRepository,
-		System:          "github",
-		Resource:        "comment",
-		ObjectType:      "comment",
-		Operation:       "create",
-		Repository:      "owner/name",
-		RepoProvided:    true,
-		Number:          42,
-		Body:            "Inline remark",
-		Path:            "file.go",
-		Line:            12,
-		Side:            "RIGHT",
+		IntegrationType:    model.IntegrationTypeRepository,
+		System:             "github",
+		Resource:           "comment",
+		ObjectType:         "comment",
+		Operation:          "create",
+		Repository:         "owner/name",
+		RepoProvided:       true,
+		MergeRequestNumber: 42,
+		Body:               "Inline remark",
+		Path:               "file.go",
+		Line:               12,
+		Side:               "RIGHT",
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -1593,7 +1593,7 @@ func TestServicePRCommentCreateReusesAndSubmitsPendingReview(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, System: "github", Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, System: "github", Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1615,7 +1615,7 @@ func TestServicePRCommentCreateDoesNotSubmitCompletedReview(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, System: "github", Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, System: "github", Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1642,7 +1642,7 @@ func TestServicePRCommentCreateRecoversWhenFailedSubmissionWasCompleted(t *testi
 	}
 	service := NewService()
 	service.runner = stub
-	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"}
+	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"}
 
 	if _, err := service.Execute(context.Background(), request); err == nil {
 		t.Fatal("expected first submission to report the external failure")
@@ -1674,7 +1674,7 @@ func TestServicePRCommentCreateRemovesPendingReviewWithoutAssociatedComment(t *t
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil || response.Status != model.ResponseStatusOK {
 		t.Fatalf("unexpected response: %#v, error: %v", response, err)
 	}
@@ -1755,7 +1755,7 @@ func TestServicePRCommentCreateInlineAcceptsNumericRESTIdentifier(t *testing.T) 
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1774,7 +1774,7 @@ func TestServicePRCommentCreateInlineChecksExistingRemarkBeforeCreate(t *testing
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1795,7 +1795,7 @@ func TestServicePRCommentCreateSubmitsPendingReviewAfterExistingRemark(t *testin
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1822,7 +1822,7 @@ func TestServicePRCommentCreatePublishesMultipleInlineRemarksThroughSeparateRevi
 	service := NewService()
 	service.runner = stub
 
-	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Path: "file.go", Line: 12, Side: "RIGHT"}
+	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Path: "file.go", Line: 12, Side: "RIGHT"}
 	request.Body = "Inline remark"
 	if _, err := service.Execute(context.Background(), request); err != nil {
 		t.Fatalf("first comment create: %v", err)
@@ -1844,7 +1844,7 @@ func TestServicePRCommentCreateInlineClassifiesPartialPayload(t *testing.T) {
 	service := NewService()
 	service.runner = stub
 
-	_, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	_, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || !strings.Contains(ghErr.Message, "createReviewComment") || !strings.Contains(ghErr.Message, "https://github.com/owner/name/pull/42") || strings.Contains(ghErr.Message, "secret") {
 		t.Fatalf("unexpected partial payload error: %#v", err)
@@ -1870,7 +1870,7 @@ func TestServicePRCommentCreateClosesPendingReviewAfterRecoveringExistingRemark(
 	service := NewService()
 	service.runner = stub
 
-	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1901,7 +1901,7 @@ func TestServicePRCommentCreateRetriesAfterReviewSubmitFailure(t *testing.T) {
 	}
 	service := NewService()
 	service.runner = stub
-	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"}
+	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, MergeRequestNumber: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"}
 
 	if _, err := service.Execute(context.Background(), request); err == nil {
 		t.Fatal("expected first review submission to fail")
@@ -1960,14 +1960,14 @@ func TestServicePRCommentsSupportsReviewRemarkObjectAlias(t *testing.T) {
 	service.runner = stub
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
-		IntegrationType: model.IntegrationTypeRepository,
-		System:          "github",
-		Resource:        "comment",
-		ObjectType:      "review-remark",
-		Operation:       "list",
-		Repository:      "owner/name",
-		RepoProvided:    true,
-		Number:          42,
+		IntegrationType:    model.IntegrationTypeRepository,
+		System:             "github",
+		Resource:           "comment",
+		ObjectType:         "review-remark",
+		Operation:          "list",
+		Repository:         "owner/name",
+		RepoProvided:       true,
+		MergeRequestNumber: 42,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)

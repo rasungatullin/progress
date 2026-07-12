@@ -60,7 +60,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		System:    "github",
 		Resource:  "issue",
 		Operation: "get",
-		Number:    input.TaskNumber,
+		ID:        strconv.Itoa(input.TaskNumber),
 	})
 	if err != nil {
 		return StartResult{}, err
@@ -132,11 +132,11 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 }
 
 func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.TrackerIssue) (*integration.MergeRequest, error) {
-	if issue == nil || issue.Number <= 0 || strings.TrimSpace(issue.Repository) == "" {
+	if issue == nil || strings.TrimSpace(issue.ID) == "" || strings.TrimSpace(issue.Repository) == "" {
 		return nil, nil
 	}
 
-	head := strconv.Itoa(issue.Number)
+	head := issue.ID
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType: integrationmodel.IntegrationTypeRepository,
 		Resource:        "merge-request",
@@ -174,13 +174,13 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 
 	state := &MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest)}
 	response, err := s.integration.Execute(ctx, integration.Request{
-		IntegrationType: integrationmodel.IntegrationTypeRepository,
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "comments",
-		Repository:      mergeRequest.Repository,
-		RepoProvided:    strings.TrimSpace(mergeRequest.Repository) != "",
-		Number:          mergeRequest.Number,
+		IntegrationType:    integrationmodel.IntegrationTypeRepository,
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "comments",
+		Repository:         mergeRequest.Repository,
+		RepoProvided:       strings.TrimSpace(mergeRequest.Repository) != "",
+		MergeRequestNumber: mergeRequest.Number,
 	})
 	if err != nil {
 		if state.HasMergeConflict {
@@ -400,7 +400,7 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 		result.Failure = decisionFailure("missing_issue", err, false, true)
 		return result, err
 	}
-	if result.Context.Task.Number == 0 {
+	if strings.TrimSpace(result.Context.Task.ID) == "" {
 		result.Context.Task = canonicalTaskFromIssue(input.Context.Issue)
 	}
 
@@ -581,7 +581,7 @@ func buildExecuteDecision(context DecisionContext, route selectedWorkflowRoute) 
 		Checks:  append([]RouteCheckResult(nil), route.Checks...),
 		Reasons: reasons,
 		ExecutionPlan: &ExecutionPlan{
-			TaskNumber:      issue.Number,
+			TaskNumber:      numericIssueID(issue.ID),
 			TaskTitle:       issue.Title,
 			Action:          route.Action,
 			ExpectedResult:  route.ExpectedResult,
@@ -638,7 +638,8 @@ func canonicalTaskFromIssue(issue *integration.TrackerIssue) integration.Canonic
 	return integration.CanonicalTask{
 		System:     strings.TrimSpace(issue.System),
 		Repository: strings.TrimSpace(issue.Repository),
-		Number:     issue.Number,
+		ID:         issue.ID,
+		ExternalID: issue.ExternalID,
 		Title:      strings.TrimSpace(issue.Title),
 		Body:       strings.TrimSpace(issue.Body),
 		State:      strings.TrimSpace(issue.State),
@@ -696,7 +697,7 @@ func executionRelatedObjectsFromDecisionContext(context DecisionContext) []execu
 }
 
 func executionObjectRefFromCanonicalTask(task integration.CanonicalTask) *execution.ObjectRef {
-	if task.Number == 0 && strings.TrimSpace(task.Title) == "" && strings.TrimSpace(task.URL) == "" {
+	if strings.TrimSpace(task.ID) == "" && strings.TrimSpace(task.Title) == "" && strings.TrimSpace(task.URL) == "" {
 		return nil
 	}
 
@@ -704,7 +705,7 @@ func executionObjectRefFromCanonicalTask(task integration.CanonicalTask) *execut
 		Type:       "task",
 		System:     strings.TrimSpace(task.System),
 		Repository: strings.TrimSpace(task.Repository),
-		Number:     task.Number,
+		Number:     numericIssueID(task.ID),
 		Title:      strings.TrimSpace(task.Title),
 		URL:        strings.TrimSpace(task.URL),
 		Attributes: cloneStringMap(task.Attributes),
@@ -765,7 +766,7 @@ func decisionFailure(code string, err error, retryable bool, manualIntervention 
 
 func buildExecutionTask(issue *integration.TrackerIssue) string {
 	lines := []string{
-		fmt.Sprintf("Task #%d: %s", issue.Number, strings.TrimSpace(issue.Title)),
+		fmt.Sprintf("Task #%s: %s", issue.ID, strings.TrimSpace(issue.Title)),
 	}
 
 	if repository := strings.TrimSpace(issue.Repository); repository != "" {
@@ -793,6 +794,11 @@ func buildExecutionTask(issue *integration.TrackerIssue) string {
 	)
 
 	return strings.Join(lines, "\n")
+}
+
+func numericIssueID(id string) int {
+	number, _ := strconv.Atoi(strings.TrimSpace(id))
+	return number
 }
 
 func ensureLogger(logger *log.Logger) *log.Logger {

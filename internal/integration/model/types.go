@@ -30,72 +30,72 @@ const (
 )
 
 type Request struct {
-	IntegrationType string
-	System          string
-	SystemProvided  bool
-	Resource        string
-	ObjectType      string
-	Operation       string
-	Repository      string
-	RepoProvided    bool
-	ID              string
-	Number          int // переходное поле для старых адаптеров
-	ExternalID      string
-	Base            string
-	Head            string
-	Title           string
-	Body            string
-	Text            string
-	Draft           bool
-	Query           string
-	State           string
-	Scope           string
-	Limit           int
-	Path            string
-	Line            int
-	Side            string
-	ChannelID       string
-	ThreadID        string
-	MessageID       string
-	Reaction        string
-	Fields          []string
-	Labels          []string
-	ExcludeLabels   []string
+	IntegrationType    string
+	System             string
+	SystemProvided     bool
+	Resource           string
+	ObjectType         string
+	Operation          string
+	Repository         string
+	RepoProvided       bool
+	ID                 string
+	MergeRequestNumber int
+	ExternalID         string
+	Base               string
+	Head               string
+	Title              string
+	Body               string
+	Text               string
+	Draft              bool
+	Query              string
+	State              string
+	Scope              string
+	Limit              int
+	Path               string
+	Line               int
+	Side               string
+	ChannelID          string
+	ThreadID           string
+	MessageID          string
+	Reaction           string
+	Fields             []string
+	Labels             []string
+	ExcludeLabels      []string
 }
 
 type ProviderRequest struct {
-	IntegrationType string
-	System          string
-	SystemProvided  bool
-	Resource        string
-	ObjectType      string
-	Operation       string
-	Repository      string
-	RepoProvided    bool
-	ID              string
-	Number          int // переходное поле для старых адаптеров
-	ExternalID      string
-	Base            string
-	Head            string
-	Title           string
-	Body            string
-	Text            string
-	Draft           bool
-	Query           string
-	State           string
-	Scope           string
-	Limit           int
-	Path            string
-	Line            int
-	Side            string
-	ChannelID       string
-	ThreadID        string
-	MessageID       string
-	Reaction        string
-	Fields          []string
-	Labels          []string
-	ExcludeLabels   []string
-	Route           Route
+	IntegrationType    string
+	System             string
+	SystemProvided     bool
+	Resource           string
+	ObjectType         string
+	Operation          string
+	Repository         string
+	RepoProvided       bool
+	ID                 string
+	MergeRequestNumber int
+	ExternalID         string
+	Base               string
+	Head               string
+	Title              string
+	Body               string
+	Text               string
+	Draft              bool
+	Query              string
+	State              string
+	Scope              string
+	Limit              int
+	Path               string
+	Line               int
+	Side               string
+	ChannelID          string
+	ThreadID           string
+	MessageID          string
+	Reaction           string
+	Fields             []string
+	Labels             []string
+	ExcludeLabels      []string
+	Route              Route
 }
 
 type IntegrationConfigFile struct {
@@ -253,7 +253,7 @@ type RepositoryStatus struct {
 type IssueStatus struct {
 	System      string
 	Repository  string
-	Number      int
+	ID          string
 	State       string
 	Command     string
 	Path        string
@@ -340,7 +340,6 @@ type OperationOutputContract struct {
 type CanonicalTask struct {
 	System     string
 	Repository string
-	Number     int // Совместимое поле; новые запросы используют ID.
 	ID         string
 	ExternalID string
 	Title      string
@@ -359,7 +358,6 @@ type CanonicalTask struct {
 type TaskComment struct {
 	System     string
 	Repository string
-	TaskNumber int // Совместимое поле; новые запросы используют TaskID.
 	TaskID     string
 	ExternalID string
 	Author     User
@@ -490,7 +488,7 @@ type ObjectLink struct {
 type TrackerIssue struct {
 	System     string
 	Repository string
-	Number     int
+	ID         string
 	ExternalID string
 	Title      string
 	Body       string
@@ -523,7 +521,7 @@ type TrackerPullRequest struct {
 type TrackerComment struct {
 	System     string
 	Repository string
-	Number     int
+	TaskID     string
 	Author     TrackerUser
 	Body       string
 	URL        string
@@ -567,7 +565,7 @@ type TrackerSearchResult struct {
 	System     string
 	Repository string
 	Kind       string
-	Number     int
+	ID         string
 	Title      string
 	State      string
 	Labels     []string

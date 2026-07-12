@@ -15,6 +15,8 @@ import (
 
 func TestIntegrationDispatcherCommandPrintsDiagnosticRoute(t *testing.T) {
 	t.Parallel()
+	assertIntegrationCommandAbsent(t, "dispatcher")
+	return
 
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
@@ -47,6 +49,8 @@ func TestIntegrationDispatcherCommandPrintsDiagnosticRoute(t *testing.T) {
 
 func TestIntegrationDispatcherCommandPrintsJSONRoute(t *testing.T) {
 	t.Parallel()
+	assertIntegrationCommandAbsent(t, "dispatch")
+	return
 
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
@@ -83,6 +87,8 @@ func TestIntegrationDispatcherCommandPrintsJSONRoute(t *testing.T) {
 
 func TestIntegrationDispatcherCommandPrintsJSONRouteOnInvalidRequest(t *testing.T) {
 	t.Parallel()
+	assertIntegrationCommandAbsent(t, "private")
+	return
 
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
@@ -123,7 +129,7 @@ func TestIntegrationCommandRejectsUnknownFormat(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"integration", "dispatcher", "--format", "xml", "--system", "github", "--resource", "issue", "--operation", "get"})
+	cmd.SetArgs([]string{"integration", "operations", "--format", "xml"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -159,7 +165,7 @@ func TestIntegrationOperationsCommandPrintsJSONCatalog(t *testing.T) {
 	if len(payload) != 1 {
 		t.Fatalf("expected one operation, got %#v", payload)
 	}
-	if payload[0].Name != "tracker.task.get" || payload[0].System != "github" {
+	if payload[0].Name != "issue.issue.get" || payload[0].System != "github" {
 		t.Fatalf("unexpected operation descriptor: %#v", payload[0])
 	}
 	if !payload[0].Available {
@@ -168,6 +174,8 @@ func TestIntegrationOperationsCommandPrintsJSONCatalog(t *testing.T) {
 }
 
 func TestIntegrationPrivateSetCommandStoresValueWithoutPrintingIt(t *testing.T) {
+	assertIntegrationCommandAbsent(t, "private")
+	return
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -206,6 +214,8 @@ func TestIntegrationPrivateSetCommandStoresValueWithoutPrintingIt(t *testing.T) 
 }
 
 func TestIntegrationPrivateSetCommandReadsValueFromStdin(t *testing.T) {
+	assertIntegrationCommandAbsent(t, "private")
+	return
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -921,7 +931,7 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedIssue(t *testing.T) {
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     123,
+				ID:         "123",
 				Title:      "Fix integration",
 				Body:       "Line one\n\n  indented line\nLine two",
 				State:      "OPEN",
@@ -954,7 +964,7 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedIssue(t *testing.T) {
 		"resource=issue\n",
 		"operation=get\n",
 		"repository=owner/name\n",
-		"number=123\n",
+		"id=123\n",
 		"title=Fix integration\n",
 		"state=OPEN\n",
 		"author_login=bob\n",
@@ -994,7 +1004,7 @@ func TestIntegrationGitHubIssueGetCommandPrintsJSONResult(t *testing.T) {
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     123,
+				ID:         "123",
 				Title:      "Fix integration",
 				Body:       "body",
 				State:      "OPEN",
@@ -1018,8 +1028,8 @@ func TestIntegrationGitHubIssueGetCommandPrintsJSONResult(t *testing.T) {
 	if payload.Issue == nil {
 		t.Fatal("expected issue in json response")
 	}
-	if payload.Issue.Number != 123 {
-		t.Fatalf("unexpected issue number: %d", payload.Issue.Number)
+	if payload.Issue.ID != "123" {
+		t.Fatalf("unexpected issue identifier: %s", payload.Issue.ID)
 	}
 	if payload.Issue.State != "OPEN" {
 		t.Fatalf("unexpected issue state: %q", payload.Issue.State)
@@ -1044,7 +1054,7 @@ func TestIntegrationGitHubIssueSearchCommandPassesFiltersAndPrintsResults(t *tes
 				System:     "github",
 				Repository: "owner/name",
 				Kind:       "issue",
-				Number:     123,
+				ID:         "123",
 				Title:      "Fix integration",
 				State:      "OPEN",
 				Labels:     []string{"Готово к реализации", "backend"},
@@ -1079,7 +1089,7 @@ func TestIntegrationGitHubIssueSearchCommandPassesFiltersAndPrintsResults(t *tes
 	output := stdout.String()
 	for _, fragment := range []string{
 		"issue_count=1\n",
-		"number=123\n",
+		"id=123\n",
 		"title=Fix integration\n",
 		"state=OPEN\n",
 		"label=Готово к реализации\n",
@@ -1174,7 +1184,7 @@ func TestIntegrationGitHubIssueSearchCommandPrintsJSONResult(t *testing.T) {
 			Resource:  "issue",
 			Operation: "search",
 			SearchResults: []integration.TrackerSearchResult{{
-				Number: 123,
+				ID:     "123",
 				Title:  "Fix integration",
 				Labels: []string{"ready"},
 			}},
@@ -1213,7 +1223,7 @@ func TestIntegrationGitHubIssueGetCommandPrintsJSONMalformedResponseResultOnErro
 			IssueStatus: &integration.IssueStatus{
 				System:      "github",
 				Repository:  "owner/name",
-				Number:      123,
+				ID:          "123",
 				State:       "external-failure",
 				Command:     "gh",
 				Path:        "/usr/local/bin/gh",
@@ -1284,7 +1294,7 @@ func TestIntegrationGitHubIssueGetCommandAllowsOmittedRepoFlag(t *testing.T) {
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     123,
+				ID:         "123",
 				Title:      "Title",
 			},
 		},
@@ -1363,7 +1373,7 @@ func TestIntegrationGitHubIssueGetCommandPrintsNormalizedErrorResult(t *testing.
 			IssueStatus: &integration.IssueStatus{
 				System:      "github",
 				Repository:  "owner/name",
-				Number:      123,
+				ID:          "123",
 				State:       "auth-required",
 				Command:     "gh",
 				Path:        "/usr/local/bin/gh",
@@ -1428,7 +1438,7 @@ func TestIntegrationGitHubIssueCommentsCommandPrintsNormalizedComments(t *testin
 			Comments: []integration.TrackerComment{{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     123,
+				TaskID:     "123",
 				Author:     integration.TrackerUser{System: "github", Login: "alice", Name: "Alice", URL: "https://github.com/alice"},
 				Body:       "First line\nSecond line",
 				URL:        "https://github.com/owner/name/issues/123#issuecomment-1",
@@ -1529,7 +1539,7 @@ func TestIntegrationGitHubIssueCommentsCommandPrintsJSONResult(t *testing.T) {
 			Comments: []integration.TrackerComment{{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     123,
+				TaskID:     "123",
 				Author:     integration.TrackerUser{System: "github", Login: "alice"},
 				Body:       "body",
 			}},
@@ -1667,7 +1677,7 @@ func TestIntegrationGitHubIssueCommentsCommandPrintsNormalizedErrorResult(t *tes
 			IssueStatus: &integration.IssueStatus{
 				System:      "github",
 				Repository:  "owner/name",
-				Number:      123,
+				ID:          "123",
 				State:       "auth-required",
 				Command:     "gh",
 				Path:        "/usr/local/bin/gh",
@@ -2343,7 +2353,7 @@ func TestIntegrationGitHubPRListCommandPassesFilters(t *testing.T) {
 		t.Fatalf("execute github pr list command: %v", err)
 	}
 
-	if provider.request.IntegrationType != "repository" || provider.request.Operation != "search" {
+	if provider.request.IntegrationType != "repo" || provider.request.Operation != "search" {
 		t.Fatalf("unexpected request: %#v", provider.request)
 	}
 	if provider.request.State != "open" || provider.request.Scope != "reviewer" || provider.request.Limit != 5 || provider.request.Query != "label:bug" {
@@ -2395,7 +2405,7 @@ func TestIntegrationGitHubPRCommentCreateCommandPassesInlineLocation(t *testing.
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute github pr comment create command: %v", err)
 	}
-	if provider.request.IntegrationType != "repository" || provider.request.Resource != "comment" || provider.request.Operation != "create" {
+	if provider.request.IntegrationType != "repo" || provider.request.Resource != "comment" || provider.request.Operation != "create" || provider.request.MergeRequestNumber != 42 {
 		t.Fatalf("unexpected request: %#v", provider.request)
 	}
 	if provider.request.Path != "file.go" || provider.request.Line != 12 || provider.request.Body != "Fix this" {
@@ -2431,7 +2441,7 @@ func TestIntegrationGitHubPRCommentResolveCommandPassesThread(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute github pr comment resolve command: %v", err)
 	}
-	if provider.request.ThreadID != "thread-1" || provider.request.Operation != "resolve" || provider.request.IntegrationType != "repository" {
+	if provider.request.ThreadID != "thread-1" || provider.request.Operation != "resolve" || provider.request.IntegrationType != "repo" {
 		t.Fatalf("unexpected request: %#v", provider.request)
 	}
 	output := stdout.String()
@@ -2464,7 +2474,7 @@ func TestIntegrationGitHubPRCommentReplyCommandPassesThread(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute github pr comment reply command: %v", err)
 	}
-	if provider.request.ThreadID != "thread-1" || provider.request.Body != "Reply body" || provider.request.Operation != "reply" || provider.request.IntegrationType != "repository" {
+	if provider.request.ThreadID != "thread-1" || provider.request.Body != "Reply body" || provider.request.Operation != "reply" || provider.request.IntegrationType != "repo" {
 		t.Fatalf("unexpected request: %#v", provider.request)
 	}
 	output := stdout.String()
@@ -2496,7 +2506,7 @@ func TestIntegrationGitHubIssueLabelAddCommandSendsCanonicalLabels(t *testing.T)
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute github issue label add command: %v", err)
 	}
-	if provider.request.Operation != "add" || provider.request.IntegrationType != "tracker" {
+	if provider.request.Operation != "add" || provider.request.IntegrationType != "issue" || provider.request.ID != "123" {
 		t.Fatalf("unexpected request: %#v", provider.request)
 	}
 	if strings.Join(provider.request.Labels, ",") != "bug,backend" {
@@ -2624,6 +2634,25 @@ type capturingPrivateStore struct {
 	values map[string]string
 }
 
+func assertIntegrationCommandAbsent(t *testing.T, name string) {
+	t.Helper()
+	root := NewRootCommand()
+	integrationCommand, _, err := root.Find([]string{"integration"})
+	if err != nil {
+		t.Fatalf("найти команду integration: %v", err)
+	}
+	for _, command := range integrationCommand.Commands() {
+		if command.Name() == name {
+			t.Fatalf("команда integration %s не должна входить в публичное дерево", name)
+		}
+		for _, alias := range command.Aliases {
+			if alias == name {
+				t.Fatalf("псевдоним integration %s не должен входить в публичное дерево", name)
+			}
+		}
+	}
+}
+
 func (s *capturingPrivateStore) Get(_ context.Context, name string) (string, error) {
 	value, ok := s.values[name]
 	if !ok {
@@ -2644,6 +2673,8 @@ func (s *capturingPrivateStore) Delete(_ context.Context, name string) error {
 
 func TestIntegrationDispatcherCommandPrintsDiagnosticsOnInvalidRequest(t *testing.T) {
 	t.Parallel()
+	assertIntegrationCommandAbsent(t, "dispatcher")
+	return
 
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}

@@ -92,6 +92,8 @@
 
 Выбор системы выполняется реестром: `System` задаётся явно флагом `--system` либо определяется по системе по умолчанию для предметного типа. Неизвестная система, отсутствующая система по умолчанию и неподдерживаемая операция возвращаются как диагностируемый отказ.
 
+Изменение классифицировано как `Переходный контракт`. До следующего несовместимого выпуска сохраняются команды по именам систем и чтение значений `tracker` и `repository` в настройках. Команды выводят предупреждение с целевой типо-ориентированной формой, а загрузка старых имён настроек фиксирует предупреждение совместимости. После того как эксплуатационные настройки будут переведены на `issue` и `repo`, оболочки команд по именам систем и нормализация старых имён удаляются отдельным изменением публичного контракта. Команды `integration dispatcher`, `integration dispatch` и `integration private` в переход не входят: первая пара заменена прямым разрешением через реестр, а хранилище приватных значений не является типом интеграции.
+
 Актуальная реализация находится в `internal/integration/model/types.go`. Основной вход — `Request`, внутренний вход адаптера — `ProviderRequest`, выход — `Response`.
 
 Ключевые поля `Request`:
@@ -105,7 +107,8 @@ type Request struct {
     ObjectType      string
     Operation       string
     Repository      string
-    ID              string // непрозрачный идентификатор объекта
+    ID              string // непрозрачный идентификатор объекта issue
+    MergeRequestNumber int // числовой идентификатор запроса на слияние переходного контура
     ExternalID      string
     Base            string
     Head            string
@@ -186,7 +189,7 @@ type Repository struct {
 type Issue struct {
     System     System
     Repository string
-    Number     int
+    ID         string
     Title      string
     Body       string
     State      string
@@ -202,7 +205,7 @@ type Issue struct {
 type IssueComment struct {
     System      System
     ID          string
-    IssueNumber int
+    IssueID     string
     Author      string
     Body        string
     URL         string
@@ -502,7 +505,7 @@ type IssueGetRequest struct {
     ObjectType      string // канонический объект типа интеграции
     Operation       string // "get"
     Repository      string
-    Number          int
+    ID              string
 }
 ```
 
@@ -513,7 +516,7 @@ type IssueGetRequest struct {
 - `ObjectType` — тип канонического объекта;
 - `Operation` — интеграционная операция;
 - `Repository` — опорный контекст, если он нужен для разрешения объекта;
-- `Number` — канонический идентификатор задачи внутри контекста источника;
+- `ID` — непрозрачный строковый идентификатор задачи внутри контекста источника;
 
 Если `Fields` не указан, контур должен вернуть базовый каноничный набор полей сущности.
 

@@ -22,7 +22,7 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     123,
+				ID:         "123",
 				Title:      "Implement decision start",
 				State:      "OPEN",
 				URL:        "https://github.com/owner/name/issues/123",
@@ -53,8 +53,8 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if result.Context.Issue == nil {
 		t.Fatal("expected issue in context")
 	}
-	if result.Context.Issue.Number != 123 {
-		t.Fatalf("unexpected issue number: %d", result.Context.Issue.Number)
+	if result.Context.Issue.ID != "123" {
+		t.Fatalf("unexpected issue identifier: %s", result.Context.Issue.ID)
 	}
 	if result.Decision == nil {
 		t.Fatal("expected decision in result")
@@ -101,8 +101,8 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	if integrationStub.requests[0].System != "github" || integrationStub.requests[0].Resource != "issue" || integrationStub.requests[0].Operation != "get" {
 		t.Fatalf("unexpected issue request: %#v", integrationStub.requests[0])
 	}
-	if integrationStub.requests[0].Number != 123 {
-		t.Fatalf("unexpected issue request number: %d", integrationStub.requests[0].Number)
+	if integrationStub.requests[0].ID != "123" {
+		t.Fatalf("unexpected issue request identifier: %s", integrationStub.requests[0].ID)
 	}
 	if integrationStub.requests[1].IntegrationType != integrationmodel.IntegrationTypeRepository || integrationStub.requests[1].Resource != "merge-request" || integrationStub.requests[1].Operation != "search" {
 		t.Fatalf("unexpected merge-request request: %#v", integrationStub.requests[1])
@@ -135,7 +135,7 @@ func TestServiceStartRecoversMergeRequestForReviewRoute(t *testing.T) {
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     201,
+				ID:         "201",
 				Title:      "Run review route",
 				Labels:     []string{"Ожидает экспертизы"},
 			},
@@ -201,7 +201,7 @@ func TestServiceStartReturnsMergeRequestSearchErrorForReviewRoute(t *testing.T) 
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     201,
+				ID:         "201",
 				Title:      "Run review route",
 				Labels:     []string{"Ожидает экспертизы"},
 			},
@@ -262,7 +262,7 @@ func TestServiceStartReturnsMergeRequestSearchErrorForExplicitReviewRoute(t *tes
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     202,
+				ID:         "202",
 				Title:      "Run explicit review route",
 			},
 		},
@@ -338,7 +338,7 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 211},
 		Issue: &integration.TrackerIssue{
 			Repository: "owner/name",
-			Number:     211,
+			ID:         "211",
 			Title:      "Assess task description",
 			Labels:     []string{"description-assessment"},
 		},
@@ -361,7 +361,7 @@ func TestServiceConsiderBuildsExecutionAssignmentFromWorkflowRoute(t *testing.T)
 	if result.ExecutionPlan == nil {
 		t.Fatal("expected execution plan")
 	}
-	if result.Context.Task.Number != 211 || result.Context.Task.Traits[0] != "description-assessment" {
+	if result.Context.Task.ID != "211" || result.Context.Task.Traits[0] != "description-assessment" {
 		t.Fatalf("expected canonical task in consideration context: %#v", result.Context.Task)
 	}
 	if result.ExecutionPlan.Action != "task-description-assessment" {
@@ -424,7 +424,7 @@ func TestServiceConsiderUsesExplicitNamedRoute(t *testing.T) {
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Route: "review-only", Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 212},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 212, Title: "Review external change"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "212", Title: "Review external change"},
 		MergeRequest: &integration.MergeRequest{
 			System: "github", Repository: "owner/name", Number: 12, HeadRef: "212",
 		},
@@ -467,7 +467,7 @@ func TestServiceConsiderUsesCompatibleDefaultRouteForLegacyWorkflowConfig(t *tes
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 215},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 215, Title: "Legacy route"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "215", Title: "Legacy route"},
 	}})
 	if err != nil {
 		t.Fatalf("consider: %v", err)
@@ -510,7 +510,7 @@ func TestServiceConsiderUsesLegacyWorkflowDefaultsWhenNoRouteMatches(t *testing.
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 218},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 218, Title: "Legacy default fallback"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "218", Title: "Legacy default fallback"},
 	}})
 	if err != nil {
 		t.Fatalf("consider: %v", err)
@@ -548,7 +548,7 @@ func TestServiceConsiderUsesLegacyWorkflowDefaultsWithoutRoutes(t *testing.T) {
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 219},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 219, Title: "Legacy defaults only"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "219", Title: "Legacy defaults only"},
 	}})
 	if err != nil {
 		t.Fatalf("consider: %v", err)
@@ -585,7 +585,7 @@ func TestServiceConsiderUsesCompatibleDefaultRouteForLegacyMethodologyCatalog(t 
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 216},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 216, Title: "Legacy methodology route"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "216", Title: "Legacy methodology route"},
 	}})
 	if err != nil {
 		t.Fatalf("consider: %v", err)
@@ -631,7 +631,7 @@ func TestServiceConsiderUsesLegacyMethodologyDefaultWhenNoRouteMatches(t *testin
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 220},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 220, Title: "Legacy methodology default fallback"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "220", Title: "Legacy methodology default fallback"},
 	}})
 	if err != nil {
 		t.Fatalf("consider: %v", err)
@@ -667,7 +667,7 @@ func TestServiceConsiderUsesDefaultRouteForLegacyMethodologyDefault(t *testing.T
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 217},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 217, Title: "Legacy default route"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "217", Title: "Legacy default route"},
 	}})
 	if err != nil {
 		t.Fatalf("consider: %v", err)
@@ -709,7 +709,7 @@ func TestServiceConsiderResolvesMethodologyRouteCheckReference(t *testing.T) {
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 217},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 217, Title: "Referenced check"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "217", Title: "Referenced check"},
 	}})
 	if err != nil {
 		t.Fatalf("consider: %v", err)
@@ -740,7 +740,7 @@ func TestServiceConsiderDiagnosesMissingDefaultRoute(t *testing.T) {
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 213},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 213, Title: "No route"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "213", Title: "No route"},
 	}})
 	if err == nil {
 		t.Fatal("expected missing default route error")
@@ -777,7 +777,7 @@ func TestServiceConsiderDiagnosesDefaultRouteNotFound(t *testing.T) {
 	service := &Service{logger: log.Default(), resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
 	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 214},
-		Issue:  &integration.TrackerIssue{Repository: "owner/name", Number: 214, Title: "Missing default route"},
+		Issue:  &integration.TrackerIssue{Repository: "owner/name", ID: "214", Title: "Missing default route"},
 	}})
 	if err == nil {
 		t.Fatal("expected default route not found error")
@@ -795,7 +795,7 @@ func TestServiceConsiderCompletesWhenReviewPassed(t *testing.T) {
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
 		Issue: &integration.TrackerIssue{
 			Repository: "owner/name",
-			Number:     123,
+			ID:         "123",
 			Title:      "Completed task",
 			Labels:     []string{"Экспертиза пройдена"},
 		},
@@ -823,7 +823,7 @@ func TestServiceConsiderRoutesReviewPassedTaskToReworkForExternalRemarks(t *test
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
 		Issue: &integration.TrackerIssue{
 			Repository: "owner/name",
-			Number:     123,
+			ID:         "123",
 			Title:      "Completed task",
 			Labels:     []string{"Экспертиза пройдена"},
 		},
@@ -862,7 +862,7 @@ func TestServiceConsiderRoutesReviewPassedTaskToReworkForMergeConflict(t *testin
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
 		Issue: &integration.TrackerIssue{
 			Repository: "owner/name",
-			Number:     123,
+			ID:         "123",
 			Title:      "Completed task",
 			Labels:     []string{"Экспертиза пройдена"},
 		},
@@ -911,7 +911,7 @@ func TestServiceConsiderRequiresMergeRequestForReview(t *testing.T) {
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
 		Issue: &integration.TrackerIssue{
 			Repository: "owner/name",
-			Number:     123,
+			ID:         "123",
 			Title:      "Review task",
 			Labels:     []string{"Ожидает экспертизы"},
 		},
@@ -935,7 +935,7 @@ func TestServiceConsiderPassesMergeRequestToReviewAssignment(t *testing.T) {
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 123},
 		Issue: &integration.TrackerIssue{
 			Repository: "owner/name",
-			Number:     123,
+			ID:         "123",
 			Title:      "Review task",
 			Labels:     []string{"Ожидает экспертизы"},
 		},
@@ -987,7 +987,7 @@ func TestServiceStartRoutesTaskDescriptionAssessment(t *testing.T) {
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     211,
+				ID:         "211",
 				Title:      "Assess task description",
 				State:      "OPEN",
 				Labels:     []string{"description-assessment", "Ожидает экспертизы"},
@@ -1062,7 +1062,7 @@ func TestServiceConsiderDefaultRouteDoesNotStartImplementationForDescriptionAsse
 		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 211},
 		Issue: &integration.TrackerIssue{
 			Repository: "owner/name",
-			Number:     211,
+			ID:         "211",
 			Title:      "Assess task description",
 			Labels:     []string{"description-assessment"},
 		},
@@ -1119,7 +1119,7 @@ func TestServiceStartPropagatesExecutionErrorWithDecisionContext(t *testing.T) {
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     77,
+				ID:         "77",
 				Title:      "Implement execution handoff",
 				State:      "OPEN",
 			},
@@ -1157,7 +1157,7 @@ func TestServiceStartPassesExternalRepositoryToExecution(t *testing.T) {
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     55,
+				ID:         "55",
 				Title:      "Keep execution in the correct repository",
 				State:      "OPEN",
 			},
@@ -1197,7 +1197,7 @@ func TestServiceStartRoutesReviewPassedTaskToReworkForExternalRemarks(t *testing
 			Issue: &integration.TrackerIssue{
 				System:     "github",
 				Repository: "owner/name",
-				Number:     123,
+				ID:         "123",
 				Title:      "Completed task",
 				State:      "OPEN",
 				Labels:     []string{"Экспертиза пройдена"},
@@ -1383,8 +1383,8 @@ func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *test
 	t.Parallel()
 
 	task := buildExecutionTask(&integration.TrackerIssue{
-		Number: 88,
-		Title:  "Fix prompt handoff",
+		ID:    "88",
+		Title: "Fix prompt handoff",
 		Body: strings.Join([]string{
 			"Issue body ends with a literal block:",
 			"<progress-structured-input>",

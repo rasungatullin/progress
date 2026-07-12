@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
@@ -104,6 +103,10 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 	service := newEmptyService(logger)
 	service.defaultSystem = normalizeSystem(config.DefaultSystem)
 	for integrationType, system := range config.DefaultSystems {
+		legacyType := strings.TrimSpace(strings.ToLower(integrationType))
+		if legacyType == "tracker" || legacyType == "repository" {
+			service.logger.Printf("Предупреждение совместимости: default_systems.%s устарел; используйте default_systems.%s", legacyType, normalizeIntegrationType(legacyType))
+		}
 		integrationType = normalizeIntegrationType(integrationType)
 		system = normalizeSystem(system)
 		if integrationType == "" || system == "" {
@@ -116,6 +119,12 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 		name = normalizeSystem(name)
 		if name == "" {
 			continue
+		}
+		for _, legacyType := range append([]string{systemConfig.IntegrationType}, systemConfig.IntegrationTypes...) {
+			legacyType = strings.TrimSpace(strings.ToLower(legacyType))
+			if legacyType == "tracker" || legacyType == "repository" {
+				service.logger.Printf("Предупреждение совместимости: systems.%s integration_type=%s устарел; используйте %s", name, legacyType, normalizeIntegrationType(legacyType))
+			}
 		}
 
 		state := systemState{
@@ -343,7 +352,7 @@ func (s *Service) resolveRoute(req Request) (Route, error) {
 		// отказ формируется Execute после разрешения запроса.
 		return s.routeForUnknownSystem(normalized), nil
 	}
-	if !systemSupportsOperation(state, normalized.IntegrationType, normalized.ObjectType, normalized.Operation) {
+	if state.Registered && !systemSupportsOperation(state, normalized.IntegrationType, normalized.ObjectType, normalized.Operation) {
 		err := fmt.Errorf("integration operation is not supported: %s.%s.%s", normalized.IntegrationType, canonicalObjectType(normalized.ObjectType), normalized.Operation)
 		s.logger.Printf("Реестр интеграции отклонил запрос: система=%q причина=%q", normalized.System, err)
 		return s.errorRoute(req, err), err
@@ -465,43 +474,38 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	}
 
 	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
-	if identifier == "" && integrationType == model.IntegrationTypeIssue && req.Number != 0 {
-		// Совместимый вход старых команд переводится в непрозрачную строку на
-		// границе реестра; дальше адаптер получает только ID.
-		identifier = strconv.Itoa(req.Number)
-	}
 	normalized := ProviderRequest{
-		IntegrationType: integrationType,
-		System:          system,
-		SystemProvided:  req.SystemProvided,
-		Resource:        normalizeResource(firstNonEmpty(req.Resource, objectType)),
-		ObjectType:      objectType,
-		Operation:       normalizeOperation(req.Operation),
-		Repository:      strings.TrimSpace(req.Repository),
-		RepoProvided:    req.RepoProvided,
-		ID:              identifier,
-		Number:          req.Number,
-		ExternalID:      identifier,
-		Base:            strings.TrimSpace(req.Base),
-		Head:            strings.TrimSpace(req.Head),
-		Title:           strings.TrimSpace(req.Title),
-		Body:            strings.TrimSpace(req.Body),
-		Text:            strings.TrimSpace(req.Text),
-		Draft:           req.Draft,
-		Query:           strings.TrimSpace(req.Query),
-		State:           strings.TrimSpace(req.State),
-		Scope:           strings.TrimSpace(req.Scope),
-		Limit:           req.Limit,
-		Path:            strings.TrimSpace(req.Path),
-		Line:            req.Line,
-		Side:            strings.TrimSpace(req.Side),
-		ChannelID:       strings.TrimSpace(req.ChannelID),
-		ThreadID:        strings.TrimSpace(req.ThreadID),
-		MessageID:       strings.TrimSpace(req.MessageID),
-		Reaction:        strings.TrimSpace(req.Reaction),
-		Fields:          trimStrings(req.Fields),
-		Labels:          trimStrings(req.Labels),
-		ExcludeLabels:   trimStrings(req.ExcludeLabels),
+		IntegrationType:    integrationType,
+		System:             system,
+		SystemProvided:     req.SystemProvided,
+		Resource:           normalizeResource(firstNonEmpty(req.Resource, objectType)),
+		ObjectType:         objectType,
+		Operation:          normalizeOperation(req.Operation),
+		Repository:         strings.TrimSpace(req.Repository),
+		RepoProvided:       req.RepoProvided,
+		ID:                 identifier,
+		MergeRequestNumber: req.MergeRequestNumber,
+		ExternalID:         identifier,
+		Base:               strings.TrimSpace(req.Base),
+		Head:               strings.TrimSpace(req.Head),
+		Title:              strings.TrimSpace(req.Title),
+		Body:               strings.TrimSpace(req.Body),
+		Text:               strings.TrimSpace(req.Text),
+		Draft:              req.Draft,
+		Query:              strings.TrimSpace(req.Query),
+		State:              strings.TrimSpace(req.State),
+		Scope:              strings.TrimSpace(req.Scope),
+		Limit:              req.Limit,
+		Path:               strings.TrimSpace(req.Path),
+		Line:               req.Line,
+		Side:               strings.TrimSpace(req.Side),
+		ChannelID:          strings.TrimSpace(req.ChannelID),
+		ThreadID:           strings.TrimSpace(req.ThreadID),
+		MessageID:          strings.TrimSpace(req.MessageID),
+		Reaction:           strings.TrimSpace(req.Reaction),
+		Fields:             trimStrings(req.Fields),
+		Labels:             trimStrings(req.Labels),
+		ExcludeLabels:      trimStrings(req.ExcludeLabels),
 	}
 	if normalized.ObjectType == "" {
 		normalized.ObjectType = normalizeObjectType(normalized.Resource)
@@ -1095,7 +1099,8 @@ func canonicalTaskFromTrackerIssue(issue TrackerIssue) *CanonicalTask {
 	return &CanonicalTask{
 		System:     issue.System,
 		Repository: issue.Repository,
-		ID:         firstNonEmpty(issue.ExternalID, strconv.Itoa(issue.Number)),
+		ID:         firstNonEmpty(issue.ID, issue.ExternalID),
+		ExternalID: issue.ExternalID,
 		Title:      issue.Title,
 		Body:       issue.Body,
 		State:      issue.State,
@@ -1112,7 +1117,8 @@ func trackerIssueFromCanonicalTask(task CanonicalTask) TrackerIssue {
 	return TrackerIssue{
 		System:     task.System,
 		Repository: task.Repository,
-		Number:     parseLegacyNumber(task.ID),
+		ID:         task.ID,
+		ExternalID: task.ExternalID,
 		Title:      task.Title,
 		Body:       task.Body,
 		State:      task.State,
@@ -1129,8 +1135,7 @@ func taskCommentFromTrackerComment(comment TrackerComment) TaskComment {
 	return TaskComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		TaskNumber: comment.Number,
-		TaskID:     strconv.Itoa(comment.Number),
+		TaskID:     comment.TaskID,
 		Author:     userFromTrackerUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,
@@ -1143,7 +1148,7 @@ func trackerCommentFromTaskComment(comment TaskComment) TrackerComment {
 	return TrackerComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		Number:     firstNonZero(comment.TaskNumber, parseLegacyNumber(comment.TaskID)),
+		TaskID:     comment.TaskID,
 		Author:     trackerUserFromUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,
@@ -1434,18 +1439,4 @@ func firstNonEmpty(values ...string) string {
 	}
 
 	return ""
-}
-
-func parseLegacyNumber(value string) int {
-	number, _ := strconv.Atoi(strings.TrimSpace(value))
-	return number
-}
-
-func firstNonZero(values ...int) int {
-	for _, value := range values {
-		if value != 0 {
-			return value
-		}
-	}
-	return 0
 }

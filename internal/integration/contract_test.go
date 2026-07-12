@@ -1,9 +1,11 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log"
+	"strings"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/integration/model"
@@ -80,5 +82,24 @@ func TestIssueRequestWithoutDefaultSystemFailsDiagnostically(t *testing.T) {
 	_, err := service.Execute(context.Background(), Request{IntegrationType: model.IntegrationTypeIssue, Resource: "issue", Operation: "search"})
 	if err == nil || err.Error() != `invalid integration request: no default system configured for integration type "issue"` {
 		t.Fatalf("unexpected missing default error: %v", err)
+	}
+}
+
+func TestLegacyIntegrationTypeSettingsAreNormalizedWithDiagnostic(t *testing.T) {
+	var diagnostics bytes.Buffer
+	service := NewServiceFromConfig(log.New(&diagnostics, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{"tracker": "work-tracker"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"work-tracker": {Type: "script", IntegrationTypes: []string{"tracker"}},
+		},
+	})
+	service.RegisterProvider("work-tracker", &contractProvider{})
+
+	if _, err := service.Execute(context.Background(), Request{IntegrationType: model.IntegrationTypeIssue, Resource: "issue", Operation: "get", ID: "ABC-123"}); err != nil {
+		t.Fatalf("выполнить запрос через старую настройку: %v", err)
+	}
+	output := diagnostics.String()
+	if !strings.Contains(output, "default_systems.tracker устарел") || !strings.Contains(output, "integration_type=tracker устарел") {
+		t.Fatalf("отсутствует диагностика перехода: %q", output)
 	}
 }

@@ -29,7 +29,7 @@ func TestReactivityProcessCommandPrintsCycles(t *testing.T) {
 			Cycles: []reactivity.TaskProcessingCycle{{
 				Index: 1,
 				Issue: &integration.TrackerIssue{
-					Number: 123,
+					ID:     "123",
 					Title:  "Task",
 					State:  "OPEN",
 					Labels: []string{"Тестовая задача"},
@@ -42,7 +42,7 @@ func TestReactivityProcessCommandPrintsCycles(t *testing.T) {
 				Execution:    &execution.LaunchResult{Status: "completed"},
 				LabelChanges: []reactivity.LabelChange{{Operation: "add", Labels: []string{reactivity.LabelAwaitingReview}}},
 			}},
-			FinalIssue: &integration.TrackerIssue{Number: 123, Labels: []string{"Тестовая задача", reactivity.LabelAwaitingReview}},
+			FinalIssue: &integration.TrackerIssue{ID: "123", Labels: []string{"Тестовая задача", reactivity.LabelAwaitingReview}},
 		}}
 	})
 
