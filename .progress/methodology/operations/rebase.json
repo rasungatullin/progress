@@ -1,0 +1,19 @@
+{
+  "name": "rebase",
+  "kind": "rebase",
+  "title": "Безопасное перебазирование ветки",
+  "type": "builtin",
+  "required": true,
+  "contract": {
+    "in": {
+      "directory": {"type": "string", "required": true, "description": "Каталог рабочего места."},
+      "base_ref": {"type": "string", "required": true, "description": "Явно выбранная базовая ссылка."},
+      "push": {"type": "boolean", "description": "Явное разрешение отправки ветки после перебазирования."},
+      "force_with_lease": {"type": "boolean", "description": "Запрос безопасной принудительной отправки; дополнительно требует настройки Git."},
+      "git": {"type": "object", "description": "Настройки Git из ресурсного снабжения."}
+    },
+    "out": {
+      "rebase_summary": {"type": "string", "description": "Сводка перебазирования и отправки ветки."}
+    }
+  }
+}

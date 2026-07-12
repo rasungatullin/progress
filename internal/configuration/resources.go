@@ -655,7 +655,7 @@ func isGitConfigEmpty(config *model.GitConfig) bool {
 	}
 	identityEmpty := config.Identity == nil || (config.Identity.AuthorName == "" && config.Identity.AuthorEmail == "" && config.Identity.CommitterName == "" && config.Identity.CommitterEmail == "")
 	signingEmpty := config.Signing == nil || (!config.Signing.Enabled && config.Signing.Format == "" && config.Signing.SigningKey == "" && config.Signing.Program == "")
-	pushEmpty := config.Push == nil || (config.Push.SSHIdentityFile == "" && config.Push.SSHIdentityPrivate == "" && config.Push.KnownHostsFile == "" && !config.Push.IdentitiesOnly)
+	pushEmpty := config.Push == nil || (config.Push.SSHIdentityFile == "" && config.Push.SSHIdentityPrivate == "" && config.Push.KnownHostsFile == "" && !config.Push.IdentitiesOnly && !config.Push.AllowForceWithLease)
 	return identityEmpty && signingEmpty && pushEmpty
 }
 
