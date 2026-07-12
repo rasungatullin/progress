@@ -543,7 +543,7 @@ func (r *APIRunner) RunPRCommentCreate(ctx context.Context, repository string, n
 	if pullRequestID == "" {
 		return apiErrorResult("pr comment create", config, &Error{Code: ErrorCodeNotFound, Message: fmt.Sprintf("GitHub pull request not found: %s#%d", repository, number)})
 	}
-	mutation := `mutation($pullRequestId: ID!, $body: String!, $path: String!, $line: Int!, $side: DiffSide!) { addPullRequestReviewThread(input: {pullRequestId: $pullRequestId, body: $body, path: $path, line: $line, side: $side}) { thread { id isResolved comments(first: 1) { nodes { id body url path line author { login url } createdAt updatedAt } } } } }`
+	mutation := `mutation($pullRequestId: ID!, $body: String!, $path: String!, $line: Int!, $side: DiffSide!) { addPullRequestReviewThread(input: {pullRequestId: $pullRequestId, body: $body, path: $path, line: $line, side: $side}) { thread { id isResolved path line comments(first: 1) { nodes { id body url path line author { login url } createdAt updatedAt } } } userErrors: errors { message path type } } }`
 	var raw json.RawMessage
 	result, err := r.graphql(ctx, config, mutation, map[string]any{"pullRequestId": pullRequestID, "body": request.Body, "path": request.Path, "line": request.Line, "side": request.Side}, &raw)
 	if err != nil {

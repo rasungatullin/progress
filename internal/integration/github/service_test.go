@@ -1588,6 +1588,55 @@ func TestServicePRCommentCreateInline(t *testing.T) {
 	}
 }
 
+func TestServicePRCommentCreateInlineAcceptsThreadOnlyPayload(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{result: CommandResult{ExitCode: 0, Stdout: `{"data":{"addPullRequestReviewThread":{"thread":{"id":"thread-1","path":"file.go","line":12}}}}`}}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.OperationResult == nil || response.OperationResult.ExternalID != "thread-1" {
+		t.Fatalf("expected thread identifier: %#v", response.OperationResult)
+	}
+}
+
+func TestServicePRCommentCreateInlineChecksExistingRemarkAfterPartialPayload(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result:       CommandResult{ExitCode: 0, Stdout: `{"data":{"addPullRequestReviewThread":{}}}`},
+		reviewResult: CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.prCommentCalls != 1 || stub.prReviewCalls != 1 || response.OperationResult == nil || response.OperationResult.ExternalID != "comment-1" {
+		t.Fatalf("unexpected idempotency result: calls=%d/%d result=%#v", stub.prCommentCalls, stub.prReviewCalls, response.OperationResult)
+	}
+}
+
+func TestServicePRCommentCreateInlineClassifiesPartialPayload(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{result: CommandResult{ExitCode: 0, Stdout: `{"data":{"addPullRequestReviewThread":{}}}`}, reviewResult: CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`}}
+	service := NewService()
+	service.runner = stub
+
+	_, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	var ghErr *Error
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || !strings.Contains(ghErr.Message, "addPullRequestReviewThread") || strings.Contains(ghErr.Message, "secret") {
+		t.Fatalf("unexpected partial payload error: %#v", err)
+	}
+}
+
 func TestServicePRCommentsSupportsReviewRemarkObjectAlias(t *testing.T) {
 	t.Parallel()
 

@@ -840,6 +840,39 @@ func TestAPITransportMapsGraphQLErrors(t *testing.T) {
 	}
 }
 
+func TestAPITransportPRCommentCreateRequestsThreadAndPayloadErrors(t *testing.T) {
+	t.Parallel()
+
+	var mutation string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode graphql request: %v", err)
+		}
+		if strings.Contains(request.Query, "addPullRequestReviewThread") {
+			mutation = request.Query
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"addPullRequestReviewThread": map[string]any{"thread": map[string]any{"id": "thread-1", "comments": map[string]any{"nodes": []map[string]any{{"id": "comment-1"}}}}, "userErrors": []any{}}}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"id": "pr-1"}}}})
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{systemConfig: model.IntegrationSystemConfig{BaseURL: server.URL, Token: "secret", Repository: "owner/name"}, client: server.Client()}
+	result, _, err := runner.RunPRCommentCreate(context.Background(), "", 42, PRCommentCreateRequest{Body: "remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("create inline comment: %v", err)
+	}
+	if !strings.Contains(mutation, "thread") || !strings.Contains(mutation, "comments(first: 1)") || !strings.Contains(mutation, "userErrors: errors") {
+		t.Fatalf("mutation does not request stable identifiers and payload errors: %s", mutation)
+	}
+	if !strings.Contains(result.Stdout, "thread-1") || !strings.Contains(result.Stdout, "comment-1") {
+		t.Fatalf("unexpected mutation response: %s", result.Stdout)
+	}
+}
+
 func TestAPITransportDoesNotSendMergedAsRESTState(t *testing.T) {
 	t.Parallel()
 
