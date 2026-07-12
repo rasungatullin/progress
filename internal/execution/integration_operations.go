@@ -825,6 +825,27 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 		}
 		response, err := executor.Execute(ctx, request)
 		if err != nil {
+			if request.Operation == "reply" && staleGitHubReviewThread(response, err) {
+				if line > 0 {
+					request.Operation = "create"
+					request.ExternalID = ""
+					request.ThreadID = ""
+					response, err = executor.Execute(ctx, request)
+				} else {
+					fallbackPublished, fallbackErr := e.publishReviewRemarkFallback(ctx, executor, ref, body)
+					if fallbackErr == nil {
+						if fallbackPublished {
+							count++
+						}
+						continue
+					}
+					err = errors.Join(err, fmt.Errorf("fallback to pull request comment failed: %w", fallbackErr))
+				}
+				if err == nil {
+					count++
+					continue
+				}
+			}
 			if line > 0 && request.Operation == "create" && unresolvedGitHubReviewLine(response, err) {
 				fallbackBody := reviewRemarkFallbackBody(body, path, line, side)
 				published, fallbackErr := e.publishReviewRemarkFallback(ctx, executor, ref, fallbackBody)
@@ -859,6 +880,17 @@ func unresolvedGitHubReviewLine(response integration.Response, err error) bool {
 	return strings.Contains(message, "status 422") &&
 		strings.Contains(message, "pull_request_review_thread.line") &&
 		strings.Contains(message, "could not be resolved")
+}
+
+func staleGitHubReviewThread(response integration.Response, err error) bool {
+	if err == nil {
+		return false
+	}
+	if response.System != "" && !strings.EqualFold(strings.TrimSpace(response.System), "github") {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "github") && strings.Contains(message, "could not resolve to a node") && strings.Contains(message, "global id")
 }
 
 func reviewRemarkFallbackBody(body, path string, line int, side string) string {
@@ -947,8 +979,19 @@ func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Cont
 			request.ThreadID = threadID
 			request.ExternalID = threadID
 		}
-		_, err := executor.Execute(ctx, request)
+		integrationResponse, err := executor.Execute(ctx, request)
 		if err != nil {
+			if typ == "inline" && staleGitHubReviewThread(integrationResponse, err) {
+				fallbackPublished, fallbackErr := e.publishReviewRemarkFallback(ctx, executor, ref, body)
+				if fallbackErr == nil {
+					if fallbackPublished {
+						count++
+						published = append(published, response)
+					}
+					continue
+				}
+				err = errors.Join(err, fmt.Errorf("fallback to pull request comment failed: %w", fallbackErr))
+			}
 			failures = append(failures, fmt.Errorf("publish review response %s: %w", reviewResponseTarget(response), err))
 			continue
 		}
@@ -987,7 +1030,7 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 			continue
 		}
 		seen[threadID] = struct{}{}
-		_, err := executor.Execute(ctx, integration.Request{
+		integrationResponse, err := executor.Execute(ctx, integration.Request{
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
 			ObjectType:      "comment",
@@ -996,6 +1039,9 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 			ThreadID:        threadID,
 		})
 		if err != nil {
+			if staleGitHubReviewThread(integrationResponse, err) {
+				continue
+			}
 			failures = append(failures, fmt.Errorf("resolve review response %s: %w", reviewResponseTarget(response), err))
 			continue
 		}
@@ -1023,14 +1069,18 @@ func (e builtinOperationExecutor) updateReviewRemarkThreads(ctx context.Context,
 			continue
 		}
 		seen[threadID] = struct{}{}
-		if _, err := executor.Execute(ctx, integration.Request{
+		integrationResponse, err := executor.Execute(ctx, integration.Request{
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
 			ObjectType:      "comment",
 			Operation:       operation,
 			ExternalID:      threadID,
 			ThreadID:        threadID,
-		}); err != nil {
+		})
+		if err != nil {
+			if staleGitHubReviewThread(integrationResponse, err) {
+				continue
+			}
 			return updated, err
 		}
 		updated++

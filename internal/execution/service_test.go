@@ -3821,6 +3821,102 @@ func TestPublishPullRequestCommentsDoesNotFallbackForOtherGitHub422(t *testing.T
 	}
 }
 
+func TestPublishPullRequestCommentsRecreatesRemarkAfterStaleThread(t *testing.T) {
+	integrations := &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		switch req.Operation {
+		case "reply":
+			return integration.Response{System: "github"}, errors.New("GitHub GraphQL returned errors: Could not resolve to a node with the global id of 'PRRT_old'")
+		case "create":
+			if req.ThreadID != "" || req.ExternalID != "" || req.Path != "internal/service.go" || req.Line != 42 {
+				t.Fatalf("stale thread must be replaced with a current inline comment: %#v", req)
+			}
+			return integration.Response{Status: "ok"}, nil
+		default:
+			t.Fatalf("unexpected integration request: %#v", req)
+			return integration.Response{}, nil
+		}
+	}}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body:       "## Замечание ревизии\n\nИсправление проверено.",
+		Path:       "internal/service.go",
+		Line:       42,
+		Side:       "RIGHT",
+		ThreadID:   "PRRT_old",
+		ExternalID: "PRRC_old",
+	}})
+	if err != nil || count != 1 {
+		t.Fatalf("stale thread must not stop publication, count=%d err=%v", count, err)
+	}
+}
+
+func TestPublishPullRequestCommentsSkipsStaleThreadStateUpdate(t *testing.T) {
+	integrations := &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		return integration.Response{System: "github"}, errors.New("GitHub GraphQL returned errors: Could not resolve to a node with the global id of 'PRRT_old'")
+	}}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	updated, err := executor.updateReviewRemarkThreads(context.Background(), []reviewRemarkComment{{ThreadID: "PRRT_old", Status: "resolved"}})
+	if err != nil || updated != 0 || len(integrations.calls) != 1 {
+		t.Fatalf("stale thread state update must be skipped, updated=%d calls=%#v err=%v", updated, integrations.calls, err)
+	}
+}
+
+func TestPublishPullRequestCommentsDoesNotDuplicateStaleThreadFallback(t *testing.T) {
+	const body = "## Замечание ревизии\n\nПозиция больше недоступна."
+	createCalls := 0
+	integrations := &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		switch req.Operation {
+		case "reply":
+			return integration.Response{System: "github"}, errors.New("GitHub GraphQL returned errors: Could not resolve to a node with the global id of 'PRRT_old'")
+		case "comments":
+			if createCalls == 0 {
+				return integration.Response{}, nil
+			}
+			return integration.Response{ReviewRemarks: []integration.ReviewRemark{{Body: body}}}, nil
+		case "create":
+			createCalls++
+			return integration.Response{Status: "ok"}, nil
+		default:
+			t.Fatalf("unexpected integration request: %#v", req)
+			return integration.Response{}, nil
+		}
+	}}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+	comment := []reviewRemarkComment{{Body: body, ThreadID: "PRRT_old", ExternalID: "PRRC_old"}}
+
+	for i := 0; i < 2; i++ {
+		count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, comment)
+		if err != nil || count != 1 {
+			t.Fatalf("stale thread fallback run %d failed, count=%d err=%v", i+1, count, err)
+		}
+	}
+	if createCalls != 1 {
+		t.Fatalf("stale thread fallback must be idempotent, create calls=%d", createCalls)
+	}
+}
+
+func TestPublishPullRequestCommentsDoesNotFallbackForOtherGraphQLError(t *testing.T) {
+	integrations := &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		if req.Operation != "reply" {
+			t.Fatalf("other GraphQL errors must not trigger fallback: %#v", req)
+		}
+		return integration.Response{System: "github"}, errors.New("GitHub authentication failed: Could not resolve to a node")
+	}}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body:     "remark",
+		Path:     "file.go",
+		Line:     12,
+		ThreadID: "PRRT_old",
+	}})
+	if err == nil || count != 0 {
+		t.Fatalf("other GraphQL errors must remain errors, count=%d err=%v", count, err)
+	}
+}
+
 func TestPublishPullRequestCommentsContinuesExistingReviewThread(t *testing.T) {
 	integrations := &stubIntegrationExecutor{}
 	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
