@@ -516,7 +516,7 @@ func executionStatusCompleted(status string) bool {
 
 func hasReviewRemarks(remarks []execution.StructuredRemark) bool {
 	for _, remark := range remarks {
-		if isResolvedReviewRemark(remark) {
+		if isResolvedReviewRemark(remark) || !isBlockingReviewRemark(remark) {
 			continue
 		}
 		if strings.TrimSpace(remark.ID) != "" ||
@@ -531,6 +531,16 @@ func hasReviewRemarks(remarks []execution.StructuredRemark) bool {
 		}
 	}
 	return false
+}
+
+func isBlockingReviewRemark(remark execution.StructuredRemark) bool {
+	severity := strings.ToLower(strings.TrimSpace(remark.Severity))
+	switch severity {
+	case "minor", "info", "informational", "warning", "non-blocking", "nonblocking":
+		return false
+	default:
+		return true
+	}
 }
 
 func isResolvedReviewRemark(remark execution.StructuredRemark) bool {
