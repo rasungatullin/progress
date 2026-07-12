@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
@@ -35,6 +36,8 @@ type operationExecution struct {
 type builtinOperationExecutor struct {
 	service *Service
 }
+
+const rebaseAbortTimeout = 30 * time.Second
 
 type commitPusher interface {
 	CommitAndPush(context.Context, model.CommitPushInput) (string, error)
@@ -2226,7 +2229,9 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	}
 	if _, err := gitOutput(ctx, input.Directory, "rebase", "--", "FETCH_HEAD"); err != nil {
 		abortErr := error(nil)
-		_, abortErr = gitOutput(ctx, input.Directory, "rebase", "--abort")
+		abortCtx, cancelAbort := context.WithTimeout(context.WithoutCancel(ctx), rebaseAbortTimeout)
+		_, abortErr = gitOutput(abortCtx, input.Directory, "rebase", "--abort")
+		cancelAbort()
 		if abortErr != nil {
 			err = fmt.Errorf("%w; additionally failed to abort rebase: %v", err, abortErr)
 		}

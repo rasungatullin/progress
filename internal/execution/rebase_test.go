@@ -132,6 +132,37 @@ func TestRebaseAbortsAfterConflict(t *testing.T) {
 	}
 }
 
+func TestRebaseAbortsAfterCanceledRebaseWithIndependentContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var abortContextErr error
+	service := &Service{runGitOutput: func(callCtx context.Context, _ string, args ...string) (string, error) {
+		call := strings.Join(args, " ")
+		switch call {
+		case "rev-parse --is-inside-work-tree":
+			return "true", nil
+		case "branch --show-current":
+			return "feature", nil
+		case "rebase -- FETCH_HEAD":
+			cancel()
+			return "", context.Canceled
+		case "rebase --abort":
+			abortContextErr = callCtx.Err()
+			return "", nil
+		default:
+			return "", nil
+		}
+	}}
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "main", HeadRef: "feature"}
+	err := (builtinOperationExecutor{service: service}).rebase(ctx, rebaseTestState(service, input), rebaseTestOperation(input), "rebase")
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected canceled rebase refusal, got %v", err)
+	}
+	if abortContextErr != nil {
+		t.Fatalf("abort must use an independent context, got %v", abortContextErr)
+	}
+}
+
 func TestRebaseRejectsBaseBranch(t *testing.T) {
 	var calls []string
 	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
