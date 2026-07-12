@@ -546,6 +546,9 @@ func writeCatalogElement(path string, element ElementUpsert, writeFile WriteFile
 		return writeRegistryObject(path, action, writeFile, mkdirAll)
 	case element.Instruction != nil:
 		instruction := normalizeInstruction(*element.Instruction)
+		if instruction.BodyFile != "" {
+			instruction.Body = ""
+		}
 		path, err := registryFilePath(root, "instructions", instructionRegistryKey(instruction))
 		if err != nil {
 			return err

@@ -221,6 +221,26 @@ func TestWriteCatalogFilesOmitsLoadedInstructionBody(t *testing.T) {
 	}
 }
 
+func TestWriteCatalogElementOmitsInstructionBodyWhenBodyFileIsSet(t *testing.T) {
+	written := map[string][]byte{}
+	writeFile := func(path string, content []byte, _ fs.FileMode) error {
+		written[path] = append([]byte(nil), content...)
+		return nil
+	}
+
+	err := writeCatalogElement("/repo/.progress/methodology/catalog.json", ElementUpsert{
+		Instruction: &Instruction{Name: "directive", Body: "inline", BodyFile: "texts/directive.md"},
+	}, writeFile, func(string, fs.FileMode) error { return nil })
+	if err != nil {
+		t.Fatalf("write catalog element: %v", err)
+	}
+
+	content := string(written["/repo/.progress/methodology/instructions/directive.json"])
+	if strings.Contains(content, `"body"`) || !strings.Contains(content, `"body_file": "texts/directive.md"`) {
+		t.Fatalf("unexpected instruction content: %s", content)
+	}
+}
+
 func TestSaveCatalogMigratesInstructionBodyFilePath(t *testing.T) {
 	t.Parallel()
 
