@@ -419,7 +419,7 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	result.RouteSource = route.RouteSource
 	result.CheckSources = route.CheckSources
 	result.Checks = route.Checks
-	if strings.TrimSpace(route.Action) == execution.ActionStartImplementationPR && input.Context.MergeRequest != nil {
+	if strings.TrimSpace(route.Action) == execution.ActionStartImplementationPR && isOpenMergeRequest(input.Context.MergeRequest) {
 		route = routeForExistingMergeRequest(route)
 		if externalMergeRequestBlocksCompletion(input.Context.MergeRequestExternalState) {
 			route = reworkRouteForExternalMergeRequestState(route, input.Context.MergeRequestExternalState)
@@ -450,6 +450,19 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	result.Reasons = append([]DecisionReason(nil), decision.Reasons...)
 	result.ExecutionPlan = decision.ExecutionPlan
 	return result, nil
+}
+
+func isOpenMergeRequest(mergeRequest *integration.MergeRequest) bool {
+	if mergeRequest == nil {
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(mergeRequest.State)) {
+	case "", "open":
+		return true
+	default:
+		return false
+	}
 }
 
 func routeForExistingMergeRequest(previous selectedWorkflowRoute) selectedWorkflowRoute {

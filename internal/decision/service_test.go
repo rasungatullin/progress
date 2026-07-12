@@ -957,6 +957,33 @@ func TestServiceConsiderDoesNotStartImplementationWhenMergeRequestExists(t *test
 	}
 }
 
+func TestServiceConsiderAllowsImplementationForClosedMergeRequest(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 143},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			ID:         "143",
+			Title:      "Начать новый цикл",
+		},
+		MergeRequest: &integration.MergeRequest{
+			Repository: "owner/name",
+			Number:     144,
+			BaseRef:    "main",
+			HeadRef:    "143",
+			State:      "CLOSED",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionStartImplementationPR {
+		t.Fatalf("expected implementation execution plan, got %#v", result.ExecutionPlan)
+	}
+}
+
 func TestServiceConsiderPassesMergeRequestToReviewAssignment(t *testing.T) {
 	t.Parallel()
 
