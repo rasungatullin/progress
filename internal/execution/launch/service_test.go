@@ -41,6 +41,37 @@ func TestReadSkillSingleFileChecksumMatchesCatalogSnapshot(t *testing.T) {
 	}
 }
 
+func TestAttachSelectedSkillsReadsLocalSkillFromRepositoryRoot(t *testing.T) {
+	t.Parallel()
+
+	repositoryRoot := t.TempDir()
+	workplaceRoot := t.TempDir()
+	skillRoot := filepath.Join(repositoryRoot, ".progress", "methodology")
+	skillPath := filepath.Join(skillRoot, "skills", "release-checks.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatalf("create skill directory: %v", err)
+	}
+	data := []byte("local uncommitted skill")
+	if err := os.WriteFile(skillPath, data, 0o600); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	invocation := model.Invocation{Assignment: &model.ExecutionAssignment{Skills: []model.SkillRef{{
+		Name:     "release-checks",
+		Purpose:  "Проверка выпуска",
+		Checksum: fmt.Sprintf("sha256:%x", sha256.Sum256(data)),
+		Scope:    "local",
+		Path:     "skills/release-checks.md",
+	}}}}
+	result, err := attachSelectedSkills(invocation, model.Workplace{Name: workplaceRoot, RepositoryRoot: repositoryRoot})
+	if err != nil {
+		t.Fatalf("attach selected skill: %v", err)
+	}
+	if !strings.Contains(result.Launch.PromptAdditions[0], string(data)) {
+		t.Fatalf("attached skill content is missing: %#v", result.Launch.PromptAdditions)
+	}
+}
+
 const (
 	codexRunnerStartupTimeout = "10s"
 	codexRunnerTimeout        = "30s"

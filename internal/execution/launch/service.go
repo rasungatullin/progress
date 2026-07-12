@@ -267,7 +267,7 @@ func attachSelectedSkills(in model.Invocation, workplace model.Workplace) (model
 		return in, nil
 	}
 	for _, skill := range in.Assignment.Skills {
-		root, err := skillCatalogRoot(skill.Scope, workplace.Name)
+		root, err := skillCatalogRoot(skill.Scope, workplace)
 		if err != nil {
 			return in, err
 		}
@@ -287,9 +287,16 @@ func attachSelectedSkills(in model.Invocation, workplace model.Workplace) (model
 	return in, nil
 }
 
-func skillCatalogRoot(scope, workplace string) (string, error) {
+func skillCatalogRoot(scope string, workplace model.Workplace) (string, error) {
 	if scope == "local" {
-		return filepath.Join(workplace, ".progress", "methodology"), nil
+		repositoryRoot := strings.TrimSpace(workplace.RepositoryRoot)
+		if repositoryRoot == "" {
+			repositoryRoot = strings.TrimSpace(workplace.Name)
+		}
+		if repositoryRoot == "" {
+			return "", fmt.Errorf("local skill catalog root is not defined")
+		}
+		return filepath.Join(repositoryRoot, ".progress", "methodology"), nil
 	}
 	if scope != "global" {
 		return "", fmt.Errorf("unsupported skill scope %q", scope)
