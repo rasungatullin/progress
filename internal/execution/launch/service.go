@@ -1441,7 +1441,7 @@ func (w *runnerOutputWriter) Write(p []byte) (int, error) {
 	defer w.mu.Unlock()
 	n, err := w.buffer.Write(p)
 	if n > 0 {
-		w.lastOutputAt = time.Now().UTC()
+		w.lastOutputAt = time.Now()
 	}
 	select {
 	case w.activity <- struct{}{}:

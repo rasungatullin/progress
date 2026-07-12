@@ -148,6 +148,22 @@ func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	}
 }
 
+func TestResetRunnerWatchdogUsesLastOutputTime(t *testing.T) {
+	t.Parallel()
+
+	watchdog := time.NewTimer(time.Hour)
+	defer watchdog.Stop()
+	lastOutputAt := time.Now().Add(-80 * time.Millisecond)
+
+	resetRunnerWatchdog(watchdog, 100*time.Millisecond, lastOutputAt)
+
+	select {
+	case <-watchdog.C:
+	case <-time.After(70 * time.Millisecond):
+		t.Fatal("watchdog was reset from the stale activity signal instead of last output time")
+	}
+}
+
 func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
 	dir := t.TempDir()
 	codexPath := filepath.Join(dir, RunnerCodex)
@@ -155,7 +171,7 @@ func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
 		"if [ \"$1\" != \"exec\" ] || [ \"$2\" != \"--json\" ]; then exit 3; fi\n" +
 		"for value in 1 2 3 4; do\n" +
 		"  printf '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"%s\"}}\\n' \"$value\"\n" +
-		"  sleep .03\n" +
+		"  sleep .05\n" +
 		"done\n"
 	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write codex stand-in: %v", err)
@@ -166,8 +182,8 @@ func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
 		Directory:       t.TempDir(),
 		Runner:          RunnerCodex,
 		Model:           "openai/gpt-5.4",
-		Timeout:         "1s",
-		NoOutputTimeout: "50ms",
+		Timeout:         "5s",
+		NoOutputTimeout: "200ms",
 	}, "ship it")
 	if err != nil {
 		t.Fatalf("codex JSON stream must keep runner active: %v", err)
@@ -183,7 +199,7 @@ func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		"printf '{\"type\":\"thread.started\",\"thread_id\":\"thread-test\"}\\n'\n" +
 		"printf '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"partial\"}}\\n'\n" +
-		"sleep .2\n"
+		"sleep .5\n"
 	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write codex stand-in: %v", err)
 	}
@@ -193,8 +209,8 @@ func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
 		Directory:       t.TempDir(),
 		Runner:          RunnerCodex,
 		Model:           "openai/gpt-5.4",
-		Timeout:         "1s",
-		NoOutputTimeout: "50ms",
+		Timeout:         "5s",
+		NoOutputTimeout: "200ms",
 	}, "ship it")
 	if !errors.Is(err, errRunnerNoOutputTimeout) {
 		t.Fatalf("expected no-output timeout, got %v", err)
