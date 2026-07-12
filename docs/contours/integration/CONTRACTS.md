@@ -306,8 +306,8 @@ type Service interface {
 - `issue.issue.label.add`;
 - `repo.repo.get`;
 - `repo.merge-request.create`;
-- `repo.review-remark.reply`;
-- `repo.review-remark.resolve`;
+- `repo.comment.reply`;
+- `repo.comment.resolve`;
 - `messenger.thread.get`;
 - `wiki.page.search`.
 

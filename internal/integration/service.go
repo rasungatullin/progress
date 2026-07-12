@@ -455,6 +455,14 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	if integrationType == "" {
 		integrationType = s.firstIntegrationTypeForSystem(system)
 	}
+	if objectType == "canonical-object" {
+		switch integrationType {
+		case model.IntegrationTypeIssue:
+			objectType = "issue"
+		case model.IntegrationTypeRepo:
+			objectType = "repository"
+		}
+	}
 
 	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
 	if identifier == "" && integrationType == model.IntegrationTypeIssue && req.Number != 0 {
@@ -497,6 +505,14 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	}
 	if normalized.ObjectType == "" {
 		normalized.ObjectType = normalizeObjectType(normalized.Resource)
+	}
+	if normalized.ObjectType == "canonical-object" {
+		switch normalized.IntegrationType {
+		case model.IntegrationTypeIssue:
+			normalized.ObjectType, normalized.Resource = "issue", "issue"
+		case model.IntegrationTypeRepo:
+			normalized.ObjectType, normalized.Resource = "repository", "repository"
+		}
 	}
 	if state, ok := s.systems[system]; ok {
 		normalized.Labels = mapCanonicalLabelsToExternal(normalized.Labels, state.TaskLabelMapping)

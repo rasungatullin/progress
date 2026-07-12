@@ -158,6 +158,10 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 
 	required := operationFields(operation.Required, operation.Defaults)
 	optional := operationFields(operation.Optional, operation.Defaults)
+	if integrationType == model.IntegrationTypeIssue {
+		required = normalizeIssueOperationFields(required)
+		optional = normalizeIssueOperationFields(optional)
+	}
 
 	available := state.Enabled && state.Registered
 	unsupportedIntegrationType := !systemSupportsIntegrationType(state, integrationType)
@@ -193,6 +197,16 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 		descriptor.Diagnostics = append(descriptor.Diagnostics, "script="+strings.TrimSpace(operation.Script))
 	}
 	return descriptor
+}
+
+func normalizeIssueOperationFields(fields []model.OperationField) []model.OperationField {
+	for i := range fields {
+		if fields[i].Name == "number" {
+			fields[i].Name = "id"
+			fields[i].Type = "string"
+		}
+	}
+	return fields
 }
 
 func scriptOperationHasExecutable(operation model.IntegrationOperationConfig) bool {
@@ -301,7 +315,7 @@ func operationOutputShape(integrationType string, objectType string, operation s
 				return "OperationResult"
 			}
 			return "MergeRequest"
-		case "merge-request-comment", "review-remark":
+		case "merge-request-comment", "review-remark", "comment":
 			if isSideEffectOperation(operation) {
 				return "OperationResult"
 			}
@@ -333,10 +347,15 @@ func canonicalOperationName(integrationType, objectType, operation string) strin
 }
 
 func canonicalObjectType(objectType string) string {
-	if normalizeObjectType(objectType) == "task" {
+	objectType = normalizeObjectType(objectType)
+	switch objectType {
+	case "task":
 		return "issue"
+	case "issue-comment", "merge-request-comment":
+		return "comment"
+	default:
+		return objectType
 	}
-	return normalizeObjectType(objectType)
 }
 
 func normalizeOperationFilter(filter OperationFilter) OperationFilter {
@@ -555,9 +574,9 @@ func reviewRemarkListOperation() operationTemplate {
 
 func reviewRemarkReplyOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repo.review-remark.reply",
+		Name:            "repo.comment.reply",
 		IntegrationType: model.IntegrationTypeRepository,
-		ObjectType:      "review-remark",
+		ObjectType:      "comment",
 		Operation:       "reply",
 		SideEffect:      true,
 		Input:           inputMany([]model.OperationField{requiredField("thread", "string"), requiredField("body", "string")}),
@@ -568,9 +587,9 @@ func reviewRemarkReplyOperation() operationTemplate {
 
 func reviewRemarkResolveOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repo.review-remark.resolve",
+		Name:            "repo.comment.resolve",
 		IntegrationType: model.IntegrationTypeRepository,
-		ObjectType:      "review-remark",
+		ObjectType:      "comment",
 		Operation:       "resolve",
 		SideEffect:      true,
 		Input:           input(requiredField("thread", "string")),

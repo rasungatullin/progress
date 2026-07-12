@@ -267,8 +267,8 @@ progress integration operations --name issue.issue.get
 - `issue.issue.get`;
 - `issue.issue.comment.create`;
 - `repo.merge-request.create`;
-- `repo.review-remark.reply`;
-- `repo.review-remark.resolve`;
+- `repo.comment.reply`;
+- `repo.comment.resolve`;
 - `messenger.message.create`;
 - `wiki.page.search`.
 
