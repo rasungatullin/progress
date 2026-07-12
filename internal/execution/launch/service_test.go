@@ -117,6 +117,142 @@ func TestRunRunnerCommandStopsOnNoOutputTimeout(t *testing.T) {
 	}
 }
 
+func TestRunRunnerCommandStopsOnNoOutputTimeoutWithoutOutput(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Now()
+	_, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "sleep 1"), model.LaunchSpec{
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 500*time.Millisecond {
+		t.Fatalf("silent runner was allowed to run until overall timeout: %s", elapsed)
+	}
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || runnerErr.output != "" || !runnerErr.lastOutputAt.IsZero() {
+		t.Fatalf("unexpected silent-runner diagnostics: %#v", runnerErr)
+	}
+}
+
+func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
+	t.Parallel()
+
+	output, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "for value in 1 2 3 4 5 6; do printf '%s\\n' \"$value\"; sleep .05; done"), model.LaunchSpec{
+		Timeout:         "1s",
+		NoOutputTimeout: "150ms",
+	})
+	if err != nil {
+		t.Fatalf("streaming output must keep runner active: %v", err)
+	}
+	if output != "1\n2\n3\n4\n5\n6\n" {
+		t.Fatalf("unexpected streaming output: %q", output)
+	}
+}
+
+func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
+	t.Parallel()
+
+	_, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "printf first; sleep .5"), model.LaunchSpec{
+		Timeout:         "1s",
+		NoOutputTimeout: "200ms",
+	})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || runnerErr.output != "first" || runnerErr.lastOutputAt.IsZero() {
+		t.Fatalf("missing last-output diagnostics: %#v", runnerErr)
+	}
+}
+
+func TestResetRunnerWatchdogUsesLastOutputTime(t *testing.T) {
+	t.Parallel()
+
+	watchdog := time.NewTimer(time.Hour)
+	defer watchdog.Stop()
+	lastOutputAt := time.Now().Add(-80 * time.Millisecond)
+
+	resetRunnerWatchdog(watchdog, 100*time.Millisecond, lastOutputAt, time.Now())
+
+	select {
+	case <-watchdog.C:
+	case <-time.After(70 * time.Millisecond):
+		t.Fatal("watchdog was reset from the stale activity signal instead of last output time")
+	}
+}
+
+func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
+	codexPath, err := filepath.Abs(filepath.Join("testdata", RunnerCodex))
+	if err != nil {
+		t.Fatalf("resolve codex stand-in: %v", err)
+	}
+	startedAt := time.Now()
+	spec := model.LaunchSpec{
+		Directory:       t.TempDir(),
+		Runner:          RunnerCodex,
+		Model:           "openai/gpt-5.4",
+		Timeout:         "5s",
+		NoOutputTimeout: "500ms",
+	}
+	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "stream")
+	output, err := runCodexRunnerCommand(context.Background(), spec, cmd)
+	if err != nil {
+		t.Fatalf("codex JSON stream must keep runner active: %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed < 500*time.Millisecond {
+		t.Fatalf("codex runner finished before the streaming process: %s", elapsed)
+	}
+	if output != "1\n2\n3\n4\n5\n6" {
+		t.Fatalf("unexpected normalized codex output: %q", output)
+	}
+}
+
+func TestRunnerOutputWriterSnapshotsBeforeProcessExit(t *testing.T) {
+	writer := &runnerOutputWriter{activity: make(chan struct{}, 1)}
+	processExit := make(chan struct{})
+	go func() {
+		_, _ = writer.Write([]byte(`{"type":"item.completed"}\n`))
+		<-processExit
+	}()
+
+	select {
+	case <-writer.activity:
+		output, lastOutputAt := writer.snapshot()
+		if output != `{"type":"item.completed"}\n` || lastOutputAt.IsZero() {
+			t.Fatalf("output was not accumulated before process exit: %q, %v", output, lastOutputAt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("output was not reported before process exit")
+	}
+	close(processExit)
+}
+
+func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
+	codexPath, err := filepath.Abs(filepath.Join("testdata", RunnerCodex))
+	if err != nil {
+		t.Fatalf("resolve codex stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:       t.TempDir(),
+		Runner:          RunnerCodex,
+		Model:           "openai/gpt-5.4",
+		Timeout:         "5s",
+		NoOutputTimeout: "300ms",
+	}
+	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "timeout")
+	_, err = runCodexRunnerCommand(context.Background(), spec, cmd)
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || !strings.Contains(runnerErr.output, `"thread_id":"thread-test"`) || runnerErr.lastOutputAt.IsZero() {
+		t.Fatalf("codex events were not preserved before Wait: %#v", runnerErr)
+	}
+}
+
 func TestLaunchPersistsTimedOutRunnerOutputAndHistory(t *testing.T) {
 	t.Parallel()
 
