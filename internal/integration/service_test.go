@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/configuration/secrets"
@@ -129,6 +130,20 @@ func TestNewServiceFromConfigWithPrivateStoreReportsMissingPrivateValue(t *testi
 	}
 }
 
+func TestResolvePrivateSystemConfigDoesNotExposeStoreErrorText(t *testing.T) {
+	t.Parallel()
+
+	const actualSecret = "actual-secret-from-store-error"
+	config := model.IntegrationSystemConfig{TokenPrivate: "github_token"}
+	err := resolvePrivateSystemConfig(context.Background(), "github", &config, failingPrivateStore{secret: actualSecret})
+	if err == nil {
+		t.Fatal("expected private store error")
+	}
+	if strings.Contains(err.Error(), actualSecret) {
+		t.Fatalf("private store error contains actual value: %v", err)
+	}
+}
+
 func TestResolvePrivateSystemConfigSkipsGitHubAppPrivateKeyAfterPrivateToken(t *testing.T) {
 	t.Parallel()
 
@@ -212,6 +227,14 @@ func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
 
 type mapPrivateStore struct {
 	values map[string]string
+}
+
+type failingPrivateStore struct {
+	secret string
+}
+
+func (s failingPrivateStore) Get(context.Context, string) (string, error) {
+	return s.secret, fmt.Errorf("backend returned %s", s.secret)
 }
 
 func (s mapPrivateStore) Get(_ context.Context, name string) (string, error) {

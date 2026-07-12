@@ -99,7 +99,7 @@ func newIntegrationCommand() *cobra.Command {
 func newIntegrationPrivateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "private",
-		Short: "Операции с приватными значениями интеграции",
+		Short: "Переходный доступ к хранилищу приватных значений",
 	}
 	cmd.AddCommand(newIntegrationPrivateStatusCommand())
 	cmd.AddCommand(newIntegrationPrivateSetCommand())
@@ -133,7 +133,7 @@ func newIntegrationPrivateSetCommand() *cobra.Command {
 	flags := &integrationPrivateFlags{}
 	cmd := &cobra.Command{
 		Use:   "set <name>",
-		Short: "Запись приватного значения интеграции",
+		Short: "Запись приватного значения",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			format, err := integrationOutputFormat(cmd)
@@ -170,7 +170,7 @@ func newIntegrationPrivateSetCommand() *cobra.Command {
 func newIntegrationPrivateDeleteCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete <name>",
-		Short: "Удаление приватного значения интеграции",
+		Short: "Удаление приватного значения",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			format, err := integrationOutputFormat(cmd)

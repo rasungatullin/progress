@@ -49,6 +49,14 @@ func newConfigurationCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newConfigurationResourcesCommand())
+	cmd.AddCommand(newConfigurationPrivateCommand())
+	return cmd
+}
+
+func newConfigurationPrivateCommand() *cobra.Command {
+	cmd := newIntegrationPrivateCommand()
+	cmd.Use = "private"
+	cmd.Short = "Управление хранилищем приватных значений"
 	return cmd
 }
 
