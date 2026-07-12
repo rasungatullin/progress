@@ -805,12 +805,12 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 		return gitResult{}, err
 	}
 
-	changedPaths, trackedDeletionPaths, err := s.changedPathsForCommit(ctx, gitRoot)
+	changes, err := s.commitChanges(ctx, gitRoot)
 	if err != nil {
 		return gitResult{}, err
 	}
 
-	if len(changedPaths) == 0 && len(trackedDeletionPaths) == 0 {
+	if !changes.hasChanges() {
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
@@ -820,25 +820,25 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 	}
 	defer cleanupPushKey()
 
-	if len(trackedDeletionPaths) > 0 {
-		addArgs := append([]string{"add", "-u", "--"}, trackedDeletionPaths...)
+	if len(changes.unstagedRuntimeDeletions) > 0 {
+		addArgs := append([]string{"add", "-u", "--"}, changes.unstagedRuntimeDeletions...)
 		if _, err := s.runGitOutput(ctx, gitRoot, addArgs...); err != nil {
 			return gitResult{}, fmt.Errorf("git add failed: %w", err)
 		}
 	}
-	if len(changedPaths) > 0 {
-		addArgs := append([]string{"add", "-A", "--"}, changedPaths...)
+	if len(changes.userPaths) > 0 {
+		addArgs := append([]string{"add", "-A", "--"}, changes.userPaths...)
 		if _, err := s.runGitOutput(ctx, gitRoot, addArgs...); err != nil {
 			return gitResult{}, fmt.Errorf("git add failed: %w", err)
 		}
 	}
 
-	changedPaths, trackedDeletionPaths, err = s.changedPathsForCommit(ctx, gitRoot)
+	changes, err = s.commitChanges(ctx, gitRoot)
 	if err != nil {
 		return gitResult{}, err
 	}
 
-	if len(changedPaths) == 0 && len(trackedDeletionPaths) == 0 {
+	if !changes.hasChanges() {
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
@@ -1071,13 +1071,31 @@ func (s *Service) changedUserPaths(ctx context.Context, dir string) ([]string, e
 }
 
 func (s *Service) changedPathsForCommit(ctx context.Context, dir string) ([]string, []string, error) {
-	output, err := s.runGitOutput(ctx, dir, "status", "--porcelain", "-z", "-uall")
+	changes, err := s.commitChanges(ctx, dir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("inspect git changes: %w", err)
+		return nil, nil, err
 	}
 
-	paths, trackedDeletionPaths := userChangedPathsForCommitFromPorcelain(output)
-	return paths, trackedDeletionPaths, nil
+	return changes.userPaths, changes.unstagedRuntimeDeletions, nil
+}
+
+type commitChanges struct {
+	userPaths                []string
+	unstagedRuntimeDeletions []string
+	stagedRuntimeDeletions   []string
+}
+
+func (c commitChanges) hasChanges() bool {
+	return len(c.userPaths) > 0 || len(c.unstagedRuntimeDeletions) > 0 || len(c.stagedRuntimeDeletions) > 0
+}
+
+func (s *Service) commitChanges(ctx context.Context, dir string) (commitChanges, error) {
+	output, err := s.runGitOutput(ctx, dir, "status", "--porcelain", "-z", "-uall")
+	if err != nil {
+		return commitChanges{}, fmt.Errorf("inspect git changes: %w", err)
+	}
+
+	return commitChangesForPorcelain(output), nil
 }
 
 func userChangedPathsFromPorcelain(output string) []string {
@@ -1086,14 +1104,21 @@ func userChangedPathsFromPorcelain(output string) []string {
 }
 
 func userChangedPathsForCommitFromPorcelain(output string) ([]string, []string) {
+	changes := commitChangesForPorcelain(output)
+	return changes.userPaths, changes.unstagedRuntimeDeletions
+}
+
+func commitChangesForPorcelain(output string) commitChanges {
 	if output == "" {
-		return nil, nil
+		return commitChanges{}
 	}
 
 	paths := make([]string, 0)
-	trackedDeletionPaths := make([]string, 0)
+	unstagedRuntimeDeletions := make([]string, 0)
+	stagedRuntimeDeletions := make([]string, 0)
 	seen := make(map[string]struct{})
-	seenTrackedDeletion := make(map[string]struct{})
+	seenUnstagedRuntimeDeletion := make(map[string]struct{})
+	seenStagedRuntimeDeletion := make(map[string]struct{})
 	entries := strings.Split(output, "\x00")
 	for index := 0; index < len(entries); index++ {
 		entry := entries[index]
@@ -1112,12 +1137,18 @@ func userChangedPathsForCommitFromPorcelain(output string) ([]string, []string) 
 				continue
 			}
 			if isProgressRuntimePath(pathValue) {
-				if isTrackedDeletion(entry) {
-					if _, ok := seenTrackedDeletion[pathValue]; ok {
+				if isUnstagedDeletion(entry) {
+					if _, ok := seenUnstagedRuntimeDeletion[pathValue]; ok {
 						continue
 					}
-					seenTrackedDeletion[pathValue] = struct{}{}
-					trackedDeletionPaths = append(trackedDeletionPaths, pathValue)
+					seenUnstagedRuntimeDeletion[pathValue] = struct{}{}
+					unstagedRuntimeDeletions = append(unstagedRuntimeDeletions, pathValue)
+				} else if isStagedDeletion(entry) {
+					if _, ok := seenStagedRuntimeDeletion[pathValue]; ok {
+						continue
+					}
+					seenStagedRuntimeDeletion[pathValue] = struct{}{}
+					stagedRuntimeDeletions = append(stagedRuntimeDeletions, pathValue)
 				}
 				continue
 			}
@@ -1129,11 +1160,19 @@ func userChangedPathsForCommitFromPorcelain(output string) ([]string, []string) 
 		}
 	}
 
-	return paths, trackedDeletionPaths
+	return commitChanges{
+		userPaths:                paths,
+		unstagedRuntimeDeletions: unstagedRuntimeDeletions,
+		stagedRuntimeDeletions:   stagedRuntimeDeletions,
+	}
 }
 
-func isTrackedDeletion(entry string) bool {
-	return len(entry) >= 2 && (entry[0] == 'D' || entry[1] == 'D')
+func isUnstagedDeletion(entry string) bool {
+	return len(entry) >= 2 && entry[1] == 'D'
+}
+
+func isStagedDeletion(entry string) bool {
+	return len(entry) >= 2 && entry[0] == 'D'
 }
 
 func isRenameOrCopyStatus(entry string) bool {

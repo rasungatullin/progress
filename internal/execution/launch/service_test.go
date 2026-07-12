@@ -843,6 +843,34 @@ func TestLaunchCommitPushKeepsTrackedRuntimeDeletionSeparateFromNewRuntimeFile(t
 	}
 }
 
+func TestLaunchCommitPushSeparatesPreparedAndUnpreparedRuntimeDeletions(t *testing.T) {
+	t.Parallel()
+
+	paths, deletionPaths := userChangedPathsForCommitFromPorcelain(strings.Join([]string{
+		"D  .progress/execution-runs/prepared.db",
+		" D .progress/execution-runs/unprepared.db",
+		" M file.txt",
+		"?? .progress/execution-runs/execution-123.json",
+		"",
+	}, "\x00"))
+	if !reflect.DeepEqual(paths, []string{"file.txt"}) {
+		t.Fatalf("unexpected visible paths: %#v", paths)
+	}
+	if !reflect.DeepEqual(deletionPaths, []string{".progress/execution-runs/unprepared.db"}) {
+		t.Fatalf("unexpected unprepared deletion paths: %#v", deletionPaths)
+	}
+	changes := commitChangesForPorcelain(strings.Join([]string{
+		"D  .progress/execution-runs/prepared.db",
+		" D .progress/execution-runs/unprepared.db",
+		" M file.txt",
+		"?? .progress/execution-runs/execution-123.json",
+		"",
+	}, "\x00"))
+	if !reflect.DeepEqual(changes.stagedRuntimeDeletions, []string{".progress/execution-runs/prepared.db"}) {
+		t.Fatalf("unexpected prepared deletion paths: %#v", changes.stagedRuntimeDeletions)
+	}
+}
+
 func TestCommitAndPushStagesTrackedRuntimeDeletionWithoutAddingNewRuntimeFile(t *testing.T) {
 	t.Parallel()
 
@@ -861,10 +889,10 @@ func TestCommitAndPushStagesTrackedRuntimeDeletionWithoutAddingNewRuntimeFile(t 
 			case "status --porcelain -z -uall":
 				statusCalls++
 				if statusCalls == 1 {
-					return " D .progress/execution-runs/execution.db\x00?? .progress/execution-runs/execution-123.json\x00", nil
+					return "D  .progress/execution-runs/execution.db\x00?? .progress/execution-runs/execution-123.json\x00 M file.txt\x00", nil
 				}
-				return "D  .progress/execution-runs/execution.db\x00", nil
-			case "add -u -- .progress/execution-runs/execution.db":
+				return "D  .progress/execution-runs/execution.db\x00M  file.txt\x00", nil
+			case "add -A -- file.txt":
 				return "", nil
 			case "commit -m remove execution database":
 				return "[feature/test abc123] remove execution database\n", nil
@@ -889,7 +917,11 @@ func TestCommitAndPushStagesTrackedRuntimeDeletionWithoutAddingNewRuntimeFile(t 
 		t.Fatalf("unexpected result: %q", result)
 	}
 	for _, call := range calls {
-		if strings.HasPrefix(strings.Join(call, " "), "add -A") {
+		joined := strings.Join(call, " ")
+		if strings.HasPrefix(joined, "add -u") {
+			t.Fatalf("prepared runtime deletion must not be added again: %#v", call)
+		}
+		if strings.Contains(joined, "execution-123.json") {
 			t.Fatalf("new runtime file must not be added: %#v", call)
 		}
 	}
