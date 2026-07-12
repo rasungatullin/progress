@@ -28,6 +28,7 @@ type ghRunner interface {
 	RunPRReviewComments(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRCommentCreate(context.Context, string, int, PRCommentCreateRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewSubmit(context.Context, string, int, int64) (CommandResult, resolvedConfig, error)
+	RunPRReviewDelete(context.Context, string, int, int64) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadReply(context.Context, PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadResolve(context.Context, string) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadUnresolve(context.Context, string) (CommandResult, resolvedConfig, error)
@@ -637,7 +638,15 @@ func (s *Service) findPendingPRReview(ctx context.Context, repository string, nu
 		}
 	}
 	for reviewID := range pending {
-		return 0, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks", reviewID), Result: commentResult}
+		deleteResult, _, deleteErr := s.runner.RunPRReviewDelete(ctx, repository, number, reviewID)
+		if deleteErr != nil {
+			return 0, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks; cleanup failed: %v", reviewID, deleteErr), Result: deleteResult, Err: deleteErr}
+		}
+		if deleteResult.ExitCode != 0 {
+			cleanupErr := &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks; cleanup exited with a non-zero code", reviewID), Result: deleteResult}
+			return 0, cleanupErr
+		}
+		return 0, nil
 	}
 	return 0, nil
 }

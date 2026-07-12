@@ -668,6 +668,25 @@ func (r *Runner) RunPRReviewSubmit(ctx context.Context, repository string, numbe
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--method", "POST", fmt.Sprintf("repos/%s/pulls/%d/reviews/%d/events", repository, number, reviewID), "-f", "event=COMMENT"})
 }
 
+func (r *Runner) RunPRReviewDelete(ctx context.Context, repository string, number int, reviewID int64) (CommandResult, resolvedConfig, error) {
+	if reviewID <= 0 {
+		return CommandResult{Command: defaultCommand, ExitCode: -1}, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review id must be greater than zero"}
+	}
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		return CommandResult{Command: defaultCommand, ExitCode: -1}, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return CommandResult{Command: config.Command, ExitCode: -1}, config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--method", "DELETE", fmt.Sprintf("repos/%s/pulls/%d/reviews/%d", repository, number, reviewID)})
+}
+
 func (r *Runner) RunPRReviewThreadReply(ctx context.Context, request PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error) {
 	request, err := normalizePRReviewThreadReplyRequest(request)
 	if err != nil {
