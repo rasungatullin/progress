@@ -883,7 +883,7 @@ func normalizeReviewRemarkCommentIdentifiers(comment reviewRemarkComment) review
 	// подмене публикуем новое замечание, не передавая идентификатор комментария
 	// в GitHub как идентификатор цепочки.
 	if externalID := strings.TrimSpace(comment.ExternalID); strings.HasPrefix(externalID, "PRRT_") {
-		comment.ThreadID = externalID
+		comment.ExternalID, comment.ThreadID = threadID, externalID
 		return comment
 	}
 	comment.ThreadID = ""

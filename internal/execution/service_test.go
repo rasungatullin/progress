@@ -4082,6 +4082,27 @@ func TestPublishPullRequestCommentsContinuesExistingReviewThread(t *testing.T) {
 	}
 }
 
+func TestPublishPullRequestCommentsRestoresSwappedReviewIdentifiers(t *testing.T) {
+	integrations := &stubIntegrationExecutor{}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body:       "## Замечание ревизии\n\nОтвет на замечание.",
+		ExternalID: "PRRT_thread-1",
+		ThreadID:   "PRRC_comment-1",
+	}})
+	if err != nil {
+		t.Fatalf("publish review thread continuation: %v", err)
+	}
+	if count != 1 || len(integrations.calls) != 1 {
+		t.Fatalf("expected one published continuation, count=%d calls=%#v", count, integrations.calls)
+	}
+	request := integrations.calls[0]
+	if request.Operation != "reply" || request.ExternalID != "PRRC_comment-1" || request.ThreadID != "PRRT_thread-1" {
+		t.Fatalf("swapped review identifiers must be restored before publication: %#v", request)
+	}
+}
+
 func TestReviewRemarkCommentsPreservesExternalIdentifiers(t *testing.T) {
 	comments := reviewRemarkComments(&model.StructuredOutput{Remarks: []model.StructuredRemark{{
 		ID:         "remark-2-follow-up",
