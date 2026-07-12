@@ -3401,6 +3401,67 @@ func TestPublishPullRequestCommentsRejectsNegativeInlineLine(t *testing.T) {
 	}
 }
 
+func TestPublishPullRequestCommentsFallsBackForUnresolvedGitHubLine(t *testing.T) {
+	const body = "## Замечание ревизии\n\nСтрока больше не входит в diff."
+	var genericBody string
+	integrations := &stubIntegrationExecutor{
+		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			switch req.Operation {
+			case "create":
+				if req.Path != "" {
+					return integration.Response{System: "github"}, errors.New(`GitHub API returned status 422: {"errors":[{"field":"pull_request_review_thread.line","message":"could not be resolved"}]}`)
+				}
+				genericBody = req.Body
+				return integration.Response{Status: "ok"}, nil
+			case "comments":
+				return integration.Response{System: "github"}, nil
+			default:
+				t.Fatalf("unexpected integration request: %#v", req)
+				return integration.Response{}, nil
+			}
+		},
+	}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{Body: body, Path: "internal/service.go", Line: 42, Side: "RIGHT"}})
+	if err != nil || count != 1 {
+		t.Fatalf("unresolved line must be published as a pull request comment, count=%d err=%v", count, err)
+	}
+	if !strings.Contains(genericBody, "Исходная позиция встроенного замечания: `internal/service.go:42:RIGHT`") {
+		t.Fatalf("fallback comment must preserve inline location: %q", genericBody)
+	}
+
+	integrations.execute = func(_ context.Context, req integration.Request) (integration.Response, error) {
+		if req.Operation == "create" && req.Path != "" {
+			return integration.Response{System: "github"}, errors.New(`GitHub API returned status 422: {"errors":[{"field":"pull_request_review_thread.line","message":"could not be resolved"}]}`)
+		}
+		if req.Operation == "comments" {
+			return integration.Response{ReviewRemarks: []integration.ReviewRemark{{Body: genericBody}}}, nil
+		}
+		t.Fatalf("duplicate fallback must not create another comment: %#v", req)
+		return integration.Response{}, nil
+	}
+	count, err = executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{Body: body, Path: "internal/service.go", Line: 42, Side: "RIGHT"}})
+	if err != nil || count != 1 {
+		t.Fatalf("existing fallback comment must be reused, count=%d err=%v", count, err)
+	}
+}
+
+func TestPublishPullRequestCommentsDoesNotFallbackForOtherGitHub422(t *testing.T) {
+	integrations := &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		return integration.Response{System: "github"}, errors.New(`GitHub API returned status 422: {"message":"validation failed"}`)
+	}}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{Body: "remark", Path: "file.go", Line: 12, Side: "RIGHT"}})
+	if err == nil || count != 0 {
+		t.Fatalf("other 422 must remain an error, count=%d err=%v", count, err)
+	}
+	if len(integrations.calls) != 1 {
+		t.Fatalf("other 422 must not trigger fallback requests: %#v", integrations.calls)
+	}
+}
+
 func TestPublishPullRequestCommentsContinuesExistingReviewThread(t *testing.T) {
 	integrations := &stubIntegrationExecutor{}
 	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}

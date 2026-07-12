@@ -805,7 +805,7 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 			path = ""
 			side = ""
 		}
-		_, err := executor.Execute(ctx, integration.Request{
+		request := integration.Request{
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
 			ObjectType:      "comment",
@@ -820,8 +820,23 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 			Path:            path,
 			Line:            line,
 			Side:            side,
-		})
+		}
+		response, err := executor.Execute(ctx, request)
 		if err != nil {
+			if line > 0 && request.Operation == "create" && unresolvedGitHubReviewLine(response, err) {
+				fallbackBody := reviewRemarkFallbackBody(body, path, line, side)
+				published, fallbackErr := e.publishReviewRemarkFallback(ctx, executor, ref, fallbackBody)
+				if fallbackErr == nil {
+					if published {
+						count++
+					}
+					if e.service != nil && e.service.logger != nil {
+						e.service.logger.Printf("Публикация встроенного замечания %s переведена в общий комментарий запроса на слияние: позиция не разрешается GitHub", reviewRemarkCommentTarget(comment))
+					}
+					continue
+				}
+				err = errors.Join(err, fmt.Errorf("fallback to pull request comment failed: %w", fallbackErr))
+			}
 			failures = append(failures, fmt.Errorf("publish review remark comment %s: %w", reviewRemarkCommentTarget(comment), err))
 			continue
 		}
@@ -829,6 +844,62 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 	}
 
 	return count, errors.Join(failures...)
+}
+
+func unresolvedGitHubReviewLine(response integration.Response, err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	if response.System != "" && !strings.EqualFold(strings.TrimSpace(response.System), "github") {
+		return false
+	}
+	return strings.Contains(message, "status 422") &&
+		strings.Contains(message, "pull_request_review_thread.line") &&
+		strings.Contains(message, "could not be resolved")
+}
+
+func reviewRemarkFallbackBody(body, path string, line int, side string) string {
+	return strings.TrimSpace(strings.Join([]string{
+		body,
+		fmt.Sprintf("Исходная позиция встроенного замечания: `%s:%d:%s`", path, line, side),
+	}, "\n\n"))
+}
+
+func (e builtinOperationExecutor) publishReviewRemarkFallback(ctx context.Context, executor integrationExecutor, ref pullRequestRef, body string) (bool, error) {
+	commentsResponse, err := executor.Execute(ctx, integration.Request{
+		IntegrationType: integrationmodel.IntegrationTypeRepository,
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "comments",
+		Repository:      ref.Repository,
+		RepoProvided:    strings.TrimSpace(ref.Repository) != "",
+		Number:          ref.Number,
+	})
+	if err != nil {
+		return false, fmt.Errorf("check existing pull request comments: %w", err)
+	}
+	for _, existing := range commentsResponse.ReviewRemarks {
+		if strings.TrimSpace(existing.Body) == body && strings.TrimSpace(existing.Path) == "" && existing.Line == 0 {
+			return true, nil
+		}
+	}
+
+	_, err = executor.Execute(ctx, integration.Request{
+		IntegrationType: integrationmodel.IntegrationTypeRepository,
+		Resource:        "comment",
+		ObjectType:      "comment",
+		Operation:       "create",
+		Repository:      ref.Repository,
+		RepoProvided:    strings.TrimSpace(ref.Repository) != "",
+		Number:          ref.Number,
+		Body:            body,
+		Text:            body,
+	})
+	if err != nil {
+		return false, fmt.Errorf("create pull request fallback comment: %w", err)
+	}
+	return true, nil
 }
 
 func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, ref pullRequestRef, responses []StructuredResponse) (int, error) {
