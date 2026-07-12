@@ -2234,7 +2234,7 @@ func TestPublishReviewResponsesRestoresKindByStructuredRemarkExternalID(t *testi
 			"result":     model.LaunchResult{Status: "completed"},
 			"review_remarks": []integration.ReviewRemark{
 				{ExternalID: "PRRC_inline-1", ReplyToID: "PRRT_thread-1"},
-				{ExternalID: "PRRC_comment-1"},
+				{ExternalID: "PRRC_comment-1", Type: "comment"},
 			},
 			"structured_output": &model.StructuredOutput{
 				Remarks: []model.StructuredRemark{
@@ -2260,6 +2260,43 @@ func TestPublishReviewResponsesRestoresKindByStructuredRemarkExternalID(t *testi
 	}
 	if len(calls) != 3 || calls[0].Operation != "reply" || calls[0].ThreadID != "PRRT_thread-1" || calls[1].Operation != "create" || calls[1].ThreadID != "" || calls[2].Operation != "resolve" {
 		t.Fatalf("response kind and thread must follow canonical external identifiers: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesRejectsPRRCWithoutThreadBeforePublication(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{
+				ExternalID: "PRRC_kwDOSYi3G87Um5M0",
+			}},
+			"structured_output": &model.StructuredOutput{
+				Remarks: []model.StructuredRemark{{ID: "remark-1", ExternalID: "PRRC_kwDOSYi3G87Um5M0"}},
+				ReviewResponses: []model.StructuredResponse{{
+					RemarkID: "remark-1",
+					Status:   "resolved",
+					Summary:  "Исправлено.",
+				}},
+			},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses)
+	if err == nil || !strings.Contains(err.Error(), "thread_id is required") {
+		t.Fatalf("PRRC without thread_id must fail with a diagnostic: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("PRRC without thread_id must not be published externally: %#v", calls)
 	}
 }
 

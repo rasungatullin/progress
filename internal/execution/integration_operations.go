@@ -1627,7 +1627,10 @@ func reviewResponseTypeFromRemark(remark integration.ReviewRemark) string {
 	if strings.TrimSpace(remark.ReplyToID) != "" {
 		return "inline"
 	}
-	if strings.TrimSpace(remark.URL) != "" || strings.HasPrefix(strings.TrimSpace(remark.ExternalID), "PRRC_") {
+	if strings.HasPrefix(strings.TrimSpace(remark.ExternalID), "PRRC_") {
+		return "inline"
+	}
+	if strings.TrimSpace(remark.URL) != "" {
 		return "comment"
 	}
 	return ""
