@@ -961,6 +961,8 @@ func TestAPITransportPRCommentCreateUsesRESTAndNormalizesSubsequentRead(t *testi
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 101, "node_id": "PRRC_comment-1", "html_url": "https://github.com/owner/name/pull/42#discussion_r101", "body": "remark", "path": "file.go", "line": 12, "side": "RIGHT"})
 		case "/repos/owner/name/issues/42/comments":
 			_ = json.NewEncoder(w).Encode([]any{})
+		case "/repos/owner/name/pulls/42/reviews":
+			_ = json.NewEncoder(w).Encode([]any{})
 		case "/graphql":
 			var request struct {
 				Query string `json:"query"`

@@ -1632,6 +1632,57 @@ func TestServicePRCommentCreateInlineChecksExistingRemarkBeforeCreate(t *testing
 	}
 }
 
+func TestServicePRCommentCreateSubmitsPendingReviewAfterExistingRemark(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result:              CommandResult{ExitCode: 0, Stdout: `{"id": 77, "state": "submitted"}`},
+		reviewResult:        CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.prCommentCalls != 0 || stub.prReviewsCalls != 1 || stub.prSubmitCalls != 1 || response.Status != model.ResponseStatusOK {
+		t.Fatalf("existing remark did not close pending review: calls=%d/%d/%d response=%#v", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls, response)
+	}
+}
+
+func TestServicePRCommentCreatePublishesMultipleInlineRemarksThroughOneReview(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{ExitCode: 0, Stdout: `{"id": 101, "node_id": "PRRC_comment-1", "body": "Inline remark", "html_url": "https://github.com/owner/name/pull/42#discussion_r101", "path": "file.go", "line": 12, "side": "RIGHT", "pull_request_review_id": 77}`},
+		pendingReviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Path: "file.go", Line: 12, Side: "RIGHT"}
+	request.Body = "Inline remark"
+	if _, err := service.Execute(context.Background(), request); err != nil {
+		t.Fatalf("first comment create: %v", err)
+	}
+	request.Body = "Second inline remark"
+	if _, err := service.Execute(context.Background(), request); err != nil {
+		t.Fatalf("second comment create: %v", err)
+	}
+
+	if stub.prCommentCalls != 2 || stub.prReviewsCalls != 2 || stub.prSubmitCalls != 2 {
+		t.Fatalf("inline remarks did not share one submitted review: comments=%d reviews=%d submits=%d", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls)
+	}
+	if stub.prCommentRequest.ReviewID != 77 {
+		t.Fatalf("second comment did not reuse pending review: %#v", stub.prCommentRequest)
+	}
+}
+
 func TestServicePRCommentCreateInlineClassifiesPartialPayload(t *testing.T) {
 	t.Parallel()
 
@@ -1921,6 +1972,8 @@ type stubRunner struct {
 	threadID            string
 	reviewResult        CommandResult
 	pendingReviewResult CommandResult
+
+	pendingReviewResults []CommandResult
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -2016,6 +2069,11 @@ func (r *stubRunner) RunPRReviews(_ context.Context, repository string, number i
 	r.prReviewsCalls++
 	r.repo = repository
 	r.number = number
+	if len(r.pendingReviewResults) > 0 {
+		result := r.pendingReviewResults[0]
+		r.pendingReviewResults = r.pendingReviewResults[1:]
+		return result, r.config, r.err
+	}
 	if r.pendingReviewResult.Stdout != "" || r.pendingReviewResult.Stderr != "" || r.pendingReviewResult.Command != "" || r.pendingReviewResult.ExitCode != 0 {
 		return r.pendingReviewResult, r.config, r.err
 	}

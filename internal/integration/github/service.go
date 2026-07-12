@@ -496,6 +496,19 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 	}
 	if commentRequest.Path != "" {
 		if existing, config, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
+			pendingReviewID, err := s.findPendingPRReview(ctx, repository, number)
+			if err != nil {
+				return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pending GitHub pull request review lookup failed after existing comment lookup")
+			}
+			if pendingReviewID > 0 {
+				submitResult, _, submitErr := s.runner.RunPRReviewSubmit(ctx, repository, number, pendingReviewID)
+				if submitErr != nil {
+					return responseWithGitHubFailure(response, submitResult, submitErr, "GitHub pull request review submit failed after existing comment lookup")
+				}
+				if submitResult.ExitCode != 0 {
+					return responseWithGitHubExitFailure(response, submitResult, repository, number, "GitHub pull request review submit exited with a non-zero code after existing comment lookup")
+				}
+			}
 			return successfulPRCommentCreate(response, existing, config, repository, number)
 		}
 		pendingReviewID, err := s.findPendingPRReview(ctx, repository, number)
