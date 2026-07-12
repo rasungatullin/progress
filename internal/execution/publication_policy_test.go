@@ -405,6 +405,28 @@ func TestActionPreconditionFailurePointsToPublishingOperation(t *testing.T) {
 	}
 }
 
+func TestRunActionOperationsReportsFailedPreconditionOnPublishingOperation(t *testing.T) {
+	t.Parallel()
+
+	action := model.Action{Operations: []model.OperationSpec{
+		{Name: OperationKindResolveAction, Kind: OperationKindResolveAction, Required: true},
+		{Name: OperationKindPublishTaskComment, Kind: OperationKindPublishTaskComment, Required: true},
+	}}
+	state := &operationExecution{action: action, tracker: newOperationTracker(action)}
+
+	err := (&Service{}).runActionOperations(context.Background(), state)
+	if err == nil {
+		t.Fatal("expected task number precondition failure")
+	}
+	results := state.tracker.snapshot()
+	if results[0].Status != model.OperationStatus(OperationStatusPending) {
+		t.Fatalf("first operation status = %q, want pending", results[0].Status)
+	}
+	if results[1].Status != model.OperationStatus(OperationStatusFailed) {
+		t.Fatalf("publishing operation status = %q, want failed", results[1].Status)
+	}
+}
+
 func TestOptionalTaskCommentSkipsWithoutTask(t *testing.T) {
 	t.Parallel()
 
