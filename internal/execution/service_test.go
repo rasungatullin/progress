@@ -3401,6 +3401,63 @@ func TestPublishPullRequestCommentsRejectsNegativeInlineLine(t *testing.T) {
 	}
 }
 
+func TestPublishPullRequestCommentsContinuesExistingReviewThread(t *testing.T) {
+	integrations := &stubIntegrationExecutor{}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body:       "## Замечание ревизии\n\nПроверка после исправления.",
+		ExternalID: "PRRC_comment-1",
+		ThreadID:   "PRRT_thread-1",
+	}})
+	if err != nil {
+		t.Fatalf("publish review thread continuation: %v", err)
+	}
+	if count != 1 || len(integrations.calls) != 1 {
+		t.Fatalf("expected one published continuation, count=%d calls=%#v", count, integrations.calls)
+	}
+	request := integrations.calls[0]
+	if request.Operation != "reply" || request.ExternalID != "PRRC_comment-1" || request.ThreadID != "PRRT_thread-1" {
+		t.Fatalf("review thread identifiers must be preserved: %#v", request)
+	}
+}
+
+func TestReviewRemarkCommentsPreservesExternalIdentifiers(t *testing.T) {
+	comments := reviewRemarkComments(&model.StructuredOutput{Remarks: []model.StructuredRemark{{
+		ID:         "remark-2-follow-up",
+		ExternalID: "PRRC_comment-1",
+		ThreadID:   "PRRT_thread-1",
+		Status:     "open",
+		Body:       "Проверка после исправления.",
+	}}})
+	if len(comments) != 1 || comments[0].ExternalID != "PRRC_comment-1" || comments[0].ThreadID != "PRRT_thread-1" {
+		t.Fatalf("review remark external identifiers were lost: %#v", comments)
+	}
+	if got := reviewRemarkCommentOperation(comments[0]); got != "reply" {
+		t.Fatalf("existing review thread must be published as reply, got %q", got)
+	}
+}
+
+func TestUpdateReviewRemarkThreadsReopensExistingChain(t *testing.T) {
+	integrations := &stubIntegrationExecutor{}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	updated, err := executor.updateReviewRemarkThreads(context.Background(), []reviewRemarkComment{{
+		ThreadID: "PRRT_thread-1",
+		Status:   "open",
+	}})
+	if err != nil {
+		t.Fatalf("update review thread state: %v", err)
+	}
+	if updated != 1 || len(integrations.calls) != 1 {
+		t.Fatalf("expected one thread state update, updated=%d calls=%#v", updated, integrations.calls)
+	}
+	request := integrations.calls[0]
+	if request.Operation != "unresolve" || request.ThreadID != "PRRT_thread-1" || request.ExternalID != "PRRT_thread-1" {
+		t.Fatalf("open remark must reopen its existing thread: %#v", request)
+	}
+}
+
 func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)
@@ -3486,6 +3543,11 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 					ThreadID: "thread-1",
 					Status:   "resolved",
 					Summary:  "Исправлено.",
+				}, {
+					RemarkID: "thread-2",
+					ThreadID: "thread-2",
+					Status:   "open",
+					Summary:  "Требуется повторная проверка.",
 				}},
 			},
 		},
@@ -3512,6 +3574,8 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 			case "reply":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", ExternalID: "comment-1"}}, nil
 			case "resolve":
+				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", ExternalID: req.ThreadID}}, nil
+			case "unresolve":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", ExternalID: req.ThreadID}}, nil
 			default:
 				t.Fatalf("unexpected integration request: %#v", req)
@@ -3548,8 +3612,11 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 	if !strings.Contains(launcher.invocation.Launch.Prompt, "Исправить замечания") {
 		t.Fatalf("structured input must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
 	}
-	if !strings.Contains(launcher.invocation.Launch.Prompt, `"ExternalID":"thread-1"`) || !strings.Contains(launcher.invocation.Launch.Prompt, `"ReplyToID":"thread-1"`) {
-		t.Fatalf("canonical review remarks must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
+	if !strings.Contains(launcher.invocation.Launch.Prompt, `"external_id":"thread-1"`) || !strings.Contains(launcher.invocation.Launch.Prompt, `"thread_id":"thread-1"`) {
+		t.Fatalf("canonical review remark identifiers must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
+	}
+	if strings.Contains(launcher.invocation.Launch.Prompt, `"ReplyToID"`) || strings.Contains(launcher.invocation.Launch.Prompt, `"ExternalID"`) {
+		t.Fatalf("integration-specific review remark fields must not be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
 	}
 	if !launcher.commitCalled {
 		t.Fatal("review rework action must push fixes before publishing responses")
@@ -3557,10 +3624,10 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 	if workplaces.invocation.Workplace.Name != "feature-fixes" || workplaces.invocation.Workplace.HeadRef != "feature/fixes" || workplaces.invocation.Workplace.BaseRef != "main" {
 		t.Fatalf("review rework action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
 	}
-	if len(integrations.calls) != 4 {
-		t.Fatalf("expected get, comments, reply and resolve integration calls, got %#v", integrations.calls)
+	if len(integrations.calls) != 6 {
+		t.Fatalf("expected get, comments, two replies and two thread state changes, got %#v", integrations.calls)
 	}
-	if integrations.calls[2].Operation != "reply" || integrations.calls[2].ThreadID != "thread-1" || integrations.calls[3].Operation != "resolve" || integrations.calls[3].ThreadID != "thread-1" {
+	if integrations.calls[2].Operation != "reply" || integrations.calls[2].ThreadID != "thread-1" || integrations.calls[3].Operation != "reply" || integrations.calls[3].ThreadID != "thread-2" || integrations.calls[4].Operation != "resolve" || integrations.calls[4].ThreadID != "thread-1" || integrations.calls[5].Operation != "unresolve" || integrations.calls[5].ThreadID != "thread-2" {
 		t.Fatalf("unexpected response publication calls: %#v", integrations.calls)
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishReviewResponses)

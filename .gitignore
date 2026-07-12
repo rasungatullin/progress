@@ -62,6 +62,7 @@ debug/
 
 # Progress local files
 .progress/*
+**/.progress/execution-runs/
 .progress/workplaces/
 !.progress/execution/
 !.progress/execution/profiles.json

@@ -539,6 +539,9 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 	if err != nil {
 		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Замечания ревизии не записаны.", err, "review_remarks_publish_failed")
 	}
+	if _, err := e.updateReviewRemarkThreads(ctx, comments); err != nil {
+		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Замечания записаны, но состояние цепочки обсуждения не обновлено.", err, "review_thread_state_update_failed")
+	}
 
 	summary := fmt.Sprintf("review-remarks-published=%d", count)
 	result := input.result
@@ -764,10 +767,13 @@ func publishReviewResponsesOutputSummary(summary string, result LaunchResult, op
 }
 
 type reviewRemarkComment struct {
-	Body string
-	Path string
-	Line int
-	Side string
+	Body       string
+	Path       string
+	Line       int
+	Side       string
+	ExternalID string
+	ThreadID   string
+	Status     string
 }
 
 func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context, state *operationExecution, ref pullRequestRef, comments []reviewRemarkComment) (int, error) {
@@ -803,10 +809,12 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
 			ObjectType:      "comment",
-			Operation:       "create",
+			Operation:       reviewRemarkCommentOperation(comment),
 			Repository:      ref.Repository,
 			RepoProvided:    strings.TrimSpace(ref.Repository) != "",
 			Number:          ref.Number,
+			ExternalID:      strings.TrimSpace(comment.ExternalID),
+			ThreadID:        strings.TrimSpace(comment.ThreadID),
 			Body:            body,
 			Text:            body,
 			Path:            path,
@@ -871,7 +879,8 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 	resolved := 0
 	seen := map[string]struct{}{}
 	for _, response := range responses {
-		if !isResolvedReviewResponse(response) {
+		operation := reviewResponseThreadOperation(response)
+		if operation == "" {
 			continue
 		}
 		threadID := strings.TrimSpace(response.ThreadID)
@@ -886,7 +895,7 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
 			ObjectType:      "comment",
-			Operation:       "resolve",
+			Operation:       operation,
 			ExternalID:      threadID,
 			ThreadID:        threadID,
 		})
@@ -897,6 +906,40 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 	}
 
 	return resolved, nil
+}
+
+func (e builtinOperationExecutor) updateReviewRemarkThreads(ctx context.Context, comments []reviewRemarkComment) (int, error) {
+	executor, err := e.integrationExecutor()
+	if err != nil {
+		return 0, err
+	}
+
+	updated := 0
+	seen := map[string]struct{}{}
+	for _, comment := range comments {
+		threadID := strings.TrimSpace(comment.ThreadID)
+		operation := reviewRemarkThreadOperation(comment.Status)
+		if threadID == "" || operation == "" {
+			continue
+		}
+		if _, ok := seen[threadID]; ok {
+			continue
+		}
+		seen[threadID] = struct{}{}
+		if _, err := executor.Execute(ctx, integration.Request{
+			IntegrationType: integrationmodel.IntegrationTypeRepository,
+			Resource:        "comment",
+			ObjectType:      "comment",
+			Operation:       operation,
+			ExternalID:      threadID,
+			ThreadID:        threadID,
+		}); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+
+	return updated, nil
 }
 
 func (e builtinOperationExecutor) integrationExecutor() (integrationExecutor, error) {
@@ -1310,14 +1353,35 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 		}), "\n\n"))
 		if body != "" {
 			comments = append(comments, reviewRemarkComment{
-				Body: body,
-				Path: strings.TrimSpace(remark.Path),
-				Line: remark.Line,
-				Side: strings.TrimSpace(remark.Side),
+				Body:       body,
+				Path:       strings.TrimSpace(remark.Path),
+				Line:       remark.Line,
+				Side:       strings.TrimSpace(remark.Side),
+				ExternalID: strings.TrimSpace(remark.ExternalID),
+				ThreadID:   strings.TrimSpace(remark.ThreadID),
+				Status:     strings.TrimSpace(remark.Status),
 			})
 		}
 	}
 	return comments
+}
+
+func reviewRemarkThreadOperation(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "open", "unresolved", "reopened":
+		return "unresolve"
+	case "resolved", "fixed", "done", "ok", "closed":
+		return "resolve"
+	default:
+		return ""
+	}
+}
+
+func reviewRemarkCommentOperation(comment reviewRemarkComment) string {
+	if strings.TrimSpace(comment.ThreadID) != "" {
+		return "reply"
+	}
+	return "create"
 }
 
 func reviewRemarkCommentTarget(comment reviewRemarkComment) string {
@@ -1377,6 +1441,18 @@ func reviewResponseCommentBody(response StructuredResponse) string {
 func isResolvedReviewResponse(response StructuredResponse) bool {
 	status := strings.ToLower(strings.TrimSpace(response.Status))
 	return status == "resolved" || status == "fixed" || status == "done" || status == "ok"
+}
+
+func reviewResponseThreadOperation(response StructuredResponse) string {
+	status := strings.ToLower(strings.TrimSpace(response.Status))
+	switch {
+	case isResolvedReviewResponse(response):
+		return "resolve"
+	case status == "open" || status == "unresolved" || status == "reopened":
+		return "unresolve"
+	default:
+		return ""
+	}
 }
 
 func validateReviewResponseThreadIDs(responses []StructuredResponse) error {

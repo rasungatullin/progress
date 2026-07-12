@@ -591,6 +591,25 @@ func (r *APIRunner) RunPRReviewThreadResolve(ctx context.Context, threadID strin
 	return result, apiResolvedConfig(config), nil
 }
 
+func (r *APIRunner) RunPRReviewThreadUnresolve(ctx context.Context, threadID string) (CommandResult, resolvedConfig, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return apiErrorResult("pr review thread unresolve", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review thread id is required"})
+	}
+	config, err := r.resolveConfig(ctx)
+	if err != nil {
+		return apiErrorResult("pr review thread unresolve", config, err)
+	}
+	mutation := `mutation($threadId: ID!) { unresolveReviewThread(input: {threadId: $threadId}) { thread { id isResolved } } }`
+	var raw json.RawMessage
+	result, err := r.graphql(ctx, config, mutation, map[string]any{"threadId": threadID}, &raw)
+	if err != nil {
+		return result, apiResolvedConfig(config), err
+	}
+	result.Stdout = string(raw)
+	return result, apiResolvedConfig(config), nil
+}
+
 func (r *APIRunner) RunPRReviewThreadReply(ctx context.Context, request PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error) {
 	request, err := normalizePRReviewThreadReplyRequest(request)
 	if err != nil {

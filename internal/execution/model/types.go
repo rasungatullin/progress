@@ -56,6 +56,8 @@ type StructuredResult struct {
 
 type StructuredRemark struct {
 	ID         string `json:"id,omitempty"`
+	ExternalID string `json:"external_id,omitempty"`
+	ThreadID   string `json:"thread_id,omitempty"`
 	Status     string `json:"status,omitempty"`
 	Severity   string `json:"severity,omitempty"`
 	Type       string `json:"type,omitempty"`

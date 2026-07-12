@@ -1670,12 +1670,24 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 	}
 	reviewRemarks, _ := operationMappingValue[[]integration.ReviewRemark](state, operation.In["review_remarks"])
 	if len(reviewRemarks) != 0 {
-		payload, err := json.Marshal(reviewRemarks)
+		remarksAllowed := spec.StructuredOutputFields == nil
+		for _, field := range spec.StructuredOutputFields {
+			if strings.TrimSpace(field) == "remarks" {
+				remarksAllowed = true
+				break
+			}
+		}
+		if !remarksAllowed {
+			writeOperationData(state, operation.Out, "prompt", prompt)
+			state.tracker.fail(name, "Исполнительная директива не согласована со схемой структурированного вывода.", fmt.Errorf("previous review remarks require structured output field %q", "remarks"), "review_remarks_field_not_allowed", false, true)
+			return fmt.Errorf("previous review remarks require structured output field %q", "remarks")
+		}
+		payload, err := json.Marshal(canonicalReviewRemarks(reviewRemarks))
 		if err != nil {
 			state.tracker.fail(name, "Замечания ревизии не включены в исполнительную директиву.", err, "review_remarks_not_encoded", false, true)
 			return err
 		}
-		prompt = joinExecutionSummaries(prompt, "Use the canonical review remarks below as execution context. Preserve ExternalID and ReplyToID in review responses as remark_id and thread_id.", string(payload))
+		prompt = joinExecutionSummaries(prompt, "Use the canonical review remarks below as execution context. Return new findings with a new id. When a finding continues or reopens an existing remark, preserve its external_id and thread_id in that remarks element. Do not return review_responses unless that field is explicitly allowed by the structured output schema.", string(payload))
 	}
 	writeOperationData(state, operation.Out, "prompt", prompt)
 	state.tracker.completeIO(name, operationIOSummary(operation.In, map[string]string{
@@ -1684,6 +1696,25 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 		"review_remarks":   formatInt(len(reviewRemarks)),
 	}), operationIOSummary(operation.Out, map[string]string{"prompt": presenceSummary(prompt)}), "Исполнительная директива сформирована.")
 	return nil
+}
+
+// canonicalReviewRemarks переводит поля интеграционного замечания в
+// словарь структурированного вывода до передачи данных исполнителю.
+func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.StructuredRemark {
+	remarks := make([]model.StructuredRemark, 0, len(reviewRemarks))
+	for _, remark := range reviewRemarks {
+		remarks = append(remarks, model.StructuredRemark{
+			ExternalID: strings.TrimSpace(remark.ExternalID),
+			ThreadID:   strings.TrimSpace(remark.ReplyToID),
+			Status:     strings.TrimSpace(remark.State),
+			Title:      "Предыдущее замечание ревизии",
+			Body:       strings.TrimSpace(remark.Body),
+			Path:       strings.TrimSpace(remark.Path),
+			Line:       remark.Line,
+			Side:       strings.TrimSpace(remark.Side),
+		})
+	}
+	return remarks
 }
 
 func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
