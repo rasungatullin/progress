@@ -458,6 +458,31 @@ func TestServiceProcessTaskIgnoresClosedGeneralRemark(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskIgnoresClosedGeneralRemarkConfirmationByID(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{
+		{ExternalID: "comment-1", State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-1\n\nИсправить обработку"},
+		{ExternalID: "comment-2", State: "conversation", Body: "Идентификатор: remark-1\n\nЗамечание закрыто: исправление подтверждено"},
+	}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	cycle := result.Cycles[0]
+	if cycle.MergeRequestExternalState != nil {
+		t.Fatalf("closed confirmation must not block completion: %#v", cycle.MergeRequestExternalState)
+	}
+	if cycle.Consideration == nil || cycle.Consideration.Status != decision.ConsiderationStatusCompleted {
+		t.Fatalf("expected completed consideration, got %#v", cycle.Consideration)
+	}
+}
+
 func TestServiceProcessTaskReworksReviewPassedTaskWithMergeConflict(t *testing.T) {
 	t.Parallel()
 

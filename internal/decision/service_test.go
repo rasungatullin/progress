@@ -1306,6 +1306,18 @@ func TestHasUnresolvedExternalReviewRemarksIgnoresResolvedGeneralRemarkByID(t *t
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksIgnoresConfirmationByID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-1\n\nИсправить обработку"},
+		{State: "conversation", Body: "Идентификатор: remark-1\n\nЗамечание закрыто: исправление подтверждено"},
+	}
+	if got := hasUnresolvedExternalReviewRemarks(remarks); got {
+		t.Fatal("resolved confirmation must suppress the original general remark")
+	}
+}
+
 func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *testing.T) {
 	t.Parallel()
 
