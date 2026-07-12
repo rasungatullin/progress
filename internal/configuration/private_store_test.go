@@ -62,3 +62,16 @@ func TestLoadPrivateStoreConfigUsesDefaultWhenNoContourConfigExists(t *testing.T
 		t.Fatalf("unexpected config home: %q", home)
 	}
 }
+
+func TestLoadPrivateStoreConfigUsesEnvironmentHomeForDefaultStore(t *testing.T) {
+	t.Setenv(configHomeEnvVar, "/environment-config-home")
+
+	readFile := func(string) ([]byte, error) { return nil, fs.ErrNotExist }
+	_, home, err := LoadPrivateStoreConfig("", "", readFile)
+	if err != nil {
+		t.Fatalf("load default private store config: %v", err)
+	}
+	if home != "/environment-config-home" {
+		t.Fatalf("unexpected environment config home: %q", home)
+	}
+}

@@ -89,15 +89,21 @@ func (s *Service) Snapshot(ctx context.Context, input SnapshotInput) (Snapshot, 
 	}
 	if snapshot.ExecutionResources != nil || snapshot.Integration != nil {
 		config := model.ResourcePrivateStoreConfig{}
+		storeHome := input.ConfigHome
 		if snapshot.ExecutionResources != nil {
 			config = snapshot.ExecutionResources.Config.PrivateStore
+			storeHome = snapshot.ExecutionResources.ConfigHome
 		}
 		if !hasPrivateStoreConfig(config) && snapshot.Integration != nil {
 			config = snapshot.Integration.Config.PrivateStore
+			storeHome = snapshot.Integration.ConfigHome
+		}
+		if strings.TrimSpace(storeHome) == "" {
+			storeHome, _ = resolveConfigHome(input.ConfigHome)
 		}
 		refs := privateValueReferences(snapshot.Integration, snapshot.ExecutionResources)
 		if len(refs) > 0 {
-			reader, _, err := secrets.NewStore(config, input.ConfigHome)
+			reader, _, err := secrets.NewStore(config, storeHome)
 			for _, name := range refs {
 				available := false
 				if err == nil {
