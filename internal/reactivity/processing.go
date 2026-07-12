@@ -340,7 +340,7 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 				continue
 			}
 			if id := externalReviewRemarkID(remark.Body, "Идентификатор:"); id != "" {
-				if _, ok := respondedRemarkIDs[id]; ok {
+				if _, ok := respondedRemarkIDs[id]; ok || isResolvedExternalReviewRemark(remark.Body) {
 					continue
 				}
 			}
@@ -355,6 +355,16 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 		}
 	}
 	return false
+}
+
+func isResolvedExternalReviewRemark(body string) bool {
+	state := strings.ToLower(strings.TrimSpace(externalReviewRemarkID(body, "Состояние:")))
+	switch state {
+	case "resolved", "fixed", "done", "ok", "closed", "outdated":
+		return true
+	}
+	normalizedBody := strings.ToLower(body)
+	return strings.Contains(normalizedBody, "замечание закрыто") || strings.Contains(normalizedBody, "remark closed")
 }
 
 func isResolvedExternalReviewResponse(body string) bool {
