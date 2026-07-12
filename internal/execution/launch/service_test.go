@@ -1898,6 +1898,39 @@ func TestLaunchStructuredOutputRequiredInvalidFails(t *testing.T) {
 	}
 }
 
+func TestLaunchStructuredOutputAcceptsCanonicalFollowUpRemarkPayload(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"Повторная ревизия завершена.",
+				structuredOutputStart,
+				`{"summary":"Проверка завершена.","remarks":[{"id":"remark-2-follow-up","external_id":"PRRC_comment-1","thread_id":"PRRT_thread-1","status":"open","title":"Предыдущее замечание ревизии","body":"Проверка после исправления."}]}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			t.Fatal("git must not be called when commit-push is disabled")
+			return "", nil
+		},
+	}
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutputRequired = true
+	result, err := service.Launch(context.Background(), invocation, validProfile(), validAllocation(), validWorkplace(t))
+	if err != nil {
+		t.Fatalf("canonical follow-up remark payload must be accepted: %v", err)
+	}
+	if result.StructuredOutput == nil || len(result.StructuredOutput.Remarks) != 1 {
+		t.Fatalf("expected one parsed follow-up remark: %#v", result.StructuredOutput)
+	}
+	remark := result.StructuredOutput.Remarks[0]
+	if remark.ExternalID != "PRRC_comment-1" || remark.ThreadID != "PRRT_thread-1" || remark.Status != "open" {
+		t.Fatalf("follow-up remark identifiers must survive parsing: %#v", remark)
+	}
+}
+
 func TestStructuredInputCanonicalValidatorRejectsEmptyProgrammaticInput(t *testing.T) {
 	t.Parallel()
 

@@ -3612,8 +3612,11 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 	if !strings.Contains(launcher.invocation.Launch.Prompt, "Исправить замечания") {
 		t.Fatalf("structured input must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
 	}
-	if !strings.Contains(launcher.invocation.Launch.Prompt, `"ExternalID":"thread-1"`) || !strings.Contains(launcher.invocation.Launch.Prompt, `"ReplyToID":"thread-1"`) {
-		t.Fatalf("canonical review remarks must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
+	if !strings.Contains(launcher.invocation.Launch.Prompt, `"external_id":"thread-1"`) || !strings.Contains(launcher.invocation.Launch.Prompt, `"thread_id":"thread-1"`) {
+		t.Fatalf("canonical review remark identifiers must be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
+	}
+	if strings.Contains(launcher.invocation.Launch.Prompt, `"ReplyToID"`) || strings.Contains(launcher.invocation.Launch.Prompt, `"ExternalID"`) {
+		t.Fatalf("integration-specific review remark fields must not be passed into synthesis prompt: %q", launcher.invocation.Launch.Prompt)
 	}
 	if !launcher.commitCalled {
 		t.Fatal("review rework action must push fixes before publishing responses")
