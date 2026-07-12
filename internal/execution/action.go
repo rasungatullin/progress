@@ -493,7 +493,7 @@ func executionFailure(code string, err error, retryable bool, manualIntervention
 	}
 }
 
-func executionResultFromLaunch(assignment *model.ExecutionAssignment, action model.Action, operations []model.OperationResult, result model.LaunchResult, err error) model.ExecutionResult {
+func executionResultFromLaunch(assignment *model.ExecutionAssignment, action model.Action, operations []model.OperationResult, mergeRequest *model.MergeRequest, result model.LaunchResult, err error) model.ExecutionResult {
 	status := strings.TrimSpace(result.Status)
 	if err != nil {
 		status = "failed"
@@ -505,6 +505,7 @@ func executionResultFromLaunch(assignment *model.ExecutionAssignment, action mod
 		Summary:         strings.TrimSpace(result.Summary),
 		Assignment:      cloneAssignment(assignment),
 		Action:          action,
+		MergeRequest:    mergeRequest,
 		Operations:      append([]model.OperationResult(nil), operations...),
 		Artifacts:       executionArtifacts(result),
 		DiagnosticLinks: executionDiagnosticLinks(result),
