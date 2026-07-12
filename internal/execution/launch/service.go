@@ -805,12 +805,12 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 		return gitResult{}, err
 	}
 
-	changedPaths, err := s.changedUserPaths(ctx, gitRoot)
+	changedPaths, trackedDeletionPaths, err := s.changedPathsForCommit(ctx, gitRoot)
 	if err != nil {
 		return gitResult{}, err
 	}
 
-	if len(changedPaths) == 0 {
+	if len(changedPaths) == 0 && len(trackedDeletionPaths) == 0 {
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
@@ -820,17 +820,25 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 	}
 	defer cleanupPushKey()
 
-	addArgs := append([]string{"add", "-A", "--"}, changedPaths...)
-	if _, err := s.runGitOutput(ctx, gitRoot, addArgs...); err != nil {
-		return gitResult{}, fmt.Errorf("git add failed: %w", err)
+	if len(trackedDeletionPaths) > 0 {
+		addArgs := append([]string{"add", "-u", "--"}, trackedDeletionPaths...)
+		if _, err := s.runGitOutput(ctx, gitRoot, addArgs...); err != nil {
+			return gitResult{}, fmt.Errorf("git add failed: %w", err)
+		}
+	}
+	if len(changedPaths) > 0 {
+		addArgs := append([]string{"add", "-A", "--"}, changedPaths...)
+		if _, err := s.runGitOutput(ctx, gitRoot, addArgs...); err != nil {
+			return gitResult{}, fmt.Errorf("git add failed: %w", err)
+		}
 	}
 
-	changedPaths, err = s.changedUserPaths(ctx, gitRoot)
+	changedPaths, trackedDeletionPaths, err = s.changedPathsForCommit(ctx, gitRoot)
 	if err != nil {
 		return gitResult{}, err
 	}
 
-	if len(changedPaths) == 0 {
+	if len(changedPaths) == 0 && len(trackedDeletionPaths) == 0 {
 		return gitResult{status: "no-changes", branch: branch}, nil
 	}
 
@@ -1058,21 +1066,34 @@ func (s *Service) hasChanges(ctx context.Context, dir string) (bool, error) {
 }
 
 func (s *Service) changedUserPaths(ctx context.Context, dir string) ([]string, error) {
+	paths, _, err := s.changedPathsForCommit(ctx, dir)
+	return paths, err
+}
+
+func (s *Service) changedPathsForCommit(ctx context.Context, dir string) ([]string, []string, error) {
 	output, err := s.runGitOutput(ctx, dir, "status", "--porcelain", "-z", "-uall")
 	if err != nil {
-		return nil, fmt.Errorf("inspect git changes: %w", err)
+		return nil, nil, fmt.Errorf("inspect git changes: %w", err)
 	}
 
-	return userChangedPathsFromPorcelain(output), nil
+	paths, trackedDeletionPaths := userChangedPathsForCommitFromPorcelain(output)
+	return paths, trackedDeletionPaths, nil
 }
 
 func userChangedPathsFromPorcelain(output string) []string {
+	paths, _ := userChangedPathsForCommitFromPorcelain(output)
+	return paths
+}
+
+func userChangedPathsForCommitFromPorcelain(output string) ([]string, []string) {
 	if output == "" {
-		return nil
+		return nil, nil
 	}
 
 	paths := make([]string, 0)
+	trackedDeletionPaths := make([]string, 0)
 	seen := make(map[string]struct{})
+	seenTrackedDeletion := make(map[string]struct{})
 	entries := strings.Split(output, "\x00")
 	for index := 0; index < len(entries); index++ {
 		entry := entries[index]
@@ -1087,7 +1108,17 @@ func userChangedPathsFromPorcelain(output string) []string {
 		}
 
 		for _, pathValue := range pathValues {
-			if pathValue == "" || isProgressRuntimePath(pathValue) {
+			if pathValue == "" {
+				continue
+			}
+			if isProgressRuntimePath(pathValue) {
+				if isTrackedDeletion(entry) {
+					if _, ok := seenTrackedDeletion[pathValue]; ok {
+						continue
+					}
+					seenTrackedDeletion[pathValue] = struct{}{}
+					trackedDeletionPaths = append(trackedDeletionPaths, pathValue)
+				}
 				continue
 			}
 			if _, ok := seen[pathValue]; ok {
@@ -1098,7 +1129,11 @@ func userChangedPathsFromPorcelain(output string) []string {
 		}
 	}
 
-	return paths
+	return paths, trackedDeletionPaths
+}
+
+func isTrackedDeletion(entry string) bool {
+	return len(entry) >= 2 && (entry[0] == 'D' || entry[1] == 'D')
 }
 
 func isRenameOrCopyStatus(entry string) bool {
@@ -1107,12 +1142,19 @@ func isRenameOrCopyStatus(entry string) bool {
 
 func isProgressRuntimePath(pathValue string) bool {
 	pathValue = strings.Trim(pathValue, "\"")
-	return pathValue == ".progress" ||
-		pathValue == ".progress/" ||
-		pathValue == ".progress/runner-output" ||
-		strings.HasPrefix(pathValue, ".progress/runner-output/") ||
-		pathValue == ".progress/execution-runs" ||
-		strings.HasPrefix(pathValue, ".progress/execution-runs/")
+	parts := strings.Split(pathValue, "/")
+	for index, part := range parts {
+		if part != ".progress" {
+			continue
+		}
+
+		suffix := strings.Trim(strings.Join(parts[index+1:], "/"), "/")
+		return suffix == "" ||
+			suffix == "runner-output" || strings.HasPrefix(suffix, "runner-output/") ||
+			suffix == "execution-runs" || strings.HasPrefix(suffix, "execution-runs/")
+	}
+
+	return false
 }
 
 func (s *Service) upstreamBranch(ctx context.Context, dir, branch string) (string, error) {

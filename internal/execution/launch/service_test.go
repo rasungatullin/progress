@@ -826,6 +826,118 @@ func TestLaunchCommitPushKeepsProgressConfigVisibleAsUserChange(t *testing.T) {
 	}
 }
 
+func TestLaunchCommitPushKeepsTrackedRuntimeDeletionSeparateFromNewRuntimeFile(t *testing.T) {
+	t.Parallel()
+
+	paths, deletionPaths := userChangedPathsForCommitFromPorcelain(strings.Join([]string{
+		" D .progress/execution-runs/execution.db",
+		"?? .progress/execution-runs/execution-123.json",
+		" M file.txt",
+		"",
+	}, "\x00"))
+	if !reflect.DeepEqual(paths, []string{"file.txt"}) {
+		t.Fatalf("unexpected visible paths: %#v", paths)
+	}
+	if !reflect.DeepEqual(deletionPaths, []string{".progress/execution-runs/execution.db"}) {
+		t.Fatalf("unexpected tracked deletion paths: %#v", deletionPaths)
+	}
+}
+
+func TestCommitAndPushStagesTrackedRuntimeDeletionWithoutAddingNewRuntimeFile(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	statusCalls := 0
+	service := &Service{
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain -z -uall":
+				statusCalls++
+				if statusCalls == 1 {
+					return " D .progress/execution-runs/execution.db\x00?? .progress/execution-runs/execution-123.json\x00", nil
+				}
+				return "D  .progress/execution-runs/execution.db\x00", nil
+			case "add -u -- .progress/execution-runs/execution.db":
+				return "", nil
+			case "commit -m remove execution database":
+				return "[feature/test abc123] remove execution database\n", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			case "push":
+				return "Everything up-to-date\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	result, err := service.CommitAndPush(context.Background(), model.CommitPushInput{
+		Directory:     "/repo",
+		CommitMessage: "remove execution database",
+	})
+	if err != nil {
+		t.Fatalf("commit and push: %v", err)
+	}
+	if !strings.Contains(result, "committed+pushed") {
+		t.Fatalf("unexpected result: %q", result)
+	}
+	for _, call := range calls {
+		if strings.HasPrefix(strings.Join(call, " "), "add -A") {
+			t.Fatalf("new runtime file must not be added: %#v", call)
+		}
+	}
+}
+
+func TestChangedPathsForCommitRecognizesNestedRuntimeDeletion(t *testing.T) {
+	t.Parallel()
+
+	repo := tempDir(t)
+	runGitTestCommand(t, repo, "init")
+	runGitTestCommand(t, repo, "config", "user.email", "test@example.com")
+	runGitTestCommand(t, repo, "config", "user.name", "Test User")
+
+	trackedPath := filepath.Join(repo, "internal", "execution", ".progress", "execution-runs", "execution.db")
+	if err := os.MkdirAll(filepath.Dir(trackedPath), 0o755); err != nil {
+		t.Fatalf("mkdir tracked path: %v", err)
+	}
+	if err := os.WriteFile(trackedPath, []byte("database"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	runGitTestCommand(t, repo, "add", "--", "internal/execution/.progress/execution-runs/execution.db")
+	runGitTestCommand(t, repo, "commit", "-m", "initial")
+
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("internal/execution/.progress/execution-runs/\n"), 0o644); err != nil {
+		t.Fatalf("write gitignore: %v", err)
+	}
+	runGitTestCommand(t, repo, "add", ".gitignore")
+	runGitTestCommand(t, repo, "commit", "-m", "ignore runtime files")
+	if err := os.Remove(trackedPath); err != nil {
+		t.Fatalf("remove tracked file: %v", err)
+	}
+	ignoredPath := filepath.Join(repo, "internal", "execution", ".progress", "execution-runs", "new.db")
+	if err := os.WriteFile(ignoredPath, []byte("new database"), 0o644); err != nil {
+		t.Fatalf("write ignored file: %v", err)
+	}
+
+	paths, deletionPaths, err := NewService().changedPathsForCommit(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("inspect changes: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("new ignored file must not be visible: %#v", paths)
+	}
+	if !reflect.DeepEqual(deletionPaths, []string{"internal/execution/.progress/execution-runs/execution.db"}) {
+		t.Fatalf("unexpected nested deletion paths: %#v", deletionPaths)
+	}
+}
+
 func TestLaunchCommitPushDropsCollapsedProgressDirectoryPath(t *testing.T) {
 	t.Parallel()
 
@@ -2273,6 +2385,15 @@ func tempDir(t *testing.T) string {
 		t.Fatalf("mkdir temp repo: %v", err)
 	}
 	return dir
+}
+
+func runGitTestCommand(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = dir
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
 }
 
 func buildStructuredJSON(value any) (string, error) {
