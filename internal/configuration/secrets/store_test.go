@@ -55,6 +55,24 @@ func TestMaskTextReplacesPrivateValues(t *testing.T) {
 	}
 }
 
+func TestMaskTextReplacesJSONEscapedPrivateValues(t *testing.T) {
+	t.Parallel()
+
+	value := "line one\nquote=\"value\"\\tail"
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal private value: %v", err)
+	}
+
+	got := MaskText(`{"value":"line one\nquote=\"value\"\\tail"}`, value)
+	if strings.Contains(got, string(encoded[1:len(encoded)-1])) || strings.Contains(got, value) {
+		t.Fatalf("masked text contains private value: %q", got)
+	}
+	if got != `{"value":"[private value masked]"}` {
+		t.Fatalf("unexpected masked JSON: %q", got)
+	}
+}
+
 func TestMaskErrorHidesPrivateValuesAndPreservesCause(t *testing.T) {
 	t.Parallel()
 

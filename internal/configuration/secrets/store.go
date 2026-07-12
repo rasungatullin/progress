@@ -45,9 +45,18 @@ const maskedValue = "[private value masked]"
 // ошибка уже может содержать значение, полученное из хранилища.
 func MaskText(text string, values ...string) string {
 	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			text = strings.ReplaceAll(text, value, maskedValue)
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
 		}
+
+		// JSON-кодирование экранирует переводы строк, кавычки и обратные
+		// косые черты. Маскирование обеих форм не позволяет обойти защиту
+		// при сохранении структурированного вывода.
+		if encoded, err := json.Marshal(value); err == nil {
+			text = strings.ReplaceAll(text, string(encoded[1:len(encoded)-1]), maskedValue)
+		}
+		text = strings.ReplaceAll(text, value, maskedValue)
 	}
 	return text
 }

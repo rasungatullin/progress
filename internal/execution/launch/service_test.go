@@ -171,6 +171,51 @@ func TestLaunchMasksPrivateValueInFullRunnerOutput(t *testing.T) {
 	}
 }
 
+func TestLaunchMasksJSONEscapedPrivateValueInFullRunnerOutput(t *testing.T) {
+	t.Parallel()
+
+	secret := "line one\nquote=\"value\"\\tail"
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			payload, err := json.Marshal(model.StructuredOutput{
+				Summary: secret,
+				Extensions: model.StructuredExtensions{
+					"raw": json.RawMessage([]byte(`{"value":"line one\nquote=\"value\"\\tail"}`)),
+				},
+			})
+			if err != nil {
+				return "", err
+			}
+			return strings.Join([]string{structuredOutputStart, string(payload), structuredOutputEnd}, "\n"), nil
+		},
+	}
+	allocation := validAllocation()
+	allocation.Git = &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivateValue: secret}}
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), allocation, validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	for name, value := range map[string]string{
+		"summary":            result.Summary,
+		"raw output":         result.RawOutput,
+		"raw structured":     result.RawStructuredOutput,
+		"structured summary": result.StructuredOutput.Summary,
+		"structured raw":     string(result.StructuredOutput.Extensions["raw"]),
+	} {
+		if strings.Contains(value, secret) || strings.Contains(value, `line one\nquote=\"value\"\\tail`) {
+			t.Fatalf("%s contains private value: %q", name, value)
+		}
+	}
+	rawOutput, err := os.ReadFile(result.RawOutputPath)
+	if err != nil {
+		t.Fatalf("read raw output: %v", err)
+	}
+	if strings.Contains(string(rawOutput), secret) || strings.Contains(string(rawOutput), `line one\nquote=\"value\"\\tail`) {
+		t.Fatalf("runner output file contains private value: %s", rawOutput)
+	}
+}
+
 func TestLaunchUpdatesExistingHistoryHandle(t *testing.T) {
 	t.Parallel()
 
