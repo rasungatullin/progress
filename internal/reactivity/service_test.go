@@ -767,7 +767,7 @@ func TestServiceProcessTaskDoesNotLoadExternalRemarksBeforeNonCompletedRoute(t *
 		t.Fatalf("process task: %v", err)
 	}
 	for _, request := range integrations.requests {
-		if request.Operation == "comments" {
+		if request.Operation == "list" {
 			t.Fatalf("comments must not be loaded for non-completed route: %#v", integrations.requests)
 		}
 	}
@@ -1069,7 +1069,7 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 			}
 		}
 		return integration.Response{MergeRequests: []integration.MergeRequest{mergeRequest}}, nil
-	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "comments":
+	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "list":
 		if s.commentsErr != nil {
 			return integration.Response{}, s.commentsErr
 		}

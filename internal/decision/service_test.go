@@ -1229,12 +1229,12 @@ func TestServiceStartRoutesReviewPassedTaskToReworkForExternalRemarks(t *testing
 	}
 	foundCommentsRequest := false
 	for _, request := range integrationStub.requests {
-		if request.Operation == "comments" {
+		if request.Operation == "list" {
 			foundCommentsRequest = true
 		}
 	}
 	if !foundCommentsRequest {
-		t.Fatalf("expected comments request, got %#v", integrationStub.requests)
+		t.Fatalf("expected review remarks list request, got %#v", integrationStub.requests)
 	}
 }
 

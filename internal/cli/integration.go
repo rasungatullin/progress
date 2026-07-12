@@ -661,11 +661,11 @@ func newIntegrationMergeRequestCommentsCommand(system string, label string) *cob
 			}
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				IntegrationType:    "repository",
+				IntegrationType:    "repo",
 				System:             system,
-				Resource:           "merge-request",
-				ObjectType:         "merge-request",
-				Operation:          "comments",
+				Resource:           "review-remark",
+				ObjectType:         "review-remark",
+				Operation:          "list",
 				Repository:         flags.repo,
 				RepoProvided:       cmd.Flags().Changed("repo"),
 				MergeRequestNumber: flags.number,

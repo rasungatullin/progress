@@ -1491,7 +1491,7 @@ func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
-			if req.Operation != "comments" || req.Repository != "owner/name" || req.MergeRequestNumber != 17 {
+			if req.Operation != "list" || req.Repository != "owner/name" || req.MergeRequestNumber != 17 {
 				t.Fatalf("unexpected integration request: %#v", req)
 			}
 			return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
@@ -3226,7 +3226,7 @@ func TestProjectReviewActionsLoadRelatedPullRequestFromPublicInput(t *testing.T)
 						HeadRef:    "167",
 						URL:        "https://github.com/owner/name/pull/184",
 					}}, nil
-				case "comments":
+				case "list":
 					return integration.Response{}, nil
 				default:
 					t.Fatalf("unexpected integration request: %#v", request)
@@ -3768,7 +3768,7 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 			switch req.Operation {
 			case "get":
 				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.MergeRequestNumber, State: "OPEN", BaseRef: "main", HeadRef: "feature/review"}}, nil
-			case "comments":
+			case "list":
 				return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
 					Repository:         req.Repository,
 					MergeRequestNumber: req.MergeRequestNumber,
@@ -3887,7 +3887,7 @@ func TestPublishPullRequestCommentsFallsBackForUnresolvedGitHubLine(t *testing.T
 				}
 				genericBody = req.Body
 				return integration.Response{Status: "ok"}, nil
-			case "comments":
+			case "list":
 				return integration.Response{System: "github"}, nil
 			default:
 				t.Fatalf("unexpected integration request: %#v", req)
@@ -3909,7 +3909,7 @@ func TestPublishPullRequestCommentsFallsBackForUnresolvedGitHubLine(t *testing.T
 		if req.Operation == "create" && req.Path != "" {
 			return integration.Response{System: "github"}, errors.New(`GitHub API returned status 422: {"errors":[{"field":"pull_request_review_thread.line","message":"could not be resolved"}]}`)
 		}
-		if req.Operation == "comments" {
+		if req.Operation == "list" {
 			return integration.Response{ReviewRemarks: []integration.ReviewRemark{{Body: genericBody}}}, nil
 		}
 		t.Fatalf("duplicate fallback must not create another comment: %#v", req)
@@ -3985,7 +3985,7 @@ func TestPublishPullRequestCommentsDoesNotDuplicateStaleThreadFallback(t *testin
 		switch req.Operation {
 		case "reply":
 			return integration.Response{System: "github"}, errors.New("GitHub GraphQL returned errors: Could not resolve to a node with the global id of 'PRRT_old'")
-		case "comments":
+		case "list":
 			if createCalls == 0 {
 				return integration.Response{}, nil
 			}
@@ -4112,7 +4112,7 @@ func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *test
 			switch req.Operation {
 			case "get":
 				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.MergeRequestNumber, State: "OPEN", BaseRef: "main", HeadRef: "112"}}, nil
-			case "comments":
+			case "list":
 				return integration.Response{}, errors.New("temporary comments outage")
 			case "create":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", URL: "https://github.com/owner/name/pull/17#issuecomment-2"}}, nil
@@ -4192,7 +4192,7 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 			switch req.Operation {
 			case "get":
 				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.MergeRequestNumber, State: "OPEN", BaseRef: "main", HeadRef: "feature/fixes"}}, nil
-			case "comments":
+			case "list":
 				return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
 					Repository:         req.Repository,
 					MergeRequestNumber: req.MergeRequestNumber,

@@ -175,9 +175,9 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 	state := &MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest)}
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType:    integrationmodel.IntegrationTypeRepository,
-		Resource:           "merge-request",
-		ObjectType:         "merge-request",
-		Operation:          "comments",
+		Resource:           "review-remark",
+		ObjectType:         "review-remark",
+		Operation:          "list",
 		Repository:         mergeRequest.Repository,
 		RepoProvided:       strings.TrimSpace(mergeRequest.Repository) != "",
 		MergeRequestNumber: mergeRequest.Number,
