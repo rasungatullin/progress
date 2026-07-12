@@ -330,6 +330,25 @@ func TestDispatchRepositoryReviewRemarkReplyReturnsOperationResult(t *testing.T)
 	}
 }
 
+func TestDispatchRepositoryReviewRemarkListUsesTypedRegistryOperation(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	route, err := service.resolveRoute(Request{
+		IntegrationType: "repo",
+		System:           "github",
+		Resource:         "review-remark",
+		ObjectType:       "review-remark",
+		Operation:        "list",
+	})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if route.IntegrationType != model.IntegrationTypeRepository || route.ObjectType != "review-remark" || route.Operation != "list" {
+		t.Fatalf("unexpected typed review remark route: %#v", route)
+	}
+}
+
 func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	t.Parallel()
 

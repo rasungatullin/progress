@@ -138,9 +138,9 @@ func (e builtinOperationExecutor) loadReviewRemarks(ctx context.Context, state *
 
 	response, err := executor.Execute(ctx, integration.Request{
 		IntegrationType:    integrationmodel.IntegrationTypeRepository,
-		Resource:           "merge-request",
-		ObjectType:         "merge-request",
-		Operation:          "comments",
+		Resource:           "review-remark",
+		ObjectType:         "review-remark",
+		Operation:          "list",
 		Repository:         ref.Repository,
 		RepoProvided:       strings.TrimSpace(ref.Repository) != "",
 		MergeRequestNumber: ref.Number,
@@ -906,9 +906,9 @@ func reviewRemarkFallbackBody(body, path string, line int, side string) string {
 func (e builtinOperationExecutor) publishReviewRemarkFallback(ctx context.Context, executor integrationExecutor, ref pullRequestRef, body string) (bool, error) {
 	commentsResponse, err := executor.Execute(ctx, integration.Request{
 		IntegrationType:    integrationmodel.IntegrationTypeRepository,
-		Resource:           "merge-request",
-		ObjectType:         "merge-request",
-		Operation:          "comments",
+		Resource:           "review-remark",
+		ObjectType:         "review-remark",
+		Operation:          "list",
 		Repository:         ref.Repository,
 		RepoProvided:       strings.TrimSpace(ref.Repository) != "",
 		MergeRequestNumber: ref.Number,
