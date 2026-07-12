@@ -351,7 +351,7 @@ func canonicalObjectType(objectType string) string {
 	switch objectType {
 	case "task":
 		return "issue"
-	case "issue-comment", "merge-request-comment":
+	case "issue-comment", "merge-request-comment", "review-remark":
 		return "comment"
 	default:
 		return objectType
