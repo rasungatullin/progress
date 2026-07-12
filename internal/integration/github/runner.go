@@ -620,7 +620,7 @@ func (r *Runner) RunPRReviewThreadUnresolve(ctx context.Context, threadID string
 	if threadID == "" {
 		result := CommandResult{Command: defaultCommand, ExitCode: -1}
 		return result, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review thread id is required", Result: result}
- 	}
+	}
 	config, err := r.loadConfig(ctx)
 	if err != nil {
 		return CommandResult{}, resolvedConfig{}, err
