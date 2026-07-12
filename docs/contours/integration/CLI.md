@@ -19,7 +19,7 @@ GitHub-адаптер поддерживает два способа обращ�
 
 1. CLI принимает входной запрос пользователя или другого контура;
 2. сервис интеграции формирует внутренний `IntegrationRequest`;
-3. диспетчер выбирает адаптер по типу интеграции и имени системы;
+3. реестр выбирает адаптер по типу интеграции и имени системы;
 4. адаптер выполняет вызов `gh` или HTTP API;
 5. адаптер считывает структурированный ответ;
 6. JSON-ответ преобразуется во внутреннюю нормализованную структуру;
@@ -64,8 +64,8 @@ flowchart LR
 ```json
 {
   "default_systems": {
-    "tracker": "github-app",
-    "repository": "github-app"
+    "issue": "github-app",
+    "repo": "github-app"
   },
   "systems": {
     "github-app": {
@@ -130,7 +130,7 @@ type Provider interface {
 }
 ```
 
-Диспетчер выбирает `Provider` по имени интегрируемой системы. Если имя системы не указано, используется `default_systems` для типа интеграции.
+Реестр выбирает `Provider` по имени интегрируемой системы. Если имя системы не указано, используется `default_systems` для типа интеграции.
 
 ## 5. Нормализованные сущности
 
@@ -570,7 +570,7 @@ GET /rest/api/content/search?cql=type%3Dpage&limit=10&expand=space,version
 ```mermaid
 flowchart TD
     A[progress] --> B[integration]
-    B --> C[dispatcher]
+    B --> C[реестр типов, систем и операций]
     B --> D[github]
     D --> E[auth status]
     D --> F[repo get]
@@ -681,15 +681,15 @@ GitHub-адаптер должен различать как минимум сл
     "service": "progress"
   },
   "default_systems": {
-    "tracker": "github",
-    "repository": "github",
+    "issue": "github",
+    "repo": "github",
     "messenger": "mattermost",
     "wiki": "confluence"
   },
   "systems": {
     "github": {
       "type": "github",
-      "integration_types": ["tracker", "repository"],
+      "integration_types": ["issue", "repo"],
       "enabled": true,
       "transport": "cli",
       "command": "gh",
@@ -704,7 +704,7 @@ GitHub-адаптер должен различать как минимум сл
     },
     "bitbucket": {
       "type": "bitbucket",
-      "integration_type": "repository",
+      "integration_type": "repo",
       "enabled": true,
       "base_url": "https://api.bitbucket.org/2.0",
       "api_variant": "cloud",
@@ -737,7 +737,7 @@ GitHub-адаптер должен различать как минимум сл
     },
     "local": {
       "type": "local-tracker",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true,
       "database": {
         "driver": "sqlite",
@@ -746,7 +746,7 @@ GitHub-адаптер должен различать как минимум сл
     },
     "work-tracker": {
       "type": "script",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true,
       "timeout": "30s",
       "project": "ABC",
@@ -802,7 +802,7 @@ GitHub-адаптер должен различать как минимум сл
   "systems": {
     "github": {
       "type": "github",
-      "integration_types": ["tracker", "repository"],
+    "integration_types": ["issue", "repo"],
       "enabled": true,
       "transport": "api",
       "base_url": "https://api.github.com",
@@ -825,12 +825,12 @@ GitHub-адаптер должен различать как минимум сл
 ```json
 {
   "default_systems": {
-    "tracker": "local"
+    "issue": "local"
   },
   "systems": {
     "local": {
       "type": "local-tracker",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true
     }
   }
@@ -970,7 +970,7 @@ private_store.type=keychain
 
 Реализованный рабочий срез включает:
 
-1. диспетчер `Dispatch`, который выбирает интегрируемую систему по `IntegrationType`, `System` и `default_systems`;
+1. реестр типов, систем и операций, который выбирает интегрируемую систему по `IntegrationType`, `System` и `default_systems`;
 2. единый вызов `Execute`, который возвращает `Response` с каноническим объектом, маршрутом и отказным состоянием;
 3. GitHub-адаптер через `gh` или прямой GitHub API для задач, комментариев задач, репозиториев и запросов на слияние;
 4. Bitbucket-адаптер через HTTP API для репозиториев и запросов на слияние;

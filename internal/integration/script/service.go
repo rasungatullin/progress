@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -250,8 +251,12 @@ func requestMap(req model.ProviderRequest) map[string]any {
 	putString(request, "system", req.System)
 	putString(request, "repository", req.Repository)
 	putString(request, "id", req.ID)
-	if req.Number > 0 {
-		request["number"] = req.Number
+	legacyNumber := req.Number
+	if legacyNumber == 0 && req.IntegrationType == model.IntegrationTypeIssue {
+		legacyNumber, _ = strconv.Atoi(req.ID)
+	}
+	if legacyNumber > 0 {
+		request["number"] = legacyNumber
 	}
 	putString(request, "external_id", req.ExternalID)
 	putString(request, "base", req.Base)

@@ -267,7 +267,7 @@ type PullRequestComment struct {
 
 ## 7. Интерфейс контура
 
-Контур публикует универсальный интерфейс диспетчеризации и выполнения канонического запроса.
+Контур публикует универсальный интерфейс разрешения и выполнения канонического запроса через реестр типов, систем и операций.
 
 ```go
 package integration
@@ -367,12 +367,12 @@ type OperationOutputContract struct {
 ```json
 {
   "default_systems": {
-    "tracker": "local"
+    "issue": "local"
   },
   "systems": {
     "local": {
       "type": "local-tracker",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true,
       "database": {
         "driver": "sqlite",

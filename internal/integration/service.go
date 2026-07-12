@@ -343,6 +343,11 @@ func (s *Service) resolveRoute(req Request) (Route, error) {
 		s.logger.Printf("Реестр интеграции отклонил запрос: система=%q причина=%q", normalized.System, err)
 		return s.errorRoute(req, err), err
 	}
+	if !systemSupportsOperation(state, normalized.IntegrationType, normalized.ObjectType, normalized.Operation) {
+		err := fmt.Errorf("integration operation is not supported: %s.%s.%s", normalized.IntegrationType, canonicalObjectType(normalized.ObjectType), normalized.Operation)
+		s.logger.Printf("Реестр интеграции отклонил запрос: система=%q причина=%q", normalized.System, err)
+		return s.errorRoute(req, err), err
+	}
 	_, registered := s.providers[normalized.System]
 	available := registered && systemSupportsIntegrationType(state, normalized.IntegrationType)
 
@@ -448,6 +453,11 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	}
 
 	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
+	if identifier == "" && integrationType == model.IntegrationTypeIssue && req.Number != 0 {
+		// Совместимый вход старых команд переводится в непрозрачную строку на
+		// границе реестра; дальше адаптер получает только ID.
+		identifier = strconv.Itoa(req.Number)
+	}
 	normalized := ProviderRequest{
 		IntegrationType: integrationType,
 		System:          system,
@@ -683,6 +693,32 @@ func systemSupportsIntegrationType(state systemState, integrationType string) bo
 	}
 	for _, item := range state.IntegrationTypes {
 		if item == integrationType {
+			return true
+		}
+	}
+	return false
+}
+
+func systemSupportsOperation(state systemState, integrationType string, objectType string, operation string) bool {
+	// Сценарный адаптер получает каталог операций из конфигурации. Пустой
+	// каталог не ограничивает контракт: это позволяет проверять маршрут до
+	// подключения конкретного сценария.
+	if state.Type == "script" && len(state.Operations) == 0 {
+		return true
+	}
+	integrationType = normalizeIntegrationType(integrationType)
+	objectType = canonicalObjectType(objectType)
+	operation = normalizeOperation(operation)
+	for _, template := range builtinOperationTemplates(state.Type) {
+		if normalizeIntegrationType(template.IntegrationType) == integrationType &&
+			canonicalObjectType(template.ObjectType) == objectType &&
+			normalizeOperation(template.Operation) == operation {
+			return true
+		}
+	}
+	for name := range state.Operations {
+		configuredType, configuredObject, configuredOperation := parseOperationName(name)
+		if configuredType == integrationType && configuredObject == objectType && configuredOperation == operation {
 			return true
 		}
 	}
