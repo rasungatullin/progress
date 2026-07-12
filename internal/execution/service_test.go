@@ -2300,6 +2300,35 @@ func TestPublishReviewResponsesRejectsPRRCWithoutThreadBeforePublication(t *test
 	}
 }
 
+func TestPublishReviewResponsesRejectsPRRCThreadIDBeforePublication(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
+				RemarkID: "remark-1", Type: "inline", ThreadID: "PRRC_comment-1", Status: "resolved", Summary: "Исправлено.",
+			}}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses)
+	if err == nil || !strings.Contains(err.Error(), "review comment identifier") {
+		t.Fatalf("PRRC thread_id must fail with a diagnostic: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("PRRC thread_id must not be published externally: %#v", calls)
+	}
+}
+
 func TestPublishReviewResponsesCanonicalKindOverridesConflictingResponse(t *testing.T) {
 	t.Parallel()
 
@@ -4069,6 +4098,29 @@ func TestReviewRemarkCommentsPreservesExternalIdentifiers(t *testing.T) {
 	}
 	if !strings.Contains(comments[0].Body, "Состояние: open") {
 		t.Fatalf("review remark state must be preserved in published body: %q", comments[0].Body)
+	}
+}
+
+func TestPublishPullRequestCommentsDoesNotUseReviewCommentIDAsThread(t *testing.T) {
+	integrations := &stubIntegrationExecutor{}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	count, err := executor.publishPullRequestComments(context.Background(), &operationExecution{}, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body:       "## Замечание ревизии\n\nНовое замечание.",
+		Path:       "internal/service.go",
+		Line:       42,
+		ExternalID: "PRRC_comment-1",
+		ThreadID:   "PRRC_comment-1",
+	}})
+	if err != nil {
+		t.Fatalf("publish review remark: %v", err)
+	}
+	if count != 1 || len(integrations.calls) != 1 {
+		t.Fatalf("expected one new remark, count=%d calls=%#v", count, integrations.calls)
+	}
+	request := integrations.calls[0]
+	if request.Operation != "create" || request.ThreadID != "" || request.ExternalID != "" {
+		t.Fatalf("review comment identifier must not be sent as thread: %#v", request)
 	}
 }
 

@@ -822,6 +822,24 @@ func TestRunnerRunPRReviewThreadReplyBuildsGraphQLCommand(t *testing.T) {
 	}
 }
 
+func TestRunnerRunPRReviewThreadReplyRejectsReviewCommentID(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(context.Context, string, []string) commandRunner {
+		t.Fatal("GraphQL command must not be invoked for a review comment identifier")
+		return commandRunner{}
+	}
+
+	_, _, err := runner.RunPRReviewThreadReply(context.Background(), PRReviewThreadReplyRequest{ThreadID: "PRRC_comment-1", Body: "Ответ"})
+	if err == nil || !strings.Contains(err.Error(), "must identify PullRequestReviewThread") {
+		t.Fatalf("expected review comment identifier diagnostic, got %v", err)
+	}
+}
+
 func TestRunnerRunPRCreateBuildsCommand(t *testing.T) {
 	t.Parallel()
 
