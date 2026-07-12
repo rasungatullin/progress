@@ -1568,11 +1568,9 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			if !startedOutput && !lastOutputAt.IsZero() {
 				startedOutput = true
 			}
-			timeout := noOutputTimeout
-			if _, structuredEventAt := writer.structuredSnapshot(); !structuredEventAt.IsZero() {
-				timeout = structuredOutputTimeout
-			}
-			resetRunnerWatchdog(watchdog, timeout, lastOutputAt, startedAt)
+			_, structuredEventAt := writer.structuredSnapshot()
+			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, startedAt)
+			resetRunnerWatchdogRemaining(watchdog, policy.remaining)
 		case <-watchdog.C:
 			_, lastOutputAt := writer.snapshot()
 			startedOutput = startedOutput || !lastOutputAt.IsZero()
@@ -1582,18 +1580,16 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 				output, lastOutputAt := writer.snapshot()
 				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout)
 			}
-			watchdogTimeout := noOutputTimeout
-			if _, structuredEventAt := writer.structuredSnapshot(); !structuredEventAt.IsZero() {
-				watchdogTimeout = structuredOutputTimeout
-			}
-			if remaining := runnerNoOutputRemaining(watchdogTimeout, lastOutputAt, startedAt); remaining > 0 {
-				watchdog.Reset(remaining)
+			_, structuredEventAt := writer.structuredSnapshot()
+			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, startedAt)
+			if policy.remaining > 0 {
+				watchdog.Reset(policy.remaining)
 				continue
 			}
 			cancel()
 			<-done
 			output, lastOutputAt := writer.snapshot()
-			return "", newNoOutputTimeoutError(output, lastOutputAt, writer, watchdogTimeout)
+			return "", newNoOutputTimeoutError(output, lastOutputAt, writer, policy.timeout, policy.structured)
 		case <-ctx.Done():
 			<-done
 			output, lastOutputAt := writer.snapshot()
@@ -1605,7 +1601,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	}
 }
 
-func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout time.Duration) *runnerExecutionError {
+func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout time.Duration, structuredRule ...bool) *runnerExecutionError {
 	lastEvent, eventAt := writer.structuredSnapshot()
 	if eventAt.IsZero() {
 		lastEvent = ""
@@ -1621,15 +1617,43 @@ func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runn
 		lastOutputAt:        lastOutputAt,
 		lastStructuredEvent: lastEvent,
 		idleDuration:        idleDuration,
-		timeoutRule:         runnerTimeoutRule(lastEvent, timeout),
+		timeoutRule:         runnerTimeoutRule(lastEvent, timeout, len(structuredRule) > 0 && structuredRule[0]),
 	}
 }
 
-func runnerTimeoutRule(lastEvent string, timeout time.Duration) string {
+func runnerTimeoutRule(lastEvent string, timeout time.Duration, structured bool) string {
 	if lastEvent == "" {
 		return fmt.Sprintf("%s без принятого события", timeout)
 	}
-	return fmt.Sprintf("%s после события", timeout)
+	if structured {
+		return fmt.Sprintf("%s после структурированного события", timeout)
+	}
+	return fmt.Sprintf("%s после последнего фрагмента", timeout)
+}
+
+type runnerWatchdogState struct {
+	remaining  time.Duration
+	timeout    time.Duration
+	structured bool
+}
+
+func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration, lastOutputAt, structuredEventAt, startedAt time.Time) runnerWatchdogState {
+	activityAt := lastOutputAt
+	if activityAt.IsZero() {
+		activityAt = startedAt
+	}
+	deadline := activityAt.Add(noOutputTimeout)
+	state := runnerWatchdogState{timeout: noOutputTimeout}
+	if !structuredEventAt.IsZero() {
+		structuredDeadline := structuredEventAt.Add(structuredOutputTimeout)
+		if !structuredDeadline.Before(deadline) {
+			deadline = structuredDeadline
+			state.timeout = structuredOutputTimeout
+			state.structured = true
+		}
+	}
+	state.remaining = time.Until(deadline)
+	return state
 }
 
 func runnerNoOutputRemaining(timeout time.Duration, lastOutputAt, startedAt time.Time) time.Duration {
@@ -1640,13 +1664,16 @@ func runnerNoOutputRemaining(timeout time.Duration, lastOutputAt, startedAt time
 }
 
 func resetRunnerWatchdog(watchdog *time.Timer, timeout time.Duration, lastOutputAt, startedAt time.Time) {
+	resetRunnerWatchdogRemaining(watchdog, runnerNoOutputRemaining(timeout, lastOutputAt, startedAt))
+}
+
+func resetRunnerWatchdogRemaining(watchdog *time.Timer, remaining time.Duration) {
 	if !watchdog.Stop() {
 		select {
 		case <-watchdog.C:
 		default:
 		}
 	}
-	remaining := runnerNoOutputRemaining(timeout, lastOutputAt, startedAt)
 	if remaining <= 0 {
 		remaining = time.Nanosecond
 	}

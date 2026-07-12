@@ -24,6 +24,12 @@ case "$7" in
 		sleep .15
 		printf '{"type":"item.completed","item":{"type":"agent_message","text":"continued"}}\n'
 		;;
+	stale-event)
+		printf '{"type":"item.completed","item":{"type":"file_change","changes":[]}}\n'
+		sleep .18
+		printf 'late diagnostic fragment\n' >&2
+		sleep .5
+		;;
 	*)
 		exit 4
 		;;
