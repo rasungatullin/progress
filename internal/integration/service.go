@@ -183,7 +183,7 @@ func resolvePrivateSystemConfig(ctx context.Context, system string, config *mode
 		value, err := store.Get(ctx, config.TokenPrivate)
 		if err != nil {
 			if errors.Is(err, secrets.ErrNotFound) {
-				return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+				return fmt.Errorf("integration system %q references missing private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate), err)
 			}
 			return secrets.MaskError(fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate), err), value)
 		}
@@ -216,7 +216,7 @@ func resolvePrivateGitHubAppConfig(ctx context.Context, system string, config *m
 	value, err := store.Get(ctx, config.GitHubAppPrivateKeyPrivate)
 	if err != nil {
 		if errors.Is(err, secrets.ErrNotFound) {
-			return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))
+			return fmt.Errorf("integration system %q references missing private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate), err)
 		}
 		return secrets.MaskError(fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate), err), value)
 	}

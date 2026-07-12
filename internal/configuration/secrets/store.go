@@ -336,7 +336,10 @@ func (s keychainStore) Get(ctx context.Context, name string) (string, error) {
 		if isKeychainNotFound(output) {
 			return "", ErrNotFound
 		}
-		return "", fmt.Errorf("read private value %q from keychain service %q: %w: %s", name, s.service, err, strings.TrimSpace(string(output)))
+		// Ответ security может содержать диагностические данные внешней
+		// утилиты. Он не является частью контракта хранилища и не должен
+		// попадать в журнал или ошибку контура.
+		return "", fmt.Errorf("read private value %q from keychain service %q: %w", name, s.service, err)
 	}
 	return strings.TrimRight(string(output), "\r\n"), nil
 }
@@ -359,7 +362,7 @@ func (s keychainStore) Delete(ctx context.Context, name string) error {
 		if isKeychainNotFound(output) {
 			return ErrNotFound
 		}
-		return fmt.Errorf("delete private value %q from keychain service %q: %w: %s", name, s.service, err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("delete private value %q from keychain service %q: %w", name, s.service, err)
 	}
 	return nil
 }

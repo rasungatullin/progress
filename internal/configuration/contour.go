@@ -89,7 +89,7 @@ func (s *Service) Snapshot(ctx context.Context, input SnapshotInput) (Snapshot, 
 	}
 	if snapshot.ExecutionResources != nil || snapshot.Integration != nil {
 		config := model.ResourcePrivateStoreConfig{}
-		storeHome := input.ConfigHome
+		storeHome, _ := resolveConfigHome(input.ConfigHome)
 		if snapshot.ExecutionResources != nil {
 			config = snapshot.ExecutionResources.Config.PrivateStore
 			storeHome = snapshot.ExecutionResources.ConfigHome

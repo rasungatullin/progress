@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -56,6 +57,22 @@ func TestMaskErrorHidesPrivateValuesAndPreservesCause(t *testing.T) {
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("masked error did not preserve cause: %v", err)
+	}
+}
+
+func TestKeychainReadErrorDoesNotExposeCommandOutput(t *testing.T) {
+	original := execCommandContext
+	execCommandContext = func(_ context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "printf %s actual-secret >&2; exit 1")
+	}
+	t.Cleanup(func() { execCommandContext = original })
+
+	_, err := (keychainStore{service: "progress"}).Get(context.Background(), "token")
+	if err == nil {
+		t.Fatal("expected keychain read error")
+	}
+	if strings.Contains(err.Error(), "actual-secret") {
+		t.Fatalf("keychain error contains command output: %v", err)
 	}
 }
 
