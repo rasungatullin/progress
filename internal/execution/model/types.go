@@ -292,6 +292,17 @@ type GitPushConfig struct {
 	SSHIdentityPrivateValue string `json:"-"`
 	KnownHostsFile          string `json:"known-hosts-file,omitempty"`
 	IdentitiesOnly          bool   `json:"identities-only,omitempty"`
+	AllowForceWithLease     bool   `json:"allow-force-with-lease,omitempty"`
+}
+
+type RebaseInput struct {
+	Directory      string     `json:"directory,omitempty"`
+	BaseRef        string     `json:"base_ref,omitempty"`
+	HeadRef        string     `json:"head_ref,omitempty"`
+	ProtectedRef   string     `json:"protected_ref,omitempty"`
+	Push           bool       `json:"push,omitempty"`
+	ForceWithLease bool       `json:"force_with_lease,omitempty"`
+	Git            *GitConfig `json:"-"`
 }
 
 type CommitPushInput struct {

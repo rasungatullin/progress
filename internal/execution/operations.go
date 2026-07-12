@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
@@ -35,6 +36,8 @@ type operationExecution struct {
 type builtinOperationExecutor struct {
 	service *Service
 }
+
+const rebaseAbortTimeout = 30 * time.Second
 
 type commitPusher interface {
 	CommitAndPush(context.Context, model.CommitPushInput) (string, error)
@@ -364,6 +367,8 @@ func (e builtinOperationExecutor) execute(ctx context.Context, state *operationE
 		return e.parseResult(state, operation, name)
 	case OperationKindCommitPush:
 		return e.commitPush(ctx, state, operation, name)
+	case OperationKindRebase:
+		return e.rebase(ctx, state, operation, name)
 	case OperationKindPublishMergeRequest:
 		return e.publishMergeRequest(ctx, state, operation, name)
 	case OperationKindPublishReviewRemarks:
@@ -2151,6 +2156,156 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 	writeCommitPushData(state, operation, summary)
 	state.tracker.completeIO(name, commitPushInputSummary(input, operation), commitPushOutputSummary(summary, operation), summary)
 	return nil
+}
+
+func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	input := rebaseInputFromOperation(state, operation)
+	if strings.TrimSpace(input.Directory) == "" {
+		return e.failRebase(state, operation, name, "Каталог рабочего места не задан.", "rebase_directory_required", fmt.Errorf("rebase directory is required"))
+	}
+	if strings.TrimSpace(input.BaseRef) == "" {
+		return e.failRebase(state, operation, name, "Базовая ссылка для перебазирования не задана.", "rebase_base_ref_required", fmt.Errorf("rebase base ref is required"))
+	}
+	if strings.HasPrefix(input.BaseRef, "-") {
+		return e.failRebase(state, operation, name, "Базовая ссылка имеет недопустимый вид.", "rebase_base_ref_invalid", fmt.Errorf("rebase base ref must not start with '-'"))
+	}
+	workplaceBranch := strings.TrimSpace(input.HeadRef)
+	if workplaceBranch == "" {
+		return e.failRebase(state, operation, name, "Рабочая ветка для перебазирования не задана.", "rebase_head_ref_required", fmt.Errorf("rebase head ref is required"))
+	}
+
+	gitOutput := e.service.runGitOutput
+	if gitOutput == nil {
+		gitOutput = runGitOutput
+	}
+	if _, err := gitOutput(ctx, input.Directory, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return e.failRebase(state, operation, name, "Рабочее место не является Git-репозиторием.", "rebase_not_repository", err)
+	}
+	dirty, err := gitOutput(ctx, input.Directory, "status", "--porcelain", "-z", "-uall")
+	if err != nil {
+		return e.failRebase(state, operation, name, "Состояние рабочего места не получено.", "rebase_status_failed", err)
+	}
+	if strings.TrimSpace(strings.ReplaceAll(dirty, "\x00", "")) != "" {
+		return e.failRebase(state, operation, name, "Перебазирование запрещено при незаписанных изменениях.", "rebase_worktree_dirty", fmt.Errorf("working tree has uncommitted changes"))
+	}
+	if input.ForceWithLease && !allowForceWithLease(input.Git) {
+		return e.failRebase(state, operation, name, "Безопасная принудительная отправка не разрешена настройкой Git.", "rebase_force_with_lease_not_allowed", fmt.Errorf("git.push.allow-force-with-lease is not enabled"))
+	}
+	if input.ForceWithLease && !input.Push {
+		return e.failRebase(state, operation, name, "Политика --force-with-lease требует явного разрешения отправки.", "rebase_push_policy_required", fmt.Errorf("force-with-lease requires push=true"))
+	}
+	branch, err := gitOutput(ctx, input.Directory, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(branch) == "" {
+		if err == nil {
+			err = fmt.Errorf("current branch is empty")
+		}
+		return e.failRebase(state, operation, name, "Текущая ветка не определена.", "rebase_branch_failed", err)
+	}
+	branch = strings.TrimSpace(branch)
+	if branch != workplaceBranch {
+		return e.failRebase(state, operation, name, "Текущая ветка не совпадает с рабочей веткой.", "rebase_head_ref_mismatch", fmt.Errorf("current branch %q does not match workplace branch %q", branch, input.HeadRef))
+	}
+	protectedBranch := strings.TrimSpace(input.ProtectedRef)
+	if protectedBranch == "" {
+		protectedBranch = "main"
+	}
+	if branch == normalizeRebaseRef(protectedBranch) {
+		return e.failRebase(state, operation, name, "Перебазирование основной ветки запрещено.", "rebase_base_branch", fmt.Errorf("current branch %q is the rebase base branch", branch))
+	}
+
+	if _, err := gitOutput(ctx, input.Directory, "fetch", "origin", input.BaseRef); err != nil {
+		return e.failRebase(state, operation, name, "Получение базовой ссылки завершилось отказом.", "rebase_fetch_failed", err)
+	}
+	remoteOID := ""
+	if input.ForceWithLease {
+		remoteOID, err = gitOutput(ctx, input.Directory, "rev-parse", "--verify", "refs/remotes/origin/"+branch)
+		if err != nil || strings.TrimSpace(remoteOID) == "" {
+			if err == nil {
+				err = fmt.Errorf("remote branch origin/%s has no commit", branch)
+			}
+			return e.failRebase(state, operation, name, "Исходная вершина удалённой ветки не определена.", "rebase_remote_head_failed", err)
+		}
+		remoteOID = strings.TrimSpace(remoteOID)
+	}
+	if _, err := gitOutput(ctx, input.Directory, "rebase", "--", "FETCH_HEAD"); err != nil {
+		abortErr := error(nil)
+		abortCtx, cancelAbort := context.WithTimeout(context.WithoutCancel(ctx), rebaseAbortTimeout)
+		_, abortErr = gitOutput(abortCtx, input.Directory, "rebase", "--abort")
+		cancelAbort()
+		if abortErr != nil {
+			err = fmt.Errorf("%w; additionally failed to abort rebase: %v", err, abortErr)
+		}
+		return e.failRebase(state, operation, name, "Перебазирование завершилось конфликтом и было прервано.", "rebase_conflict", err)
+	}
+
+	summary := fmt.Sprintf("rebased branch=%s base=%s", branch, input.BaseRef)
+	if input.Push {
+		pushArgs := []string{"push"}
+		if input.ForceWithLease {
+			pushArgs = append(pushArgs, "--force-with-lease=refs/heads/"+branch+":"+remoteOID)
+		}
+		pushArgs = append(pushArgs, "origin", "HEAD:"+branch)
+		if _, err := gitOutput(ctx, input.Directory, pushArgs...); err != nil {
+			return e.failRebase(state, operation, name, "Отправка перебазированной ветки завершилась отказом.", "rebase_push_failed", err)
+		}
+		if input.ForceWithLease {
+			summary += " pushed=force-with-lease"
+		} else {
+			summary += " pushed=normal"
+		}
+	}
+
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"rebase_summary": {Ref: "data.rebase_summary"}}
+	}
+	writeOperationData(state, out, "rebase_summary", summary)
+	state.tracker.completeIO(name, rebaseInputSummary(input, operation), operationIOSummary(operation.Out, map[string]string{"rebase_summary": summary}), summary)
+	return nil
+}
+
+func (e builtinOperationExecutor) failRebase(state *operationExecution, operation OperationSpec, name, summary, code string, err error) error {
+	state.tracker.fail(name, summary, err, code, true, true)
+	return err
+}
+
+func allowForceWithLease(config *model.GitConfig) bool {
+	return config != nil && config.Push != nil && config.Push.AllowForceWithLease
+}
+
+func rebaseInputFromOperation(state *operationExecution, operation OperationSpec) model.RebaseInput {
+	input := model.RebaseInput{}
+	input.Directory, _ = operationMappingValue[string](state, operation.In["directory"])
+	input.BaseRef, _ = operationMappingValue[string](state, operation.In["base_ref"])
+	input.HeadRef, _ = operationMappingValue[string](state, operation.In["head_ref"])
+	input.ProtectedRef, _ = operationMappingValue[string](state, operation.In["protected_ref"])
+	input.Push, _ = operationMappingValue[bool](state, operation.In["push"])
+	input.ForceWithLease, _ = operationMappingValue[bool](state, operation.In["force_with_lease"])
+	if mapping, ok := operation.In["git"]; ok {
+		if strings.TrimSpace(mapping.Ref) == "data.allocation.git" && state != nil {
+			input.Git, _ = state.data["allocation"].(allocation).Git, true
+		} else {
+			input.Git, _ = operationMappingValue[*model.GitConfig](state, mapping)
+		}
+	}
+	return input
+}
+
+func rebaseInputSummary(input model.RebaseInput, operation OperationSpec) string {
+	return operationIOSummary(operation.In, map[string]string{
+		"directory":        input.Directory,
+		"base_ref":         input.BaseRef,
+		"head_ref":         input.HeadRef,
+		"protected_ref":    input.ProtectedRef,
+		"push":             fmt.Sprintf("%t", input.Push),
+		"force_with_lease": fmt.Sprintf("%t", input.ForceWithLease),
+	})
+}
+
+func normalizeRebaseRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	ref = strings.TrimPrefix(ref, "refs/heads/")
+	return strings.TrimPrefix(ref, "origin/")
 }
 
 func writeCommitPushData(state *operationExecution, operation OperationSpec, summary string) {

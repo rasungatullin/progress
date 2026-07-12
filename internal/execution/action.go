@@ -38,6 +38,7 @@ const (
 	OperationKindLaunchSynthesis        = "launch-synthesis"
 	OperationKindParseResult            = "parse-result"
 	OperationKindCommitPush             = "commit-push"
+	OperationKindRebase                 = "rebase"
 	OperationKindPublishMergeRequest    = "publish-merge-request"
 	OperationKindPublishReviewRemarks   = "publish-review-remarks"
 	OperationKindPublishReviewResponses = "publish-review-responses"
@@ -352,6 +353,8 @@ func defaultOperationSpec(kind string) model.OperationSpec {
 		return builtinOperation(OperationKindParseResult, "Разбор результата", true)
 	case OperationKindCommitPush:
 		return builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true)
+	case OperationKindRebase:
+		return builtinOperation(OperationKindRebase, "Безопасное перебазирование ветки", true)
 	case OperationKindPublishMergeRequest:
 		return builtinOperation(OperationKindPublishMergeRequest, "Открытие запроса на слияние", true)
 	case OperationKindPublishReviewRemarks:
@@ -371,7 +374,7 @@ func actionRequiresWorkplace(action methodology.Action, operations []model.Opera
 	}
 	for _, operation := range operations {
 		switch operationKind(operation) {
-		case OperationKindPrepareWorkplace, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindPublishReviewRemarks, OperationKindPublishReviewResponses:
+		case OperationKindPrepareWorkplace, OperationKindCommitPush, OperationKindRebase, OperationKindPublishMergeRequest, OperationKindPublishReviewRemarks, OperationKindPublishReviewResponses:
 			return true
 		}
 	}
