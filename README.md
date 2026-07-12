@@ -66,10 +66,10 @@
 ## Пример CLI-вызова
 
 ```bash
-progress synthesize --config ./configs/dev.yaml
+progress decision start --task 123
 ```
 
-Примерный режим вызова: загрузка конфигурации комплекса, активация контуров, подключение интеграционных модулей и запуск вычислительного каскада.
+Примерный режим вызова: запуск контура принятия решения по номеру задачи.
 
 ## С чего начать
 
@@ -91,6 +91,8 @@ progress synthesize --config ./configs/dev.yaml
 - [docs/styleguide/](docs/styleguide/) — канонические документы по языку проекта, словарю терминов и таблицам соответствия между кодом и документацией;
 - [AGENTS.md](AGENTS.md) — обязательные инструкции для агентских контуров;
 - [docs/styleguide/agent-workflows.md](docs/styleguide/agent-workflows.md) — прикладные правила подготовки агентских текстов, коммитов, запросов на слияние и ревизионных материалов;
+- [docs/public-contract-checklist.md](docs/public-contract-checklist.md) — единый чеклист изменения публичного контракта;
+- [docs/operations-guide-template.md](docs/operations-guide-template.md) — короткий шаблон эксплуатационного руководства для новой возможности;
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — целевая архитектурная схема;
 - [docs/contours/CONTRACTS.md](docs/contours/CONTRACTS.md) — проверяемая карта межконтурных контрактов;
 - [docs/contours/reactivity/README.md](docs/contours/reactivity/README.md) — контур реакции на внешние события;
