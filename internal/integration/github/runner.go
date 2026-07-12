@@ -585,9 +585,6 @@ func (r *Runner) RunPRCommentCreate(ctx context.Context, repository string, numb
 	}
 	endpoint := fmt.Sprintf("repos/%s/pulls/%d/comments", repository, number)
 	args := []string{"api", "--method", "POST", endpoint, "-f", "body=" + request.Body, "-f", "commit_id=" + request.CommitID, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side}
-	if request.ReviewID > 0 {
-		args = append(args, "-F", "pull_request_review_id="+strconv.FormatInt(request.ReviewID, 10))
-	}
 	return r.runCommandWithResolvedConfig(ctx, config, args)
 }
 
@@ -720,7 +717,6 @@ type PRCommentCreateRequest struct {
 	Line     int
 	Side     string
 	CommitID string
-	ReviewID int64
 }
 
 type PRReviewThreadReplyRequest struct {

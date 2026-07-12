@@ -1592,8 +1592,8 @@ func TestServicePRCommentCreateReusesAndSubmitsPendingReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if stub.prCommentRequest.ReviewID != 77 || stub.prSubmitCalls != 1 || response.Status != model.ResponseStatusOK {
-		t.Fatalf("pending review was not reused and submitted: request=%#v submits=%d response=%#v", stub.prCommentRequest, stub.prSubmitCalls, response)
+	if stub.prSubmitCalls != 2 || response.Status != model.ResponseStatusOK {
+		t.Fatalf("pending review was not completed before and after comment create: submits=%d response=%#v", stub.prSubmitCalls, response)
 	}
 }
 
@@ -1652,14 +1652,17 @@ func TestServicePRCommentCreateSubmitsPendingReviewAfterExistingRemark(t *testin
 	}
 }
 
-func TestServicePRCommentCreatePublishesMultipleInlineRemarksThroughOneReview(t *testing.T) {
+func TestServicePRCommentCreatePublishesMultipleInlineRemarksThroughSeparateReviews(t *testing.T) {
 	t.Parallel()
 
 	stub := &stubRunner{
-		result: CommandResult{ExitCode: 0, Stdout: `{"id": 101, "node_id": "PRRC_comment-1", "body": "Inline remark", "html_url": "https://github.com/owner/name/pull/42#discussion_r101", "path": "file.go", "line": 12, "side": "RIGHT", "pull_request_review_id": 77}`},
+		commentResults: []CommandResult{
+			{ExitCode: 0, Stdout: `{"id": 101, "node_id": "PRRC_comment-1", "body": "Inline remark", "html_url": "https://github.com/owner/name/pull/42#discussion_r101", "path": "file.go", "line": 12, "side": "RIGHT", "pull_request_review_id": 77}`},
+			{ExitCode: 0, Stdout: `{"id": 102, "node_id": "PRRC_comment-2", "body": "Second inline remark", "html_url": "https://github.com/owner/name/pull/42#discussion_r102", "path": "file.go", "line": 18, "side": "RIGHT", "pull_request_review_id": 78}`},
+		},
 		pendingReviewResults: []CommandResult{
 			{ExitCode: 0, Stdout: `[]`},
-			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+			{ExitCode: 0, Stdout: `[]`},
 		},
 	}
 	service := NewService()
@@ -1676,10 +1679,7 @@ func TestServicePRCommentCreatePublishesMultipleInlineRemarksThroughOneReview(t 
 	}
 
 	if stub.prCommentCalls != 2 || stub.prReviewsCalls != 2 || stub.prSubmitCalls != 2 {
-		t.Fatalf("inline remarks did not share one submitted review: comments=%d reviews=%d submits=%d", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls)
-	}
-	if stub.prCommentRequest.ReviewID != 77 {
-		t.Fatalf("second comment did not reuse pending review: %#v", stub.prCommentRequest)
+		t.Fatalf("inline remarks were not published through separate submitted reviews: comments=%d reviews=%d submits=%d", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls)
 	}
 }
 
@@ -1732,7 +1732,10 @@ func TestServicePRCommentCreateRetriesAfterReviewSubmitFailure(t *testing.T) {
 			{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`},
 			{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
 		},
-		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		pendingReviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		},
 		submitResults: []CommandResult{
 			{ExitCode: 1, Stderr: "submit failed"},
 			{ExitCode: 0, Stdout: `{"id":77,"state":"COMMENTED"}`},
@@ -2011,6 +2014,7 @@ type stubRunner struct {
 	prListCalls         int
 	prReviewCalls       int
 	prCommentCalls      int
+	commentResults      []CommandResult
 	prReplyCalls        int
 	prResolveCalls      int
 	prReviewsCalls      int
@@ -2149,6 +2153,11 @@ func (r *stubRunner) RunPRCommentCreate(_ context.Context, repository string, nu
 	r.repo = repository
 	r.number = number
 	r.prCommentRequest = request
+	if len(r.commentResults) > 0 {
+		result := r.commentResults[0]
+		r.commentResults = r.commentResults[1:]
+		return result, r.config, r.err
+	}
 	return r.result, r.config, r.err
 }
 

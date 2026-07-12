@@ -515,7 +515,15 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		if err != nil {
 			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pending GitHub pull request review lookup failed before comment create")
 		}
-		commentRequest.ReviewID = pendingReviewID
+		if pendingReviewID > 0 {
+			submitResult, _, submitErr := s.runner.RunPRReviewSubmit(ctx, repository, number, pendingReviewID)
+			if submitErr != nil {
+				return responseWithGitHubFailure(response, submitResult, submitErr, "GitHub pull request review submit failed before comment create")
+			}
+			if submitResult.ExitCode != 0 {
+				return responseWithGitHubExitFailure(response, submitResult, repository, number, "GitHub pull request review submit exited with a non-zero code before comment create")
+			}
+		}
 	}
 
 	result, config, err := s.runner.RunPRCommentCreate(ctx, repository, number, commentRequest)
@@ -528,6 +536,7 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 	}
 
 	var remark model.ReviewRemark
+	var reviewID int64
 	if commentRequest.Path == "" {
 		var raw ghIssueComment
 		if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
@@ -540,9 +549,7 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub REST JSON response: %v", err), Result: result, Err: err}, "gh pull request inline comment create returned malformed JSON")
 		}
 		remark = reviewRemarkFromRESTComment(repository, number, raw)
-		if raw.ReviewID > 0 {
-			commentRequest.ReviewID = raw.ReviewID
-		}
+		reviewID = raw.ReviewID
 	}
 	if remark.ExternalID == "" && remark.URL == "" {
 		if existing, _, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
@@ -551,16 +558,16 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review comment endpoint returned no stable identifier for %s#%d (operation=createReviewComment reference=%s response=%s)", repository, number, githubPullRequestReference(repository, number), safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=partial-payload operation=createReviewComment reference="+githubPullRequestReference(repository, number)+"; existing remarks were checked before retry")
 		}
 	}
-	if commentRequest.ReviewID == 0 {
+	if reviewID == 0 {
 		pendingReviewID, err := s.findPendingPRReview(ctx, repository, number)
 		if err != nil {
 			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pending GitHub pull request review lookup failed after comment create")
 		}
-		commentRequest.ReviewID = pendingReviewID
+		reviewID = pendingReviewID
 	}
 
-	if commentRequest.ReviewID > 0 {
-		submitResult, _, submitErr := s.runner.RunPRReviewSubmit(ctx, repository, number, commentRequest.ReviewID)
+	if reviewID > 0 {
+		submitResult, _, submitErr := s.runner.RunPRReviewSubmit(ctx, repository, number, reviewID)
 		if submitErr != nil {
 			return responseWithGitHubFailure(response, submitResult, submitErr, "GitHub pull request review submit failed after comment create")
 		}

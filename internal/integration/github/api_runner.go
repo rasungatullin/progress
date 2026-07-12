@@ -593,9 +593,6 @@ func (r *APIRunner) RunPRCommentCreate(ctx context.Context, repository string, n
 		return headResult, apiResolvedConfig(config), &Error{Code: ErrorCodePartialPayload, Message: "GitHub pull request head SHA is missing", Result: headResult}
 	}
 	payload := map[string]any{"body": request.Body, "commit_id": request.CommitID, "path": request.Path, "line": request.Line, "side": request.Side}
-	if request.ReviewID > 0 {
-		payload["pull_request_review_id"] = request.ReviewID
-	}
 	var raw ghPRReviewCommentCreateResponse
 	result, err := r.do(ctx, config, http.MethodPost, fmt.Sprintf("repos/%s/pulls/%d/comments", repository, number), payload, &raw)
 	if err != nil {
