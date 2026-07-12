@@ -2,6 +2,7 @@ package reactivity
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 const (
 	StopReasonNoNextOperation = "no-next-operation"
 	StopReasonSingleCycle     = "single-cycle"
+	repeatedStateLimit        = 3
 )
 
 type TaskProcessingInput struct {
@@ -70,12 +72,24 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 
 	result := TaskProcessingResult{TaskNumber: input.TaskNumber}
 	var knownMergeRequest *integration.MergeRequest
+	previousState := ""
+	repeatedStates := 0
 	for index := 1; index <= maxCycles; index++ {
 		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index, knownMergeRequest)
 		result.Cycles = append(result.Cycles, cycle)
 		result.FinalIssue = cycle.Issue
 		if err != nil {
 			return result, err
+		}
+		state := processingStateSignature(cycle)
+		if state == previousState {
+			repeatedStates++
+		} else {
+			previousState = state
+			repeatedStates = 1
+		}
+		if repeatedStates >= repeatedStateLimit {
+			return result, fmt.Errorf("обработка задачи %d остановлена: повторяющееся состояние обработки (%d циклов подряд)", input.TaskNumber, repeatedStates)
 		}
 		if cycle.ExecutionResult != nil && cycle.ExecutionResult.MergeRequest != nil {
 			knownMergeRequest = integrationMergeRequestFromExecutionResult(cycle.ExecutionResult.MergeRequest)
@@ -92,6 +106,26 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 	}
 
 	return result, fmt.Errorf("обработка задачи %d превысила лимит циклов: %d", input.TaskNumber, maxCycles)
+}
+
+func processingStateSignature(cycle TaskProcessingCycle) string {
+	state := struct {
+		IssueLabels   []string
+		MergeRequest  *integration.MergeRequest
+		ExternalState *decision.MergeRequestExternalState
+		Consideration *decision.ConsiderationResult
+		Action        string
+		ReviewPassed  *bool
+	}{
+		IssueLabels:   cycle.Issue.Labels,
+		MergeRequest:  cycle.MergeRequest,
+		ExternalState: cycle.MergeRequestExternalState,
+		Consideration: cycle.Consideration,
+		Action:        cycle.Action,
+		ReviewPassed:  cycle.ReviewPassed,
+	}
+	encoded, _ := json.Marshal(state)
+	return string(encoded)
 }
 
 func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (TaskProcessingResult, error) {
@@ -326,14 +360,20 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 
 func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
 	respondedRemarkIDs := map[string]struct{}{}
-	for _, remark := range remarks {
+	start := 0
+	for index, remark := range remarks {
+		if isExternalReviewConclusion(remark.Body) && isApprovedExternalReviewConclusion(remark.Body) {
+			start = index + 1
+		}
+	}
+	for _, remark := range remarks[start:] {
 		id := externalReviewRemarkReferenceID(remark.Body)
 		if id != "" && (isResolvedExternalReviewResponse(remark.Body) || isResolvedExternalReviewRemark(remark.Body)) {
 			respondedRemarkIDs[id] = struct{}{}
 		}
 	}
 
-	for _, remark := range remarks {
+	for _, remark := range remarks[start:] {
 		if isExternalReviewConclusion(remark.Body) {
 			if isApprovedExternalReviewConclusion(remark.Body) {
 				continue

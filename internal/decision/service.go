@@ -198,14 +198,20 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 
 func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
 	respondedRemarkIDs := map[string]struct{}{}
-	for _, remark := range remarks {
+	start := 0
+	for index, remark := range remarks {
+		if isExternalReviewConclusion(remark.Body) && isApprovedExternalReviewConclusion(remark.Body) {
+			start = index + 1
+		}
+	}
+	for _, remark := range remarks[start:] {
 		id := externalReviewRemarkReferenceID(remark.Body)
 		if id != "" && (isResolvedExternalReviewResponse(remark.Body) || isResolvedExternalReviewRemark(remark.Body)) {
 			respondedRemarkIDs[id] = struct{}{}
 		}
 	}
 
-	for _, remark := range remarks {
+	for _, remark := range remarks[start:] {
 		if isExternalReviewConclusion(remark.Body) {
 			if isApprovedExternalReviewConclusion(remark.Body) {
 				continue
