@@ -826,6 +826,75 @@ func TestLaunchCommitPushKeepsProgressConfigVisibleAsUserChange(t *testing.T) {
 	}
 }
 
+func TestLaunchCommitPushKeepsTrackedRuntimeDeletionSeparateFromNewRuntimeFile(t *testing.T) {
+	t.Parallel()
+
+	paths, deletionPaths := userChangedPathsForCommitFromPorcelain(strings.Join([]string{
+		" D .progress/execution-runs/execution.db",
+		"?? .progress/execution-runs/execution-123.json",
+		" M file.txt",
+		"",
+	}, "\x00"))
+	if !reflect.DeepEqual(paths, []string{"file.txt"}) {
+		t.Fatalf("unexpected visible paths: %#v", paths)
+	}
+	if !reflect.DeepEqual(deletionPaths, []string{".progress/execution-runs/execution.db"}) {
+		t.Fatalf("unexpected tracked deletion paths: %#v", deletionPaths)
+	}
+}
+
+func TestCommitAndPushStagesTrackedRuntimeDeletionWithoutAddingNewRuntimeFile(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	statusCalls := 0
+	service := &Service{
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch strings.Join(args, " ") {
+			case "rev-parse --is-inside-work-tree":
+				return "true\n", nil
+			case "rev-parse --show-toplevel":
+				return "/repo\n", nil
+			case "branch --show-current":
+				return "feature/test\n", nil
+			case "status --porcelain -z -uall":
+				statusCalls++
+				if statusCalls == 1 {
+					return " D .progress/execution-runs/execution.db\x00?? .progress/execution-runs/execution-123.json\x00", nil
+				}
+				return "D  .progress/execution-runs/execution.db\x00", nil
+			case "add -u -- .progress/execution-runs/execution.db":
+				return "", nil
+			case "commit -m remove execution database":
+				return "[feature/test abc123] remove execution database\n", nil
+			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
+				return "origin/feature/test\n", nil
+			case "push":
+				return "Everything up-to-date\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	result, err := service.CommitAndPush(context.Background(), model.CommitPushInput{
+		Directory:     "/repo",
+		CommitMessage: "remove execution database",
+	})
+	if err != nil {
+		t.Fatalf("commit and push: %v", err)
+	}
+	if !strings.Contains(result, "committed+pushed") {
+		t.Fatalf("unexpected result: %q", result)
+	}
+	for _, call := range calls {
+		if strings.HasPrefix(strings.Join(call, " "), "add -A") {
+			t.Fatalf("new runtime file must not be added: %#v", call)
+		}
+	}
+}
+
 func TestLaunchCommitPushDropsCollapsedProgressDirectoryPath(t *testing.T) {
 	t.Parallel()
 
