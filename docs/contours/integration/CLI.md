@@ -276,14 +276,14 @@ progress integration operations --name tracker.task.get
 
 ### 7.3 `progress integration private`
 
-Команды `progress integration private ...` работают с хранилищем приватных значений, выбранным настройкой `private_store`.
+Основной путь управления — команды `progress configuration private ...`. Команды `progress integration private ...` сохранены как совместимый переход и работают с тем же хранилищем приватных значений, выбранным настройкой `private_store`.
 
 Основные операции:
 
-1. `progress integration private status` — вывести выбранную реализацию хранилища без чтения значений;
-2. `progress integration private set <name> --stdin` — записать приватное значение с именем `<name>`;
-3. `progress integration private set <name> --value <value>` — записать значение из аргумента CLI;
-4. `progress integration private delete <name>` — удалить приватное значение.
+1. `progress configuration private status` — вывести выбранную реализацию хранилища без чтения значений;
+2. `progress configuration private set <name> --stdin` — записать приватное значение с именем `<name>`;
+3. `progress configuration private set <name> --value <value>` — записать значение из аргумента CLI;
+4. `progress configuration private delete <name>` — удалить приватное значение.
 
 Команда записи печатает только статус, имя значения и выбранное хранилище. Само приватное значение не выводится.
 
@@ -937,7 +937,7 @@ PROGRESS_INTEGRATION_TIMEOUT
 
 Правило приоритета авторизации:
 
-1. если задан `token`, используется прямое значение из конфигурации;
+1. если задан `token`, он принимается только при чтении переходной конфигурации и не сериализуется обратно;
 2. если `token` не задан и указан `token_private`, значение читается из хранилища приватных значений по имени;
 3. если `token` и `token_private` не заданы, сохраняется совместимость с `token_env`.
 

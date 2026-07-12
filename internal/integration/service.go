@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
 	confluenceprovider "github.com/rasungatullin/progress/internal/integration/confluence"
 	githubprovider "github.com/rasungatullin/progress/internal/integration/github"
@@ -16,7 +17,6 @@ import (
 	mattermostprovider "github.com/rasungatullin/progress/internal/integration/mattermost"
 	"github.com/rasungatullin/progress/internal/integration/model"
 	scriptprovider "github.com/rasungatullin/progress/internal/integration/script"
-	"github.com/rasungatullin/progress/internal/integration/secrets"
 	telegramprovider "github.com/rasungatullin/progress/internal/integration/telegram"
 )
 
@@ -99,7 +99,7 @@ func NewServiceFromConfig(logger *log.Logger, config model.IntegrationConfigFile
 	return NewServiceFromConfigWithPrivateStore(logger, config, nil)
 }
 
-func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.IntegrationConfigFile, store secrets.Store) *Service {
+func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.IntegrationConfigFile, store secrets.Reader) *Service {
 	service := newEmptyService(logger)
 	service.defaultSystem = normalizeSystem(config.DefaultSystem)
 	for integrationType, system := range config.DefaultSystems {
@@ -169,7 +169,7 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 	return service
 }
 
-func resolvePrivateSystemConfig(ctx context.Context, system string, config *model.IntegrationSystemConfig, store secrets.Store) error {
+func resolvePrivateSystemConfig(ctx context.Context, system string, config *model.IntegrationSystemConfig, store secrets.Reader) error {
 	if config == nil {
 		return nil
 	}
@@ -183,9 +183,9 @@ func resolvePrivateSystemConfig(ctx context.Context, system string, config *mode
 		value, err := store.Get(ctx, config.TokenPrivate)
 		if err != nil {
 			if errors.Is(err, secrets.ErrNotFound) {
-				return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
+				return fmt.Errorf("integration system %q references missing private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate), err)
 			}
-			return fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate), err)
+			return secrets.MaskError(fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate), err), value)
 		}
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("integration system %q references empty private value %q", normalizeSystem(system), strings.TrimSpace(config.TokenPrivate))
@@ -206,7 +206,7 @@ func resolvedTokenEnvValue(config model.IntegrationSystemConfig) string {
 	return ""
 }
 
-func resolvePrivateGitHubAppConfig(ctx context.Context, system string, config *model.IntegrationSystemConfig, store secrets.Store) error {
+func resolvePrivateGitHubAppConfig(ctx context.Context, system string, config *model.IntegrationSystemConfig, store secrets.Reader) error {
 	if config == nil || strings.TrimSpace(config.GitHubAppPrivateKey) != "" || strings.TrimSpace(config.GitHubAppPrivateKeyPrivate) == "" {
 		return nil
 	}
@@ -216,9 +216,9 @@ func resolvePrivateGitHubAppConfig(ctx context.Context, system string, config *m
 	value, err := store.Get(ctx, config.GitHubAppPrivateKeyPrivate)
 	if err != nil {
 		if errors.Is(err, secrets.ErrNotFound) {
-			return fmt.Errorf("integration system %q references missing private value %q", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))
+			return fmt.Errorf("integration system %q references missing private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate), err)
 		}
-		return fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate), err)
+		return secrets.MaskError(fmt.Errorf("integration system %q cannot read private value %q: %w", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate), err), value)
 	}
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("integration system %q references empty private value %q", normalizeSystem(system), strings.TrimSpace(config.GitHubAppPrivateKeyPrivate))

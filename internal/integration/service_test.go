@@ -9,10 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	"github.com/rasungatullin/progress/internal/integration/model"
-	"github.com/rasungatullin/progress/internal/integration/secrets"
 	"github.com/rasungatullin/progress/internal/logging"
 )
 
@@ -129,6 +130,40 @@ func TestNewServiceFromConfigWithPrivateStoreReportsMissingPrivateValue(t *testi
 	}
 }
 
+func TestResolvePrivateSystemConfigDoesNotExposeStoreErrorText(t *testing.T) {
+	t.Parallel()
+
+	const actualSecret = "actual-secret-from-store-error"
+	config := model.IntegrationSystemConfig{TokenPrivate: "github_token"}
+	err := resolvePrivateSystemConfig(context.Background(), "github", &config, failingPrivateStore{secret: actualSecret})
+	if err == nil {
+		t.Fatal("expected private store error")
+	}
+	if strings.Contains(err.Error(), actualSecret) {
+		t.Fatalf("private store error contains actual value: %v", err)
+	}
+}
+
+func TestResolvePrivateSystemConfigPreservesStoreErrorCause(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("private backend unavailable")
+	config := model.IntegrationSystemConfig{TokenPrivate: "github_token"}
+	err := resolvePrivateSystemConfig(context.Background(), "github", &config, failingPrivateStoreWithCause{
+		secret: "actual-secret",
+		cause:  cause,
+	})
+	if err == nil {
+		t.Fatal("expected private store error")
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("private store error did not preserve cause: %v", err)
+	}
+	if strings.Contains(err.Error(), "actual-secret") {
+		t.Fatalf("private store error contains actual value: %v", err)
+	}
+}
+
 func TestResolvePrivateSystemConfigSkipsGitHubAppPrivateKeyAfterPrivateToken(t *testing.T) {
 	t.Parallel()
 
@@ -212,6 +247,23 @@ func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
 
 type mapPrivateStore struct {
 	values map[string]string
+}
+
+type failingPrivateStore struct {
+	secret string
+}
+
+func (s failingPrivateStore) Get(context.Context, string) (string, error) {
+	return s.secret, fmt.Errorf("backend returned %s", s.secret)
+}
+
+type failingPrivateStoreWithCause struct {
+	secret string
+	cause  error
+}
+
+func (s failingPrivateStoreWithCause) Get(context.Context, string) (string, error) {
+	return s.secret, fmt.Errorf("backend returned %s: %w", s.secret, s.cause)
 }
 
 func (s mapPrivateStore) Get(_ context.Context, name string) (string, error) {

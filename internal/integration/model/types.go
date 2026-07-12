@@ -1,5 +1,11 @@
 package model
 
+import (
+	"encoding/json"
+
+	executionmodel "github.com/rasungatullin/progress/internal/execution/model"
+)
+
 const (
 	IntegrationTypeTracker    = "tracker"
 	IntegrationTypeRepository = "repository"
@@ -99,25 +105,25 @@ type IntegrationConfigFile struct {
 	Systems        map[string]IntegrationSystemConfig `json:"systems"`
 }
 
-type IntegrationPrivateStoreConfig struct {
-	Type    string `json:"type,omitempty"`
-	Service string `json:"service,omitempty"`
-	Path    string `json:"path,omitempty"`
-}
+// IntegrationPrivateStoreConfig сохраняется как псевдоним для совместимости
+// со старыми потребителями модели интеграции.
+type IntegrationPrivateStoreConfig = executionmodel.ResourcePrivateStoreConfig
 
 type IntegrationSystemConfig struct {
-	Type                        string                                `json:"type"`
-	IntegrationType             string                                `json:"integration_type,omitempty"`
-	IntegrationTypes            []string                              `json:"integration_types,omitempty"`
-	Default                     bool                                  `json:"default,omitempty"`
-	Enabled                     *bool                                 `json:"enabled,omitempty"`
-	Command                     string                                `json:"command,omitempty"`
-	Path                        string                                `json:"path,omitempty"`
-	Timeout                     string                                `json:"timeout,omitempty"`
-	Transport                   string                                `json:"transport,omitempty"`
-	BaseURL                     string                                `json:"base_url,omitempty"`
-	APIVariant                  string                                `json:"api_variant,omitempty"`
-	Token                       string                                `json:"token,omitempty"`
+	Type             string   `json:"type"`
+	IntegrationType  string   `json:"integration_type,omitempty"`
+	IntegrationTypes []string `json:"integration_types,omitempty"`
+	Default          bool     `json:"default,omitempty"`
+	Enabled          *bool    `json:"enabled,omitempty"`
+	Command          string   `json:"command,omitempty"`
+	Path             string   `json:"path,omitempty"`
+	Timeout          string   `json:"timeout,omitempty"`
+	Transport        string   `json:"transport,omitempty"`
+	BaseURL          string   `json:"base_url,omitempty"`
+	APIVariant       string   `json:"api_variant,omitempty"`
+	// Token принимается только при чтении переходной конфигурации. Фактическое
+	// значение не должно сериализоваться обратно в проектное состояние.
+	Token                       string                                `json:"-"`
 	TokenPrivate                string                                `json:"token_private,omitempty"`
 	TokenEnv                    string                                `json:"token_env,omitempty"`
 	GitHubAppID                 string                                `json:"github_app_id,omitempty"`
@@ -138,6 +144,22 @@ type IntegrationSystemConfig struct {
 	Settings                    map[string]string                     `json:"settings,omitempty"`
 	TaskLabelMapping            map[string]string                     `json:"task_label_mapping,omitempty"`
 	Operations                  map[string]IntegrationOperationConfig `json:"operations,omitempty"`
+}
+
+// UnmarshalJSON сохраняет совместимость со старыми конфигурациями, где
+// фактический токен записывался в поле token. Обратная сериализация это поле
+// исключает независимо от места, из которого модель выдана потребителю.
+func (c *IntegrationSystemConfig) UnmarshalJSON(data []byte) error {
+	type configAlias IntegrationSystemConfig
+	aux := struct {
+		*configAlias
+		Token string `json:"token"`
+	}{configAlias: (*configAlias)(c)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	c.Token = aux.Token
+	return nil
 }
 
 type IntegrationDatabaseConfig struct {

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
 const (
@@ -32,12 +32,46 @@ type Store interface {
 	Delete(context.Context, string) error
 }
 
+// Reader — ограниченный контракт чтения приватного значения по именованной ссылке.
+// Контуры-потребители не получают операции изменения хранилища.
+type Reader interface {
+	Get(context.Context, string) (string, error)
+}
+
+const maskedValue = "[private value masked]"
+
+// MaskError удаляет фактические приватные значения из текста ошибки, сохраняя
+// исходную ошибку для проверки через errors.Is и errors.As.
+func MaskError(err error, values ...string) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			message = strings.ReplaceAll(message, value, maskedValue)
+		}
+	}
+	if message == err.Error() {
+		return err
+	}
+	return maskedError{message: message, cause: err}
+}
+
+type maskedError struct {
+	message string
+	cause   error
+}
+
+func (e maskedError) Error() string { return e.message }
+func (e maskedError) Unwrap() error { return e.cause }
+
 type Descriptor struct {
 	Type     string
 	Location string
 }
 
-func NewStore(config model.IntegrationPrivateStoreConfig, configHome string) (Store, Descriptor, error) {
+func NewStore(config model.ResourcePrivateStoreConfig, configHome string) (Store, Descriptor, error) {
 	storeType := strings.TrimSpace(strings.ToLower(config.Type))
 	if storeType == "" {
 		storeType = defaultStoreType()
@@ -302,7 +336,10 @@ func (s keychainStore) Get(ctx context.Context, name string) (string, error) {
 		if isKeychainNotFound(output) {
 			return "", ErrNotFound
 		}
-		return "", fmt.Errorf("read private value %q from keychain service %q: %w: %s", name, s.service, err, strings.TrimSpace(string(output)))
+		// Ответ security может содержать диагностические данные внешней
+		// утилиты. Он не является частью контракта хранилища и не должен
+		// попадать в журнал или ошибку контура.
+		return "", fmt.Errorf("read private value %q from keychain service %q: %w", name, s.service, err)
 	}
 	return strings.TrimRight(string(output), "\r\n"), nil
 }
@@ -325,7 +362,7 @@ func (s keychainStore) Delete(ctx context.Context, name string) error {
 		if isKeychainNotFound(output) {
 			return ErrNotFound
 		}
-		return fmt.Errorf("delete private value %q from keychain service %q: %w: %s", name, s.service, err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("delete private value %q from keychain service %q: %w", name, s.service, err)
 	}
 	return nil
 }

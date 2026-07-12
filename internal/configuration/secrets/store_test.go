@@ -6,18 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
 func TestFileStoreWritesReadsAndDeletesPrivateValues(t *testing.T) {
 	t.Parallel()
 
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, t.TempDir())
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}
@@ -45,11 +47,40 @@ func TestFileStoreWritesReadsAndDeletesPrivateValues(t *testing.T) {
 	}
 }
 
+func TestMaskErrorHidesPrivateValuesAndPreservesCause(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("backend returned actual-secret")
+	err := MaskError(fmt.Errorf("read failed: %w", cause), "actual-secret")
+	if strings.Contains(err.Error(), "actual-secret") {
+		t.Fatalf("masked error contains private value: %v", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("masked error did not preserve cause: %v", err)
+	}
+}
+
+func TestKeychainReadErrorDoesNotExposeCommandOutput(t *testing.T) {
+	original := execCommandContext
+	execCommandContext = func(_ context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "printf %s actual-secret >&2; exit 1")
+	}
+	t.Cleanup(func() { execCommandContext = original })
+
+	_, err := (keychainStore{service: "progress"}).Get(context.Background(), "token")
+	if err == nil {
+		t.Fatal("expected keychain read error")
+	}
+	if strings.Contains(err.Error(), "actual-secret") {
+		t.Fatalf("keychain error contains command output: %v", err)
+	}
+}
+
 func TestFileStoreUsesRestrictedFilePermissions(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, dir)
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, dir)
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}
@@ -78,7 +109,7 @@ func TestFileStoreResolvesRelativePathFromConfigHome(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	_, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file", Path: "private/custom.json"}, dir)
+	_, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file", Path: "private/custom.json"}, dir)
 	if err != nil {
 		t.Fatalf("create file store with relative path: %v", err)
 	}
@@ -92,7 +123,7 @@ func TestFileStoreResolvesRelativePathFromConfigHome(t *testing.T) {
 func TestFileStoreSerializesConcurrentMutations(t *testing.T) {
 	t.Parallel()
 
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, t.TempDir())
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}
@@ -143,7 +174,7 @@ func TestFileStoreSerializesConcurrentMutations(t *testing.T) {
 func TestFileStoreLockHonorsContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, t.TempDir())
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}
@@ -170,7 +201,7 @@ func TestFileStoreLockHonorsContextCancellation(t *testing.T) {
 func TestFileStoreRecoversStaleLock(t *testing.T) {
 	t.Parallel()
 
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, t.TempDir())
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}

@@ -49,6 +49,15 @@ func newConfigurationCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newConfigurationResourcesCommand())
+	cmd.AddCommand(newConfigurationPrivateCommand())
+	return cmd
+}
+
+func newConfigurationPrivateCommand() *cobra.Command {
+	cmd := newIntegrationPrivateCommand()
+	cmd.Use = "private"
+	cmd.Short = "Управление хранилищем приватных значений"
+	cmd.PersistentFlags().String("format", configurationOutputText, "Формат вывода: text (по умолчанию) или json")
 	return cmd
 }
 
