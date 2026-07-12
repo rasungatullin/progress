@@ -1583,7 +1583,7 @@ func TestServicePRCommentCreateReusesAndSubmitsPendingReview(t *testing.T) {
 
 	stub := &stubRunner{
 		result:              CommandResult{ExitCode: 0, Stdout: `{"id":101,"node_id":"PRRC_comment-1","body":"Inline remark","html_url":"https://github.com/owner/name/pull/42#discussion_r101","path":"file.go","line":12,"side":"RIGHT","pull_request_review_id":77}`},
-		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING","comments":1}]`},
 	}
 	service := NewService()
 	service.runner = stub
@@ -1638,7 +1638,7 @@ func TestServicePRCommentCreateSubmitsPendingReviewAfterExistingRemark(t *testin
 	stub := &stubRunner{
 		result:              CommandResult{ExitCode: 0, Stdout: `{"id": 77, "state": "submitted"}`},
 		reviewResult:        CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
-		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING","comments":1}]`},
 	}
 	service := NewService()
 	service.runner = stub
@@ -1662,7 +1662,9 @@ func TestServicePRCommentCreatePublishesMultipleInlineRemarksThroughSeparateRevi
 		},
 		pendingReviewResults: []CommandResult{
 			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING","comments":1}]`},
 			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[{"id":78,"state":"PENDING","comments":1}]`},
 		},
 	}
 	service := NewService()
@@ -1678,7 +1680,7 @@ func TestServicePRCommentCreatePublishesMultipleInlineRemarksThroughSeparateRevi
 		t.Fatalf("second comment create: %v", err)
 	}
 
-	if stub.prCommentCalls != 2 || stub.prReviewsCalls != 2 || stub.prSubmitCalls != 2 {
+	if stub.prCommentCalls != 2 || stub.prReviewsCalls != 4 || stub.prSubmitCalls != 2 {
 		t.Fatalf("inline remarks were not published through separate submitted reviews: comments=%d reviews=%d submits=%d", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls)
 	}
 }
@@ -1708,7 +1710,8 @@ func TestServicePRCommentCreateClosesPendingReviewAfterRecoveringExistingRemark(
 		},
 		pendingReviewResults: []CommandResult{
 			{ExitCode: 0, Stdout: `[]`},
-			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING","comments":1}]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING","comments":1}]`},
 		},
 	}
 	service := NewService()
@@ -1734,7 +1737,8 @@ func TestServicePRCommentCreateRetriesAfterReviewSubmitFailure(t *testing.T) {
 		},
 		pendingReviewResults: []CommandResult{
 			{ExitCode: 0, Stdout: `[]`},
-			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING","comments":1}]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING","comments":1}]`},
 		},
 		submitResults: []CommandResult{
 			{ExitCode: 1, Stderr: "submit failed"},
@@ -1752,7 +1756,7 @@ func TestServicePRCommentCreateRetriesAfterReviewSubmitFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retry execute: %v", err)
 	}
-	if stub.prCommentCalls != 1 || stub.prReviewCalls != 2 || stub.prReviewsCalls != 2 || stub.prSubmitCalls != 2 || response.Status != model.ResponseStatusOK {
+	if stub.prCommentCalls != 1 || stub.prReviewCalls != 2 || stub.prReviewsCalls != 3 || stub.prSubmitCalls != 2 || response.Status != model.ResponseStatusOK {
 		t.Fatalf("retry did not recover existing remark: comments=%d threads=%d reviews=%d submits=%d response=%#v", stub.prCommentCalls, stub.prReviewCalls, stub.prReviewsCalls, stub.prSubmitCalls, response)
 	}
 }

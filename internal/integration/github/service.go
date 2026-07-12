@@ -153,8 +153,9 @@ type ghPRReviewCommentCreateResponse struct {
 }
 
 type ghPRReview struct {
-	ID    int64  `json:"id"`
-	State string `json:"state"`
+	ID       int64  `json:"id"`
+	State    string `json:"state"`
+	Comments *int   `json:"comments"`
 }
 
 type ghPRReviewThreadResolveResponse struct {
@@ -558,6 +559,16 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review comment endpoint returned no stable identifier for %s#%d (operation=createReviewComment reference=%s response=%s)", repository, number, githubPullRequestReference(repository, number), safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=partial-payload operation=createReviewComment reference="+githubPullRequestReference(repository, number)+"; existing remarks were checked before retry")
 		}
 	}
+	if reviewID > 0 {
+		pendingReviewID, pending, err := s.findPRReviewState(ctx, repository, number, reviewID)
+		if err != nil {
+			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pull request review state lookup failed after comment create")
+		}
+		if !pending || pendingReviewID == 0 {
+			return successfulPRCommentCreate(response, remark, config, repository, number)
+		}
+		reviewID = pendingReviewID
+	}
 	if reviewID == 0 {
 		pendingReviewID, err := s.findPendingPRReview(ctx, repository, number)
 		if err != nil {
@@ -598,11 +609,43 @@ func (s *Service) findPendingPRReview(ctx context.Context, repository string, nu
 		}
 	}
 	for _, review := range reviews {
-		if review.ID > 0 && strings.EqualFold(strings.TrimSpace(review.State), "pending") {
+		if review.ID <= 0 || !strings.EqualFold(strings.TrimSpace(review.State), "pending") || review.Comments == nil {
+			continue
+		}
+		if *review.Comments == 0 {
+			return 0, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks", review.ID), Result: result}
+		}
+		if *review.Comments > 0 {
 			return review.ID, nil
 		}
 	}
 	return 0, nil
+}
+
+func (s *Service) findPRReviewState(ctx context.Context, repository string, number int, reviewID int64) (int64, bool, error) {
+	result, _, err := s.runner.RunPRReviews(ctx, repository, number)
+	if err != nil {
+		return 0, false, err
+	}
+	if result.ExitCode != 0 {
+		return 0, false, &Error{Code: ErrorCodeExternalFailure, Message: "GitHub pull request reviews lookup exited with a non-zero code", Result: result}
+	}
+	var reviews []ghPRReview
+	if err := json.Unmarshal([]byte(result.Stdout), &reviews); err != nil {
+		var pages [][]ghPRReview
+		if pageErr := json.Unmarshal([]byte(result.Stdout), &pages); pageErr != nil {
+			return 0, false, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub pull request reviews JSON response: %v", err), Result: result, Err: err}
+		}
+		for _, page := range pages {
+			reviews = append(reviews, page...)
+		}
+	}
+	for _, review := range reviews {
+		if review.ID == reviewID {
+			return review.ID, strings.EqualFold(strings.TrimSpace(review.State), "pending"), nil
+		}
+	}
+	return 0, false, nil
 }
 
 func reviewRemarkFromRESTComment(repository string, number int, comment ghPRReviewCommentCreateResponse) model.ReviewRemark {
