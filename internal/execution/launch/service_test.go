@@ -17,6 +17,8 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
+const codexRunnerStartupTimeout = "5s"
+
 func TestLaunchCommitPushDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -211,7 +213,7 @@ func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
 		Runner:          RunnerCodex,
 		Model:           "openai/gpt-5.4",
 		Timeout:         "5s",
-		StartupTimeout:  "1s",
+		StartupTimeout:  codexRunnerStartupTimeout,
 		NoOutputTimeout: "500ms",
 	}
 	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "stream")
@@ -257,7 +259,7 @@ func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
 		Runner:                  RunnerCodex,
 		Model:                   "openai/gpt-5.4",
 		Timeout:                 "5s",
-		StartupTimeout:          "1s",
+		StartupTimeout:          codexRunnerStartupTimeout,
 		NoOutputTimeout:         "300ms",
 		StructuredOutputTimeout: "300ms",
 	}
@@ -287,7 +289,7 @@ func TestRunCodexRunnerAllowsPauseAfterStructuredFileChange(t *testing.T) {
 		Runner:                  RunnerCodex,
 		Model:                   "openai/gpt-5.4",
 		Timeout:                 "2s",
-		StartupTimeout:          "100ms",
+		StartupTimeout:          codexRunnerStartupTimeout,
 		NoOutputTimeout:         "50ms",
 		StructuredOutputTimeout: "300ms",
 	}
@@ -311,7 +313,7 @@ func TestRunCodexRunnerDoesNotKeepStructuredTimeoutAfterItsDeadline(t *testing.T
 		Runner:                  RunnerCodex,
 		Model:                   "openai/gpt-5.4",
 		Timeout:                 "2s",
-		StartupTimeout:          "100ms",
+		StartupTimeout:          codexRunnerStartupTimeout,
 		NoOutputTimeout:         "50ms",
 		StructuredOutputTimeout: "200ms",
 	}
