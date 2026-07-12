@@ -366,7 +366,12 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 }
 
 func isExternalReviewConclusion(body string) bool {
-	return strings.Contains(body, "## Заключение ревизии")
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) == "## Заключение ревизии" {
+			return true
+		}
+	}
+	return false
 }
 
 func externalReviewConclusionStatus(body string) string {
