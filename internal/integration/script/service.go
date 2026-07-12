@@ -138,6 +138,11 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 	operationName := operationNameForRequest(req)
 	operation, ok := s.config.Operations[operationName]
 	if !ok {
+		// Совместимое чтение старых настроек сохраняется только на границе конфигурации.
+		legacyName := strings.Replace(operationName, "issue.issue.", "tracker.task.", 1)
+		operation, ok = s.config.Operations[legacyName]
+	}
+	if !ok {
 		return failureResponse(response, model.FailureKindUnsupportedOperation, false, fmt.Errorf("script operation is not configured: %s", operationName), nil)
 	}
 
@@ -390,16 +395,16 @@ func operationNameForRequest(req model.ProviderRequest) string {
 		switch objectType {
 		case "task", "issue":
 			if rawOperation == "comments" || rawOperation == "list-comments" {
-				return "tracker.task.comment.list"
+				return "issue.issue.comment.list"
 			}
-			return "tracker.task." + operation
+			return "issue.issue." + operation
 		case "comment":
 			if operation == "comments" || operation == "list" {
-				return "tracker.task.comment.list"
+				return "issue.issue.comment.list"
 			}
-			return "tracker.task.comment." + operation
+			return "issue.issue.comment." + operation
 		case "label":
-			return "tracker.task.label." + operation
+			return "issue.issue.label." + operation
 		}
 	}
 	if integrationType == "" || objectType == "" {

@@ -275,7 +275,6 @@ package integration
 import "context"
 
 type Service interface {
-    Dispatch(context.Context, Request) (Route, error)
     Execute(context.Context, Request) (Response, error)
     Operations(context.Context, OperationFilter) []OperationDescriptor
 }
@@ -285,7 +284,7 @@ type Service interface {
 
 - контур сам должен уметь определить, с какой системой работать, по настройкам и селектору;
 - поле `System` является явным селектором интегрируемой системы;
-- если `System` не задан, диспетчер выбирает систему по `IntegrationType` и настройкам `default_systems`;
+- если `System` не задан, реестр выбирает систему по `IntegrationType` и настройкам `default_systems`;
 - если `SystemProvided=true` и `System` пустой, запрос отклоняется как `invalid-request`;
 - вызывающему коду не нужно знать устройство GitHub, Bitbucket, Mattermost, Telegram или другой внешней системы.
 
@@ -301,14 +300,14 @@ type Service interface {
 
 Примеры:
 
-- `tracker.task.get`;
-- `tracker.task.comment.list`;
-- `tracker.task.comment.create`;
-- `tracker.task.label.add`;
-- `repository.repo.get`;
-- `repository.merge-request.create`;
-- `repository.review-remark.reply`;
-- `repository.review-remark.resolve`;
+- `issue.issue.get`;
+- `issue.issue.comment.list`;
+- `issue.issue.comment.create`;
+- `issue.issue.label.add`;
+- `repo.repo.get`;
+- `repo.merge-request.create`;
+- `repo.review-remark.reply`;
+- `repo.review-remark.resolve`;
 - `messenger.thread.get`;
 - `wiki.page.search`.
 
@@ -397,20 +396,20 @@ type OperationOutputContract struct {
 
 Хранилище фиксирует задачи и комментарии в канонической модели:
 
-- задача хранит номер, внешний идентификатор, заголовок, описание, состояние, признаки, атрибуты, автора и время изменения;
-- комментарий хранит идентификатор, номер задачи, автора, тело и время изменения;
+- задача хранит строковый непрозрачный идентификатор, заголовок, описание, состояние, признаки, атрибуты, автора и время изменения;
+- комментарий хранит строковый идентификатор объекта, автора, тело и время изменения;
 - признаки задачи возвращаются как `Traits` и совместимые `Labels`.
 
 Поддержанные операции первого среза:
 
-- `tracker.task.create`;
-- `tracker.task.get`;
-- `tracker.task.search`;
-- `tracker.task.update`;
-- `tracker.task.comment.list`;
-- `tracker.task.comment.create`;
-- `tracker.task.label.add`;
-- `tracker.task.label.remove`;
+- `issue.issue.create`;
+- `issue.issue.get`;
+- `issue.issue.search`;
+- `issue.issue.update`;
+- `issue.issue.comment.list`;
+- `issue.issue.comment.create`;
+- `issue.issue.label.add`;
+- `issue.issue.label.remove`;
 - `auth status` для проверки доступности SQLite-хранилища.
 
 ## 9. Сценарный адаптер
@@ -424,16 +423,16 @@ type OperationOutputContract struct {
   "systems": {
     "work-tracker": {
       "type": "script",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true,
       "project": "ABC",
       "settings": {
         "tracker_url": "https://tracker.example"
       },
       "operations": {
-        "tracker.task.get": {
+        "issue.issue.get": {
           "script": ".progress/integration/work-tracker/task-get.sh",
-          "required": ["number"],
+          "required": ["id"],
           "optional": ["project", "tracker_url"],
           "defaults": {
             "project": "${system.project}",
@@ -453,12 +452,12 @@ type OperationOutputContract struct {
 ```json
 {
   "system": "work-tracker",
-  "integration_type": "tracker",
-  "operation_name": "tracker.task.get",
-  "object_type": "task",
+  "integration_type": "issue",
+  "operation_name": "issue.issue.get",
+  "object_type": "issue",
   "operation": "get",
   "request": {
-    "number": 123,
+    "id": "ABC-123",
     "project": "ABC",
     "tracker_url": "https://tracker.example"
   },

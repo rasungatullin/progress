@@ -222,6 +222,9 @@ func parseOperationName(name string) (string, string, string) {
 	}
 	objectType := strings.Join(parts[1:len(parts)-1], "-")
 	objectType = normalizeObjectType(objectType)
+	if integrationType == model.IntegrationTypeIssue && objectType == "task" {
+		objectType = "issue"
+	}
 	return integrationType, objectType, operation
 }
 
@@ -318,6 +321,7 @@ func normalizeOperationFilter(filter OperationFilter) OperationFilter {
 	filter.Name = strings.TrimSpace(strings.ToLower(filter.Name))
 	filter.Name = strings.Replace(filter.Name, "tracker.", "issue.", 1)
 	filter.Name = strings.Replace(filter.Name, "repository.", "repo.", 1)
+	filter.Name = strings.Replace(filter.Name, "issue.task.", "issue.issue.", 1)
 	return filter
 }
 
@@ -341,11 +345,11 @@ func sortedOperationConfigNames(operations map[string]model.IntegrationOperation
 
 func trackerTaskGetOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "issue.task.get",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.get",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "get",
-		Input:           input(requiredField("number", "integer"), optionalFields("repository", "fields")...),
+		Input:           input(requiredField("id", "string"), optionalFields("repository", "fields")...),
 		Output:          output("task", "CanonicalTask"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -353,9 +357,9 @@ func trackerTaskGetOperation() operationTemplate {
 
 func trackerTaskCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "issue.task.create",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.create",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "create",
 		SideEffect:      true,
 		Input:           input(requiredField("title", "string"), optionalFields("body", "state", "external_id", "labels")...),
@@ -370,9 +374,9 @@ func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
 		optional = append(optional, optionalFields("exclude_labels")...)
 	}
 	return operationTemplate{
-		Name:            "issue.task.search",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.search",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "search",
 		Input:           model.OperationInputContract{Optional: optional},
 		Output:          output("tracker-search-result", "TrackerSearchResult[]"),
@@ -382,12 +386,12 @@ func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
 
 func trackerTaskUpdateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "issue.task.update",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.update",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "update",
 		SideEffect:      true,
-		Input:           input(requiredField("number", "integer"), optionalFields("title", "body", "state", "labels")...),
+		Input:           input(requiredField("id", "string"), optionalFields("title", "body", "state", "labels")...),
 		Output:          output("task", "CanonicalTask"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -395,11 +399,11 @@ func trackerTaskUpdateOperation() operationTemplate {
 
 func trackerTaskCommentListOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "issue.task.comment.list",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.comment.list",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "comments",
-		Input:           input(requiredField("number", "integer"), optionalFields("repository")...),
+		Input:           input(requiredField("id", "string"), optionalFields("repository")...),
 		Output:          output("task-comment", "TaskComment[]"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -407,23 +411,23 @@ func trackerTaskCommentListOperation() operationTemplate {
 
 func trackerTaskCommentCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "issue.task.comment.create",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task-comment",
+		Name:            "issue.issue.comment.create",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "comment",
 		Operation:       "create",
 		SideEffect:      true,
-		Input:           inputMany([]model.OperationField{requiredField("number", "integer"), requiredField("body", "string")}, optionalFields("repository")...),
+		Input:           inputMany([]model.OperationField{requiredField("id", "string"), requiredField("body", "string")}, optionalFields("repository")...),
 		Output:          output("operation-result", "OperationResult"),
 		FailureKinds:    defaultFailureKinds(),
 	}
 }
 
 func trackerTaskLabelAddOperation() operationTemplate {
-	return trackerTaskLabelOperation("issue.task.label.add", "add")
+	return trackerTaskLabelOperation("issue.issue.label.add", "add")
 }
 
 func trackerTaskLabelRemoveOperation() operationTemplate {
-	return trackerTaskLabelOperation("issue.task.label.remove", "remove")
+	return trackerTaskLabelOperation("issue.issue.label.remove", "remove")
 }
 
 func trackerTaskLabelOperation(name string, operation string) operationTemplate {
@@ -433,7 +437,7 @@ func trackerTaskLabelOperation(name string, operation string) operationTemplate 
 		ObjectType:      "task-label",
 		Operation:       operation,
 		SideEffect:      true,
-		Input:           inputMany([]model.OperationField{requiredField("number", "integer"), requiredRepeatedField("labels", "string[]")}, optionalFields("repository")...),
+		Input:           inputMany([]model.OperationField{requiredField("id", "string"), requiredRepeatedField("labels", "string[]")}, optionalFields("repository")...),
 		Output:          output("operation-result", "OperationResult"),
 		FailureKinds:    defaultFailureKinds(),
 	}

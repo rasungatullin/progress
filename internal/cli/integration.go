@@ -85,14 +85,8 @@ func newIntegrationCommand() *cobra.Command {
 	}
 	cmd.PersistentFlags().String("format", integrationOutputText, "Формат вывода: text (по умолчанию) или json")
 
-	dispatcher := newIntegrationDispatcherCommand()
-	dispatcher.Hidden = true
-	cmd.AddCommand(dispatcher)
 	cmd.AddCommand(newIntegrationOperationsCommand())
 	cmd.AddCommand(newIntegrationIssueCommand())
-	private := newIntegrationPrivateCommand()
-	private.Hidden = true
-	cmd.AddCommand(private)
 	cmd.AddCommand(newIntegrationGitHubCommand())
 	cmd.AddCommand(newIntegrationBitbucketCommand())
 	cmd.AddCommand(newIntegrationMattermostCommand())
@@ -289,8 +283,9 @@ func newIntegrationPrivateDeleteCommand() *cobra.Command {
 
 func newIntegrationGitHubCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "github",
-		Short: "Интеграция с GitHub через gh",
+		Use:        "github",
+		Short:      "Интеграция с GitHub через gh",
+		Deprecated: "используйте типо-ориентированные команды integration issue и integration repo; выбор системы задаётся флагом --system",
 	}
 
 	cmd.AddCommand(newIntegrationGitHubAuthCommand())
@@ -302,8 +297,9 @@ func newIntegrationGitHubCommand() *cobra.Command {
 
 func newIntegrationBitbucketCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "bitbucket",
-		Short: "Интеграция с Bitbucket как репозиторием",
+		Use:        "bitbucket",
+		Short:      "Интеграция с Bitbucket как репозиторием",
+		Deprecated: "используйте типо-ориентированные команды integration repo с флагом --system",
 	}
 	cmd.AddCommand(newIntegrationSystemAuthCommand("bitbucket", "Bitbucket"))
 	cmd.AddCommand(newIntegrationBitbucketRepoCommand())
@@ -335,8 +331,9 @@ func newIntegrationBitbucketPRCommand() *cobra.Command {
 
 func newIntegrationMattermostCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mattermost",
-		Short: "Интеграция с Mattermost как мессенджером",
+		Use:        "mattermost",
+		Short:      "Интеграция с Mattermost как мессенджером",
+		Deprecated: "используйте типо-ориентированные команды integration messenger с флагом --system",
 	}
 	cmd.AddCommand(newIntegrationSystemAuthCommand("mattermost", "Mattermost"))
 	cmd.AddCommand(newIntegrationMattermostThreadCommand())
@@ -364,8 +361,9 @@ func newIntegrationMattermostMessageCommand() *cobra.Command {
 
 func newIntegrationTelegramCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "telegram",
-		Short: "Интеграция с Telegram как мессенджером",
+		Use:        "telegram",
+		Short:      "Интеграция с Telegram как мессенджером",
+		Deprecated: "используйте типо-ориентированные команды integration messenger с флагом --system",
 	}
 	cmd.AddCommand(newIntegrationSystemAuthCommand("telegram", "Telegram"))
 	cmd.AddCommand(newIntegrationTelegramThreadCommand())
@@ -440,8 +438,9 @@ func newIntegrationGitHubIssueLabelCommand() *cobra.Command {
 
 func newIntegrationConfluenceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "confluence",
-		Short: "Интеграция с Confluence как wiki",
+		Use:        "confluence",
+		Short:      "Интеграция с Confluence как wiki",
+		Deprecated: "используйте типо-ориентированные команды integration wiki с флагом --system",
 	}
 	cmd.AddCommand(newIntegrationSystemAuthCommand("confluence", "Confluence"))
 	cmd.AddCommand(newIntegrationConfluencePageCommand())

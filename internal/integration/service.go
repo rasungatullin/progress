@@ -442,6 +442,7 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		integrationType = s.firstIntegrationTypeForSystem(system)
 	}
 
+	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
 	normalized := ProviderRequest{
 		IntegrationType: integrationType,
 		System:          system,
@@ -451,9 +452,9 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		Operation:       normalizeOperation(req.Operation),
 		Repository:      strings.TrimSpace(req.Repository),
 		RepoProvided:    req.RepoProvided,
-		ID:              strings.TrimSpace(req.ID),
+		ID:              identifier,
 		Number:          req.Number,
-		ExternalID:      strings.TrimSpace(req.ExternalID),
+		ExternalID:      identifier,
 		Base:            strings.TrimSpace(req.Base),
 		Head:            strings.TrimSpace(req.Head),
 		Title:           strings.TrimSpace(req.Title),
@@ -731,12 +732,12 @@ func expectedResult(integrationType string, objectType string, resource string, 
 		switch normalizeObjectType(firstNonEmpty(objectType, resource)) {
 		case "issue":
 			if operation == "comments" {
-				return "tracker-comment[]"
+				return "issue-comment[]"
 			}
 			if operation == "search" {
-				return "tracker-search-result[]"
+				return "issue-search-result[]"
 			}
-			return "tracker-issue"
+			return "issue"
 		case "task":
 			if operation == "comments" {
 				return "task-comment[]"

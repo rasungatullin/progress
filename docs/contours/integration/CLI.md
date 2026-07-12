@@ -194,12 +194,7 @@ type Provider interface {
 
 В текущей конфигурации поддерживаются следующие команды:
 
-- `progress integration dispatcher`;
-- `progress integration dispatch`;
 - `progress integration operations`;
-- `progress integration private status`;
-- `progress integration private set`;
-- `progress integration private delete`;
 - `progress integration github auth status`;
 - `progress integration github repo get`;
 - `progress integration github issue get`;
@@ -247,11 +242,7 @@ progress integration issue search --query "готово к реализации"
 
 Флаг `--id` принимает непрозрачную строку: как числовое значение `123`, так и значение внешней системы `ABC-123`. Если `--system` не задан, контур выбирает систему по умолчанию для типа `issue`; явное значение выбирается по имени записи в конфигурации. Старые команды вида `integration github issue ...` сохраняются как совместимый переход.
 
-### 7.1 `progress integration dispatcher`
-
-Команда вызывает диспетчер интеграционного контура как отдельный модуль. Она нужна для диагностики маршрута: какой адаптер будет выбран, какие требования к доступу предъявляются и какой тип нормализованного объекта ожидается на выходе.
-
-### 7.2 `progress integration operations`
+### 7.1 `progress integration operations`
 
 Команда публикует каталог интеграционных операций, доступных по текущей конфигурации систем. Каталог нужен контуру исполнения и диагностическим проверкам: он показывает каноническое имя операции, интегрируемую систему, тип адаптера, контракт входных полей, тип результата, признак побочного действия и возможные отказные состояния.
 
@@ -260,9 +251,9 @@ progress integration issue search --query "готово к реализации"
 ```bash
 progress integration operations
 progress integration operations --format json
-progress integration operations --type tracker
+progress integration operations --type issue
 progress integration operations --system github
-progress integration operations --name tracker.task.get
+progress integration operations --name issue.issue.get
 ```
 
 Каноническое имя операции строится по схеме:
@@ -273,11 +264,11 @@ progress integration operations --name tracker.task.get
 
 Примеры:
 
-- `tracker.task.get`;
-- `tracker.task.comment.create`;
-- `repository.merge-request.create`;
-- `repository.review-remark.reply`;
-- `repository.review-remark.resolve`;
+- `issue.issue.get`;
+- `issue.issue.comment.create`;
+- `repo.merge-request.create`;
+- `repo.review-remark.reply`;
+- `repo.review-remark.resolve`;
 - `messenger.message.create`;
 - `wiki.page.search`.
 
@@ -285,18 +276,7 @@ progress integration operations --name tracker.task.get
 
 Отключённая система может присутствовать в каталоге только с `available=false`. Сценарные системы типа `script` публикуют операции из `systems.<name>.operations`; доступными считаются только операции с заданным `script`, `command` или `path`. Контракт входных полей сохраняется из конфигурации.
 
-### 7.3 `progress integration private`
-
-Команды `progress integration private ...` работают с хранилищем приватных значений, выбранным настройкой `private_store`.
-
-Основные операции:
-
-1. `progress integration private status` — вывести выбранную реализацию хранилища без чтения значений;
-2. `progress integration private set <name> --stdin` — записать приватное значение с именем `<name>`;
-3. `progress integration private set <name> --value <value>` — записать значение из аргумента CLI;
-4. `progress integration private delete <name>` — удалить приватное значение.
-
-Команда записи печатает только статус, имя значения и выбранное хранилище. Само приватное значение не выводится.
+Хранилище приватных значений не входит в публичное пространство имён интеграции и настраивается только через контур настроек и ресурсов.
 
 ### 7.4 `progress integration github auth status`
 
@@ -859,14 +839,14 @@ GitHub-адаптер должен различать как минимум сл
 
 Локальный трекер поддерживает операции:
 
-- `tracker.task.create`;
-- `tracker.task.get`;
-- `tracker.task.search`;
-- `tracker.task.update`;
-- `tracker.task.comment.list`;
-- `tracker.task.comment.create`;
-- `tracker.task.label.add`;
-- `tracker.task.label.remove`.
+- `issue.issue.create`;
+- `issue.issue.get`;
+- `issue.issue.search`;
+- `issue.issue.update`;
+- `issue.issue.comment.list`;
+- `issue.issue.comment.create`;
+- `issue.issue.label.add`;
+- `issue.issue.label.remove`.
 
 Хранилище создаёт схему при первом обращении. Задачи и комментарии возвращаются как `CanonicalTask`, `TaskComment`, `OperationResult` и совместимые структуры `TrackerIssue`/`TrackerComment`.
 
@@ -957,7 +937,7 @@ PROGRESS_INTEGRATION_TIMEOUT
 Пример записи приватного значения для Mattermost:
 
 ```bash
-progress integration private set mt_auth_token --stdin
+private_store.type=keychain
 ```
 
 После записи локальная конфигурация может ссылаться на это значение:

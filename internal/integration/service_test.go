@@ -1067,6 +1067,30 @@ func TestExecutePassesNormalizedRequestToProvider(t *testing.T) {
 	}
 }
 
+func TestExecutePreservesOpaqueIssueIdentifierAndUsesDefaultSystem(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	provider := &capturingProvider{}
+	service.RegisterProvider("github", provider)
+
+	for _, identifier := range []string{"123", "ABC-123"} {
+		_, err := service.Execute(context.Background(), Request{
+			IntegrationType: model.IntegrationTypeIssue,
+			Resource:        "issue",
+			ObjectType:      "issue",
+			Operation:       "get",
+			ID:              identifier,
+		})
+		if err != nil {
+			t.Fatalf("execute issue %q: %v", identifier, err)
+		}
+		if provider.seen.System != "github" || provider.seen.ID != identifier || provider.seen.ExternalID != identifier {
+			t.Fatalf("unexpected normalized request for %q: %#v", identifier, provider.seen)
+		}
+	}
+}
+
 func contains(items []string, target string) bool {
 	for _, item := range items {
 		if item == target {

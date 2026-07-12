@@ -35,6 +35,10 @@ type ghRunner interface {
 	RunPRReviewThreadUnresolve(context.Context, string) (CommandResult, resolvedConfig, error)
 }
 
+type ghIssueIDRunner interface {
+	RunIssueViewByID(context.Context, string, string) (CommandResult, resolvedConfig, error)
+}
+
 type Service struct {
 	runner ghRunner
 }
@@ -968,7 +972,25 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		}
 	}
 
-	number, err := normalizeIssueNumber(req.Number)
+	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
+	if identifier == "" && req.Number > 0 {
+		identifier = strconv.Itoa(req.Number)
+	}
+	number, _ := strconv.Atoi(identifier)
+	if identifier == "" {
+		identifier = strconv.Itoa(req.Number)
+	}
+	var result CommandResult
+	var config resolvedConfig
+	var err error
+	if issueRunner, ok := s.runner.(ghIssueIDRunner); ok {
+		result, config, err = issueRunner.RunIssueViewByID(ctx, repository, identifier)
+	} else {
+		number, err = normalizeIssueNumber(number)
+		if err == nil {
+			result, config, err = s.runner.RunIssueView(ctx, repository, number)
+		}
+	}
 	if err != nil {
 		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
 		status.State = ErrorCodeInvalidRequest
@@ -978,7 +1000,6 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
 	}
 
-	result, config, err := s.runner.RunIssueView(ctx, repository, number)
 	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
 	if err != nil && result.ExitCode == 0 {
 		result.ExitCode = -1
@@ -1062,6 +1083,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		System:     "github",
 		Repository: repository,
 		Number:     raw.Number,
+		ExternalID: identifier,
 		Title:      strings.TrimSpace(raw.Title),
 		Body:       raw.Body,
 		State:      strings.TrimSpace(raw.State),
@@ -1076,6 +1098,8 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		System:     "github",
 		Repository: response.Issue.Repository,
 		Number:     response.Issue.Number,
+		ID:         identifier,
+		ExternalID: identifier,
 		Title:      response.Issue.Title,
 		Body:       response.Issue.Body,
 		State:      response.Issue.State,

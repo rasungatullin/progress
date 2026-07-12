@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -127,6 +128,14 @@ func (r *APIRunner) RunIssueView(ctx context.Context, repository string, number 
 	}
 	result.Stdout = mustJSON(issueViewFromAPI(raw))
 	return result, apiResolvedConfig(config), nil
+}
+
+func (r *APIRunner) RunIssueViewByID(ctx context.Context, repository string, identifier string) (CommandResult, resolvedConfig, error) {
+	number, err := strconv.Atoi(strings.TrimSpace(identifier))
+	if err != nil {
+		return apiErrorResult("issue view", apiConfig{}, &Error{Code: ErrorCodeUnsupportedOperation, Message: fmt.Sprintf("GitHub API issue identifiers must be numeric, got %q", strings.TrimSpace(identifier))})
+	}
+	return r.RunIssueView(ctx, repository, number)
 }
 
 func (r *APIRunner) RunIssueList(ctx context.Context, repository string, request IssueListRequest) (CommandResult, resolvedConfig, error) {
