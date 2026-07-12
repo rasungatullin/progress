@@ -1683,6 +1683,71 @@ func TestServicePRCommentCreateRemovesPendingReviewWithoutAssociatedComment(t *t
 	}
 }
 
+func TestFindPendingPRReviewRemovesEveryEmptyReviewAndReturnsFirstPublishableReview(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[
+			{"id":99,"state":"PENDING"},
+			{"id":77,"state":"PENDING"},
+			{"id":55,"state":"PENDING"},
+			{"id":88,"state":"PENDING"},
+			{"id":66,"state":"COMMENTED"}
+		]`},
+		reviewCommentResult: CommandResult{ExitCode: 0, Stdout: `[
+			{"id":201,"pull_request_review_id":99},
+			{"id":202,"pull_request_review_id":77},
+			{"id":203,"pull_request_review_id":66}
+		]`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	reviewID, err := service.findPendingPRReview(context.Background(), "owner/name", 42)
+	if err != nil {
+		t.Fatalf("find pending pull request review: %v", err)
+	}
+	if reviewID != 77 {
+		t.Fatalf("expected first publishable review 77, got %d", reviewID)
+	}
+	if !slices.Equal(stub.prDeleteReviewIDs, []int64{55, 88}) {
+		t.Fatalf("unexpected empty review cleanup order: %v", stub.prDeleteReviewIDs)
+	}
+}
+
+func TestFindPendingPRReviewReportsPartialPayloadWhenLaterCleanupFails(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[
+			{"id":30,"state":"PENDING"},
+			{"id":20,"state":"PENDING"},
+			{"id":10,"state":"PENDING"}
+		]`},
+		reviewCommentResult: CommandResult{ExitCode: 0, Stdout: `[
+			{"id":201,"pull_request_review_id":30}
+		]`},
+		deleteResults: []CommandResult{
+			{ExitCode: 0},
+			{ExitCode: 403, Stderr: "forbidden"},
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	reviewID, err := service.findPendingPRReview(context.Background(), "owner/name", 42)
+	if reviewID != 0 {
+		t.Fatalf("publishable review must not be returned after incomplete cleanup: %d", reviewID)
+	}
+	var ghErr *Error
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || ghErr.Result.ExitCode != 403 {
+		t.Fatalf("expected partial payload cleanup failure, got %T: %v", err, err)
+	}
+	if !slices.Equal(stub.prDeleteReviewIDs, []int64{10, 20}) {
+		t.Fatalf("unexpected cleanup attempts: %v", stub.prDeleteReviewIDs)
+	}
+}
+
 func TestServicePRCommentCreateInlineAcceptsNumericRESTIdentifier(t *testing.T) {
 	t.Parallel()
 
@@ -2136,6 +2201,7 @@ type stubRunner struct {
 	pendingReviewResults []CommandResult
 	reviewCommentResults []CommandResult
 	submitResults        []CommandResult
+	deleteResults        []CommandResult
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -2293,6 +2359,11 @@ func (r *stubRunner) RunPRReviewDelete(_ context.Context, repository string, num
 	r.prDeleteReviewIDs = append(r.prDeleteReviewIDs, reviewID)
 	r.repo = repository
 	r.number = number
+	if len(r.deleteResults) > 0 {
+		result := r.deleteResults[0]
+		r.deleteResults = r.deleteResults[1:]
+		return result, r.config, r.err
+	}
 	return r.result, r.config, r.err
 }
 

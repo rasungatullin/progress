@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -632,12 +633,22 @@ func (s *Service) findPendingPRReview(ctx context.Context, repository string, nu
 	if err != nil {
 		return 0, err
 	}
+	publishable := make(map[int64]struct{})
 	for _, comment := range comments {
 		if _, found := pending[comment.ReviewID]; found {
-			return comment.ReviewID, nil
+			publishable[comment.ReviewID] = struct{}{}
 		}
 	}
+	pendingIDs := make([]int64, 0, len(pending))
 	for reviewID := range pending {
+		pendingIDs = append(pendingIDs, reviewID)
+	}
+	sort.Slice(pendingIDs, func(i, j int) bool { return pendingIDs[i] < pendingIDs[j] })
+
+	for _, reviewID := range pendingIDs {
+		if _, found := publishable[reviewID]; found {
+			continue
+		}
 		deleteResult, _, deleteErr := s.runner.RunPRReviewDelete(ctx, repository, number, reviewID)
 		if deleteErr != nil {
 			return 0, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks; cleanup failed: %v", reviewID, deleteErr), Result: deleteResult, Err: deleteErr}
@@ -646,7 +657,11 @@ func (s *Service) findPendingPRReview(ctx context.Context, repository string, nu
 			cleanupErr := &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks; cleanup exited with a non-zero code", reviewID), Result: deleteResult}
 			return 0, cleanupErr
 		}
-		return 0, nil
+	}
+	for _, reviewID := range pendingIDs {
+		if _, found := publishable[reviewID]; found {
+			return reviewID, nil
+		}
 	}
 	return 0, nil
 }
