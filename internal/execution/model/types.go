@@ -414,9 +414,22 @@ type ExecutionResult struct {
 	Summary         string               `json:"summary,omitempty"`
 	Assignment      *ExecutionAssignment `json:"assignment,omitempty"`
 	Action          Action               `json:"action,omitempty"`
+	MergeRequest    *MergeRequest        `json:"merge_request,omitempty"`
 	Operations      []OperationResult    `json:"operations,omitempty"`
 	Artifacts       []Artifact           `json:"artifacts,omitempty"`
 	DiagnosticLinks []DiagnosticLink     `json:"diagnostic_links,omitempty"`
 	Launch          *LaunchResult        `json:"launch,omitempty"`
 	Failure         *Failure             `json:"failure,omitempty"`
+}
+
+type MergeRequest struct {
+	System     string `json:"system,omitempty"`
+	Repository string `json:"repository,omitempty"`
+	Number     int    `json:"number,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Body       string `json:"body,omitempty"`
+	State      string `json:"state,omitempty"`
+	BaseRef    string `json:"base_ref,omitempty"`
+	HeadRef    string `json:"head_ref,omitempty"`
+	URL        string `json:"url,omitempty"`
 }

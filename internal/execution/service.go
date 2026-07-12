@@ -42,6 +42,7 @@ type DiagnosticLink = model.DiagnosticLink
 type Failure = model.Failure
 type LaunchResult = model.LaunchResult
 type ExecutionResult = model.ExecutionResult
+type MergeRequest = model.MergeRequest
 type StructuredInput = model.StructuredInput
 type StructuredOutput = model.StructuredOutput
 type StructuredExtensions = model.StructuredExtensions
@@ -220,7 +221,7 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 	if err != nil {
 		result := failedStartResult(err)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile{}, allocation{}, workplace{}, result, err)
-		return executionResultFromLaunch(assignment, Action{Name: actionNameFromInvocation(in)}, nil, result, err), err
+		return executionResultFromLaunch(assignment, Action{Name: actionNameFromInvocation(in)}, nil, nil, result, err), err
 	}
 	if strings.TrimSpace(action.Profile) != "" {
 		in.Profile = strings.TrimSpace(action.Profile)
@@ -240,7 +241,7 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 	}
 	err = s.runActionOperations(ctx, state)
 	data := executionDataFromState(state)
-	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), data.result, err), err
+	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), mergeRequestFromExecutionData(state), data.result, err), err
 }
 
 func invocationFromActionInvocation(request ActionInvocation) invocation {

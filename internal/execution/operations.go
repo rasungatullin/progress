@@ -718,6 +718,21 @@ func executionDataFromState(state *operationExecution) executionDataSnapshot {
 	}
 }
 
+func mergeRequestFromExecutionData(state *operationExecution) *model.MergeRequest {
+	if state == nil {
+		return nil
+	}
+	value, ok := state.data["merge_request"].(integration.MergeRequest)
+	if !ok || value.Number <= 0 {
+		return nil
+	}
+	return &model.MergeRequest{
+		System: value.System, Repository: value.Repository, Number: value.Number,
+		Title: value.Title, Body: value.Body, State: value.State,
+		BaseRef: value.BaseRef, HeadRef: value.HeadRef, URL: value.URL,
+	}
+}
+
 func profileFromExecutionData(state *operationExecution) profile {
 	if state == nil {
 		return profile{}

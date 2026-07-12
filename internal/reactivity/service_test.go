@@ -112,7 +112,10 @@ func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) 
 		{Status: decision.ConsiderationStatusCompleted, Route: decision.ProcessingRoute{Name: "task-processing-completed"}},
 	}}
 	executions := &processingExecutionStub{results: []execution.ExecutionResult{
-		{Status: "completed", Launch: &execution.LaunchResult{Status: "completed"}},
+		{Status: "completed", MergeRequest: &execution.MergeRequest{
+			Repository: "owner/name", Number: 184, BaseRef: "main", HeadRef: "123",
+			URL: "https://github.com/owner/name/pull/184",
+		}, Launch: &execution.LaunchResult{Status: "completed"}},
 		{Status: "completed", Launch: &execution.LaunchResult{Status: "completed", StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "ok"}}}},
 	}}
 	service := NewService(nil)
@@ -146,8 +149,11 @@ func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) 
 			t.Fatalf("merge-request search must be constrained by head ref: %#v", request)
 		}
 	}
-	if mergeRequestSearches == 0 {
-		t.Fatal("expected merge-request search request")
+	if mergeRequestSearches != 1 {
+		t.Fatalf("expected merge-request search only before publication, got %d", mergeRequestSearches)
+	}
+	if len(executions.requests) < 2 || len(executions.requests[1].Assignment.RelatedObjects) != 1 || executions.requests[1].Assignment.RelatedObjects[0].Number != 184 {
+		t.Fatalf("next cycle must receive published merge request: %#v", executions.requests)
 	}
 	if result.FinalIssue == nil || !containsLabel(result.FinalIssue.Labels, LabelReviewPassed) {
 		t.Fatalf("final issue must include passed label: %#v", result.FinalIssue)
