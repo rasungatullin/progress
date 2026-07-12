@@ -220,7 +220,7 @@ func (s *Service) listComments(ctx context.Context, db *sql.DB, response model.R
 			return failureResponse(response, model.FailureKindExternalFailure, err)
 		}
 		record.ExternalID = externalID.String
-		comment := taskComment(req.System, record)
+		comment := taskComment(req.System, firstNonEmpty(task.ExternalID, strconv.Itoa(task.Number)), record)
 		response.TaskComments = append(response.TaskComments, comment)
 		response.Comments = append(response.Comments, trackerComment(comment))
 	}
@@ -248,7 +248,7 @@ func (s *Service) createComment(ctx context.Context, db *sql.DB, response model.
 	}
 	id, _ := result.LastInsertId()
 	record := commentRecord{ID: int(id), TaskNumber: task.Number, Body: body, CreatedAt: now, UpdatedAt: now}
-	comment := taskComment(req.System, record)
+	comment := taskComment(req.System, firstNonEmpty(task.ExternalID, strconv.Itoa(task.Number)), record)
 	response.TaskComments = []model.TaskComment{comment}
 	response.Comments = []model.TrackerComment{trackerComment(comment)}
 	response.OperationResult = operationResult(req.System, "comment", "create", strconv.Itoa(record.ID), "", "local tracker comment created")
@@ -488,10 +488,10 @@ func trackerIssue(task model.CanonicalTask) model.TrackerIssue {
 	}
 }
 
-func taskComment(system string, record commentRecord) model.TaskComment {
+func taskComment(system string, taskID string, record commentRecord) model.TaskComment {
 	return model.TaskComment{
 		System:     system,
-		TaskID:     firstNonEmpty(record.ExternalID, strconv.Itoa(record.TaskNumber)),
+		TaskID:     taskID,
 		ExternalID: firstNonEmpty(record.ExternalID, strconv.Itoa(record.ID)),
 		Author:     model.User{System: system, Login: record.Author},
 		Body:       record.Body,
