@@ -1872,6 +1872,11 @@ func invocationValueFromLaunchSynthesisMapping(state *operationExecution, mappin
 		return invocation{}, false
 	}
 	switch strings.TrimSpace(mapping.Ref) {
+	case "in.invocation", "invocation":
+		if state == nil {
+			return invocation{}, false
+		}
+		return state.in, true
 	case "data.invocation":
 		if state == nil {
 			return invocation{}, false

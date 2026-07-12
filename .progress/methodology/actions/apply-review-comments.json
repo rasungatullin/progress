@@ -102,22 +102,16 @@
     {
       "name": "load-pull-request",
       "in": {
-        "repository": {
-          "ref": "in.repository_url"
-        },
-        "number": {
-          "ref": "in.number"
-        },
-        "base_ref": {
-          "ref": "in.base_ref"
-        },
-        "head_ref": {
-          "ref": "in.head_ref"
+        "invocation": {
+          "ref": "in.invocation"
         }
       },
       "out": {
         "pull_request": {
           "ref": "data.pull_request"
+        },
+        "invocation": {
+          "ref": "data.invocation"
         },
         "result": {
           "ref": "data.result"
@@ -127,11 +121,11 @@
     {
       "name": "load-review-remarks",
       "in": {
-        "repository": {
-          "ref": "in.repository_url"
+        "invocation": {
+          "ref": "data.invocation"
         },
-        "number": {
-          "ref": "data.pull_request.number"
+        "pull_request": {
+          "ref": "data.pull_request"
         }
       },
       "out": {
@@ -342,17 +336,11 @@
     {
       "name": "publish-review-responses",
       "in": {
-        "repository": {
-          "ref": "in.repository_url"
+        "invocation": {
+          "ref": "data.invocation"
         },
-        "number": {
-          "ref": "data.pull_request.number"
-        },
-        "result_status": {
-          "ref": "data.result.status"
-        },
-        "result_summary": {
-          "ref": "data.result.summary"
+        "result": {
+          "ref": "data.result"
         },
         "structured_output": {
           "ref": "data.structured_output"

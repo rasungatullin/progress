@@ -106,6 +106,7 @@ func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) 
 	t.Parallel()
 
 	integrations := newProcessingIntegrationStub([]string{})
+	integrations.searchReturnsEmpty = true
 	decisions := &processingDecisionStub{results: []decision.ConsiderationResult{
 		processingConsideration(execution.ActionStartImplementationPR),
 		processingConsideration(execution.ActionReviewPullRequest),
@@ -154,6 +155,9 @@ func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) 
 	}
 	if len(executions.requests) < 2 || len(executions.requests[1].Assignment.RelatedObjects) != 1 || executions.requests[1].Assignment.RelatedObjects[0].Number != 184 {
 		t.Fatalf("next cycle must receive published merge request: %#v", executions.requests)
+	}
+	if len(decisions.inputs) < 2 || decisions.inputs[1].Context.MergeRequest == nil || decisions.inputs[1].Context.MergeRequest.Number != 184 {
+		t.Fatalf("next decision cycle must receive published merge request: %#v", decisions.inputs)
 	}
 	if result.FinalIssue == nil || !containsLabel(result.FinalIssue.Labels, LabelReviewPassed) {
 		t.Fatalf("final issue must include passed label: %#v", result.FinalIssue)
@@ -655,13 +659,14 @@ func processingConsideration(action string) decision.ConsiderationResult {
 }
 
 type processingIntegrationStub struct {
-	issue         integration.TrackerIssue
-	mergeRequest  integration.MergeRequest
-	reviewRemarks []integration.ReviewRemark
-	labels        []string
-	requests      []integration.Request
-	searchErr     error
-	commentsErr   error
+	issue              integration.TrackerIssue
+	mergeRequest       integration.MergeRequest
+	reviewRemarks      []integration.ReviewRemark
+	labels             []string
+	requests           []integration.Request
+	searchErr          error
+	commentsErr        error
+	searchReturnsEmpty bool
 }
 
 func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
@@ -696,6 +701,9 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "search":
 		if s.searchErr != nil {
 			return integration.Response{}, s.searchErr
+		}
+		if s.searchReturnsEmpty {
+			return integration.Response{MergeRequests: []integration.MergeRequest{}}, nil
 		}
 		mergeRequest := s.mergeRequest
 		mergeRequest.Traits = append([]string(nil), s.mergeRequest.Traits...)

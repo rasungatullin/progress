@@ -6,8 +6,10 @@
   "required": true,
   "contract": {
     "in": {
-      "repository": {"type": "string", "required": true, "description": "Репозиторий запроса на слияние."},
-      "number": {"type": "integer", "required": true, "description": "Номер запроса на слияние."},
+      "invocation": {"type": "object", "description": "Ввод контура исполнения со связанным запросом на слияние."},
+      "repository": {"type": "string", "description": "Репозиторий запроса на слияние."},
+      "number": {"type": "integer", "description": "Номер запроса на слияние."},
+      "result": {"type": "object", "description": "Результат запуска выполнения."},
       "result_status": {"type": "string", "description": "Состояние выполнения."},
       "result_summary": {"type": "string", "description": "Сводка выполнения."},
       "structured_output": {

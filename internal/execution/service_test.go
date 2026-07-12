@@ -2729,6 +2729,63 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 	}
 }
 
+func TestProjectReviewActionsLoadRelatedPullRequestFromPublicInput(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repository root: %v", err)
+	}
+
+	for _, actionName := range []string{ActionReviewPullRequest, ActionApplyReviewComments} {
+		t.Run(actionName, func(t *testing.T) {
+			resolver := newMethodologyActionResolver()
+			resolver.getwd = func() (string, error) { return repoRoot, nil }
+			integrations := &stubIntegrationExecutor{execute: func(_ context.Context, request integration.Request) (integration.Response, error) {
+				switch request.Operation {
+				case "get":
+					if request.Repository != "owner/name" || request.Number != 184 {
+						t.Fatalf("unexpected pull request request: %#v", request)
+					}
+					return integration.Response{MergeRequest: &integration.MergeRequest{
+						Repository: "owner/name",
+						Number:     184,
+						BaseRef:    "main",
+						HeadRef:    "167",
+						URL:        "https://github.com/owner/name/pull/184",
+					}}, nil
+				case "comments":
+					return integration.Response{}, nil
+				default:
+					t.Fatalf("unexpected integration request: %#v", request)
+					return integration.Response{}, nil
+				}
+			}}
+			workplaceRoot := t.TempDir()
+			service := &Service{
+				logger:       log.Default(),
+				actions:      resolver,
+				profiles:     &stubProfileResolver{profile: model.Profile{Name: "review", Mode: "manual", ModelBinding: "review"}},
+				resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:review", Reserved: true, Runner: "codex", Model: "openai/gpt-5.6-sol", ModelBinding: "review"}},
+				workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: workplaceRoot, Ready: true}},
+				launcher:     &stubLauncher{result: model.LaunchResult{Status: "completed", StructuredOutput: &model.StructuredOutput{Summary: "Операция выполнена.", CommitMessage: "Проверить передачу запроса"}}},
+				integrations: integrations,
+			}
+
+			_, err := service.ExecuteAction(context.Background(), ActionInvocation{Assignment: &ExecutionAssignment{
+				Action:          actionName,
+				CanonicalTask:   &ObjectRef{Type: "task", Repository: "owner/name", Number: 167},
+				RelatedObjects:  []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 184}},
+				StructuredInput: &StructuredInput{Task: "Обработать запрос на слияние."},
+			}})
+			if err != nil {
+				t.Fatalf("execute project action: %v", err)
+			}
+			if len(integrations.calls) < 1 || integrations.calls[0].Operation != "get" || integrations.calls[0].Number != 184 {
+				t.Fatalf("first integration call must load related pull request: %#v", integrations.calls)
+			}
+		})
+	}
+}
+
 func TestActionResolutionKeepsLoadReviewRemarksMapping(t *testing.T) {
 	t.Parallel()
 

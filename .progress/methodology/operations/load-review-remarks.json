@@ -5,14 +5,20 @@
   "type": "builtin",
   "contract": {
     "in": {
+      "invocation": {
+        "type": "object",
+        "description": "Ввод контура исполнения со связанным запросом на слияние."
+      },
+      "pull_request": {
+        "type": "object",
+        "description": "Загруженный запрос на слияние."
+      },
       "repository": {
         "type": "string",
-        "required": true,
         "description": "Репозиторий запроса на слияние."
       },
       "number": {
         "type": "integer",
-        "required": true,
         "description": "Номер запроса на слияние."
       }
     },
