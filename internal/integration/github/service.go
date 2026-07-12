@@ -35,6 +35,10 @@ type ghRunner interface {
 	RunPRReviewThreadUnresolve(context.Context, string) (CommandResult, resolvedConfig, error)
 }
 
+type ghIssueIDRunner interface {
+	RunIssueViewByID(context.Context, string, string) (CommandResult, resolvedConfig, error)
+}
+
 type Service struct {
 	runner ghRunner
 }
@@ -407,7 +411,7 @@ func (s *Service) executePRList(ctx context.Context, response model.Response, re
 			System:     "github",
 			Repository: repository,
 			Kind:       "merge-request",
-			Number:     pr.Number,
+			ID:         strconv.Itoa(pr.Number),
 			Title:      pr.Title,
 			State:      pr.State,
 			URL:        pr.URL,
@@ -433,7 +437,7 @@ func (s *Service) executePRComments(ctx context.Context, response model.Response
 			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comments request rejected before invoking gh")
 		}
 	}
-	number, err := normalizePullRequestNumber(req.Number)
+	number, err := normalizePullRequestNumber(req.MergeRequestNumber)
 	if err != nil {
 		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comments request rejected before invoking gh")
 	}
@@ -489,7 +493,7 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comment create request rejected before invoking gh")
 		}
 	}
-	number, err := normalizePullRequestNumber(req.Number)
+	number, err := normalizePullRequestNumber(req.MergeRequestNumber)
 	if err != nil {
 		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comment create request rejected before invoking gh")
 	}
@@ -930,7 +934,7 @@ func (s *Service) executeIssueList(ctx context.Context, response model.Response,
 			System:     "github",
 			Repository: repository,
 			Kind:       "issue",
-			Number:     item.Number,
+			ID:         strconv.Itoa(item.Number),
 			Title:      strings.TrimSpace(item.Title),
 			State:      strings.TrimSpace(item.State),
 			Labels:     normalizeTrackerLabels(item.Labels),
@@ -959,7 +963,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		var err error
 		repository, err = normalizeRepository(repository)
 		if err != nil {
-			status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), 0)
 			status.State = ErrorCodeInvalidRequest
 			status.Message = err.Error()
 			status.Diagnostics = append(status.Diagnostics, "issue request rejected before invoking gh")
@@ -968,9 +972,34 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		}
 	}
 
-	number, err := normalizeIssueNumber(req.Number)
+	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
+	number, _ := strconv.Atoi(identifier)
+	if identifier == "" {
+		identifier = strings.TrimSpace(req.ID)
+	}
+	var result CommandResult
+	var config resolvedConfig
+	var err error
+	if issueRunner, ok := s.runner.(ghIssueIDRunner); ok {
+		result, config, err = issueRunner.RunIssueViewByID(ctx, repository, identifier)
+	} else {
+		number, err = normalizeIssueNumber(number)
+		if err == nil {
+			result, config, err = s.runner.RunIssueView(ctx, repository, number)
+		}
+	}
 	if err != nil {
-		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
+		var ghErr *Error
+		if errors.As(err, &ghErr) {
+			status := issueErrorStatus(config, result, repository, number)
+			status.State = repositoryStateForErrorCode(ghErr.Code)
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "gh issue view failed before returning an issue payload")
+			response.IssueStatus = &status
+			applyGitHubFailure(&response, ghErr.Code, status.Message, status.Diagnostics)
+			return response, ghErr
+		}
+		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, 0)
 		status.State = ErrorCodeInvalidRequest
 		status.Message = err.Error()
 		status.Diagnostics = append(status.Diagnostics, "issue request rejected before invoking gh")
@@ -978,7 +1007,6 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
 	}
 
-	result, config, err := s.runner.RunIssueView(ctx, repository, number)
 	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
 	if err != nil && result.ExitCode == 0 {
 		result.ExitCode = -1
@@ -1016,7 +1044,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
 		case isIssueNotFound(result), isRepoNotFound(result):
 			status.State = ErrorCodeNotFound
-			status.Message = fmt.Sprintf("GitHub issue not found: %s#%d", repository, number)
+			status.Message = fmt.Sprintf("GitHub issue not found: %s#%s", repository, identifier)
 			status.Diagnostics = append(status.Diagnostics, "gh issue view could not resolve the requested issue")
 			response.IssueStatus = &status
 			return response, &Error{Code: ErrorCodeNotFound, Message: status.Message, Result: result}
@@ -1061,7 +1089,8 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 	response.Issue = &model.TrackerIssue{
 		System:     "github",
 		Repository: repository,
-		Number:     raw.Number,
+		ID:         identifier,
+		ExternalID: identifier,
 		Title:      strings.TrimSpace(raw.Title),
 		Body:       raw.Body,
 		State:      strings.TrimSpace(raw.State),
@@ -1075,7 +1104,8 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 	response.Task = &model.CanonicalTask{
 		System:     "github",
 		Repository: response.Issue.Repository,
-		Number:     response.Issue.Number,
+		ID:         identifier,
+		ExternalID: identifier,
 		Title:      response.Issue.Title,
 		Body:       response.Issue.Body,
 		State:      response.Issue.State,
@@ -1090,13 +1120,21 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 	return response, nil
 }
 
+func issueNumberFromID(id string) (int, error) {
+	number, err := strconv.Atoi(strings.TrimSpace(id))
+	if err != nil {
+		return 0, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub issue ID must be a positive integer", Err: err}
+	}
+	return normalizeIssueNumber(number)
+}
+
 func (s *Service) executeIssueComments(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	repository := strings.TrimSpace(req.Repository)
 	if req.RepoProvided {
 		var err error
 		repository, err = normalizeRepository(repository)
 		if err != nil {
-			status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), 0)
 			status.State = ErrorCodeInvalidRequest
 			status.Message = err.Error()
 			status.Diagnostics = append(status.Diagnostics, "issue comments request rejected before invoking gh")
@@ -1105,9 +1143,9 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 		}
 	}
 
-	number, err := normalizeIssueNumber(req.Number)
+	number, err := issueNumberFromID(req.ID)
 	if err != nil {
-		status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
+		status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, 0)
 		status.State = ErrorCodeInvalidRequest
 		status.Message = err.Error()
 		status.Diagnostics = append(status.Diagnostics, "issue comments request rejected before invoking gh")
@@ -1183,7 +1221,7 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 		comments = append(comments, model.TrackerComment{
 			System:     "github",
 			Repository: repository,
-			Number:     number,
+			TaskID:     strconv.Itoa(number),
 			Author:     author,
 			Body:       item.Body,
 			URL:        strings.TrimSpace(firstNonEmpty(item.HTMLURL, item.URL)),
@@ -1198,7 +1236,7 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 		response.TaskComments = append(response.TaskComments, model.TaskComment{
 			System:     "github",
 			Repository: comment.Repository,
-			TaskNumber: comment.Number,
+			TaskID:     comment.TaskID,
 			Author: model.User{
 				System:   "github",
 				Login:    comment.Author.Login,
@@ -1228,7 +1266,7 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 		var err error
 		repository, err = normalizeRepository(repository)
 		if err != nil {
-			status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), 0)
 			status.State = ErrorCodeInvalidRequest
 			status.Message = err.Error()
 			status.Diagnostics = append(status.Diagnostics, "issue comment create request rejected before invoking gh")
@@ -1239,9 +1277,9 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 		}
 	}
 
-	number, err := normalizeIssueNumber(req.Number)
+	number, err := issueNumberFromID(req.ID)
 	if err != nil {
-		status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
+		status := issueCommentsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, 0)
 		status.State = ErrorCodeInvalidRequest
 		status.Message = err.Error()
 		status.Diagnostics = append(status.Diagnostics, "issue comment create request rejected before invoking gh")
@@ -1333,7 +1371,7 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 	comment := model.TrackerComment{
 		System:     "github",
 		Repository: repository,
-		Number:     number,
+		TaskID:     strconv.Itoa(number),
 		Author:     author,
 		Body:       raw.Body,
 		URL:        strings.TrimSpace(firstNonEmpty(raw.HTMLURL, raw.URL)),
@@ -1344,7 +1382,7 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 	response.TaskComments = []model.TaskComment{{
 		System:     "github",
 		Repository: repository,
-		TaskNumber: number,
+		TaskID:     strconv.Itoa(number),
 		Author: model.User{
 			System:   "github",
 			Login:    author.Login,
@@ -1386,7 +1424,7 @@ func (s *Service) executeIssueLabelsChange(ctx context.Context, response model.R
 		var err error
 		repository, err = normalizeRepository(repository)
 		if err != nil {
-			status := issueLabelsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number, operation, req.Labels)
+			status := issueLabelsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), 0, operation, req.Labels)
 			status.State = ErrorCodeInvalidRequest
 			status.Message = err.Error()
 			status.Diagnostics = append(status.Diagnostics, "issue label "+action+" request rejected before invoking gh")
@@ -1397,9 +1435,9 @@ func (s *Service) executeIssueLabelsChange(ctx context.Context, response model.R
 		}
 	}
 
-	number, err := normalizeIssueNumber(req.Number)
+	number, err := issueNumberFromID(req.ID)
 	if err != nil {
-		status := issueLabelsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number, operation, req.Labels)
+		status := issueLabelsErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, 0, operation, req.Labels)
 		status.State = ErrorCodeInvalidRequest
 		status.Message = err.Error()
 		status.Diagnostics = append(status.Diagnostics, "issue label "+action+" request rejected before invoking gh")
@@ -1521,7 +1559,7 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 		var err error
 		repository, err = normalizeRepository(repository)
 		if err != nil {
-			status := prGetErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Number)
+			status := prGetErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.MergeRequestNumber)
 			status.State = ErrorCodeInvalidRequest
 			status.Message = err.Error()
 			status.Diagnostics = append(status.Diagnostics, "pull request get request rejected before invoking gh")
@@ -1530,9 +1568,9 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 		}
 	}
 
-	number, err := normalizePullRequestNumber(req.Number)
+	number, err := normalizePullRequestNumber(req.MergeRequestNumber)
 	if err != nil {
-		status := prGetErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
+		status := prGetErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.MergeRequestNumber)
 		status.State = ErrorCodeInvalidRequest
 		status.Message = err.Error()
 		status.Diagnostics = append(status.Diagnostics, "pull request get request rejected before invoking gh")
@@ -2140,10 +2178,14 @@ func prStateForErrorCode(code string) string {
 }
 
 func issueErrorStatus(config resolvedConfig, result CommandResult, repository string, number int) model.IssueStatus {
+	id := ""
+	if number > 0 {
+		id = strconv.Itoa(number)
+	}
 	status := model.IssueStatus{
 		System:     "github",
 		Repository: repository,
-		Number:     number,
+		ID:         id,
 		State:      StateExternalFailure,
 		Command:    config.Command,
 		Path:       result.Path,
@@ -2170,10 +2212,14 @@ func issueErrorStatus(config resolvedConfig, result CommandResult, repository st
 }
 
 func issueLabelsErrorStatus(config resolvedConfig, result CommandResult, repository string, number int, operation string, labels []string) model.IssueStatus {
+	id := ""
+	if number > 0 {
+		id = strconv.Itoa(number)
+	}
 	status := model.IssueStatus{
 		System:     "github",
 		Repository: repository,
-		Number:     number,
+		ID:         id,
 		State:      StateExternalFailure,
 		Command:    config.Command,
 		Path:       result.Path,
@@ -2217,10 +2263,14 @@ func issueLabelsCommandDiagnostic(command string, repository string, number int,
 }
 
 func issueCommentsErrorStatus(config resolvedConfig, result CommandResult, repository string, number int) model.IssueStatus {
+	id := ""
+	if number > 0 {
+		id = strconv.Itoa(number)
+	}
 	status := model.IssueStatus{
 		System:     "github",
 		Repository: repository,
-		Number:     number,
+		ID:         id,
 		State:      StateExternalFailure,
 		Command:    config.Command,
 		Path:       result.Path,

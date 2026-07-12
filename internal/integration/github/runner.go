@@ -141,16 +141,24 @@ func (r *Runner) RunRepoView(ctx context.Context, repository string) (CommandRes
 }
 
 func (r *Runner) RunIssueView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
-	number, err := normalizeIssueNumber(number)
-	if err != nil {
+	if _, err := normalizeIssueNumber(number); err != nil {
 		result := CommandResult{Command: defaultCommand, ExitCode: -1}
-		return result, resolvedConfig{}, &Error{
-			Code:    ErrorCodeInvalidRequest,
-			Message: err.Error(),
-			Result:  result,
-		}
+		return result, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error(), Result: result}
 	}
+	return r.runIssueViewByID(ctx, repository, strconv.Itoa(number))
+}
 
+func (r *Runner) RunIssueViewByID(ctx context.Context, repository string, identifier string) (CommandResult, resolvedConfig, error) {
+	return r.runIssueViewByID(ctx, repository, identifier)
+}
+
+func (r *Runner) runIssueViewByID(ctx context.Context, repository string, identifier string) (CommandResult, resolvedConfig, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub issue identifier must not be empty", Result: result}
+	}
+	var err error
 	config, err := r.loadConfig(ctx)
 	if err != nil {
 		return CommandResult{}, resolvedConfig{}, err
@@ -166,7 +174,7 @@ func (r *Runner) RunIssueView(ctx context.Context, repository string, number int
 		}
 	}
 
-	return r.runCommandWithResolvedConfig(ctx, config, []string{"issue", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,labels,assignees,author,url,createdAt,updatedAt"})
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"issue", "view", identifier, "--repo", repository, "--json", "number,title,body,state,labels,assignees,author,url,createdAt,updatedAt"})
 }
 
 func (r *Runner) RunIssueList(ctx context.Context, repository string, request IssueListRequest) (CommandResult, resolvedConfig, error) {

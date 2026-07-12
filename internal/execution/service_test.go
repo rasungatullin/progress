@@ -1382,7 +1382,7 @@ func TestLoadPullRequestFillsOnlyActionData(t *testing.T) {
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
-			if req.Operation != "get" || req.Repository != "owner/name" || req.Number != 17 {
+			if req.Operation != "get" || req.Repository != "owner/name" || req.MergeRequestNumber != 17 {
 				t.Fatalf("unexpected integration request: %#v", req)
 			}
 			return integration.Response{MergeRequest: &integration.MergeRequest{
@@ -1491,12 +1491,12 @@ func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
-			if req.Operation != "comments" || req.Repository != "owner/name" || req.Number != 17 {
+			if req.Operation != "comments" || req.Repository != "owner/name" || req.MergeRequestNumber != 17 {
 				t.Fatalf("unexpected integration request: %#v", req)
 			}
 			return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
 				Repository:         req.Repository,
-				MergeRequestNumber: req.Number,
+				MergeRequestNumber: req.MergeRequestNumber,
 				ExternalID:         "comment-1",
 				ReplyToID:          "thread-1",
 				State:              "unresolved",
@@ -1928,7 +1928,7 @@ func TestPublishReviewRemarksFillsOnlyActionData(t *testing.T) {
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
-			if req.Operation != "create" || req.Repository != "owner/name" || req.Number != 17 || req.Path != "internal/execution/service.go" || req.Line != 42 {
+			if req.Operation != "create" || req.Repository != "owner/name" || req.MergeRequestNumber != 17 || req.Path != "internal/execution/service.go" || req.Line != 42 {
 				t.Fatalf("unexpected integration request: %#v", req)
 			}
 			return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", URL: "https://github.com/owner/name/pull/17#discussion_r1"}}, nil
@@ -2109,7 +2109,7 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 			callIndex++
 			switch callIndex {
 			case 1:
-				if req.Operation != "reply" || req.Repository != "owner/name" || req.Number != 17 || req.ThreadID != "thread-1" || !strings.Contains(req.Body, "Добавил покрытие отказа.") {
+				if req.Operation != "reply" || req.Repository != "owner/name" || req.MergeRequestNumber != 17 || req.ThreadID != "thread-1" || !strings.Contains(req.Body, "Добавил покрытие отказа.") {
 					t.Fatalf("unexpected reply request: %#v", req)
 				}
 			case 2:
@@ -3216,7 +3216,7 @@ func TestProjectReviewActionsLoadRelatedPullRequestFromPublicInput(t *testing.T)
 			integrations := &stubIntegrationExecutor{execute: func(_ context.Context, request integration.Request) (integration.Response, error) {
 				switch request.Operation {
 				case "get":
-					if request.Repository != "owner/name" || request.Number != 184 {
+					if request.Repository != "owner/name" || request.MergeRequestNumber != 184 {
 						t.Fatalf("unexpected pull request request: %#v", request)
 					}
 					return integration.Response{MergeRequest: &integration.MergeRequest{
@@ -3253,7 +3253,7 @@ func TestProjectReviewActionsLoadRelatedPullRequestFromPublicInput(t *testing.T)
 			if err != nil {
 				t.Fatalf("execute project action: %v", err)
 			}
-			if len(integrations.calls) < 1 || integrations.calls[0].Operation != "get" || integrations.calls[0].Number != 184 {
+			if len(integrations.calls) < 1 || integrations.calls[0].Operation != "get" || integrations.calls[0].MergeRequestNumber != 184 {
 				t.Fatalf("first integration call must load related pull request: %#v", integrations.calls)
 			}
 		})
@@ -3767,11 +3767,11 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
 			switch req.Operation {
 			case "get":
-				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.Number, State: "OPEN", BaseRef: "main", HeadRef: "feature/review"}}, nil
+				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.MergeRequestNumber, State: "OPEN", BaseRef: "main", HeadRef: "feature/review"}}, nil
 			case "comments":
 				return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
 					Repository:         req.Repository,
-					MergeRequestNumber: req.Number,
+					MergeRequestNumber: req.MergeRequestNumber,
 					ExternalID:         "previous-comment",
 					State:              "open",
 					Body:               "Ранее записанное замечание.",
@@ -3822,7 +3822,7 @@ func TestServiceExecuteReviewPullRequestPublishesRemarks(t *testing.T) {
 	if len(integrations.calls) != 6 {
 		t.Fatalf("expected get, comments and create integration calls, got %#v", integrations.calls)
 	}
-	if integrations.calls[2].Number != 17 || integrations.calls[2].Repository != "owner/name" {
+	if integrations.calls[2].MergeRequestNumber != 17 || integrations.calls[2].Repository != "owner/name" {
 		t.Fatalf("unexpected review remark target: %#v", integrations.calls[2])
 	}
 	if integrations.calls[2].Path != "internal/execution/integration_operations.go" || integrations.calls[2].Line != 42 || integrations.calls[2].Side != "RIGHT" {
@@ -4111,7 +4111,7 @@ func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *test
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
 			switch req.Operation {
 			case "get":
-				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.Number, State: "OPEN", BaseRef: "main", HeadRef: "112"}}, nil
+				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.MergeRequestNumber, State: "OPEN", BaseRef: "main", HeadRef: "112"}}, nil
 			case "comments":
 				return integration.Response{}, errors.New("temporary comments outage")
 			case "create":
@@ -4191,11 +4191,11 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
 			switch req.Operation {
 			case "get":
-				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.Number, State: "OPEN", BaseRef: "main", HeadRef: "feature/fixes"}}, nil
+				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.MergeRequestNumber, State: "OPEN", BaseRef: "main", HeadRef: "feature/fixes"}}, nil
 			case "comments":
 				return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
 					Repository:         req.Repository,
-					MergeRequestNumber: req.Number,
+					MergeRequestNumber: req.MergeRequestNumber,
 					ExternalID:         "thread-1",
 					ReplyToID:          "thread-1",
 					State:              "unresolved",

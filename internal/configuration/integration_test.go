@@ -558,7 +558,7 @@ func TestLoadIntegrationConfigRejectsLocalTrackerDefaultForRepository(t *testing
 	if err == nil {
 		t.Fatal("expected invalid config error")
 	}
-	if err.Error() != "invalid integration config after merge of 1 layers: default_systems.repository references system \"local\" without matching integration type" {
+	if err.Error() != "invalid integration config after merge of 1 layers: default_systems.repo references system \"local\" without matching integration type" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -580,7 +580,7 @@ func TestLoadIntegrationConfigRejectsScriptDefaultForRepository(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid config error")
 	}
-	if err.Error() != "invalid integration config after merge of 1 layers: default_systems.repository references system \"work-tracker\" without matching integration type" {
+	if err.Error() != "invalid integration config after merge of 1 layers: default_systems.repo references system \"work-tracker\" without matching integration type" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

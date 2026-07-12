@@ -88,6 +88,12 @@
 
 ## 5. Каноничные Go-типы
 
+Для предметного контракта используются типы `issue`, `repo`, `messenger` и `wiki`. Хранилище приватных значений не является типом интеграции. Запрос `Request` содержит строковое поле `ID` — непрозрачный идентификатор объекта; разбор составных ссылок не выполняется. Числовой идентификатор не является частью типо-ориентированного запроса.
+
+Выбор системы выполняется реестром: `System` задаётся явно флагом `--system` либо определяется по системе по умолчанию для предметного типа. Неизвестная система, отсутствующая система по умолчанию и неподдерживаемая операция возвращаются как диагностируемый отказ.
+
+Изменение классифицировано как `Переходный контракт`. До следующего несовместимого выпуска сохраняются команды по именам систем и чтение значений `tracker` и `repository` в настройках. Команды выводят предупреждение с целевой типо-ориентированной формой, а загрузка старых имён настроек фиксирует предупреждение совместимости. После того как эксплуатационные настройки будут переведены на `issue` и `repo`, оболочки команд по именам систем и нормализация старых имён удаляются отдельным изменением публичного контракта. Команды `integration dispatcher`, `integration dispatch` и `integration private` в переход не входят: первая пара заменена прямым разрешением через реестр, а хранилище приватных значений не является типом интеграции.
+
 Актуальная реализация находится в `internal/integration/model/types.go`. Основной вход — `Request`, внутренний вход адаптера — `ProviderRequest`, выход — `Response`.
 
 Ключевые поля `Request`:
@@ -101,7 +107,8 @@ type Request struct {
     ObjectType      string
     Operation       string
     Repository      string
-    Number          int
+    ID              string // непрозрачный идентификатор объекта issue
+    MergeRequestNumber int // числовой идентификатор запроса на слияние переходного контура
     ExternalID      string
     Base            string
     Head            string
@@ -182,7 +189,7 @@ type Repository struct {
 type Issue struct {
     System     System
     Repository string
-    Number     int
+    ID         string
     Title      string
     Body       string
     State      string
@@ -198,7 +205,7 @@ type Issue struct {
 type IssueComment struct {
     System      System
     ID          string
-    IssueNumber int
+    IssueID     string
     Author      string
     Body        string
     URL         string
@@ -248,7 +255,7 @@ type PullRequestComment struct {
 }
 ```
 
-В текущем срезе среды исполнения GitHub issue comments нормализуются в общий `TrackerComment`: `Repository` и `Number` задают исходную issue, `Author` хранит нормализованного пользователя, `URL` берётся из `html_url`, а `CreatedAt`/`UpdatedAt` сохраняются как строки из ответа GitHub.
+В текущем срезе среды исполнения комментарии GitHub нормализуются в общий объект комментария: `Repository` и внешний идентификатор задают исходную issue, `Author` хранит нормализованного пользователя, `URL` берётся из `html_url`, а `CreatedAt`/`UpdatedAt` сохраняются как строки из ответа GitHub.
 
 ## 6. Транспорт внешнего обращения
 
@@ -263,7 +270,7 @@ type PullRequestComment struct {
 
 ## 7. Интерфейс контура
 
-Контур публикует универсальный интерфейс диспетчеризации и выполнения канонического запроса.
+Контур публикует универсальный интерфейс разрешения и выполнения канонического запроса через реестр типов, систем и операций.
 
 ```go
 package integration
@@ -271,7 +278,6 @@ package integration
 import "context"
 
 type Service interface {
-    Dispatch(context.Context, Request) (Route, error)
     Execute(context.Context, Request) (Response, error)
     Operations(context.Context, OperationFilter) []OperationDescriptor
 }
@@ -281,7 +287,7 @@ type Service interface {
 
 - контур сам должен уметь определить, с какой системой работать, по настройкам и селектору;
 - поле `System` является явным селектором интегрируемой системы;
-- если `System` не задан, диспетчер выбирает систему по `IntegrationType` и настройкам `default_systems`;
+- если `System` не задан, реестр выбирает систему по `IntegrationType` и настройкам `default_systems`;
 - если `SystemProvided=true` и `System` пустой, запрос отклоняется как `invalid-request`;
 - вызывающему коду не нужно знать устройство GitHub, Bitbucket, Mattermost, Telegram или другой внешней системы.
 
@@ -297,18 +303,18 @@ type Service interface {
 
 Примеры:
 
-- `tracker.task.get`;
-- `tracker.task.comment.list`;
-- `tracker.task.comment.create`;
-- `tracker.task.label.add`;
-- `repository.repo.get`;
-- `repository.merge-request.create`;
-- `repository.review-remark.reply`;
-- `repository.review-remark.resolve`;
+- `issue.issue.get`;
+- `issue.issue.comment.list`;
+- `issue.issue.comment.create`;
+- `issue.issue.label.add`;
+- `repo.repo.get`;
+- `repo.merge-request.create`;
+- `repo.comment.reply`;
+- `repo.comment.resolve`;
 - `messenger.thread.get`;
 - `wiki.page.search`.
 
-Внешние имена команд, например `github issue comments` или `bitbucket pr get`, не являются каноническими именами операций. Они остаются диагностическим способом вызова конкретного адаптера.
+Внешние имена команд, например `github issue comments` или `bitbucket pr get`, не являются каноническими именами операций. Они сохраняются как совместимый переход и сопровождаются диагностикой устаревшей формы; маршрутизация новых запросов выполняется реестром.
 
 Публичная модель каталога:
 
@@ -364,12 +370,12 @@ type OperationOutputContract struct {
 ```json
 {
   "default_systems": {
-    "tracker": "local"
+    "issue": "local"
   },
   "systems": {
     "local": {
       "type": "local-tracker",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true,
       "database": {
         "driver": "sqlite",
@@ -393,20 +399,20 @@ type OperationOutputContract struct {
 
 Хранилище фиксирует задачи и комментарии в канонической модели:
 
-- задача хранит номер, внешний идентификатор, заголовок, описание, состояние, признаки, атрибуты, автора и время изменения;
-- комментарий хранит идентификатор, номер задачи, автора, тело и время изменения;
+- задача хранит строковый непрозрачный идентификатор, заголовок, описание, состояние, признаки, атрибуты, автора и время изменения;
+- комментарий хранит строковый идентификатор объекта, автора, тело и время изменения;
 - признаки задачи возвращаются как `Traits` и совместимые `Labels`.
 
 Поддержанные операции первого среза:
 
-- `tracker.task.create`;
-- `tracker.task.get`;
-- `tracker.task.search`;
-- `tracker.task.update`;
-- `tracker.task.comment.list`;
-- `tracker.task.comment.create`;
-- `tracker.task.label.add`;
-- `tracker.task.label.remove`;
+- `issue.issue.create`;
+- `issue.issue.get`;
+- `issue.issue.search`;
+- `issue.issue.update`;
+- `issue.issue.comment.list`;
+- `issue.issue.comment.create`;
+- `issue.issue.label.add`;
+- `issue.issue.label.remove`;
 - `auth status` для проверки доступности SQLite-хранилища.
 
 ## 9. Сценарный адаптер
@@ -420,16 +426,16 @@ type OperationOutputContract struct {
   "systems": {
     "work-tracker": {
       "type": "script",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true,
       "project": "ABC",
       "settings": {
         "tracker_url": "https://tracker.example"
       },
       "operations": {
-        "tracker.task.get": {
+        "issue.issue.get": {
           "script": ".progress/integration/work-tracker/task-get.sh",
-          "required": ["number"],
+          "required": ["id"],
           "optional": ["project", "tracker_url"],
           "defaults": {
             "project": "${system.project}",
@@ -449,12 +455,12 @@ type OperationOutputContract struct {
 ```json
 {
   "system": "work-tracker",
-  "integration_type": "tracker",
-  "operation_name": "tracker.task.get",
-  "object_type": "task",
+  "integration_type": "issue",
+  "operation_name": "issue.issue.get",
+  "object_type": "issue",
   "operation": "get",
   "request": {
-    "number": 123,
+    "id": "ABC-123",
     "project": "ABC",
     "tracker_url": "https://tracker.example"
   },
@@ -494,23 +500,23 @@ type OperationOutputContract struct {
 
 ```go
 type IssueGetRequest struct {
-    IntegrationType string // "tracker"
+    IntegrationType string // "issue", "repo", "messenger" или "wiki"
     System          string
-    ObjectType      string // "task" или "issue"
+    ObjectType      string // канонический объект типа интеграции
     Operation       string // "get"
     Repository      string
-    Number          int
+    ID              string
 }
 ```
 
 Семантика полей:
 
-- `IntegrationType` — тип интеграции, например `tracker`, `repository` или `messenger`;
+- `IntegrationType` — тип интеграции: `issue`, `repo`, `messenger` или `wiki`;
 - `System` — конкретная интегрируемая система, если нужно переопределить систему по умолчанию;
 - `ObjectType` — тип канонического объекта;
 - `Operation` — интеграционная операция;
 - `Repository` — опорный контекст, если он нужен для разрешения объекта;
-- `Number` — канонический идентификатор задачи внутри контекста источника;
+- `ID` — непрозрачный строковый идентификатор задачи внутри контекста источника;
 
 Если `Fields` не указан, контур должен вернуть базовый каноничный набор полей сущности.
 

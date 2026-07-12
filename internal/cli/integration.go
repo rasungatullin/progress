@@ -1,13 +1,9 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"unicode"
@@ -48,16 +44,25 @@ type integrationFlags struct {
 	excludeLabels   []string
 }
 
-type integrationPrivateFlags struct {
-	value string
-	stdin bool
-}
-
+// Оставлено только для сборочной совместимости старых тестовых и внутренних
+// потребителей. Хранилище приватных значений не публикуется в дереве CLI.
 type integrationPrivateResult struct {
 	Status   string `json:"status"`
 	Name     string `json:"name,omitempty"`
 	Store    string `json:"store"`
 	Location string `json:"location,omitempty"`
+}
+
+var integrationPrivateStoreFactory = func(cmd *cobra.Command) (secrets.Store, secrets.Descriptor, error) {
+	repoRoot := ""
+	if output, err := os.Getwd(); err == nil {
+		repoRoot = output
+	}
+	loaded, err := configuration.LoadIntegrationPrivateStoreConfig(repoRoot, os.ReadFile)
+	if err != nil {
+		return nil, secrets.Descriptor{}, err
+	}
+	return secrets.NewStore(loaded.Config, loaded.ConfigHome)
 }
 
 const (
@@ -69,15 +74,6 @@ var integrationServiceFactory = func(cmd *cobra.Command) *integration.Service {
 	return integration.NewConfiguredService(logging.New(cmd.ErrOrStderr()))
 }
 
-var integrationPrivateStoreFactory = func(cmd *cobra.Command) (secrets.Store, secrets.Descriptor, error) {
-	repoRoot := resolveIntegrationPrivateRepoRoot(context.Background())
-	loaded, err := configuration.LoadIntegrationPrivateStoreConfig(repoRoot, os.ReadFile)
-	if err != nil {
-		return nil, secrets.Descriptor{}, err
-	}
-	return secrets.NewStore(loaded.Config, loaded.ConfigHome)
-}
-
 func newIntegrationCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "integration",
@@ -85,9 +81,11 @@ func newIntegrationCommand() *cobra.Command {
 	}
 	cmd.PersistentFlags().String("format", integrationOutputText, "Формат вывода: text (по умолчанию) или json")
 
-	cmd.AddCommand(newIntegrationDispatcherCommand())
 	cmd.AddCommand(newIntegrationOperationsCommand())
-	cmd.AddCommand(newIntegrationPrivateCommand())
+	cmd.AddCommand(newIntegrationIssueCommand())
+	cmd.AddCommand(newIntegrationRepoCommand())
+	cmd.AddCommand(newIntegrationMessengerCommand())
+	cmd.AddCommand(newIntegrationWikiCommand())
 	cmd.AddCommand(newIntegrationGitHubCommand())
 	cmd.AddCommand(newIntegrationBitbucketCommand())
 	cmd.AddCommand(newIntegrationMattermostCommand())
@@ -96,111 +94,164 @@ func newIntegrationCommand() *cobra.Command {
 	return cmd
 }
 
-func newIntegrationPrivateCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "private",
-		Short: "Операции с приватными значениями интеграции",
-	}
-	cmd.AddCommand(newIntegrationPrivateStatusCommand())
-	cmd.AddCommand(newIntegrationPrivateSetCommand())
-	cmd.AddCommand(newIntegrationPrivateDeleteCommand())
+// Типо-ориентированные команды ниже используют тот же реестр, что и issue.
+// Система выбирается по --system либо по default_systems.
+func newIntegrationRepoCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "repo", Short: "Операции с объектами типа repo"}
+	flags := &integrationFlags{}
+	get := &cobra.Command{Use: "get", Short: "Получение репозитория", RunE: func(cmd *cobra.Command, _ []string) error {
+		format, err := integrationOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
+		response, err := newIntegrationService(cmd).Execute(cmd.Context(), integration.Request{IntegrationType: "repo", System: flags.system, SystemProvided: cmd.Flags().Changed("system"), Resource: "repo", ObjectType: "repository", Operation: "get", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo")})
+		if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationRepository); printErr != nil {
+			return printErr
+		}
+		return err
+	}}
+	get.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	get.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.AddCommand(get)
 	return cmd
 }
 
-func newIntegrationPrivateStatusCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Проверка выбранного хранилища приватных значений",
+func newIntegrationMessengerCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "messenger", Short: "Операции с объектами типа messenger"}
+	flags := &integrationFlags{}
+	create := &cobra.Command{Use: "message", Short: "Создание сообщения", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.text) == "" {
+			return fmt.Errorf("--text is required")
+		}
+		format, err := integrationOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
+		response, err := newIntegrationService(cmd).Execute(cmd.Context(), integration.Request{IntegrationType: "messenger", System: flags.system, SystemProvided: cmd.Flags().Changed("system"), Resource: "message", ObjectType: "message", Operation: "create", Text: flags.text, ChannelID: flags.channelID, ThreadID: flags.threadID})
+		if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationMessage); printErr != nil {
+			return printErr
+		}
+		return err
+	}}
+	create.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	create.Flags().StringVar(&flags.text, "text", "", "Текст сообщения")
+	create.Flags().StringVar(&flags.channelID, "channel", "", "Идентификатор канала")
+	create.Flags().StringVar(&flags.threadID, "thread", "", "Идентификатор цепочки обсуждения")
+	cmd.AddCommand(create)
+	return cmd
+}
+
+func newIntegrationWikiCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "wiki", Short: "Операции с объектами типа wiki"}
+	flags := &integrationFlags{}
+	search := &cobra.Command{Use: "search", Short: "Поиск страниц", RunE: func(cmd *cobra.Command, _ []string) error {
+		format, err := integrationOutputFormat(cmd)
+		if err != nil {
+			return err
+		}
+		response, err := newIntegrationService(cmd).Execute(cmd.Context(), integration.Request{IntegrationType: "wiki", System: flags.system, SystemProvided: cmd.Flags().Changed("system"), Resource: "page", ObjectType: "page", Operation: "search", Query: flags.query, Limit: flags.limit})
+		if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationWikiPages); printErr != nil {
+			return printErr
+		}
+		return err
+	}}
+	search.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	search.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
+	search.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число страниц")
+	cmd.AddCommand(search)
+	return cmd
+}
+
+// newIntegrationIssueCommand предоставляет типо-ориентированный контракт
+// issue. Старые команды по имени системы сохраняются на переходный период.
+func newIntegrationIssueCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "issue",
+		Short: "Операции с объектами типа issue",
+	}
+	cmd.AddCommand(newIntegrationIssueGetCommand())
+	cmd.AddCommand(newIntegrationIssueSearchCommand())
+	return cmd
+}
+
+func newIntegrationIssueGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{
+		Use:   "get",
+		Short: "Получение объекта issue по непрозрачному идентификатору",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			format, err := integrationOutputFormat(cmd)
-			if err != nil {
-				return err
+			if !cmd.Flags().Changed("id") {
+				return fmt.Errorf("--id is required")
 			}
-			_, descriptor, err := integrationPrivateStoreFactory(cmd)
-			if err != nil {
-				return err
-			}
-			return printIntegrationPrivateResult(cmd, integrationPrivateResult{
-				Status:   "ready",
-				Store:    descriptor.Type,
-				Location: descriptor.Location,
-			}, format)
+			return executeTypeOrientedIssueCommand(cmd, flags, "get")
 		},
 	}
-}
-
-func newIntegrationPrivateSetCommand() *cobra.Command {
-	flags := &integrationPrivateFlags{}
-	cmd := &cobra.Command{
-		Use:   "set <name>",
-		Short: "Запись приватного значения интеграции",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			format, err := integrationOutputFormat(cmd)
-			if err != nil {
-				return err
-			}
-			value, err := integrationPrivateInputValue(cmd, flags)
-			if err != nil {
-				return err
-			}
-			if strings.TrimSpace(value) == "" {
-				return fmt.Errorf("private value must not be empty")
-			}
-			store, descriptor, err := integrationPrivateStoreFactory(cmd)
-			if err != nil {
-				return err
-			}
-			if err := store.Set(cmd.Context(), args[0], value); err != nil {
-				return err
-			}
-			return printIntegrationPrivateResult(cmd, integrationPrivateResult{
-				Status:   "stored",
-				Name:     strings.TrimSpace(args[0]),
-				Store:    descriptor.Type,
-				Location: descriptor.Location,
-			}, format)
-		},
-	}
-	cmd.Flags().StringVar(&flags.value, "value", "", "Значение для записи")
-	cmd.Flags().BoolVar(&flags.stdin, "stdin", false, "Прочитать значение из стандартного ввода")
+	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий в формате owner/name")
+	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор объекта")
 	return cmd
 }
 
-func newIntegrationPrivateDeleteCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Удаление приватного значения интеграции",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			format, err := integrationOutputFormat(cmd)
-			if err != nil {
-				return err
-			}
-			store, descriptor, err := integrationPrivateStoreFactory(cmd)
-			if err != nil {
-				return err
-			}
-			if err := store.Delete(cmd.Context(), args[0]); err != nil {
-				if errors.Is(err, secrets.ErrNotFound) {
-					return fmt.Errorf("private value %q not found", strings.TrimSpace(args[0]))
-				}
-				return err
-			}
-			return printIntegrationPrivateResult(cmd, integrationPrivateResult{
-				Status:   "deleted",
-				Name:     strings.TrimSpace(args[0]),
-				Store:    descriptor.Type,
-				Location: descriptor.Location,
-			}, format)
+func newIntegrationIssueSearchCommand() *cobra.Command {
+	flags := &integrationFlags{state: "open"}
+	cmd := &cobra.Command{
+		Use:   "search",
+		Short: "Поиск объектов типа issue",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return executeTypeOrientedIssueCommand(cmd, flags, "search")
 		},
+	}
+	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий в формате owner/name")
+	cmd.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
+	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
+	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
+	return cmd
+}
+
+func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags, operation string) error {
+	format, err := integrationOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
+	request := integration.Request{
+		IntegrationType: "issue",
+		System:          flags.system,
+		SystemProvided:  cmd.Flags().Changed("system"),
+		Resource:        "issue",
+		ObjectType:      "issue",
+		Operation:       operation,
+		Repository:      flags.repo,
+		RepoProvided:    cmd.Flags().Changed("repo"),
+		ID:              strings.TrimSpace(flags.externalID),
+		ExternalID:      strings.TrimSpace(flags.externalID),
+		Query:           flags.query,
+		State:           flags.state,
+		Limit:           flags.limit,
+	}
+	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
+	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
+		return printErr
+	}
+	return err
+}
+
+func printTypeOrientedIssueResponse(cmd *cobra.Command, response integration.Response) {
+	cmd.Printf("system=%s\nresource=issue\nobject=issue\noperation=%s\nstatus=%s\n", response.System, response.Operation, response.Status)
+	if response.Task != nil {
+		cmd.Printf("id=%s\n", firstNonEmpty(response.Task.ExternalID, response.Task.ID))
+		cmd.Printf("title=%s\nstate=%s\n", response.Task.Title, response.Task.State)
+	}
+	if response.Failure != nil {
+		cmd.Printf("failure=%s\nmessage=%s\n", response.Failure.Kind, response.Failure.Message)
 	}
 }
 
 func newIntegrationGitHubCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "github",
-		Short: "Интеграция с GitHub через gh",
+		Use:        "github",
+		Short:      "Интеграция с GitHub через gh",
+		Deprecated: "используйте типо-ориентированные команды integration issue и integration repo; выбор системы задаётся флагом --system",
 	}
 
 	cmd.AddCommand(newIntegrationGitHubAuthCommand())
@@ -212,8 +263,9 @@ func newIntegrationGitHubCommand() *cobra.Command {
 
 func newIntegrationBitbucketCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "bitbucket",
-		Short: "Интеграция с Bitbucket как репозиторием",
+		Use:        "bitbucket",
+		Short:      "Интеграция с Bitbucket как репозиторием",
+		Deprecated: "используйте типо-ориентированные команды integration repo с флагом --system",
 	}
 	cmd.AddCommand(newIntegrationSystemAuthCommand("bitbucket", "Bitbucket"))
 	cmd.AddCommand(newIntegrationBitbucketRepoCommand())
@@ -245,8 +297,9 @@ func newIntegrationBitbucketPRCommand() *cobra.Command {
 
 func newIntegrationMattermostCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mattermost",
-		Short: "Интеграция с Mattermost как мессенджером",
+		Use:        "mattermost",
+		Short:      "Интеграция с Mattermost как мессенджером",
+		Deprecated: "используйте типо-ориентированные команды integration messenger с флагом --system",
 	}
 	cmd.AddCommand(newIntegrationSystemAuthCommand("mattermost", "Mattermost"))
 	cmd.AddCommand(newIntegrationMattermostThreadCommand())
@@ -274,8 +327,9 @@ func newIntegrationMattermostMessageCommand() *cobra.Command {
 
 func newIntegrationTelegramCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "telegram",
-		Short: "Интеграция с Telegram как мессенджером",
+		Use:        "telegram",
+		Short:      "Интеграция с Telegram как мессенджером",
+		Deprecated: "используйте типо-ориентированные команды integration messenger с флагом --system",
 	}
 	cmd.AddCommand(newIntegrationSystemAuthCommand("telegram", "Telegram"))
 	cmd.AddCommand(newIntegrationTelegramThreadCommand())
@@ -350,8 +404,9 @@ func newIntegrationGitHubIssueLabelCommand() *cobra.Command {
 
 func newIntegrationConfluenceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "confluence",
-		Short: "Интеграция с Confluence как wiki",
+		Use:        "confluence",
+		Short:      "Интеграция с Confluence как wiki",
+		Deprecated: "используйте типо-ориентированные команды integration wiki с флагом --system",
 	}
 	cmd.AddCommand(newIntegrationSystemAuthCommand("confluence", "Confluence"))
 	cmd.AddCommand(newIntegrationConfluencePageCommand())
@@ -468,14 +523,14 @@ func newIntegrationMergeRequestGetCommand(system string, label string) *cobra.Co
 			}
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				IntegrationType: "repository",
-				System:          system,
-				Resource:        "merge-request",
-				ObjectType:      "merge-request",
-				Operation:       "get",
-				Repository:      flags.repo,
-				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
+				IntegrationType:    "repository",
+				System:             system,
+				Resource:           "merge-request",
+				ObjectType:         "merge-request",
+				Operation:          "get",
+				Repository:         flags.repo,
+				RepoProvided:       cmd.Flags().Changed("repo"),
+				MergeRequestNumber: flags.number,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationMergeRequest); printErr != nil {
 				return printErr
@@ -606,14 +661,14 @@ func newIntegrationMergeRequestCommentsCommand(system string, label string) *cob
 			}
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				IntegrationType: "repository",
-				System:          system,
-				Resource:        "merge-request",
-				ObjectType:      "merge-request",
-				Operation:       "comments",
-				Repository:      flags.repo,
-				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
+				IntegrationType:    "repository",
+				System:             system,
+				Resource:           "merge-request",
+				ObjectType:         "merge-request",
+				Operation:          "comments",
+				Repository:         flags.repo,
+				RepoProvided:       cmd.Flags().Changed("repo"),
+				MergeRequestNumber: flags.number,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationReviewRemarks); printErr != nil {
 				return printErr
@@ -658,18 +713,18 @@ func newIntegrationMergeRequestCommentCreateCommand(system string, label string)
 			}
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				IntegrationType: "repository",
-				System:          system,
-				Resource:        "comment",
-				ObjectType:      "comment",
-				Operation:       "create",
-				Repository:      flags.repo,
-				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
-				Body:            flags.body,
-				Path:            flags.path,
-				Line:            flags.line,
-				Side:            flags.side,
+				IntegrationType:    "repository",
+				System:             system,
+				Resource:           "comment",
+				ObjectType:         "comment",
+				Operation:          "create",
+				Repository:         flags.repo,
+				RepoProvided:       cmd.Flags().Changed("repo"),
+				MergeRequestNumber: flags.number,
+				Body:               flags.body,
+				Path:               flags.path,
+				Line:               flags.line,
+				Side:               flags.side,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationReviewRemarkOperation); printErr != nil {
 				return printErr
@@ -997,7 +1052,7 @@ func newIntegrationGitHubIssueGetCommand() *cobra.Command {
 				Operation:    "get",
 				Repository:   flags.repo,
 				RepoProvided: cmd.Flags().Changed("repo"),
-				Number:       flags.number,
+				ID:           strconv.Itoa(flags.number),
 			})
 			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssue); err != nil {
 				return err
@@ -1084,7 +1139,7 @@ func newIntegrationGitHubIssueCommentsCommand() *cobra.Command {
 				Operation:    "comments",
 				Repository:   flags.repo,
 				RepoProvided: cmd.Flags().Changed("repo"),
-				Number:       flags.number,
+				ID:           strconv.Itoa(flags.number),
 			})
 			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssueComments); err != nil {
 				return err
@@ -1129,7 +1184,7 @@ func newIntegrationGitHubIssueCommentCreateCommand() *cobra.Command {
 				Operation:       "create",
 				Repository:      flags.repo,
 				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
+				ID:              strconv.Itoa(flags.number),
 				Body:            flags.body,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printGitHubIssueComments); printErr != nil {
@@ -1180,7 +1235,7 @@ func newIntegrationGitHubIssueLabelChangeCommand(operation string) *cobra.Comman
 				Operation:       operation,
 				Repository:      flags.repo,
 				RepoProvided:    cmd.Flags().Changed("repo"),
-				Number:          flags.number,
+				ID:              strconv.Itoa(flags.number),
 				Labels:          flags.labels,
 			})
 			if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationOperationResult); printErr != nil {
@@ -1276,12 +1331,12 @@ func newIntegrationGitHubPRGetCommand() *cobra.Command {
 
 			service := newIntegrationService(cmd)
 			response, err := service.Execute(cmd.Context(), integration.Request{
-				System:       "github",
-				Resource:     "pr",
-				Operation:    "get",
-				Repository:   flags.repo,
-				RepoProvided: cmd.Flags().Changed("repo"),
-				Number:       flags.number,
+				System:             "github",
+				Resource:           "pr",
+				Operation:          "get",
+				Repository:         flags.repo,
+				RepoProvided:       cmd.Flags().Changed("repo"),
+				MergeRequestNumber: flags.number,
 			})
 			if err := printIntegrationResponseOrJSON(cmd, response, format, printGitHubPullRequest); err != nil {
 				return err
@@ -1296,51 +1351,6 @@ func newIntegrationGitHubPRGetCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий GitHub в формате owner/name")
 	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер pull request GitHub")
-	return cmd
-}
-
-func newIntegrationDispatcherCommand() *cobra.Command {
-	flags := &integrationFlags{
-		system:    "github",
-		resource:  "issue",
-		operation: "get",
-	}
-
-	cmd := &cobra.Command{
-		Use:     "dispatcher",
-		Aliases: []string{"dispatch"},
-		Short:   "Диагностика маршрута диспетчера интеграции",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			format, err := integrationOutputFormat(cmd)
-			if err != nil {
-				return err
-			}
-
-			service := newIntegrationService(cmd)
-			route, err := service.Dispatch(cmd.Context(), integration.Request{
-				IntegrationType: flags.integrationType,
-				System:          flags.system,
-				SystemProvided:  cmd.Flags().Changed("system"),
-				Resource:        flags.resource,
-				ObjectType:      flags.object,
-				Operation:       flags.operation,
-			})
-			if err := printIntegrationRouteOrJSON(cmd, route, format); err != nil {
-				return err
-			}
-			if err != nil {
-				return err
-			}
-
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&flags.integrationType, "type", flags.integrationType, "Тип интеграции")
-	cmd.Flags().StringVar(&flags.system, "system", flags.system, "Имя внешней системы")
-	cmd.Flags().StringVar(&flags.resource, "resource", flags.resource, "Тип внешнего ресурса")
-	cmd.Flags().StringVar(&flags.object, "object", flags.object, "Тип канонического объекта")
-	cmd.Flags().StringVar(&flags.operation, "operation", flags.operation, "Тип операции интеграции")
 	return cmd
 }
 
@@ -1376,48 +1386,14 @@ func newIntegrationOperationsCommand() *cobra.Command {
 }
 
 func newIntegrationService(cmd *cobra.Command) *integration.Service {
-	return integrationServiceFactory(cmd)
-}
-
-func resolveIntegrationPrivateRepoRoot(ctx context.Context) string {
-	output, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").CombinedOutput()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(output))
-}
-
-func integrationPrivateInputValue(cmd *cobra.Command, flags *integrationPrivateFlags) (string, error) {
-	valueChanged := cmd.Flags().Changed("value")
-	switch {
-	case flags.stdin && valueChanged:
-		return "", fmt.Errorf("--value and --stdin cannot be used together")
-	case flags.stdin:
-		content, err := io.ReadAll(cmd.InOrStdin())
-		if err != nil {
-			return "", fmt.Errorf("read private value from stdin: %w", err)
+	path := cmd.CommandPath()
+	for _, system := range []string{"github", "bitbucket", "mattermost", "telegram", "confluence"} {
+		if strings.Contains(path, "integration "+system) {
+			cmd.PrintErrf("предупреждение: форма integration %s устарела; используйте типо-ориентированную команду и --system\n", system)
+			break
 		}
-		return strings.TrimRight(string(content), "\r\n"), nil
-	case valueChanged:
-		return flags.value, nil
-	default:
-		return "", fmt.Errorf("--value or --stdin is required")
 	}
-}
-
-func printIntegrationPrivateResult(cmd *cobra.Command, result integrationPrivateResult, format string) error {
-	if format == integrationOutputJSON {
-		return printIntegrationJSON(cmd, result)
-	}
-	cmd.Printf("status=%s\n", result.Status)
-	if result.Name != "" {
-		cmd.Printf("name=%s\n", result.Name)
-	}
-	cmd.Printf("store=%s\n", result.Store)
-	if result.Location != "" {
-		cmd.Printf("location=%s\n", result.Location)
-	}
-	return nil
+	return integrationServiceFactory(cmd)
 }
 
 func printIntegrationRoute(cmd *cobra.Command, route integration.Route) {
@@ -1515,7 +1491,7 @@ func printGitHubRepository(cmd *cobra.Command, response integration.Response) {
 func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 	issue := response.Issue
 	if issue != nil {
-		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\ntitle=%s\nstate=%s\nauthor_login=%s\nauthor_name=%s\nauthor_url=%s\nurl=%s\ncreated_at=%s\nupdated_at=%s\n", issue.System, response.Resource, response.Operation, issue.Repository, issue.Number, issue.Title, issue.State, issue.Author.Login, issue.Author.Name, issue.Author.URL, issue.URL, issue.CreatedAt, issue.UpdatedAt)
+		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nid=%s\ntitle=%s\nstate=%s\nauthor_login=%s\nauthor_name=%s\nauthor_url=%s\nurl=%s\ncreated_at=%s\nupdated_at=%s\n", issue.System, response.Resource, response.Operation, issue.Repository, issue.ID, issue.Title, issue.State, issue.Author.Login, issue.Author.Name, issue.Author.URL, issue.URL, issue.CreatedAt, issue.UpdatedAt)
 		for _, label := range issue.Labels {
 			cmd.Printf("label=%s\n", label)
 		}
@@ -1538,7 +1514,7 @@ func printGitHubIssue(cmd *cobra.Command, response integration.Response) {
 		return
 	}
 
-	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nid=%s\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.ID, status.State, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}
@@ -1559,7 +1535,7 @@ func printGitHubIssueSearchResults(cmd *cobra.Command, response integration.Resp
 		}
 		cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nissue_count=%d\n", response.System, response.Resource, response.Operation, repository, len(response.SearchResults))
 		for _, issue := range response.SearchResults {
-			cmd.Printf("number=%d\ntitle=%s\nstate=%s\n", issue.Number, issue.Title, issue.State)
+			cmd.Printf("id=%s\ntitle=%s\nstate=%s\n", issue.ID, issue.Title, issue.State)
 			for _, label := range issue.Labels {
 				cmd.Printf("label=%s\n", label)
 			}
@@ -1600,7 +1576,7 @@ func printGitHubIssueComments(cmd *cobra.Command, response integration.Response)
 		number := 0
 		if len(response.Comments) > 0 {
 			repository = response.Comments[0].Repository
-			number = response.Comments[0].Number
+			number, _ = strconv.Atoi(response.Comments[0].TaskID)
 		} else if response.Metadata != nil {
 			repository = response.Metadata["repository"]
 			number, _ = strconv.Atoi(response.Metadata["number"])
@@ -1619,7 +1595,7 @@ func printGitHubIssueComments(cmd *cobra.Command, response integration.Response)
 		return
 	}
 
-	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nnumber=%d\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.Number, status.State, status.Command, status.Path, status.ExitCode, status.Message)
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nrepository=%s\nid=%s\nstate=%s\ncommand=%s\npath=%s\nexit-code=%d\nmessage=%s\n", status.System, response.Resource, response.Operation, status.Repository, status.ID, status.State, status.Command, status.Path, status.ExitCode, status.Message)
 	for _, diagnostic := range status.Diagnostics {
 		cmd.Printf("diagnostic=%s\n", diagnostic)
 	}

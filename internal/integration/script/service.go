@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ type scriptResponse struct {
 type scriptTask struct {
 	System     string            `json:"system"`
 	Repository string            `json:"repository"`
+	ID         string            `json:"id"`
 	Number     int               `json:"number"`
 	ExternalID string            `json:"external_id"`
 	Title      string            `json:"title"`
@@ -72,6 +74,7 @@ type scriptTask struct {
 type scriptComment struct {
 	System     string     `json:"system"`
 	Repository string     `json:"repository"`
+	TaskID     string     `json:"task_id"`
 	TaskNumber int        `json:"task_number"`
 	Number     int        `json:"number"`
 	ExternalID string     `json:"external_id"`
@@ -96,6 +99,7 @@ type scriptSearchResult struct {
 	System     string `json:"system"`
 	Repository string `json:"repository"`
 	Kind       string `json:"kind"`
+	ID         string `json:"id"`
 	Number     int    `json:"number"`
 	ExternalID string `json:"external_id"`
 	Title      string `json:"title"`
@@ -137,6 +141,11 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 
 	operationName := operationNameForRequest(req)
 	operation, ok := s.config.Operations[operationName]
+	if !ok {
+		// Совместимое чтение старых настроек сохраняется только на границе конфигурации.
+		legacyName := strings.Replace(operationName, "issue.issue.", "tracker.task.", 1)
+		operation, ok = s.config.Operations[legacyName]
+	}
 	if !ok {
 		return failureResponse(response, model.FailureKindUnsupportedOperation, false, fmt.Errorf("script operation is not configured: %s", operationName), nil)
 	}
@@ -244,8 +253,14 @@ func requestMap(req model.ProviderRequest) map[string]any {
 	request := map[string]any{}
 	putString(request, "system", req.System)
 	putString(request, "repository", req.Repository)
-	if req.Number > 0 {
-		request["number"] = req.Number
+	putString(request, "id", req.ID)
+	// Числовая форма передаётся только как совместимый вход старого сценария;
+	// каноническим значением остаётся непрозрачная строка id.
+	if number, err := strconv.Atoi(strings.TrimSpace(req.ID)); err == nil && number > 0 {
+		request["number"] = number
+	}
+	if req.MergeRequestNumber > 0 {
+		request["number"] = req.MergeRequestNumber
 	}
 	putString(request, "external_id", req.ExternalID)
 	putString(request, "base", req.Base)
@@ -389,16 +404,16 @@ func operationNameForRequest(req model.ProviderRequest) string {
 		switch objectType {
 		case "task", "issue":
 			if rawOperation == "comments" || rawOperation == "list-comments" {
-				return "tracker.task.comment.list"
+				return "issue.issue.comment.list"
 			}
-			return "tracker.task." + operation
+			return "issue.issue." + operation
 		case "comment":
 			if operation == "comments" || operation == "list" {
-				return "tracker.task.comment.list"
+				return "issue.issue.comment.list"
 			}
-			return "tracker.task.comment." + operation
+			return "issue.issue.comment." + operation
 		case "label":
-			return "tracker.task.label." + operation
+			return "issue.issue.label." + operation
 		}
 	}
 	if integrationType == "" || objectType == "" {
@@ -512,7 +527,7 @@ func (task scriptTask) toCanonicalTask() model.CanonicalTask {
 	return model.CanonicalTask{
 		System:     task.System,
 		Repository: task.Repository,
-		Number:     task.Number,
+		ID:         firstNonEmpty(task.ID, task.ExternalID, positiveIntString(task.Number)),
 		ExternalID: task.ExternalID,
 		Title:      strings.TrimSpace(task.Title),
 		Body:       task.Body,
@@ -528,14 +543,11 @@ func (task scriptTask) toCanonicalTask() model.CanonicalTask {
 }
 
 func (comment scriptComment) toTaskComment() model.TaskComment {
-	number := comment.TaskNumber
-	if number == 0 {
-		number = comment.Number
-	}
+	taskID := firstNonEmpty(comment.TaskID, positiveIntString(comment.TaskNumber), positiveIntString(comment.Number))
 	return model.TaskComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		TaskNumber: number,
+		TaskID:     taskID,
 		ExternalID: comment.ExternalID,
 		Author:     comment.Author.toUser(),
 		Body:       comment.Body,
@@ -562,7 +574,7 @@ func (result scriptSearchResult) toTrackerSearchResult() model.TrackerSearchResu
 		System:     result.System,
 		Repository: result.Repository,
 		Kind:       firstNonEmpty(result.Kind, "task"),
-		Number:     result.Number,
+		ID:         firstNonEmpty(result.ID, result.ExternalID, positiveIntString(result.Number)),
 		Title:      result.Title,
 		State:      result.State,
 		URL:        result.URL,
@@ -593,7 +605,8 @@ func trackerIssueFromTask(task model.CanonicalTask) model.TrackerIssue {
 	return model.TrackerIssue{
 		System:     task.System,
 		Repository: task.Repository,
-		Number:     task.Number,
+		ID:         task.ID,
+		ExternalID: task.ExternalID,
 		Title:      task.Title,
 		Body:       task.Body,
 		State:      task.State,
@@ -610,7 +623,7 @@ func trackerCommentFromTaskComment(comment model.TaskComment) model.TrackerComme
 	return model.TrackerComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		Number:     comment.TaskNumber,
+		TaskID:     comment.TaskID,
 		Author:     trackerUserFromUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,
@@ -624,7 +637,7 @@ func searchResultFromTask(task model.CanonicalTask) model.TrackerSearchResult {
 		System:     task.System,
 		Repository: task.Repository,
 		Kind:       "task",
-		Number:     task.Number,
+		ID:         task.ID,
 		Title:      task.Title,
 		State:      task.State,
 		URL:        task.URL,
@@ -746,6 +759,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseLegacyNumber(value string) int {
+	number, _ := strconv.Atoi(strings.TrimSpace(value))
+	return number
+}
+
+func positiveIntString(value int) string {
+	if value <= 0 {
+		return ""
+	}
+	return strconv.Itoa(value)
 }
 
 func resolveRepoRoot(ctx context.Context) (string, error) {

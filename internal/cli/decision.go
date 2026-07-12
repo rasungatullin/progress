@@ -147,7 +147,7 @@ func printDecisionStartResult(cmd *cobra.Command, result decision.StartResult) {
 		return
 	}
 
-	cmd.Printf("issue-number=%d\nissue-title=%s\nissue-state=%s\n", issue.Number, issue.Title, issue.State)
+	cmd.Printf("issue-id=%s\nissue-title=%s\nissue-state=%s\n", issue.ID, issue.Title, issue.State)
 	if issue.URL != "" {
 		cmd.Printf("issue-url=%s\n", issue.URL)
 	}

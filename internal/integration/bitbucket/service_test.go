@@ -197,12 +197,12 @@ func TestServiceServerPullRequestGetNormalizesResponse(t *testing.T) {
 	})
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
-		IntegrationType: model.IntegrationTypeRepository,
-		System:          "bitbucket",
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "get",
-		Number:          5,
+		IntegrationType:    model.IntegrationTypeRepository,
+		System:             "bitbucket",
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "get",
+		MergeRequestNumber: 5,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -266,12 +266,12 @@ func TestServiceServerPullRequestCommentsNormalizesActivities(t *testing.T) {
 	})
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
-		IntegrationType: model.IntegrationTypeRepository,
-		System:          "bitbucket",
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "comments",
-		Number:          5,
+		IntegrationType:    model.IntegrationTypeRepository,
+		System:             "bitbucket",
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "comments",
+		MergeRequestNumber: 5,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -334,12 +334,12 @@ func TestServiceCloudPullRequestCommentsFollowsPagination(t *testing.T) {
 	})
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{
-		IntegrationType: model.IntegrationTypeRepository,
-		System:          "bitbucket",
-		Resource:        "merge-request",
-		ObjectType:      "merge-request",
-		Operation:       "comments",
-		Number:          5,
+		IntegrationType:    model.IntegrationTypeRepository,
+		System:             "bitbucket",
+		Resource:           "merge-request",
+		ObjectType:         "merge-request",
+		Operation:          "comments",
+		MergeRequestNumber: 5,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)

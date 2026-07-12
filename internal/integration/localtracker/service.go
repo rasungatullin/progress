@@ -162,7 +162,7 @@ func (s *Service) searchTasks(ctx context.Context, db *sql.DB, response model.Re
 		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
 			System:    req.System,
 			Kind:      "task",
-			Number:    task.Number,
+			ID:        task.ID,
 			Title:     task.Title,
 			State:     task.State,
 			URL:       task.URL,
@@ -220,7 +220,7 @@ func (s *Service) listComments(ctx context.Context, db *sql.DB, response model.R
 			return failureResponse(response, model.FailureKindExternalFailure, err)
 		}
 		record.ExternalID = externalID.String
-		comment := taskComment(req.System, record)
+		comment := taskComment(req.System, firstNonEmpty(task.ExternalID, strconv.Itoa(task.Number)), record)
 		response.TaskComments = append(response.TaskComments, comment)
 		response.Comments = append(response.Comments, trackerComment(comment))
 	}
@@ -248,7 +248,7 @@ func (s *Service) createComment(ctx context.Context, db *sql.DB, response model.
 	}
 	id, _ := result.LastInsertId()
 	record := commentRecord{ID: int(id), TaskNumber: task.Number, Body: body, CreatedAt: now, UpdatedAt: now}
-	comment := taskComment(req.System, record)
+	comment := taskComment(req.System, firstNonEmpty(task.ExternalID, strconv.Itoa(task.Number)), record)
 	response.TaskComments = []model.TaskComment{comment}
 	response.Comments = []model.TrackerComment{trackerComment(comment)}
 	response.OperationResult = operationResult(req.System, "comment", "create", strconv.Itoa(record.ID), "", "local tracker comment created")
@@ -363,10 +363,11 @@ func migrate(ctx context.Context, db *sql.DB) error {
 }
 
 func (s *Service) findTask(ctx context.Context, db *sql.DB, req model.ProviderRequest) (taskRecord, error) {
-	if req.Number > 0 {
-		return s.taskByNumber(ctx, db, req.Number)
+	identifier := strings.TrimSpace(req.ID)
+	if number, err := strconv.Atoi(identifier); err == nil && number > 0 {
+		return s.taskByNumber(ctx, db, number)
 	}
-	externalID := strings.TrimSpace(req.ExternalID)
+	externalID := firstNonEmpty(identifier, strings.TrimSpace(req.ExternalID))
 	if externalID == "" {
 		return taskRecord{}, fmt.Errorf("local tracker task number or external_id is required")
 	}
@@ -457,7 +458,7 @@ func applyTask(response *model.Response, system string, record taskRecord) {
 func canonicalTask(system string, record taskRecord) model.CanonicalTask {
 	return model.CanonicalTask{
 		System:     system,
-		Number:     record.Number,
+		ID:         firstNonEmpty(record.ExternalID, strconv.Itoa(record.Number)),
 		ExternalID: record.ExternalID,
 		Title:      record.Title,
 		Body:       record.Body,
@@ -473,23 +474,24 @@ func canonicalTask(system string, record taskRecord) model.CanonicalTask {
 
 func trackerIssue(task model.CanonicalTask) model.TrackerIssue {
 	return model.TrackerIssue{
-		System:    task.System,
-		Number:    task.Number,
-		Title:     task.Title,
-		Body:      task.Body,
-		State:     task.State,
-		Labels:    append([]string(nil), task.Traits...),
-		Author:    model.TrackerUser{System: task.System, Login: task.Author.Login},
-		URL:       task.URL,
-		CreatedAt: task.CreatedAt,
-		UpdatedAt: task.UpdatedAt,
+		System:     task.System,
+		ID:         task.ID,
+		ExternalID: task.ExternalID,
+		Title:      task.Title,
+		Body:       task.Body,
+		State:      task.State,
+		Labels:     append([]string(nil), task.Traits...),
+		Author:     model.TrackerUser{System: task.System, Login: task.Author.Login},
+		URL:        task.URL,
+		CreatedAt:  task.CreatedAt,
+		UpdatedAt:  task.UpdatedAt,
 	}
 }
 
-func taskComment(system string, record commentRecord) model.TaskComment {
+func taskComment(system string, taskID string, record commentRecord) model.TaskComment {
 	return model.TaskComment{
 		System:     system,
-		TaskNumber: record.TaskNumber,
+		TaskID:     taskID,
 		ExternalID: firstNonEmpty(record.ExternalID, strconv.Itoa(record.ID)),
 		Author:     model.User{System: system, Login: record.Author},
 		Body:       record.Body,
@@ -502,7 +504,7 @@ func taskComment(system string, record commentRecord) model.TaskComment {
 func trackerComment(comment model.TaskComment) model.TrackerComment {
 	return model.TrackerComment{
 		System:    comment.System,
-		Number:    comment.TaskNumber,
+		TaskID:    comment.TaskID,
 		Author:    model.TrackerUser{System: comment.System, Login: comment.Author.Login},
 		Body:      comment.Body,
 		URL:       comment.URL,
@@ -647,6 +649,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseLegacyNumber(value string) int {
+	number, _ := strconv.Atoi(strings.TrimSpace(value))
+	return number
 }
 
 func nullableString(value string) any {

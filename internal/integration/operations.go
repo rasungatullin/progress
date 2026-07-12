@@ -58,12 +58,12 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			continue
 		}
 		descriptor := OperationDescriptor{
-			Name:            template.Name,
+			Name:            canonicalConfiguredOperationName(template.Name),
 			IntegrationType: template.IntegrationType,
 			System:          state.Name,
 			AdapterType:     state.Type,
-			ObjectType:      template.ObjectType,
-			Operation:       template.Operation,
+			ObjectType:      operationObjectPath(template.Name),
+			Operation:       operationAction(template.Name),
 			Enabled:         state.Enabled,
 			Available:       state.Enabled && state.Registered,
 			SideEffect:      template.SideEffect,
@@ -152,9 +152,14 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 	if integrationType == "" {
 		return OperationDescriptor{}
 	}
+	canonicalName := canonicalConfiguredOperationName(name)
 
 	required := operationFields(operation.Required, operation.Defaults)
 	optional := operationFields(operation.Optional, operation.Defaults)
+	if integrationType == model.IntegrationTypeIssue {
+		required = normalizeIssueOperationFields(required)
+		optional = normalizeIssueOperationFields(optional)
+	}
 
 	available := state.Enabled && state.Registered
 	unsupportedIntegrationType := !systemSupportsIntegrationType(state, integrationType)
@@ -166,12 +171,12 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 		available = false
 	}
 	descriptor := OperationDescriptor{
-		Name:            name,
+		Name:            canonicalName,
 		IntegrationType: integrationType,
 		System:          state.Name,
 		AdapterType:     state.Type,
-		ObjectType:      objectType,
-		Operation:       action,
+		ObjectType:      operationObjectPath(canonicalName),
+		Operation:       operationAction(canonicalName),
 		Enabled:         state.Enabled,
 		Available:       available,
 		SideEffect:      isSideEffectOperation(action),
@@ -190,6 +195,16 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 		descriptor.Diagnostics = append(descriptor.Diagnostics, "script="+strings.TrimSpace(operation.Script))
 	}
 	return descriptor
+}
+
+func normalizeIssueOperationFields(fields []model.OperationField) []model.OperationField {
+	for i := range fields {
+		if fields[i].Name == "number" {
+			fields[i].Name = "id"
+			fields[i].Type = "string"
+		}
+	}
+	return fields
 }
 
 func scriptOperationHasExecutable(operation model.IntegrationOperationConfig) bool {
@@ -221,6 +236,19 @@ func parseOperationName(name string) (string, string, string) {
 	}
 	objectType := strings.Join(parts[1:len(parts)-1], "-")
 	objectType = normalizeObjectType(objectType)
+	// Каноническое имя операции допускает вложенные объектные пространства,
+	// тогда как реестр сопоставляет их с единым объектом адаптера.
+	switch objectType {
+	case "issue-comment":
+		objectType = "comment"
+	case "issue-label":
+		objectType = "label"
+	case "merge-request-comment":
+		objectType = "comment"
+	}
+	if integrationType == model.IntegrationTypeIssue && objectType == "task" {
+		objectType = "issue"
+	}
 	return integrationType, objectType, operation
 }
 
@@ -256,20 +284,21 @@ func operationFieldType(name string) string {
 }
 
 func operationOutputShape(integrationType string, objectType string, operation string) string {
+	objectType = canonicalObjectType(objectType)
 	switch normalizeIntegrationType(integrationType) {
 	case model.IntegrationTypeTracker:
 		switch objectType {
-		case "task":
+		case "issue":
 			if operation == "search" || operation == "list" {
 				return "TrackerSearchResult[]"
 			}
 			return "CanonicalTask"
-		case "task-comment", "comment":
+		case "issue-comment", "comment":
 			if operation == "create" {
 				return "OperationResult"
 			}
 			return "TaskComment[]"
-		case "task-label", "label":
+		case "issue-label", "label":
 			return "OperationResult"
 		}
 	case model.IntegrationTypeRepository:
@@ -284,7 +313,7 @@ func operationOutputShape(integrationType string, objectType string, operation s
 				return "OperationResult"
 			}
 			return "MergeRequest"
-		case "merge-request-comment", "review-remark":
+		case "merge-request-comment", "review-remark", "comment":
 			if isSideEffectOperation(operation) {
 				return "OperationResult"
 			}
@@ -311,10 +340,62 @@ func operationOutputShape(integrationType string, objectType string, operation s
 	return "Response"
 }
 
+func canonicalOperationName(integrationType, objectType, operation string) string {
+	return normalizeIntegrationType(integrationType) + "." + canonicalObjectType(objectType) + "." + normalizeOperation(operation)
+}
+
+func canonicalConfiguredOperationName(name string) string {
+	parts := strings.Split(strings.TrimSpace(strings.ToLower(name)), ".")
+	if len(parts) < 3 {
+		return ""
+	}
+	parts[0] = normalizeIntegrationType(parts[0])
+	if parts[0] == model.IntegrationTypeIssue && parts[1] == "task" {
+		parts[1] = "issue"
+	}
+	parts[len(parts)-1] = normalizeOperation(parts[len(parts)-1])
+	if parts[len(parts)-1] == "comments" {
+		parts[len(parts)-1] = "list"
+	}
+	return strings.Join(parts, ".")
+}
+
+func operationObjectPath(name string) string {
+	parts := strings.Split(canonicalConfiguredOperationName(name), ".")
+	if len(parts) < 3 {
+		return ""
+	}
+	return strings.Join(parts[1:len(parts)-1], ".")
+}
+
+func operationAction(name string) string {
+	parts := strings.Split(canonicalConfiguredOperationName(name), ".")
+	if len(parts) < 3 {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
+func canonicalObjectType(objectType string) string {
+	objectType = normalizeObjectType(objectType)
+	switch objectType {
+	case "task":
+		return "issue"
+	case "issue-comment", "merge-request-comment", "review-remark":
+		return "comment"
+	default:
+		return objectType
+	}
+}
+
 func normalizeOperationFilter(filter OperationFilter) OperationFilter {
 	filter.System = normalizeSystem(filter.System)
 	filter.IntegrationType = normalizeIntegrationType(filter.IntegrationType)
 	filter.Name = strings.TrimSpace(strings.ToLower(filter.Name))
+	filter.Name = strings.Replace(filter.Name, "tracker.", "issue.", 1)
+	filter.Name = strings.Replace(filter.Name, "repository.", "repo.", 1)
+	filter.Name = strings.Replace(filter.Name, "issue.task.", "issue.issue.", 1)
+	filter.Name = canonicalConfiguredOperationName(filter.Name)
 	return filter
 }
 
@@ -338,11 +419,11 @@ func sortedOperationConfigNames(operations map[string]model.IntegrationOperation
 
 func trackerTaskGetOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.get",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.get",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "get",
-		Input:           input(requiredField("number", "integer"), optionalFields("repository", "fields")...),
+		Input:           input(requiredField("id", "string"), optionalFields("repository", "fields")...),
 		Output:          output("task", "CanonicalTask"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -350,9 +431,9 @@ func trackerTaskGetOperation() operationTemplate {
 
 func trackerTaskCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.create",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.create",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "create",
 		SideEffect:      true,
 		Input:           input(requiredField("title", "string"), optionalFields("body", "state", "external_id", "labels")...),
@@ -367,9 +448,9 @@ func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
 		optional = append(optional, optionalFields("exclude_labels")...)
 	}
 	return operationTemplate{
-		Name:            "tracker.task.search",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.search",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "search",
 		Input:           model.OperationInputContract{Optional: optional},
 		Output:          output("tracker-search-result", "TrackerSearchResult[]"),
@@ -379,12 +460,12 @@ func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
 
 func trackerTaskUpdateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.update",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.update",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "update",
 		SideEffect:      true,
-		Input:           input(requiredField("number", "integer"), optionalFields("title", "body", "state", "labels")...),
+		Input:           input(requiredField("id", "string"), optionalFields("title", "body", "state", "labels")...),
 		Output:          output("task", "CanonicalTask"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -392,11 +473,11 @@ func trackerTaskUpdateOperation() operationTemplate {
 
 func trackerTaskCommentListOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.comment.list",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task",
+		Name:            "issue.issue.comment.list",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "issue",
 		Operation:       "comments",
-		Input:           input(requiredField("number", "integer"), optionalFields("repository")...),
+		Input:           input(requiredField("id", "string"), optionalFields("repository")...),
 		Output:          output("task-comment", "TaskComment[]"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -404,23 +485,23 @@ func trackerTaskCommentListOperation() operationTemplate {
 
 func trackerTaskCommentCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.comment.create",
-		IntegrationType: model.IntegrationTypeTracker,
-		ObjectType:      "task-comment",
+		Name:            "issue.issue.comment.create",
+		IntegrationType: model.IntegrationTypeIssue,
+		ObjectType:      "comment",
 		Operation:       "create",
 		SideEffect:      true,
-		Input:           inputMany([]model.OperationField{requiredField("number", "integer"), requiredField("body", "string")}, optionalFields("repository")...),
+		Input:           inputMany([]model.OperationField{requiredField("id", "string"), requiredField("body", "string")}, optionalFields("repository")...),
 		Output:          output("operation-result", "OperationResult"),
 		FailureKinds:    defaultFailureKinds(),
 	}
 }
 
 func trackerTaskLabelAddOperation() operationTemplate {
-	return trackerTaskLabelOperation("tracker.task.label.add", "add")
+	return trackerTaskLabelOperation("issue.issue.label.add", "add")
 }
 
 func trackerTaskLabelRemoveOperation() operationTemplate {
-	return trackerTaskLabelOperation("tracker.task.label.remove", "remove")
+	return trackerTaskLabelOperation("issue.issue.label.remove", "remove")
 }
 
 func trackerTaskLabelOperation(name string, operation string) operationTemplate {
@@ -430,7 +511,7 @@ func trackerTaskLabelOperation(name string, operation string) operationTemplate 
 		ObjectType:      "task-label",
 		Operation:       operation,
 		SideEffect:      true,
-		Input:           inputMany([]model.OperationField{requiredField("number", "integer"), requiredRepeatedField("labels", "string[]")}, optionalFields("repository")...),
+		Input:           inputMany([]model.OperationField{requiredField("id", "string"), requiredRepeatedField("labels", "string[]")}, optionalFields("repository")...),
 		Output:          output("operation-result", "OperationResult"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -438,7 +519,7 @@ func trackerTaskLabelOperation(name string, operation string) operationTemplate 
 
 func repositoryGetOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.repo.get",
+		Name:            "repo.repo.get",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "repository",
 		Operation:       "get",
@@ -450,7 +531,7 @@ func repositoryGetOperation() operationTemplate {
 
 func mergeRequestGetOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.get",
+		Name:            "repo.merge-request.get",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request",
 		Operation:       "get",
@@ -462,7 +543,7 @@ func mergeRequestGetOperation() operationTemplate {
 
 func mergeRequestSearchOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.search",
+		Name:            "repo.merge-request.search",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request",
 		Operation:       "search",
@@ -474,7 +555,7 @@ func mergeRequestSearchOperation() operationTemplate {
 
 func mergeRequestCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.create",
+		Name:            "repo.merge-request.create",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request",
 		Operation:       "create",
@@ -487,7 +568,7 @@ func mergeRequestCreateOperation() operationTemplate {
 
 func mergeRequestCommentListOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.comment.list",
+		Name:            "repo.merge-request.comment.list",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request-comment",
 		Operation:       "list",
@@ -499,7 +580,7 @@ func mergeRequestCommentListOperation() operationTemplate {
 
 func mergeRequestCommentCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.comment.create",
+		Name:            "repo.merge-request.comment.create",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request-comment",
 		Operation:       "create",
@@ -512,7 +593,7 @@ func mergeRequestCommentCreateOperation() operationTemplate {
 
 func reviewRemarkListOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.review-remark.list",
+		Name:            "repo.review-remark.list",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "review-remark",
 		Operation:       "list",
@@ -524,9 +605,9 @@ func reviewRemarkListOperation() operationTemplate {
 
 func reviewRemarkReplyOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.review-remark.reply",
+		Name:            "repo.comment.reply",
 		IntegrationType: model.IntegrationTypeRepository,
-		ObjectType:      "review-remark",
+		ObjectType:      "comment",
 		Operation:       "reply",
 		SideEffect:      true,
 		Input:           inputMany([]model.OperationField{requiredField("thread", "string"), requiredField("body", "string")}),
@@ -537,9 +618,9 @@ func reviewRemarkReplyOperation() operationTemplate {
 
 func reviewRemarkResolveOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.review-remark.resolve",
+		Name:            "repo.comment.resolve",
 		IntegrationType: model.IntegrationTypeRepository,
-		ObjectType:      "review-remark",
+		ObjectType:      "comment",
 		Operation:       "resolve",
 		SideEffect:      true,
 		Input:           input(requiredField("thread", "string")),

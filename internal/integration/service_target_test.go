@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"context"
 	"io"
 	"testing"
 
@@ -46,7 +45,7 @@ func TestDispatchUsesDefaultSystemByIntegrationType(t *testing.T) {
 			name:           "tracker",
 			request:        Request{IntegrationType: "tracker", ObjectType: "task", Operation: "get"},
 			expectedSystem: "github",
-			expectedType:   "tracker",
+			expectedType:   "issue",
 			expectedObject: "task",
 			expectedResult: "canonical-task",
 		},
@@ -54,7 +53,7 @@ func TestDispatchUsesDefaultSystemByIntegrationType(t *testing.T) {
 			name:           "repository",
 			request:        Request{IntegrationType: "repository", ObjectType: "repository", Operation: "get"},
 			expectedSystem: "bitbucket",
-			expectedType:   "repository",
+			expectedType:   "repo",
 			expectedObject: "repository",
 			expectedResult: "canonical-repository",
 		},
@@ -73,7 +72,7 @@ func TestDispatchUsesDefaultSystemByIntegrationType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			route, err := service.Dispatch(context.Background(), tc.request)
+			route, err := service.resolveRoute(tc.request)
 			if err != nil {
 				t.Fatalf("dispatch: %v", err)
 			}
@@ -112,7 +111,7 @@ func TestDispatchInfersRepositoryTypeFromObjectBeforeSystemDefault(t *testing.T)
 		{System: "github", Resource: "repo", Operation: "get"},
 		{System: "github", Resource: "pr", Operation: "get"},
 	} {
-		route, err := service.Dispatch(context.Background(), request)
+		route, err := service.resolveRoute(request)
 		if err != nil {
 			t.Fatalf("dispatch: %v", err)
 		}

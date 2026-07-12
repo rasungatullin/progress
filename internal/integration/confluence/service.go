@@ -137,9 +137,7 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 
 func (s *Service) executePageGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	pageID := strings.TrimSpace(req.ExternalID)
-	if pageID == "" && req.Number > 0 {
-		pageID = strconv.Itoa(req.Number)
-	}
+	pageID = firstNonEmpty(pageID, strings.TrimSpace(req.ID))
 	if pageID == "" {
 		err := fmt.Errorf("Confluence page id is required")
 		response.Status = model.ResponseStatusFailed

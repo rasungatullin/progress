@@ -129,6 +129,28 @@ func (r *APIRunner) RunIssueView(ctx context.Context, repository string, number 
 	return result, apiResolvedConfig(config), nil
 }
 
+func (r *APIRunner) RunIssueViewByID(ctx context.Context, repository string, identifier string) (CommandResult, resolvedConfig, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return apiErrorResult("issue view", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub issue identifier is required"})
+	}
+	config, err := r.resolveConfig(ctx)
+	if err != nil {
+		return apiErrorResult("issue view", config, err)
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return apiErrorResult("issue view", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	var raw apiIssue
+	result, err := r.do(ctx, config, http.MethodGet, fmt.Sprintf("repos/%s/issues/%s", repository, url.PathEscape(identifier)), nil, &raw)
+	if err != nil {
+		return result, apiResolvedConfig(config), err
+	}
+	result.Stdout = mustJSON(issueViewFromAPI(raw))
+	return result, apiResolvedConfig(config), nil
+}
+
 func (r *APIRunner) RunIssueList(ctx context.Context, repository string, request IssueListRequest) (CommandResult, resolvedConfig, error) {
 	request, err := normalizeIssueListRequest(request)
 	if err != nil {

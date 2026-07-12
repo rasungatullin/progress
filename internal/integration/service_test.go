@@ -24,7 +24,7 @@ func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{System: "gitlab", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "gitlab", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	if route.ProviderAvailable {
 		t.Fatal("provider must be unavailable")
 	}
-	if route.ExpectedResult != "tracker-issue" {
+	if route.ExpectedResult != "issue" {
 		t.Fatalf("unexpected expected result: %q", route.ExpectedResult)
 	}
 	if len(route.Diagnostics) < 3 {
@@ -60,7 +60,7 @@ func TestNewServiceFromConfigUsesDefaultSystem(t *testing.T) {
 	})
 	service.RegisterProvider("github", stubProvider{})
 
-	route, err := service.Dispatch(context.Background(), Request{Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
 		},
 	})
 
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestDispatchReportsConfiguredTransport(t *testing.T) {
 		},
 	})
 
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestDispatchReportsUnsupportedConfiguredSystemType(t *testing.T) {
 		},
 	})
 
-	route, err := service.Dispatch(context.Background(), Request{System: "gitlab", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "gitlab", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -289,8 +289,8 @@ func TestDispatchReportsUnsupportedConfiguredSystemType(t *testing.T) {
 func TestDispatchRepositoryCommentReplyReturnsOperationResult(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{
+	service := newEmptyService(logging.New(io.Discard))
+	route, err := service.resolveRoute(Request{
 		IntegrationType: model.IntegrationTypeRepository,
 		System:          "github",
 		Resource:        "comment",
@@ -312,7 +312,7 @@ func TestDispatchRepositoryReviewRemarkReplyReturnsOperationResult(t *testing.T)
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{
+	route, err := service.resolveRoute(Request{
 		IntegrationType: model.IntegrationTypeRepository,
 		System:          "github",
 		Resource:        "comment",
@@ -336,7 +336,7 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	service := NewService(logging.New(io.Discard))
 	service.RegisterProvider("github", stubProvider{
 		response: Response{
-			Issue: &TrackerIssue{Number: 42, Title: "Example"},
+			Issue: &TrackerIssue{ID: "42", Title: "Example"},
 		},
 	})
 
@@ -350,7 +350,7 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	if !result.Route.ProviderAvailable {
 		t.Fatal("provider must be available")
 	}
-	if result.Issue == nil || result.Issue.Number != 42 {
+	if result.Issue == nil || result.Issue.ID != "42" {
 		t.Fatalf("unexpected issue payload: %#v", result.Issue)
 	}
 	if result.System != "github" {
@@ -533,12 +533,12 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 func TestDispatchReturnsErrorForMissingSystem(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(logging.New(io.Discard))
-	_, err := service.Dispatch(context.Background(), Request{Resource: "issue", Operation: "get"})
+	service := newEmptyService(logging.New(io.Discard))
+	_, err := service.resolveRoute(Request{Resource: "issue", Operation: "get"})
 	if err == nil {
 		t.Fatal("expected dispatch error")
 	}
-	if err.Error() != "invalid integration request: system is required" {
+	if err.Error() != "invalid integration request: no default system configured for integration type \"issue\"" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -546,12 +546,12 @@ func TestDispatchReturnsErrorForMissingSystem(t *testing.T) {
 func TestExecuteReturnsErrorForMissingSystem(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(logging.New(io.Discard))
+	service := newEmptyService(logging.New(io.Discard))
 	_, err := service.Execute(context.Background(), Request{Resource: "issue", Operation: "get"})
 	if err == nil {
 		t.Fatal("expected execute error")
 	}
-	if err.Error() != "invalid integration request: system is required" {
+	if err.Error() != "invalid integration request: no default system configured for integration type \"issue\"" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -564,7 +564,7 @@ func TestExecuteReturnsErrorForUnknownProvider(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if err.Error() != "integration provider not registered: gitlab" {
+	if err.Error() != "integration system is not configured: gitlab" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -573,7 +573,7 @@ func TestNewServiceRegistersGitHubProvider(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "auth", Operation: "status"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "auth", Operation: "status"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestDispatchPRCreateUsesStatusResultContract(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "pr", Operation: "create"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "pr", Operation: "create"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestDispatchWikiPageUsesWikiResultContract(t *testing.T) {
 			"docs": {Type: "confluence"},
 		},
 	})
-	route, err := service.Dispatch(context.Background(), Request{IntegrationType: "wiki", Resource: "page", Operation: "get"})
+	route, err := service.resolveRoute(Request{IntegrationType: "wiki", Resource: "page", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -632,7 +632,7 @@ func TestOperationsCatalogIncludesBuiltInGitHubOperation(t *testing.T) {
 		t.Fatalf("expected one operation, got %#v", operations)
 	}
 	operation := operations[0]
-	if operation.Name != "tracker.task.get" || operation.IntegrationType != model.IntegrationTypeTracker {
+	if operation.Name != "issue.issue.get" || operation.IntegrationType != model.IntegrationTypeIssue {
 		t.Fatalf("unexpected operation identity: %#v", operation)
 	}
 	if operation.System != "github" || operation.AdapterType != "github" || !operation.Enabled || !operation.Available {
@@ -641,7 +641,7 @@ func TestOperationsCatalogIncludesBuiltInGitHubOperation(t *testing.T) {
 	if operation.Output.Shape != "CanonicalTask" {
 		t.Fatalf("unexpected output shape: %q", operation.Output.Shape)
 	}
-	if len(operation.Input.Required) != 1 || operation.Input.Required[0].Name != "number" || operation.Input.Required[0].Type != "integer" {
+	if len(operation.Input.Required) != 1 || operation.Input.Required[0].Name != "id" || operation.Input.Required[0].Type != "string" {
 		t.Fatalf("unexpected required fields: %#v", operation.Input.Required)
 	}
 }
@@ -676,7 +676,7 @@ func TestOperationsCatalogPublishesExecutableGitHubTaskCommentsRead(t *testing.T
 		t.Fatalf("expected one operation, got %#v", operations)
 	}
 	operation := operations[0]
-	if operation.ObjectType != "task" || operation.Operation != "comments" {
+	if operation.ObjectType != "issue.comment" || operation.Operation != "list" {
 		t.Fatalf("task comment list operation must use executable GitHub route, got %#v", operation)
 	}
 	if operation.Output.Resource != "task-comment" || operation.Output.Shape != "TaskComment[]" {
@@ -780,13 +780,13 @@ func TestOperationsCatalogIncludesScriptOperationConfig(t *testing.T) {
 		t.Fatalf("expected one script operation, got %#v", operations)
 	}
 	operation := operations[0]
-	if operation.Name != "tracker.task.get" || operation.AdapterType != "script" {
+	if operation.Name != "issue.issue.get" || operation.AdapterType != "script" {
 		t.Fatalf("unexpected script operation: %#v", operation)
 	}
 	if !operation.Available {
 		t.Fatalf("script operation must be available after adapter registration: %#v", operation)
 	}
-	if len(operation.Input.Required) != 1 || operation.Input.Required[0].Name != "number" {
+	if len(operation.Input.Required) != 1 || operation.Input.Required[0].Name != "id" {
 		t.Fatalf("unexpected required fields: %#v", operation.Input.Required)
 	}
 	if len(operation.Input.Optional) != 1 || operation.Input.Optional[0].Name != "project" || operation.Input.Optional[0].Default != "${system.project}" {
@@ -823,7 +823,7 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 	if len(searchOperations) != 1 || searchOperations[0].Output.Shape != "TrackerSearchResult[]" {
 		t.Fatalf("expected local tracker search result contract, got %#v", searchOperations)
 	}
-	searchRoute, err := service.Dispatch(context.Background(), Request{
+	searchRoute, err := service.resolveRoute(Request{
 		IntegrationType: model.IntegrationTypeTracker,
 		System:          "local",
 		Resource:        "task",
@@ -847,7 +847,7 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute local tracker provider: %v", err)
 	}
-	if result.Task == nil || result.Task.Number != 1 || result.Task.Title != "Локальная задача" {
+	if result.Task == nil || result.Task.ID != "1" || result.Task.Title != "Локальная задача" {
 		t.Fatalf("unexpected local tracker task: %#v", result.Task)
 	}
 	if result.Route.System != "local" {
@@ -903,7 +903,7 @@ func TestOperationsCatalogMarksUnsupportedConfiguredOperationUnavailable(t *test
 	if operations[0].Available {
 		t.Fatalf("unsupported script operation must be unavailable: %#v", operations[0])
 	}
-	if !contains(operations[0].Diagnostics, "system does not support integration type=repository") {
+	if !contains(operations[0].Diagnostics, "system does not support integration type=repo") {
 		t.Fatalf("expected unsupported integration type diagnostic, got %#v", operations[0].Diagnostics)
 	}
 }
@@ -930,7 +930,7 @@ func TestOperationsCatalogUsesSearchResultContractForTaskSearch(t *testing.T) {
 	if operations[0].Output.Shape != "TrackerSearchResult[]" {
 		t.Fatalf("unexpected search output shape: %#v", operations[0].Output)
 	}
-	route, err := service.Dispatch(context.Background(), Request{
+	route, err := service.resolveRoute(Request{
 		IntegrationType: model.IntegrationTypeTracker,
 		System:          "work-tracker",
 		Resource:        "task",
@@ -978,12 +978,12 @@ func TestNewServiceFromConfigRegistersScriptProvider(t *testing.T) {
 		Resource:        "task",
 		ObjectType:      "task",
 		Operation:       "get",
-		Number:          7,
+		ID:              "7",
 	})
 	if err != nil {
 		t.Fatalf("execute script provider: %v", err)
 	}
-	if result.Task == nil || result.Task.Number != 7 || result.Task.Title != "Script task" {
+	if result.Task == nil || result.Task.ID != "7" || result.Task.Title != "Script task" {
 		t.Fatalf("unexpected script task: %#v", result.Task)
 	}
 }
@@ -1064,6 +1064,30 @@ func TestExecutePassesNormalizedRequestToProvider(t *testing.T) {
 	}
 	if provider.seen.Route.System != "github" {
 		t.Fatalf("unexpected route system: %q", provider.seen.Route.System)
+	}
+}
+
+func TestExecutePreservesOpaqueIssueIdentifierAndUsesDefaultSystem(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(logging.New(io.Discard))
+	provider := &capturingProvider{}
+	service.RegisterProvider("github", provider)
+
+	for _, identifier := range []string{"123", "ABC-123"} {
+		_, err := service.Execute(context.Background(), Request{
+			IntegrationType: model.IntegrationTypeIssue,
+			Resource:        "issue",
+			ObjectType:      "issue",
+			Operation:       "get",
+			ID:              identifier,
+		})
+		if err != nil {
+			t.Fatalf("execute issue %q: %v", identifier, err)
+		}
+		if provider.seen.System != "github" || provider.seen.ID != identifier || provider.seen.ExternalID != identifier {
+			t.Fatalf("unexpected normalized request for %q: %#v", identifier, provider.seen)
+		}
 	}
 }
 

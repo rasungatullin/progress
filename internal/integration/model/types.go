@@ -1,10 +1,14 @@
 package model
 
 const (
-	IntegrationTypeTracker    = "tracker"
-	IntegrationTypeRepository = "repository"
-	IntegrationTypeMessenger  = "messenger"
-	IntegrationTypeWiki       = "wiki"
+	IntegrationTypeIssue     = "issue"
+	IntegrationTypeRepo      = "repo"
+	IntegrationTypeMessenger = "messenger"
+	IntegrationTypeWiki      = "wiki"
+
+	// Старые имена сохраняются только для чтения прежнего кода и настроек.
+	IntegrationTypeTracker    = IntegrationTypeIssue
+	IntegrationTypeRepository = IntegrationTypeRepo
 
 	ResponseStatusOK      = "ok"
 	ResponseStatusPartial = "partial"
@@ -26,70 +30,72 @@ const (
 )
 
 type Request struct {
-	IntegrationType string
-	System          string
-	SystemProvided  bool
-	Resource        string
-	ObjectType      string
-	Operation       string
-	Repository      string
-	RepoProvided    bool
-	Number          int
-	ExternalID      string
-	Base            string
-	Head            string
-	Title           string
-	Body            string
-	Text            string
-	Draft           bool
-	Query           string
-	State           string
-	Scope           string
-	Limit           int
-	Path            string
-	Line            int
-	Side            string
-	ChannelID       string
-	ThreadID        string
-	MessageID       string
-	Reaction        string
-	Fields          []string
-	Labels          []string
-	ExcludeLabels   []string
+	IntegrationType    string
+	System             string
+	SystemProvided     bool
+	Resource           string
+	ObjectType         string
+	Operation          string
+	Repository         string
+	RepoProvided       bool
+	ID                 string
+	MergeRequestNumber int
+	ExternalID         string
+	Base               string
+	Head               string
+	Title              string
+	Body               string
+	Text               string
+	Draft              bool
+	Query              string
+	State              string
+	Scope              string
+	Limit              int
+	Path               string
+	Line               int
+	Side               string
+	ChannelID          string
+	ThreadID           string
+	MessageID          string
+	Reaction           string
+	Fields             []string
+	Labels             []string
+	ExcludeLabels      []string
 }
 
 type ProviderRequest struct {
-	IntegrationType string
-	System          string
-	SystemProvided  bool
-	Resource        string
-	ObjectType      string
-	Operation       string
-	Repository      string
-	RepoProvided    bool
-	Number          int
-	ExternalID      string
-	Base            string
-	Head            string
-	Title           string
-	Body            string
-	Text            string
-	Draft           bool
-	Query           string
-	State           string
-	Scope           string
-	Limit           int
-	Path            string
-	Line            int
-	Side            string
-	ChannelID       string
-	ThreadID        string
-	MessageID       string
-	Reaction        string
-	Fields          []string
-	Labels          []string
-	ExcludeLabels   []string
-	Route           Route
+	IntegrationType    string
+	System             string
+	SystemProvided     bool
+	Resource           string
+	ObjectType         string
+	Operation          string
+	Repository         string
+	RepoProvided       bool
+	ID                 string
+	MergeRequestNumber int
+	ExternalID         string
+	Base               string
+	Head               string
+	Title              string
+	Body               string
+	Text               string
+	Draft              bool
+	Query              string
+	State              string
+	Scope              string
+	Limit              int
+	Path               string
+	Line               int
+	Side               string
+	ChannelID          string
+	ThreadID           string
+	MessageID          string
+	Reaction           string
+	Fields             []string
+	Labels             []string
+	ExcludeLabels      []string
+	Route              Route
 }
 
 type IntegrationConfigFile struct {
@@ -247,7 +253,7 @@ type RepositoryStatus struct {
 type IssueStatus struct {
 	System      string
 	Repository  string
-	Number      int
+	ID          string
 	State       string
 	Command     string
 	Path        string
@@ -334,7 +340,7 @@ type OperationOutputContract struct {
 type CanonicalTask struct {
 	System     string
 	Repository string
-	Number     int
+	ID         string
 	ExternalID string
 	Title      string
 	Body       string
@@ -352,7 +358,7 @@ type CanonicalTask struct {
 type TaskComment struct {
 	System     string
 	Repository string
-	TaskNumber int
+	TaskID     string
 	ExternalID string
 	Author     User
 	Body       string
@@ -482,7 +488,8 @@ type ObjectLink struct {
 type TrackerIssue struct {
 	System     string
 	Repository string
-	Number     int
+	ID         string
+	ExternalID string
 	Title      string
 	Body       string
 	State      string
@@ -514,7 +521,7 @@ type TrackerPullRequest struct {
 type TrackerComment struct {
 	System     string
 	Repository string
-	Number     int
+	TaskID     string
 	Author     TrackerUser
 	Body       string
 	URL        string
@@ -558,7 +565,7 @@ type TrackerSearchResult struct {
 	System     string
 	Repository string
 	Kind       string
-	Number     int
+	ID         string
 	Title      string
 	State      string
 	Labels     []string

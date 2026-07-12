@@ -747,15 +747,15 @@ func systemDeclaresIntegrationType(system integrationmodel.IntegrationSystemConf
 	}
 	switch normalizeSystemName(system.Type) {
 	case "github":
-		return integrationType == "tracker" || integrationType == "repository"
+		return integrationType == "issue" || integrationType == "repo"
 	case "bitbucket":
-		return integrationType == "repository"
+		return integrationType == "repo"
 	case "mattermost", "telegram":
 		return integrationType == "messenger"
 	case "confluence":
 		return integrationType == "wiki"
 	case "local-tracker", "script":
-		return integrationType == "tracker"
+		return integrationType == "issue"
 	default:
 		return true
 	}
@@ -774,7 +774,14 @@ func normalizeOperationName(name string) string {
 }
 
 func normalizeIntegrationTypeName(name string) string {
-	return strings.TrimSpace(strings.ToLower(name))
+	switch value := strings.TrimSpace(strings.ToLower(name)); value {
+	case "tracker":
+		return "issue"
+	case "repository":
+		return "repo"
+	default:
+		return value
+	}
 }
 
 func trimConfigStrings(values []string) []string {

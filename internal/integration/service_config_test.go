@@ -30,7 +30,7 @@ func TestNewConfiguredServiceDisablesProvidersOnInvalidConfig(t *testing.T) {
 
 	service := NewConfiguredService(logging.New(io.Discard))
 
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestNewConfiguredServiceDisablesProvidersOnInvalidConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected execute error")
 	}
-	if err.Error() != "integration provider not registered: github" {
+	if err.Error() != "integration system is not configured: github" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -72,7 +72,7 @@ func TestNewConfiguredServiceLoadsGlobalLayerWhenRepoRootUnavailable(t *testing.
 
 	service := NewConfiguredService(logging.New(io.Discard))
 
-	route, err := service.Dispatch(context.Background(), Request{System: "enterprise", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "enterprise", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}

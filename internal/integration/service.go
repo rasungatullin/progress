@@ -82,12 +82,12 @@ type systemState struct {
 
 func NewService(logger *log.Logger) *Service {
 	service := newEmptyService(logger)
-	service.defaultSystems[model.IntegrationTypeTracker] = "github"
-	service.defaultSystems[model.IntegrationTypeRepository] = "github"
+	service.defaultSystems[model.IntegrationTypeIssue] = "github"
+	service.defaultSystems[model.IntegrationTypeRepo] = "github"
 	service.registerConfiguredProvider("github", systemState{
 		Name:             "github",
 		Type:             "github",
-		IntegrationTypes: []string{model.IntegrationTypeTracker, model.IntegrationTypeRepository},
+		IntegrationTypes: []string{model.IntegrationTypeIssue, model.IntegrationTypeRepo},
 		Configured:       true,
 		Enabled:          true,
 		Default:          true,
@@ -103,6 +103,10 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 	service := newEmptyService(logger)
 	service.defaultSystem = normalizeSystem(config.DefaultSystem)
 	for integrationType, system := range config.DefaultSystems {
+		legacyType := strings.TrimSpace(strings.ToLower(integrationType))
+		if legacyType == "tracker" || legacyType == "repository" {
+			service.logger.Printf("Предупреждение совместимости: default_systems.%s устарел; используйте default_systems.%s", legacyType, normalizeIntegrationType(legacyType))
+		}
 		integrationType = normalizeIntegrationType(integrationType)
 		system = normalizeSystem(system)
 		if integrationType == "" || system == "" {
@@ -115,6 +119,12 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 		name = normalizeSystem(name)
 		if name == "" {
 			continue
+		}
+		for _, legacyType := range append([]string{systemConfig.IntegrationType}, systemConfig.IntegrationTypes...) {
+			legacyType = strings.TrimSpace(strings.ToLower(legacyType))
+			if legacyType == "tracker" || legacyType == "repository" {
+				service.logger.Printf("Предупреждение совместимости: systems.%s integration_type=%s устарел; используйте %s", name, legacyType, normalizeIntegrationType(legacyType))
+			}
 		}
 
 		state := systemState{
@@ -326,27 +336,27 @@ func (s *Service) applyConfiguredDefaults() {
 		}
 	}
 
-	for system, state := range s.systems {
-		if !state.Enabled || len(state.IntegrationTypes) == 0 {
-			continue
-		}
-		for _, integrationType := range state.IntegrationTypes {
-			if _, exists := s.defaultSystems[integrationType]; !exists {
-				s.defaultSystems[integrationType] = system
-			}
-		}
-	}
 }
 
-func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
+func (s *Service) resolveRoute(req Request) (Route, error) {
 	normalized, err := s.normalizeRequest(req)
 	if err != nil {
 		route := s.errorRoute(req, err)
-		s.logger.Printf("Диспетчер интеграции отклонил запрос: система=%q тип=%q причина=%q", req.System, req.IntegrationType, err)
+		s.logger.Printf("Реестр интеграции отклонил запрос: система=%q тип=%q причина=%q", req.System, req.IntegrationType, err)
 		return route, err
 	}
 
 	state, known := s.systems[normalized.System]
+	if !known {
+		// Неизвестная система остаётся маршрутом с диагностикой: окончательный
+		// отказ формируется Execute после разрешения запроса.
+		return s.routeForUnknownSystem(normalized), nil
+	}
+	if state.Registered && !systemSupportsOperation(state, normalized.IntegrationType, normalized.ObjectType, normalized.Operation) {
+		err := fmt.Errorf("integration operation is not supported: %s.%s.%s", normalized.IntegrationType, canonicalObjectType(normalized.ObjectType), normalized.Operation)
+		s.logger.Printf("Реестр интеграции отклонил запрос: система=%q причина=%q", normalized.System, err)
+		return s.errorRoute(req, err), err
+	}
 	_, registered := s.providers[normalized.System]
 	available := registered && systemSupportsIntegrationType(state, normalized.IntegrationType)
 
@@ -362,7 +372,7 @@ func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
 		ExpectedResult:    expectedResult(normalized.IntegrationType, normalized.ObjectType, normalized.Resource, normalized.Operation),
 		Diagnostics:       buildDiagnostics(normalized.IntegrationType, normalized.System, normalized.Resource, normalized.ObjectType, normalized.Operation, available, registered, known, state, s.registeredSystems()),
 	}
-	s.logger.Printf("Диспетчер интеграции сформировал маршрут: тип=%q система=%q объект=%q операция=%q провайдер=%q доступен=%t", route.IntegrationType, route.System, route.ObjectType, route.Operation, route.Provider, route.ProviderAvailable)
+	s.logger.Printf("Реестр интеграции сформировал маршрут: тип=%q система=%q объект=%q операция=%q провайдер=%q доступен=%t", route.IntegrationType, route.System, route.ObjectType, route.Operation, route.Provider, route.ProviderAvailable)
 	return route, nil
 }
 
@@ -380,7 +390,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 		}, err
 	}
 
-	route, err := s.Dispatch(ctx, req)
+	route, err := s.resolveRoute(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -388,6 +398,10 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	normalized.Route = route
 	provider, ok := s.providers[route.System]
 	if !ok || !route.ProviderAvailable {
+		if _, known := s.systems[route.System]; !known {
+			err := fmt.Errorf("integration system is not configured: %s", route.System)
+			return responseWithFailure(route, model.FailureKindNotConfigured, false, err), err
+		}
 		if state, known := s.systems[route.System]; known {
 			switch {
 			case !state.Enabled:
@@ -434,6 +448,9 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	objectType := normalizeObjectType(firstNonEmpty(req.ObjectType, req.Resource))
 	integrationType := normalizeIntegrationType(req.IntegrationType)
+	if integrationType == "" {
+		integrationType = inferIntegrationType(objectType)
+	}
 	system := normalizeSystem(req.System)
 	if req.SystemProvided && system == "" {
 		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
@@ -442,52 +459,64 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		system = s.defaultSystemForType(integrationType)
 	}
 	if system == "" {
-		system = s.defaultSystem
-	}
-	if system == "" {
-		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
-	}
-	if integrationType == "" {
-		integrationType = inferIntegrationType(objectType)
+		return ProviderRequest{}, fmt.Errorf("invalid integration request: no default system configured for integration type %q", integrationType)
 	}
 	if integrationType == "" {
 		integrationType = s.firstIntegrationTypeForSystem(system)
 	}
+	if objectType == "canonical-object" {
+		switch integrationType {
+		case model.IntegrationTypeIssue:
+			objectType = "issue"
+		case model.IntegrationTypeRepo:
+			objectType = "repository"
+		}
+	}
 
+	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
 	normalized := ProviderRequest{
-		IntegrationType: integrationType,
-		System:          system,
-		SystemProvided:  req.SystemProvided,
-		Resource:        normalizeResource(firstNonEmpty(req.Resource, objectType)),
-		ObjectType:      objectType,
-		Operation:       normalizeOperation(req.Operation),
-		Repository:      strings.TrimSpace(req.Repository),
-		RepoProvided:    req.RepoProvided,
-		Number:          req.Number,
-		ExternalID:      strings.TrimSpace(req.ExternalID),
-		Base:            strings.TrimSpace(req.Base),
-		Head:            strings.TrimSpace(req.Head),
-		Title:           strings.TrimSpace(req.Title),
-		Body:            strings.TrimSpace(req.Body),
-		Text:            strings.TrimSpace(req.Text),
-		Draft:           req.Draft,
-		Query:           strings.TrimSpace(req.Query),
-		State:           strings.TrimSpace(req.State),
-		Scope:           strings.TrimSpace(req.Scope),
-		Limit:           req.Limit,
-		Path:            strings.TrimSpace(req.Path),
-		Line:            req.Line,
-		Side:            strings.TrimSpace(req.Side),
-		ChannelID:       strings.TrimSpace(req.ChannelID),
-		ThreadID:        strings.TrimSpace(req.ThreadID),
-		MessageID:       strings.TrimSpace(req.MessageID),
-		Reaction:        strings.TrimSpace(req.Reaction),
-		Fields:          trimStrings(req.Fields),
-		Labels:          trimStrings(req.Labels),
-		ExcludeLabels:   trimStrings(req.ExcludeLabels),
+		IntegrationType:    integrationType,
+		System:             system,
+		SystemProvided:     req.SystemProvided,
+		Resource:           normalizeResource(firstNonEmpty(req.Resource, objectType)),
+		ObjectType:         objectType,
+		Operation:          normalizeOperation(req.Operation),
+		Repository:         strings.TrimSpace(req.Repository),
+		RepoProvided:       req.RepoProvided,
+		ID:                 identifier,
+		MergeRequestNumber: req.MergeRequestNumber,
+		ExternalID:         identifier,
+		Base:               strings.TrimSpace(req.Base),
+		Head:               strings.TrimSpace(req.Head),
+		Title:              strings.TrimSpace(req.Title),
+		Body:               strings.TrimSpace(req.Body),
+		Text:               strings.TrimSpace(req.Text),
+		Draft:              req.Draft,
+		Query:              strings.TrimSpace(req.Query),
+		State:              strings.TrimSpace(req.State),
+		Scope:              strings.TrimSpace(req.Scope),
+		Limit:              req.Limit,
+		Path:               strings.TrimSpace(req.Path),
+		Line:               req.Line,
+		Side:               strings.TrimSpace(req.Side),
+		ChannelID:          strings.TrimSpace(req.ChannelID),
+		ThreadID:           strings.TrimSpace(req.ThreadID),
+		MessageID:          strings.TrimSpace(req.MessageID),
+		Reaction:           strings.TrimSpace(req.Reaction),
+		Fields:             trimStrings(req.Fields),
+		Labels:             trimStrings(req.Labels),
+		ExcludeLabels:      trimStrings(req.ExcludeLabels),
 	}
 	if normalized.ObjectType == "" {
 		normalized.ObjectType = normalizeObjectType(normalized.Resource)
+	}
+	if normalized.ObjectType == "canonical-object" {
+		switch normalized.IntegrationType {
+		case model.IntegrationTypeIssue:
+			normalized.ObjectType, normalized.Resource = "issue", "issue"
+		case model.IntegrationTypeRepo:
+			normalized.ObjectType, normalized.Resource = "repository", "repository"
+		}
 	}
 	if state, ok := s.systems[system]; ok {
 		normalized.Labels = mapCanonicalLabelsToExternal(normalized.Labels, state.TaskLabelMapping)
@@ -515,9 +544,27 @@ func (s *Service) errorRoute(req Request, err error) Route {
 		Diagnostics: []string{
 			fmt.Sprintf("request system=%s resource=%s operation=%s", system, normalizeResource(req.Resource), normalizeOperation(req.Operation)),
 			fmt.Sprintf("request type=%s system=%s resource=%s object=%s operation=%s", integrationType, system, normalizeResource(req.Resource), objectType, normalizeOperation(req.Operation)),
-			"dispatcher mode=diagnostic-only",
+			"registry mode=direct-resolution",
 			"invalid-request missing system",
 			fmt.Sprintf("invalid-request %s", err.Error()),
+		},
+	}
+}
+
+func (s *Service) routeForUnknownSystem(req ProviderRequest) Route {
+	return Route{
+		IntegrationType: req.IntegrationType,
+		System:          req.System,
+		Provider:        req.System,
+		Resource:        req.Resource,
+		ObjectType:      req.ObjectType,
+		Operation:       req.Operation,
+		ExpectedResult:  expectedResult(req.IntegrationType, req.ObjectType, req.Resource, req.Operation),
+		Diagnostics: []string{
+			fmt.Sprintf("request system=%s resource=%s operation=%s", req.System, req.Resource, req.Operation),
+			"registry mode=direct-resolution",
+			fmt.Sprintf("provider=%s unknown to current integration configuration", req.System),
+			fmt.Sprintf("registered systems=%s", strings.Join(s.registeredSystems(), ",")),
 		},
 	}
 }
@@ -557,7 +604,14 @@ func normalizeSystem(system string) string {
 }
 
 func normalizeIntegrationType(integrationType string) string {
-	return strings.TrimSpace(strings.ToLower(integrationType))
+	switch value := strings.TrimSpace(strings.ToLower(integrationType)); value {
+	case "tracker":
+		return model.IntegrationTypeIssue
+	case "repository":
+		return model.IntegrationTypeRepo
+	default:
+		return value
+	}
 }
 
 func normalizeObjectType(objectType string) string {
@@ -687,11 +741,42 @@ func systemSupportsIntegrationType(state systemState, integrationType string) bo
 	return false
 }
 
+func systemSupportsOperation(state systemState, integrationType string, objectType string, operation string) bool {
+	// Состояние авторизации является общей служебной операцией адаптера и не
+	// относится к типо-ориентированным объектам.
+	if normalizeObjectType(objectType) == "auth" && normalizeOperation(operation) == "status" {
+		return true
+	}
+	// Сценарный адаптер получает каталог операций из конфигурации. Пустой
+	// каталог не ограничивает контракт: это позволяет проверять маршрут до
+	// подключения конкретного сценария.
+	if state.Type == "script" && len(state.Operations) == 0 {
+		return true
+	}
+	integrationType = normalizeIntegrationType(integrationType)
+	objectType = canonicalObjectType(objectType)
+	operation = normalizeOperation(operation)
+	for _, template := range builtinOperationTemplates(state.Type) {
+		if normalizeIntegrationType(template.IntegrationType) == integrationType &&
+			canonicalObjectType(template.ObjectType) == objectType &&
+			normalizeOperation(template.Operation) == operation {
+			return true
+		}
+	}
+	for name := range state.Operations {
+		configuredType, configuredObject, configuredOperation := parseOperationName(name)
+		if configuredType == integrationType && configuredObject == objectType && configuredOperation == operation {
+			return true
+		}
+	}
+	return false
+}
+
 func buildDiagnostics(integrationType string, system string, resource string, objectType string, operation string, available bool, registered bool, known bool, state systemState, registeredSystems []string) []string {
 	diagnostics := []string{
 		fmt.Sprintf("request system=%s resource=%s operation=%s", system, resource, operation),
 		fmt.Sprintf("request type=%s system=%s resource=%s object=%s operation=%s", integrationType, system, resource, objectType, operation),
-		"dispatcher mode=diagnostic-only",
+		"registry mode=direct-resolution",
 	}
 
 	if available {
@@ -735,12 +820,12 @@ func expectedResult(integrationType string, objectType string, resource string, 
 		switch normalizeObjectType(firstNonEmpty(objectType, resource)) {
 		case "issue":
 			if operation == "comments" {
-				return "tracker-comment[]"
+				return "issue-comment[]"
 			}
 			if operation == "search" {
-				return "tracker-search-result[]"
+				return "issue-search-result[]"
 			}
-			return "tracker-issue"
+			return "issue"
 		case "task":
 			if operation == "comments" {
 				return "task-comment[]"
@@ -1014,7 +1099,8 @@ func canonicalTaskFromTrackerIssue(issue TrackerIssue) *CanonicalTask {
 	return &CanonicalTask{
 		System:     issue.System,
 		Repository: issue.Repository,
-		Number:     issue.Number,
+		ID:         firstNonEmpty(issue.ID, issue.ExternalID),
+		ExternalID: issue.ExternalID,
 		Title:      issue.Title,
 		Body:       issue.Body,
 		State:      issue.State,
@@ -1031,7 +1117,8 @@ func trackerIssueFromCanonicalTask(task CanonicalTask) TrackerIssue {
 	return TrackerIssue{
 		System:     task.System,
 		Repository: task.Repository,
-		Number:     task.Number,
+		ID:         task.ID,
+		ExternalID: task.ExternalID,
 		Title:      task.Title,
 		Body:       task.Body,
 		State:      task.State,
@@ -1048,7 +1135,7 @@ func taskCommentFromTrackerComment(comment TrackerComment) TaskComment {
 	return TaskComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		TaskNumber: comment.Number,
+		TaskID:     comment.TaskID,
 		Author:     userFromTrackerUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,
@@ -1061,7 +1148,7 @@ func trackerCommentFromTaskComment(comment TaskComment) TrackerComment {
 	return TrackerComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		Number:     comment.TaskNumber,
+		TaskID:     comment.TaskID,
 		Author:     trackerUserFromUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,

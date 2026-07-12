@@ -23,6 +23,7 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 		Resource:   "task",
 		ObjectType: "task",
 		Operation:  "create",
+		ExternalID: "ABC-123",
 		Title:      "Локальная задача",
 		Body:       "Описание",
 		Labels:     []string{"backend"},
@@ -30,7 +31,7 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if create.Task == nil || create.Task.Number != 1 || create.Task.Title != "Локальная задача" {
+	if create.Task == nil || create.Task.ID != "ABC-123" || create.Task.Title != "Локальная задача" {
 		t.Fatalf("unexpected created task: %#v", create.Task)
 	}
 
@@ -39,7 +40,7 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 		Resource:   "comment",
 		ObjectType: "comment",
 		Operation:  "create",
-		Number:     create.Task.Number,
+		ID:         create.Task.ID,
 		Body:       "Комментарий",
 	})
 	if err != nil {
@@ -54,7 +55,7 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 		Resource:   "label",
 		ObjectType: "label",
 		Operation:  "add",
-		Number:     create.Task.Number,
+		ID:         create.Task.ID,
 		Labels:     []string{"bug"},
 	}); err != nil {
 		t.Fatalf("add label: %v", err)
@@ -64,7 +65,7 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 		Resource:   "label",
 		ObjectType: "label",
 		Operation:  "remove",
-		Number:     create.Task.Number,
+		ID:         create.Task.ID,
 		Labels:     []string{"backend"},
 	}); err != nil {
 		t.Fatalf("remove label: %v", err)
@@ -75,7 +76,7 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 		Resource:   "task",
 		ObjectType: "task",
 		Operation:  "get",
-		Number:     create.Task.Number,
+		ID:         create.Task.ID,
 	})
 	if err != nil {
 		t.Fatalf("get task: %v", err)
@@ -89,7 +90,7 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 		Resource:   "comment",
 		ObjectType: "comment",
 		Operation:  "comments",
-		Number:     create.Task.Number,
+		ID:         create.Task.ID,
 	})
 	if err != nil {
 		t.Fatalf("list comments: %v", err)
@@ -109,7 +110,7 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search tasks: %v", err)
 	}
-	if len(search.SearchResults) != 1 || search.SearchResults[0].Number != create.Task.Number {
+	if len(search.SearchResults) != 1 || search.SearchResults[0].ID != create.Task.ID {
 		t.Fatalf("unexpected search results: %#v", search.SearchResults)
 	}
 }
@@ -155,7 +156,7 @@ func TestSearchAppliesLimitAfterLabelFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search tasks: %v", err)
 	}
-	if len(search.SearchResults) != 1 || search.SearchResults[0].Number != matching.Task.Number {
+	if len(search.SearchResults) != 1 || search.SearchResults[0].ID != matching.Task.ID {
 		t.Fatalf("unexpected search results: %#v", search.SearchResults)
 	}
 }
@@ -184,7 +185,7 @@ func TestServiceListsCommentsForTaskCatalogRequest(t *testing.T) {
 		Resource:   "comment",
 		ObjectType: "comment",
 		Operation:  "create",
-		Number:     create.Task.Number,
+		ID:         create.Task.ID,
 		Body:       "Комментарий",
 	}); err != nil {
 		t.Fatalf("create comment: %v", err)
@@ -196,7 +197,7 @@ func TestServiceListsCommentsForTaskCatalogRequest(t *testing.T) {
 			Resource:   "task",
 			ObjectType: "task",
 			Operation:  operation,
-			Number:     create.Task.Number,
+			ID:         create.Task.ID,
 		})
 		if err != nil {
 			t.Fatalf("list comments with operation %q: %v", operation, err)
@@ -211,7 +212,7 @@ func TestServiceListsCommentsForTaskCatalogRequest(t *testing.T) {
 		Resource:   "task",
 		ObjectType: "task",
 		Operation:  "list",
-		Number:     create.Task.Number,
+		ID:         create.Task.ID,
 	})
 	if err == nil {
 		t.Fatal("expected unsupported task list operation")

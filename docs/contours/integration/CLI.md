@@ -19,7 +19,7 @@ GitHub-адаптер поддерживает два способа обращ�
 
 1. CLI принимает входной запрос пользователя или другого контура;
 2. сервис интеграции формирует внутренний `IntegrationRequest`;
-3. диспетчер выбирает адаптер по типу интеграции и имени системы;
+3. реестр выбирает адаптер по типу интеграции и имени системы;
 4. адаптер выполняет вызов `gh` или HTTP API;
 5. адаптер считывает структурированный ответ;
 6. JSON-ответ преобразуется во внутреннюю нормализованную структуру;
@@ -64,8 +64,8 @@ flowchart LR
 ```json
 {
   "default_systems": {
-    "tracker": "github-app",
-    "repository": "github-app"
+    "issue": "github-app",
+    "repo": "github-app"
   },
   "systems": {
     "github-app": {
@@ -130,7 +130,7 @@ type Provider interface {
 }
 ```
 
-Диспетчер выбирает `Provider` по имени интегрируемой системы. Если имя системы не указано, используется `default_systems` для типа интеграции.
+Реестр выбирает `Provider` по имени интегрируемой системы. Если имя системы не указано, используется `default_systems` для типа интеграции.
 
 ## 5. Нормализованные сущности
 
@@ -162,7 +162,7 @@ type Provider interface {
 
 - `System`;
 - `Repository`;
-- `Number`;
+- `ID`;
 - `Title`;
 - `Body`;
 - `State`;
@@ -192,14 +192,15 @@ type Provider interface {
 
 ## 6. Состав CLI-команд
 
-В текущей конфигурации поддерживаются следующие команды:
+В текущей конфигурации поддерживаются следующие команды. Команды с именем
+внешней системы сохранены только как переходная форма: при запуске они выводят
+предупреждение и должны постепенно заменяться типо-ориентированными командами
+с флагом `--system`.
 
-- `progress integration dispatcher`;
-- `progress integration dispatch`;
 - `progress integration operations`;
-- `progress integration private status`;
-- `progress integration private set`;
-- `progress integration private delete`;
+- `progress integration issue get --id 123`;
+- `progress integration issue search --query "текст"`;
+- `progress integration repo get --system github`;
 - `progress integration github auth status`;
 - `progress integration github repo get`;
 - `progress integration github issue get`;
@@ -236,11 +237,18 @@ type Provider interface {
 
 ## 7. Назначение команд
 
-### 7.1 `progress integration dispatcher`
+### 7.0 Типо-ориентированные команды
 
-Команда вызывает диспетчер интеграционного контура как отдельный модуль. Она нужна для диагностики маршрута: какой адаптер будет выбран, какие требования к доступу предъявляются и какой тип нормализованного объекта ожидается на выходе.
+Новые команды выбирают предметный тип объекта, а не название внешней системы:
 
-### 7.2 `progress integration operations`
+```text
+progress integration issue get --id ABC-123
+progress integration issue search --query "готово к реализации" --system jira-main
+```
+
+Флаг `--id` принимает непрозрачную строку: как числовое значение `123`, так и значение внешней системы `ABC-123`. Если `--system` не задан, контур выбирает систему по умолчанию для типа `issue`; явное значение выбирается по имени записи в конфигурации. Старые команды вида `integration github issue ...` сохраняются как совместимый переход.
+
+### 7.1 `progress integration operations`
 
 Команда публикует каталог интеграционных операций, доступных по текущей конфигурации систем. Каталог нужен контуру исполнения и диагностическим проверкам: он показывает каноническое имя операции, интегрируемую систему, тип адаптера, контракт входных полей, тип результата, признак побочного действия и возможные отказные состояния.
 
@@ -249,9 +257,9 @@ type Provider interface {
 ```bash
 progress integration operations
 progress integration operations --format json
-progress integration operations --type tracker
+progress integration operations --type issue
 progress integration operations --system github
-progress integration operations --name tracker.task.get
+progress integration operations --name issue.issue.get
 ```
 
 Каноническое имя операции строится по схеме:
@@ -262,11 +270,11 @@ progress integration operations --name tracker.task.get
 
 Примеры:
 
-- `tracker.task.get`;
-- `tracker.task.comment.create`;
-- `repository.merge-request.create`;
-- `repository.review-remark.reply`;
-- `repository.review-remark.resolve`;
+- `issue.issue.get`;
+- `issue.issue.comment.create`;
+- `repo.merge-request.create`;
+- `repo.comment.reply`;
+- `repo.comment.resolve`;
 - `messenger.message.create`;
 - `wiki.page.search`.
 
@@ -274,18 +282,7 @@ progress integration operations --name tracker.task.get
 
 Отключённая система может присутствовать в каталоге только с `available=false`. Сценарные системы типа `script` публикуют операции из `systems.<name>.operations`; доступными считаются только операции с заданным `script`, `command` или `path`. Контракт входных полей сохраняется из конфигурации.
 
-### 7.3 `progress integration private`
-
-Команды `progress integration private ...` работают с хранилищем приватных значений, выбранным настройкой `private_store`.
-
-Основные операции:
-
-1. `progress integration private status` — вывести выбранную реализацию хранилища без чтения значений;
-2. `progress integration private set <name> --stdin` — записать приватное значение с именем `<name>`;
-3. `progress integration private set <name> --value <value>` — записать значение из аргумента CLI;
-4. `progress integration private delete <name>` — удалить приватное значение.
-
-Команда записи печатает только статус, имя значения и выбранное хранилище. Само приватное значение не выводится.
+Хранилище приватных значений не входит в публичное пространство имён интеграции и настраивается только через контур настроек и ресурсов.
 
 ### 7.4 `progress integration github auth status`
 
@@ -345,7 +342,7 @@ gh api --paginate --slurp repos/owner/name/issues/123/comments
 
 Команда принимает `--repo` и обязательный `--number`. Если `--repo` не передан, адаптер может использовать `default_repo` из `.progress/integration/systems.json` или глобального `$PROGRESS_CONFIG_HOME/integration/systems.json`; если пользователь явно передал пустой `--repo=`, резервный выбор не применяется и запрос отклоняется как `invalid-request`.
 
-Адаптер преобразует paginated REST-ответ GitHub в массив `TrackerComment` с полями `System`, `Repository`, `Number`, `Author`, `Body`, `URL`, `CreatedAt` и `UpdatedAt`. В текстовом выводе команда печатает общий `comment_count`, затем поля каждого комментария и тело построчно.
+Адаптер преобразует paginated REST-ответ GitHub в массив `TrackerComment` с полями `System`, `Repository`, `TaskID`, `Author`, `Body`, `URL`, `CreatedAt` и `UpdatedAt`. В текстовом выводе команда печатает общий `comment_count`, затем поля каждого комментария и тело построчно.
 
 ### 7.8 `progress integration github issue label add`
 
@@ -579,7 +576,7 @@ GET /rest/api/content/search?cql=type%3Dpage&limit=10&expand=space,version
 ```mermaid
 flowchart TD
     A[progress] --> B[integration]
-    B --> C[dispatcher]
+    B --> C[реестр типов, систем и операций]
     B --> D[github]
     D --> E[auth status]
     D --> F[repo get]
@@ -690,15 +687,15 @@ GitHub-адаптер должен различать как минимум сл
     "service": "progress"
   },
   "default_systems": {
-    "tracker": "github",
-    "repository": "github",
+    "issue": "github",
+    "repo": "github",
     "messenger": "mattermost",
     "wiki": "confluence"
   },
   "systems": {
     "github": {
       "type": "github",
-      "integration_types": ["tracker", "repository"],
+      "integration_types": ["issue", "repo"],
       "enabled": true,
       "transport": "cli",
       "command": "gh",
@@ -713,7 +710,7 @@ GitHub-адаптер должен различать как минимум сл
     },
     "bitbucket": {
       "type": "bitbucket",
-      "integration_type": "repository",
+      "integration_type": "repo",
       "enabled": true,
       "base_url": "https://api.bitbucket.org/2.0",
       "api_variant": "cloud",
@@ -746,7 +743,7 @@ GitHub-адаптер должен различать как минимум сл
     },
     "local": {
       "type": "local-tracker",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true,
       "database": {
         "driver": "sqlite",
@@ -755,7 +752,7 @@ GitHub-адаптер должен различать как минимум сл
     },
     "work-tracker": {
       "type": "script",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true,
       "timeout": "30s",
       "project": "ABC",
@@ -811,7 +808,7 @@ GitHub-адаптер должен различать как минимум сл
   "systems": {
     "github": {
       "type": "github",
-      "integration_types": ["tracker", "repository"],
+    "integration_types": ["issue", "repo"],
       "enabled": true,
       "transport": "api",
       "base_url": "https://api.github.com",
@@ -834,12 +831,12 @@ GitHub-адаптер должен различать как минимум сл
 ```json
 {
   "default_systems": {
-    "tracker": "local"
+    "issue": "local"
   },
   "systems": {
     "local": {
       "type": "local-tracker",
-      "integration_type": "tracker",
+      "integration_type": "issue",
       "enabled": true
     }
   }
@@ -848,14 +845,14 @@ GitHub-адаптер должен различать как минимум сл
 
 Локальный трекер поддерживает операции:
 
-- `tracker.task.create`;
-- `tracker.task.get`;
-- `tracker.task.search`;
-- `tracker.task.update`;
-- `tracker.task.comment.list`;
-- `tracker.task.comment.create`;
-- `tracker.task.label.add`;
-- `tracker.task.label.remove`.
+- `issue.issue.create`;
+- `issue.issue.get`;
+- `issue.issue.search`;
+- `issue.issue.update`;
+- `issue.issue.comment.list`;
+- `issue.issue.comment.create`;
+- `issue.issue.label.add`;
+- `issue.issue.label.remove`.
 
 Хранилище создаёт схему при первом обращении. Задачи и комментарии возвращаются как `CanonicalTask`, `TaskComment`, `OperationResult` и совместимые структуры `TrackerIssue`/`TrackerComment`.
 
@@ -946,7 +943,7 @@ PROGRESS_INTEGRATION_TIMEOUT
 Пример записи приватного значения для Mattermost:
 
 ```bash
-progress integration private set mt_auth_token --stdin
+private_store.type=keychain
 ```
 
 После записи локальная конфигурация может ссылаться на это значение:
@@ -979,7 +976,7 @@ progress integration private set mt_auth_token --stdin
 
 Реализованный рабочий срез включает:
 
-1. диспетчер `Dispatch`, который выбирает интегрируемую систему по `IntegrationType`, `System` и `default_systems`;
+1. реестр типов, систем и операций, который выбирает интегрируемую систему по `IntegrationType`, `System` и `default_systems`;
 2. единый вызов `Execute`, который возвращает `Response` с каноническим объектом, маршрутом и отказным состоянием;
 3. GitHub-адаптер через `gh` или прямой GitHub API для задач, комментариев задач, репозиториев и запросов на слияние;
 4. Bitbucket-адаптер через HTTP API для репозиториев и запросов на слияние;
