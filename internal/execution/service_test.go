@@ -29,7 +29,7 @@ func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 			Model:     "ignored",
 			Prompt:    "ship it",
 		},
-	}, profile{Mode: "manual"}, allocation{Runner: "codex", Model: "gpt-5.3-codex", ModelBinding: "coder"}, workplace{})
+	}, profile{Mode: "manual"}, allocation{Runner: "codex", Model: "gpt-5.3-codex", ModelBinding: "coder", ReasoningEffort: "medium"}, workplace{})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -42,6 +42,9 @@ func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 	}
 	if launcher.invocation.Launch.ModelBinding != "coder" {
 		t.Fatalf("expected model-binding from allocation, got %q", launcher.invocation.Launch.ModelBinding)
+	}
+	if launcher.invocation.Launch.ReasoningEffort != "medium" {
+		t.Fatalf("expected reasoning effort from allocation, got %q", launcher.invocation.Launch.ReasoningEffort)
 	}
 }
 

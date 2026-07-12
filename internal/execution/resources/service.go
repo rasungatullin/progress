@@ -184,6 +184,9 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 	if err := ensureToolResourceAvailable(config, tool, resource); err != nil {
 		return model.Allocation{}, err
 	}
+	if err := validateReasoningEffort(tool, resource, binding.ReasoningEffort); err != nil {
+		return model.Allocation{}, fmt.Errorf("binding %q has invalid reasoning-effort: %w", bindingName, err)
+	}
 	environment, environmentType, err := resolveAllocationEnvironment(config, in, binding.Environment)
 	if err != nil {
 		return model.Allocation{}, err
@@ -195,6 +198,7 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 		Runner:          tool,
 		Model:           resource,
 		ModelBinding:    bindingName,
+		ReasoningEffort: binding.ReasoningEffort,
 		Environment:     environment,
 		EnvironmentType: environmentType,
 		Source:          source,
@@ -204,6 +208,25 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 		allocation.BindingSource = string(config.BindingSources[bindingName])
 	}
 	return allocation, nil
+}
+
+func validateReasoningEffort(runner, modelName, effort string) error {
+	effort = strings.TrimSpace(effort)
+	if effort == "" {
+		return nil
+	}
+	if runner != "codex" {
+		return fmt.Errorf("runner %q does not support reasoning-effort", runner)
+	}
+	if !strings.HasPrefix(strings.TrimPrefix(modelName, "openai/"), "gpt-5") {
+		return fmt.Errorf("model %q does not support reasoning-effort", modelName)
+	}
+	switch effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return nil
+	default:
+		return fmt.Errorf("unsupported value %q", effort)
+	}
 }
 
 func resolveDefaultBinding(config resourceConfig, in model.Invocation) (model.Allocation, error) {

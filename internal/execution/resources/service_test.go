@@ -38,6 +38,45 @@ func TestAllocateUsesExplicitModelBinding(t *testing.T) {
 	}
 }
 
+func TestAllocatePassesReasoningEffortFromBinding(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "coder"},
+		"runners": ["codex"],
+		"models": ["gpt-5.3-codex-spark"],
+		"bindings": {
+			"coder": {"runner": "codex", "model": "gpt-5.3-codex-spark", "reasoning-effort": " medium "}
+		}
+	}`)
+
+	allocation, err := service.Allocate(context.Background(), model.Invocation{Launch: model.LaunchSpec{ModelBinding: "coder"}}, model.Profile{})
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if allocation.ReasoningEffort != "medium" {
+		t.Fatalf("unexpected reasoning effort: %#v", allocation)
+	}
+}
+
+func TestAllocateRejectsReasoningEffortForUnsupportedBinding(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"runners": ["opencode"],
+		"models": ["openai/gpt-5.4"],
+		"bindings": {
+			"default": {"runner": "opencode", "model": "openai/gpt-5.4", "reasoning-effort": "medium"}
+		}
+	}`)
+
+	_, err := service.Allocate(context.Background(), model.Invocation{}, model.Profile{ModelBinding: "default"})
+	if err == nil || !strings.Contains(err.Error(), "does not support reasoning-effort") {
+		t.Fatalf("expected unsupported reasoning effort error, got %v", err)
+	}
+}
+
 func TestAllocateUsesGlobalResourcesWhenLocalIsMissing(t *testing.T) {
 	t.Setenv("PROGRESS_CONFIG_HOME", "/global")
 	service := newTestServiceWithGlobalFallback(`{

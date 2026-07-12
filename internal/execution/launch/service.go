@@ -696,6 +696,10 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 		return fmt.Errorf("launch model is required")
 	}
 
+	if err := validateReasoningEffort(in.Launch); err != nil {
+		return err
+	}
+
 	if err := validateStructuredOutputSettings(in.Launch); err != nil {
 		return err
 	}
@@ -710,6 +714,25 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 	}
 
 	return nil
+}
+
+func validateReasoningEffort(spec model.LaunchSpec) error {
+	effort := strings.TrimSpace(spec.ReasoningEffort)
+	if effort == "" {
+		return nil
+	}
+	if spec.Runner != RunnerCodex {
+		return fmt.Errorf("runner %q does not support reasoning-effort", spec.Runner)
+	}
+	if !strings.HasPrefix(codexModelName(spec.Model), "gpt-5") {
+		return fmt.Errorf("model %q does not support reasoning-effort", spec.Model)
+	}
+	switch effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return nil
+	default:
+		return fmt.Errorf("unsupported reasoning-effort value %q", spec.ReasoningEffort)
+	}
 }
 
 func isSupportedRunner(runner string) bool {
@@ -2135,6 +2158,9 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 			args = []string{"exec", "resume", sessionID, prompt}
 		} else {
 			args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
+		}
+		if effort := strings.TrimSpace(spec.ReasoningEffort); effort != "" {
+			args = append([]string{args[0], "-c", `model_reasoning_effort="` + effort + `"`}, args[1:]...)
 		}
 	default:
 		if resume {
