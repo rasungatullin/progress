@@ -629,6 +629,9 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 		state.tracker.skipIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary("", input.result, operation), "Структурированный вывод не содержит ответов на замечания.")
 		return nil
 	}
+	if err := validateReviewResponses(responses); err != nil {
+		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не прошли предварительную проверку.", err, "review_responses_invalid")
+	}
 
 	count, publishedResponses, publishFailures := e.publishReviewResponseComments(ctx, ref, responses)
 	resolved, resolveFailures := e.resolveReviewThreads(ctx, publishedResponses)
@@ -1665,6 +1668,27 @@ func validateReviewResponseThreadIDs(responses []StructuredResponse) error {
 		}
 	}
 	return nil
+}
+
+func validateReviewResponses(responses []StructuredResponse) error {
+	var failures []error
+	for index, response := range responses {
+		typ := reviewResponseType(response)
+		if typ == "local" {
+			continue
+		}
+		switch typ {
+		case "inline":
+			if strings.TrimSpace(response.ThreadID) == "" && (strings.TrimSpace(reviewResponseCommentBody(response)) != "" || isResolvedReviewResponse(response)) {
+				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): thread_id is required; canonical external_id is missing or unknown", index, strings.TrimSpace(response.RemarkID)))
+			}
+		case "comment":
+			// Общий комментарий формируется как новая связанная запись и thread_id не требует.
+		default:
+			failures = append(failures, fmt.Errorf("review response %d (remark_id %q): type is unsupported or cannot be restored from canonical external_id/thread_id", index, strings.TrimSpace(response.RemarkID)))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func reviewResponseType(response StructuredResponse) string {

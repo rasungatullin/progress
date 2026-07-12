@@ -2386,7 +2386,7 @@ func TestPublishReviewResponsesRejectsUnclassifiedResponseWithoutExternalPublica
 	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
 		t.Fatalf("unclassified response must produce a partial failure")
 	}
-	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+	if len(calls) != 0 {
 		t.Fatalf("unclassified response must not be published externally: %#v", calls)
 	}
 }
@@ -2415,7 +2415,7 @@ func TestPublishReviewResponsesRejectsResponseWithoutRemarkKind(t *testing.T) {
 	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
 		t.Fatalf("response without canonical remark kind must produce a partial failure")
 	}
-	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+	if len(calls) != 0 {
 		t.Fatalf("unclassified response must not be published externally: %#v", calls)
 	}
 }
@@ -2542,7 +2542,7 @@ func TestPublishReviewResponsesRejectsUnknownTypeWithoutExternalPublication(t *t
 	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
 		t.Fatalf("unknown response type must fail")
 	}
-	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+	if len(calls) != 0 {
 		t.Fatalf("unknown response type must not be published externally: %#v", calls)
 	}
 }
