@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1582,8 +1583,11 @@ func TestServicePRCommentCreateReusesAndSubmitsPendingReview(t *testing.T) {
 	t.Parallel()
 
 	stub := &stubRunner{
-		result:              CommandResult{ExitCode: 0, Stdout: `{"id":101,"node_id":"PRRC_comment-1","body":"Inline remark","html_url":"https://github.com/owner/name/pull/42#discussion_r101","path":"file.go","line":12,"side":"RIGHT","pull_request_review_id":77}`},
-		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		result: CommandResult{ExitCode: 0, Stdout: `{"id":101,"node_id":"PRRC_comment-1","body":"Inline remark","html_url":"https://github.com/owner/name/pull/42#discussion_r101","path":"file.go","line":12,"side":"RIGHT","pull_request_review_id":78}`},
+		pendingReviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+			{ExitCode: 0, Stdout: `[{"id":78,"state":"PENDING"}]`},
+		},
 		reviewCommentResult: CommandResult{ExitCode: 0, Stdout: `[{"id":100,"pull_request_review_id":77}]`},
 	}
 	service := NewService()
@@ -1593,8 +1597,8 @@ func TestServicePRCommentCreateReusesAndSubmitsPendingReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if stub.prSubmitCalls != 2 || response.Status != model.ResponseStatusOK {
-		t.Fatalf("pending review was not completed before and after comment create: submits=%d response=%#v", stub.prSubmitCalls, response)
+	if !slices.Equal(stub.prSubmitReviewIDs, []int64{77, 78}) || response.Status != model.ResponseStatusOK {
+		t.Fatalf("pending reviews were not completed before and after comment create: submits=%v response=%#v", stub.prSubmitReviewIDs, response)
 	}
 }
 
@@ -1652,24 +1656,95 @@ func TestServicePRCommentCreateRecoversWhenFailedSubmissionWasCompleted(t *testi
 	}
 }
 
-func TestServicePRCommentCreateRejectsPendingReviewWithoutAssociatedComment(t *testing.T) {
+func TestServicePRCommentCreateRemovesPendingReviewWithoutAssociatedComment(t *testing.T) {
 	t.Parallel()
 
 	stub := &stubRunner{
-		reviewResult:        CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
-		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
-		reviewCommentResult: CommandResult{ExitCode: 0, Stdout: `[{"id":101,"pull_request_review_id":88}]`},
+		result:       CommandResult{ExitCode: 0, Stdout: `{"id":101,"node_id":"PRRC_comment-1","body":"Inline remark","html_url":"https://github.com/owner/name/pull/42#discussion_r101","path":"file.go","line":12,"side":"RIGHT"}`},
+		reviewResult: CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`},
+		pendingReviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+			{ExitCode: 0, Stdout: `[{"id":88,"state":"PENDING"}]`},
+		},
+		reviewCommentResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[{"id":101,"pull_request_review_id":88}]`},
+		},
 	}
 	service := NewService()
 	service.runner = stub
 
-	_, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
-	var ghErr *Error
-	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || !strings.Contains(ghErr.Message, "contains no publishable remarks") {
-		t.Fatalf("unexpected error: %#v", err)
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil || response.Status != model.ResponseStatusOK {
+		t.Fatalf("unexpected response: %#v, error: %v", response, err)
 	}
-	if stub.prSubmitCalls != 0 {
-		t.Fatalf("unrelated pending review was submitted: %d", stub.prSubmitCalls)
+	if !slices.Equal(stub.prDeleteReviewIDs, []int64{77}) || !slices.Equal(stub.prSubmitReviewIDs, []int64{88}) || stub.prCommentCalls != 1 {
+		t.Fatalf("empty pending review was not removed before publishing: deletes=%v submits=%v comments=%d", stub.prDeleteReviewIDs, stub.prSubmitReviewIDs, stub.prCommentCalls)
+	}
+}
+
+func TestFindPendingPRReviewRemovesEveryEmptyReviewAndReturnsFirstPublishableReview(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[
+			{"id":99,"state":"PENDING"},
+			{"id":77,"state":"PENDING"},
+			{"id":55,"state":"PENDING"},
+			{"id":88,"state":"PENDING"},
+			{"id":66,"state":"COMMENTED"}
+		]`},
+		reviewCommentResult: CommandResult{ExitCode: 0, Stdout: `[
+			{"id":201,"pull_request_review_id":99},
+			{"id":202,"pull_request_review_id":77},
+			{"id":203,"pull_request_review_id":66}
+		]`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	reviewID, err := service.findPendingPRReview(context.Background(), "owner/name", 42)
+	if err != nil {
+		t.Fatalf("find pending pull request review: %v", err)
+	}
+	if reviewID != 77 {
+		t.Fatalf("expected first publishable review 77, got %d", reviewID)
+	}
+	if !slices.Equal(stub.prDeleteReviewIDs, []int64{55, 88}) {
+		t.Fatalf("unexpected empty review cleanup order: %v", stub.prDeleteReviewIDs)
+	}
+}
+
+func TestFindPendingPRReviewReportsPartialPayloadWhenLaterCleanupFails(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[
+			{"id":30,"state":"PENDING"},
+			{"id":20,"state":"PENDING"},
+			{"id":10,"state":"PENDING"}
+		]`},
+		reviewCommentResult: CommandResult{ExitCode: 0, Stdout: `[
+			{"id":201,"pull_request_review_id":30}
+		]`},
+		deleteResults: []CommandResult{
+			{ExitCode: 0},
+			{ExitCode: 403, Stderr: "forbidden"},
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	reviewID, err := service.findPendingPRReview(context.Background(), "owner/name", 42)
+	if reviewID != 0 {
+		t.Fatalf("publishable review must not be returned after incomplete cleanup: %d", reviewID)
+	}
+	var ghErr *Error
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || ghErr.Result.ExitCode != 403 {
+		t.Fatalf("expected partial payload cleanup failure, got %T: %v", err, err)
+	}
+	if !slices.Equal(stub.prDeleteReviewIDs, []int64{10, 20}) {
+		t.Fatalf("unexpected cleanup attempts: %v", stub.prDeleteReviewIDs)
 	}
 }
 
@@ -2103,6 +2178,9 @@ type stubRunner struct {
 	prReviewsCalls       int
 	prReviewCommentCalls int
 	prSubmitCalls        int
+	prDeleteCalls        int
+	prSubmitReviewIDs    []int64
+	prDeleteReviewIDs    []int64
 	number               int
 	base                 string
 	head                 string
@@ -2123,6 +2201,7 @@ type stubRunner struct {
 	pendingReviewResults []CommandResult
 	reviewCommentResults []CommandResult
 	submitResults        []CommandResult
+	deleteResults        []CommandResult
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -2264,11 +2343,25 @@ func (r *stubRunner) RunPRCommentCreate(_ context.Context, repository string, nu
 
 func (r *stubRunner) RunPRReviewSubmit(_ context.Context, repository string, number int, reviewID int64) (CommandResult, resolvedConfig, error) {
 	r.prSubmitCalls++
+	r.prSubmitReviewIDs = append(r.prSubmitReviewIDs, reviewID)
 	r.repo = repository
 	r.number = number
 	if len(r.submitResults) > 0 {
 		result := r.submitResults[0]
 		r.submitResults = r.submitResults[1:]
+		return result, r.config, r.err
+	}
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRReviewDelete(_ context.Context, repository string, number int, reviewID int64) (CommandResult, resolvedConfig, error) {
+	r.prDeleteCalls++
+	r.prDeleteReviewIDs = append(r.prDeleteReviewIDs, reviewID)
+	r.repo = repository
+	r.number = number
+	if len(r.deleteResults) > 0 {
+		result := r.deleteResults[0]
+		r.deleteResults = r.deleteResults[1:]
 		return result, r.config, r.err
 	}
 	return r.result, r.config, r.err

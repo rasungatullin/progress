@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,7 @@ type ghRunner interface {
 	RunPRReviewComments(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRCommentCreate(context.Context, string, int, PRCommentCreateRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewSubmit(context.Context, string, int, int64) (CommandResult, resolvedConfig, error)
+	RunPRReviewDelete(context.Context, string, int, int64) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadReply(context.Context, PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadResolve(context.Context, string) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadUnresolve(context.Context, string) (CommandResult, resolvedConfig, error)
@@ -631,13 +633,35 @@ func (s *Service) findPendingPRReview(ctx context.Context, repository string, nu
 	if err != nil {
 		return 0, err
 	}
+	publishable := make(map[int64]struct{})
 	for _, comment := range comments {
 		if _, found := pending[comment.ReviewID]; found {
-			return comment.ReviewID, nil
+			publishable[comment.ReviewID] = struct{}{}
 		}
 	}
+	pendingIDs := make([]int64, 0, len(pending))
 	for reviewID := range pending {
-		return 0, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks", reviewID), Result: commentResult}
+		pendingIDs = append(pendingIDs, reviewID)
+	}
+	sort.Slice(pendingIDs, func(i, j int) bool { return pendingIDs[i] < pendingIDs[j] })
+
+	for _, reviewID := range pendingIDs {
+		if _, found := publishable[reviewID]; found {
+			continue
+		}
+		deleteResult, _, deleteErr := s.runner.RunPRReviewDelete(ctx, repository, number, reviewID)
+		if deleteErr != nil {
+			return 0, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks; cleanup failed: %v", reviewID, deleteErr), Result: deleteResult, Err: deleteErr}
+		}
+		if deleteResult.ExitCode != 0 {
+			cleanupErr := &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks; cleanup exited with a non-zero code", reviewID), Result: deleteResult}
+			return 0, cleanupErr
+		}
+	}
+	for _, reviewID := range pendingIDs {
+		if _, found := publishable[reviewID]; found {
+			return reviewID, nil
+		}
 	}
 	return 0, nil
 }

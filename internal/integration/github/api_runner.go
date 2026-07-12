@@ -657,6 +657,26 @@ func (r *APIRunner) RunPRReviewSubmit(ctx context.Context, repository string, nu
 	return result, apiResolvedConfig(config), nil
 }
 
+func (r *APIRunner) RunPRReviewDelete(ctx context.Context, repository string, number int, reviewID int64) (CommandResult, resolvedConfig, error) {
+	if reviewID <= 0 {
+		return apiErrorResult("pr review delete", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review id must be greater than zero"})
+	}
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		return apiErrorResult("pr review delete", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	config, err := r.resolveConfig(ctx)
+	if err != nil {
+		return apiErrorResult("pr review delete", config, err)
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return apiErrorResult("pr review delete", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	result, err := r.do(ctx, config, http.MethodDelete, fmt.Sprintf("repos/%s/pulls/%d/reviews/%d", repository, number, reviewID), nil, nil)
+	return result, apiResolvedConfig(config), err
+}
+
 func (r *APIRunner) RunPRReviewThreadResolve(ctx context.Context, threadID string) (CommandResult, resolvedConfig, error) {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
