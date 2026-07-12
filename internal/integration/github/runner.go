@@ -550,8 +550,25 @@ func (r *Runner) RunPRCommentCreate(ctx context.Context, repository string, numb
 			Result:  result,
 		}
 	}
+	headResult, _, err := r.runCommandWithResolvedConfig(ctx, config, []string{"pr", "view", strconv.Itoa(number), "--repo", repository, "--json", "headRefOid"})
+	if err != nil {
+		return headResult, config, err
+	}
+	if headResult.ExitCode != 0 {
+		return headResult, config, nil
+	}
+	var head struct {
+		OID string `json:"headRefOid"`
+	}
+	if err := json.Unmarshal([]byte(headResult.Stdout), &head); err != nil {
+		return headResult, config, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI head JSON response: %v", err), Result: headResult, Err: err}
+	}
+	request.CommitID = strings.TrimSpace(head.OID)
+	if request.CommitID == "" {
+		return headResult, config, &Error{Code: ErrorCodePartialPayload, Message: "GitHub pull request head SHA is missing", Result: headResult}
+	}
 	endpoint := fmt.Sprintf("repos/%s/pulls/%d/comments", repository, number)
-	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--method", "POST", endpoint, "-f", "body=" + request.Body, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side})
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--method", "POST", endpoint, "-f", "body=" + request.Body, "-f", "commit_id=" + request.CommitID, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side})
 }
 
 func (r *Runner) RunPRReviewThreadResolve(ctx context.Context, threadID string) (CommandResult, resolvedConfig, error) {
@@ -641,10 +658,11 @@ type PRListRequest struct {
 }
 
 type PRCommentCreateRequest struct {
-	Body string
-	Path string
-	Line int
-	Side string
+	Body     string
+	Path     string
+	Line     int
+	Side     string
+	CommitID string
 }
 
 type PRReviewThreadReplyRequest struct {
