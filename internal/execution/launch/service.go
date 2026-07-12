@@ -1469,6 +1469,10 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	if err != nil {
 		return "", err
 	}
+	startupTimeout, err := runnerDuration(spec.StartupTimeout, noOutputTimeout)
+	if err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
@@ -1485,8 +1489,9 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	startedAt := time.Now()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	watchdog := time.NewTimer(noOutputTimeout)
+	watchdog := time.NewTimer(startupTimeout)
 	defer watchdog.Stop()
+	startedOutput := false
 	for {
 		select {
 		case err := <-done:
@@ -1503,9 +1508,19 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			return output, nil
 		case <-writer.activity:
 			_, lastOutputAt := writer.snapshot()
+			if !startedOutput && !lastOutputAt.IsZero() {
+				startedOutput = true
+			}
 			resetRunnerWatchdog(watchdog, noOutputTimeout, lastOutputAt, startedAt)
 		case <-watchdog.C:
 			_, lastOutputAt := writer.snapshot()
+			startedOutput = startedOutput || !lastOutputAt.IsZero()
+			if !startedOutput {
+				cancel()
+				<-done
+				output, lastOutputAt := writer.snapshot()
+				return "", &runnerExecutionError{err: errRunnerNoOutputTimeout, output: output, stopReason: "no-output-timeout", lastOutputAt: lastOutputAt}
+			}
 			if remaining := runnerNoOutputRemaining(noOutputTimeout, lastOutputAt, startedAt); remaining > 0 {
 				watchdog.Reset(remaining)
 				continue
@@ -1934,6 +1949,9 @@ func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) 
 	}
 	if strings.TrimSpace(spec.Timeout) == "" {
 		spec.Timeout = profile.Timeout
+	}
+	if strings.TrimSpace(spec.StartupTimeout) == "" {
+		spec.StartupTimeout = profile.StartupTimeout
 	}
 	if strings.TrimSpace(spec.NoOutputTimeout) == "" {
 		spec.NoOutputTimeout = profile.NoOutputTimeout

@@ -18,6 +18,7 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 			"mode": "manual",
 			"model-binding": "default",
 			"allow-model-fallback": true,
+			"startup-timeout": "150ms",
 			"prompt-additions": ["Default context.", "Always verify the result."],
 			"structured-output": true,
 			"structured-output-required": false,
@@ -31,6 +32,7 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 				"description": "Coder profile",
 				"model-binding": "coder",
 				"allow-model-fallback": false,
+				"startup-timeout": "300ms",
 				"prompt-additions": ["Implement the requested change."],
 				"structured-output-required": true,
 				"structured-output-fields": ["commit_message", "changes"]
@@ -53,6 +55,9 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	if defaultProfile.Mode != "manual" || defaultProfile.ModelBinding != "default" || !defaultProfile.AllowModelFallback {
 		t.Fatalf("unexpected default binding config: %#v", defaultProfile)
 	}
+	if defaultProfile.StartupTimeout != "150ms" {
+		t.Fatalf("unexpected default startup-timeout: %q", defaultProfile.StartupTimeout)
+	}
 	if !defaultProfile.StructuredOutput || defaultProfile.StructuredOutputRequired {
 		t.Fatalf("unexpected default structured output flags: %#v", defaultProfile)
 	}
@@ -69,6 +74,9 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	}
 	if coderProfile.ModelBinding != "coder" || coderProfile.AllowModelFallback {
 		t.Fatalf("unexpected coder binding config: %#v", coderProfile)
+	}
+	if coderProfile.StartupTimeout != "300ms" {
+		t.Fatalf("unexpected coder startup-timeout: %q", coderProfile.StartupTimeout)
 	}
 	if !coderProfile.StructuredOutput || !coderProfile.StructuredOutputRequired {
 		t.Fatalf("unexpected coder structured flags: %#v", coderProfile)

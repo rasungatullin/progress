@@ -137,6 +137,22 @@ func TestRunRunnerCommandStopsOnNoOutputTimeoutWithoutOutput(t *testing.T) {
 	}
 }
 
+func TestRunRunnerCommandUsesStartupTimeoutBeforeFirstOutput(t *testing.T) {
+	t.Parallel()
+
+	output, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "sleep .1; printf ready"), model.LaunchSpec{
+		Timeout:         "1s",
+		StartupTimeout:  "200ms",
+		NoOutputTimeout: "20ms",
+	})
+	if err != nil {
+		t.Fatalf("startup delay within startup timeout must be allowed: %v", err)
+	}
+	if output != "ready" {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +211,7 @@ func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
 		Runner:          RunnerCodex,
 		Model:           "openai/gpt-5.4",
 		Timeout:         "5s",
+		StartupTimeout:  "1s",
 		NoOutputTimeout: "500ms",
 	}
 	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "stream")
@@ -240,6 +257,7 @@ func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
 		Runner:          RunnerCodex,
 		Model:           "openai/gpt-5.4",
 		Timeout:         "5s",
+		StartupTimeout:  "1s",
 		NoOutputTimeout: "300ms",
 	}
 	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "timeout")
