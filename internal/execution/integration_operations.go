@@ -629,6 +629,9 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 		state.tracker.skipIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary("", input.result, operation), "Структурированный вывод не содержит ответов на замечания.")
 		return nil
 	}
+	if err := validateReviewResponses(responses); err != nil {
+		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не прошли предварительную проверку.", err, "review_responses_invalid")
+	}
 
 	count, publishedResponses, publishFailures := e.publishReviewResponseComments(ctx, ref, responses)
 	resolved, resolveFailures := e.resolveReviewThreads(ctx, publishedResponses)
@@ -1557,6 +1560,16 @@ func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.R
 			byID[id] = remark
 		}
 	}
+	for _, remark := range output.Remarks {
+		id := strings.TrimSpace(remark.ID)
+		externalID := strings.TrimSpace(remark.ExternalID)
+		if id == "" || externalID == "" {
+			continue
+		}
+		if canonical, ok := byID[externalID]; ok {
+			byID[id] = canonical
+		}
+	}
 	responses := append([]StructuredResponse(nil), output.ReviewResponses...)
 	for index := range responses {
 		enrichReviewResponse(&responses[index], byID)
@@ -1585,7 +1598,19 @@ func enrichReviewResponse(response *StructuredResponse, remarks map[string]integ
 	if !ok {
 		return
 	}
-	if strings.TrimSpace(response.Type) == "" && strings.TrimSpace(response.ThreadID) == "" {
+	if canonicalType := reviewResponseTypeFromRemark(remark); canonicalType != "" {
+		response.Type = canonicalType
+		if canonicalType == "inline" {
+			response.ThreadID = strings.TrimSpace(remark.ReplyToID)
+		} else {
+			response.ThreadID = ""
+		}
+		return
+	}
+	if strings.TrimSpace(response.Type) == "" && strings.TrimSpace(response.ThreadID) != "" {
+		return
+	}
+	if strings.TrimSpace(response.Type) == "" {
 		response.Type = reviewResponseTypeFromRemark(remark)
 	}
 	if strings.TrimSpace(response.ThreadID) == "" {
@@ -1602,7 +1627,10 @@ func reviewResponseTypeFromRemark(remark integration.ReviewRemark) string {
 	if strings.TrimSpace(remark.ReplyToID) != "" {
 		return "inline"
 	}
-	if strings.TrimSpace(remark.ExternalID) != "" || strings.TrimSpace(remark.URL) != "" {
+	if strings.HasPrefix(strings.TrimSpace(remark.ExternalID), "PRRC_") {
+		return "inline"
+	}
+	if strings.TrimSpace(remark.URL) != "" {
 		return "comment"
 	}
 	return ""
@@ -1655,6 +1683,27 @@ func validateReviewResponseThreadIDs(responses []StructuredResponse) error {
 		}
 	}
 	return nil
+}
+
+func validateReviewResponses(responses []StructuredResponse) error {
+	var failures []error
+	for index, response := range responses {
+		typ := reviewResponseType(response)
+		if typ == "local" {
+			continue
+		}
+		switch typ {
+		case "inline":
+			if strings.TrimSpace(response.ThreadID) == "" && (strings.TrimSpace(reviewResponseCommentBody(response)) != "" || isResolvedReviewResponse(response)) {
+				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): thread_id is required; canonical external_id is missing or unknown", index, strings.TrimSpace(response.RemarkID)))
+			}
+		case "comment":
+			// Общий комментарий формируется как новая связанная запись и thread_id не требует.
+		default:
+			failures = append(failures, fmt.Errorf("review response %d (remark_id %q): type is unsupported or cannot be restored from canonical external_id/thread_id", index, strings.TrimSpace(response.RemarkID)))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func reviewResponseType(response StructuredResponse) string {

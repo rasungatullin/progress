@@ -2224,6 +2224,121 @@ func TestPublishReviewResponsesRestoresKindFromCanonicalRemark(t *testing.T) {
 	}
 }
 
+func TestPublishReviewResponsesRestoresKindByStructuredRemarkExternalID(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{
+				{ExternalID: "PRRC_inline-1", ReplyToID: "PRRT_thread-1"},
+				{ExternalID: "PRRC_comment-1", Type: "comment"},
+			},
+			"structured_output": &model.StructuredOutput{
+				Remarks: []model.StructuredRemark{
+					{ID: "remark-1", ExternalID: "PRRC_inline-1"},
+					{ID: "remark-2", ExternalID: "PRRC_comment-1"},
+				},
+				ReviewResponses: []model.StructuredResponse{
+					{RemarkID: "remark-1", Status: "resolved", Summary: "Строчный ответ."},
+					{RemarkID: "remark-2", Status: "fixed", Summary: "Ответ на общий комментарий."},
+				},
+			},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
+		t.Fatalf("publish review responses: %v", err)
+	}
+	if len(calls) != 3 || calls[0].Operation != "reply" || calls[0].ThreadID != "PRRT_thread-1" || calls[1].Operation != "create" || calls[1].ThreadID != "" || calls[2].Operation != "resolve" {
+		t.Fatalf("response kind and thread must follow canonical external identifiers: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesRejectsPRRCWithoutThreadBeforePublication(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{
+				ExternalID: "PRRC_kwDOSYi3G87Um5M0",
+			}},
+			"structured_output": &model.StructuredOutput{
+				Remarks: []model.StructuredRemark{{ID: "remark-1", ExternalID: "PRRC_kwDOSYi3G87Um5M0"}},
+				ReviewResponses: []model.StructuredResponse{{
+					RemarkID: "remark-1",
+					Status:   "resolved",
+					Summary:  "Исправлено.",
+				}},
+			},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses)
+	if err == nil || !strings.Contains(err.Error(), "thread_id is required") {
+		t.Fatalf("PRRC without thread_id must fail with a diagnostic: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("PRRC without thread_id must not be published externally: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesCanonicalKindOverridesConflictingResponse(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{
+				{ExternalID: "PRRC_inline-1", Type: "inline", ReplyToID: "PRRT_thread-1"},
+				{ExternalID: "PRRC_comment-1", Type: "comment"},
+			},
+			"structured_output": &model.StructuredOutput{
+				Remarks: []model.StructuredRemark{
+					{ID: "remark-1", ExternalID: "PRRC_inline-1"},
+					{ID: "remark-2", ExternalID: "PRRC_comment-1"},
+				},
+				ReviewResponses: []model.StructuredResponse{
+					{RemarkID: "remark-1", Type: "comment", ThreadID: "stale-thread", Status: "resolved", Summary: "Строчный ответ."},
+					{RemarkID: "remark-2", Type: "inline", ThreadID: "stale-thread", Status: "fixed", Summary: "Ответ на общий комментарий."},
+				},
+			},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
+		t.Fatalf("publish review responses: %v", err)
+	}
+	if len(calls) != 3 || calls[0].Operation != "reply" || calls[0].ThreadID != "PRRT_thread-1" || calls[1].Operation != "create" || calls[1].ThreadID != "" || calls[2].Operation != "resolve" {
+		t.Fatalf("canonical response kind must override conflicting synthesized values: %#v", calls)
+	}
+}
+
 func TestPublishReviewResponsesCommentIgnoresThreadID(t *testing.T) {
 	t.Parallel()
 
@@ -2347,7 +2462,7 @@ func TestPublishReviewResponsesRejectsUnclassifiedResponseWithoutExternalPublica
 	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
 		t.Fatalf("unclassified response must produce a partial failure")
 	}
-	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+	if len(calls) != 0 {
 		t.Fatalf("unclassified response must not be published externally: %#v", calls)
 	}
 }
@@ -2376,7 +2491,7 @@ func TestPublishReviewResponsesRejectsResponseWithoutRemarkKind(t *testing.T) {
 	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
 		t.Fatalf("response without canonical remark kind must produce a partial failure")
 	}
-	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+	if len(calls) != 0 {
 		t.Fatalf("unclassified response must not be published externally: %#v", calls)
 	}
 }
@@ -2503,7 +2618,7 @@ func TestPublishReviewResponsesRejectsUnknownTypeWithoutExternalPublication(t *t
 	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
 		t.Fatalf("unknown response type must fail")
 	}
-	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+	if len(calls) != 0 {
 		t.Fatalf("unknown response type must not be published externally: %#v", calls)
 	}
 }
