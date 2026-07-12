@@ -33,6 +33,10 @@
       "structured_output": {
         "type": "object",
         "description": "Нормализованный структурированный результат выполнения."
+      },
+      "review_remarks": {
+        "type": "object_array",
+        "description": "Канонические замечания ревизии для восстановления вида ответа и цепочки обсуждения по remark_id."
       }
     },
     "out": {

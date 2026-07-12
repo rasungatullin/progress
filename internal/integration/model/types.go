@@ -398,6 +398,7 @@ type ReviewRemark struct {
 	Repository         string
 	MergeRequestNumber int
 	ExternalID         string
+	Type               string
 	Author             User
 	State              string
 	Body               string

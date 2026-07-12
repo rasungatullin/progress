@@ -344,6 +344,9 @@
         },
         "structured_output": {
           "ref": "data.structured_output"
+        },
+        "review_remarks": {
+          "ref": "data.review_remarks"
         }
       },
       "out": {

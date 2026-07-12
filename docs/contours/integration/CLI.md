@@ -439,7 +439,7 @@ gh api --paginate --slurp repos/owner/name/issues/456/comments
 gh api graphql -f query='<review threads query>' -f owner=owner -f name=name -F number=456
 ```
 
-Адаптер приводит оба вида комментариев к `ReviewRemark`. Для обычного комментария поля `Path`, `Line` и `ReplyToID` пустые. Для inline-замечания `ReplyToID` содержит идентификатор review thread, а `State` отражает состояние `resolved` или `unresolved`.
+Адаптер приводит оба вида комментариев к `ReviewRemark`. Поле `Type` принимает значение `comment` для обычного комментария и `inline` для замечания ревизии в цепочке. Для обычного комментария поля `Path`, `Line` и `ReplyToID` пустые. Для inline-замечания `ReplyToID` содержит идентификатор review thread, а `State` отражает состояние `resolved` или `unresolved`.
 
 ### 7.13 `progress integration github pr search`
 

@@ -1520,10 +1520,10 @@ func TestServicePRCommentsCombinesConversationAndReviewThreads(t *testing.T) {
 	if len(response.ReviewRemarks) != 2 {
 		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
 	}
-	if response.ReviewRemarks[0].State != "conversation" {
+	if response.ReviewRemarks[0].State != "conversation" || response.ReviewRemarks[0].Type != "comment" {
 		t.Fatalf("unexpected conversation remark: %#v", response.ReviewRemarks[0])
 	}
-	if response.ReviewRemarks[1].State != "unresolved" || response.ReviewRemarks[1].ReplyToID != "thread-1" || response.ReviewRemarks[1].Path != "file.go" || response.ReviewRemarks[1].Line != 12 {
+	if response.ReviewRemarks[1].State != "unresolved" || response.ReviewRemarks[1].Type != "inline" || response.ReviewRemarks[1].ReplyToID != "thread-1" || response.ReviewRemarks[1].Path != "file.go" || response.ReviewRemarks[1].Line != 12 {
 		t.Fatalf("unexpected inline remark: %#v", response.ReviewRemarks[1])
 	}
 }

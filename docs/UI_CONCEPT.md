@@ -291,7 +291,7 @@ created_at
 - `operational_context` — элементы с полями `title` и `body`;
 - `previous_run_results` — элементы с полями `summary` и `body`;
 - `review_remarks` — элементы с полями `id`, `status`, `severity`, `type`, `title`, `body`, `answer`, `resolution`;
-- `review_responses` — элементы с полями `id`, `remark_id`, `status`, `summary`, `body`;
+- `review_responses` — элементы с полями `id`, `remark_id`, `thread_id`, `type`, `status`, `summary`, `body`;
 - `integration_actions` — элементы с полями `id`, `status`, `type`, `title`, `body`;
 - `extensions` — именные расширения, доступные как техническая секция.
 
