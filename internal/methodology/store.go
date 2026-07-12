@@ -412,6 +412,15 @@ func loadInstructionBody(instruction Instruction, descriptionPath, methodologyRo
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return Instruction{}, fmt.Errorf("instruction %q body_file %q escapes methodology catalog", instruction.Name, instruction.BodyFile)
 	}
+	if evaluatedPath, err := filepath.EvalSymlinks(bodyPath); err == nil {
+		evaluatedRelative, relativeErr := filepath.Rel(root, evaluatedPath)
+		if relativeErr != nil || evaluatedRelative == ".." || strings.HasPrefix(evaluatedRelative, ".."+string(filepath.Separator)) {
+			return Instruction{}, fmt.Errorf("instruction %q body_file %q escapes methodology catalog", instruction.Name, instruction.BodyFile)
+		}
+		bodyPath = evaluatedPath
+	} else if !os.IsNotExist(err) {
+		return Instruction{}, fmt.Errorf("resolve instruction body file %s: %w", bodyPath, err)
+	}
 	content, err := readFile(bodyPath)
 	if err != nil {
 		return Instruction{}, fmt.Errorf("read instruction body file %s: %w", bodyPath, err)
@@ -466,6 +475,9 @@ func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mk
 		}
 	}
 	for _, instruction := range catalog.Instructions {
+		if instruction.BodyFile != "" {
+			instruction.Body = ""
+		}
 		path, err := registryFilePath(root, "instructions", instructionRegistryKey(instruction))
 		if err != nil {
 			return err

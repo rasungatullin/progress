@@ -156,6 +156,47 @@ func TestLoadCatalogRejectsInstructionBodyAndBodyFile(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsInstructionBodyFileSymlinkOutsideMethodologyRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	outsideDir := t.TempDir()
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"instructions":[{"name":"directive","body_file":"texts/directive.md"}]}`)
+	writeTestFile(t, filepath.Join(outsideDir, "directive.md"), "внешний текст")
+	if err := os.MkdirAll(filepath.Join(methodologyDir, "texts"), 0o755); err != nil {
+		t.Fatalf("create instruction directory: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outsideDir, "directive.md"), filepath.Join(methodologyDir, "texts", "directive.md")); err != nil {
+		t.Fatalf("create instruction symlink: %v", err)
+	}
+
+	_, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err == nil || !strings.Contains(err.Error(), "escapes methodology catalog") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWriteCatalogFilesOmitsLoadedInstructionBody(t *testing.T) {
+	written := map[string][]byte{}
+	writeFile := func(path string, content []byte, _ fs.FileMode) error {
+		written[path] = append([]byte(nil), content...)
+		return nil
+	}
+
+	err := writeCatalogFiles("/repo/.progress/methodology/catalog.json", Catalog{
+		Instructions: []Instruction{{Name: "directive", Body: "загруженный текст", BodyFile: "texts/directive.md"}},
+	}, writeFile, func(string, fs.FileMode) error { return nil }, func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("write catalog files: %v", err)
+	}
+
+	content := string(written["/repo/.progress/methodology/instructions/directive.json"])
+	if strings.Contains(content, `"body"`) || !strings.Contains(content, `"body_file": "texts/directive.md"`) {
+		t.Fatalf("unexpected instruction content: %s", content)
+	}
+}
+
 func TestLoadCatalogKeepsLocalAliasPriorityOverGlobalAlias(t *testing.T) {
 	t.Parallel()
 
