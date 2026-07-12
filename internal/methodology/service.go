@@ -191,10 +191,13 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 		Action:      action,
 		Profile:     profile,
 		Instruction: instruction,
-		Skills:      selectRouteSkills(catalog.Skills, route.Skills),
 		Diagnostics: []string{
 			fmt.Sprintf("route=%s", route.Name),
 		},
+	}
+	result.Skills, err = selectRouteSkills(catalog.Skills, route.Skills)
+	if err != nil {
+		return SelectionResult{}, err
 	}
 	if action.Name != "" {
 		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("action=%s", action.Name))
@@ -213,9 +216,9 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 	return result, nil
 }
 
-func selectRouteSkills(skills []Skill, names []string) []Skill {
+func selectRouteSkills(skills []Skill, names []string) ([]Skill, error) {
 	if len(names) == 0 {
-		return nil
+		return nil, nil
 	}
 	byName := make(map[string]Skill, len(skills))
 	for _, skill := range skills {
@@ -226,17 +229,19 @@ func selectRouteSkills(skills []Skill, names []string) []Skill {
 	for _, name := range names {
 		name = normalizeName(name)
 		if name == "" {
-			continue
+			return nil, fmt.Errorf("маршрут обработки содержит пустое имя навыка")
 		}
 		if _, ok := seen[name]; ok {
-			continue
+			return nil, fmt.Errorf("маршрут обработки содержит дублирующийся навык %q", name)
 		}
-		if skill, ok := byName[name]; ok {
-			selected = append(selected, skill)
-			seen[name] = struct{}{}
+		skill, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("навык %q не найден в каталоге методик", name)
 		}
+		selected = append(selected, skill)
+		seen[name] = struct{}{}
 	}
-	return selected
+	return selected, nil
 }
 
 func (s *Service) repoRootForWrite(ctx context.Context, repoRoot string, scope configuration.ConfigFileSource) (string, error) {

@@ -2,6 +2,7 @@ package methodology
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -157,5 +158,31 @@ func TestServiceSelectDoesNotUseInstructionForAnotherProfile(t *testing.T) {
 	}
 	if len(result.Diagnostics) == 0 || result.Diagnostics[len(result.Diagnostics)-1] != "instruction-missing-for-profile=default" {
 		t.Fatalf("expected missing instruction diagnostic: %#v", result.Diagnostics)
+	}
+}
+
+func TestServiceSelectRejectsInvalidRouteSkills(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		routeSkills []string
+		want        string
+	}{
+		{name: "empty", routeSkills: []string{"  "}, want: "пустое имя навыка"},
+		{name: "duplicate", routeSkills: []string{"release-checks", "release-checks"}, want: "дублирующийся навык"},
+		{name: "unknown", routeSkills: []string{"missing"}, want: "не найден в каталоге методик"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewService(nil).Select(context.Background(), Catalog{
+				Routes: []Route{{Name: "default", Skills: tt.routeSkills}},
+				Skills: []Skill{{Name: "release-checks", Path: "skills/release-checks.md"}},
+			}, SelectionRequest{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected %q error, got %v", tt.want, err)
+			}
+		})
 	}
 }
