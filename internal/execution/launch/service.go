@@ -2,6 +2,7 @@ package launch
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -35,6 +37,26 @@ const runnerMetadataStart = "<progress-runner-metadata>"
 const runnerMetadataEnd = "</progress-runner-metadata>"
 
 const runRecordFilePrefix = "execution-"
+
+const (
+	defaultRunnerTimeout         = 30 * time.Minute
+	defaultRunnerNoOutputTimeout = 5 * time.Minute
+)
+
+var (
+	errRunnerTimeout         = errors.New("runner timeout")
+	errRunnerNoOutputTimeout = errors.New("runner stalled: no output")
+)
+
+type runnerExecutionError struct {
+	err    error
+	output string
+}
+
+func (e *runnerExecutionError) Error() string {
+	return fmt.Sprintf("%s\n%s", e.err, strings.TrimSpace(e.output))
+}
+func (e *runnerExecutionError) Unwrap() error { return e.err }
 
 type trailingStructuredBlockState int
 
@@ -113,14 +135,27 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	runnerOutput, err := s.runRunner(ctx, in)
 	if err != nil {
 		status := "failed"
+		partialOutput := ""
+		var runnerErr *runnerExecutionError
+		if errors.As(err, &runnerErr) {
+			partialOutput = runnerErr.output
+		}
+		rawOutputPath := persistRunnerOutput(workplace.Name, partialOutput)
+		if errors.Is(err, errRunnerTimeout) {
+			status = "timeout"
+		} else if errors.Is(err, errRunnerNoOutputTimeout) {
+			status = "runner-stalled"
+		}
 		if errors.Is(err, errResumeUnsupported) {
 			status = "resume-unsupported"
 		} else if launchInterrupted(ctx, err) {
 			status = "interrupted"
 		}
 		result := model.LaunchResult{
-			Status:  status,
-			Summary: strings.TrimSpace(err.Error()),
+			Status:        status,
+			Summary:       strings.TrimSpace(err.Error()),
+			RawOutput:     partialOutput,
+			RawOutputPath: rawOutputPath,
 		}
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
@@ -1267,9 +1302,9 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	}
 	cmd.Dir = in.Launch.Directory
 	cmd.Env = sanitizedEnv()
-	output, err := cmd.CombinedOutput()
+	output, err := runRunnerCommand(ctx, cmd, in.Launch)
 	if err != nil {
-		return "", fmt.Errorf("launch runner failed: %w\n%s", err, strings.TrimSpace(string(output)))
+		return "", err
 	}
 	if opencodeTitle != "" {
 		metadata.RunnerSessionID = lookupOpenCodeSessionID(ctx, opencodeTitle)
@@ -1289,9 +1324,9 @@ func runCodexRunner(ctx context.Context, spec model.LaunchSpec, prompt string) (
 	cmd.Args = insertCodexJSONFlag(cmd.Args)
 	cmd.Dir = spec.Directory
 	cmd.Env = sanitizedEnv()
-	output, err := cmd.CombinedOutput()
+	output, err := runRunnerCommand(ctx, cmd, spec)
 	if err != nil {
-		return "", fmt.Errorf("launch runner failed: %w\n%s", err, strings.TrimSpace(string(output)))
+		return "", err
 	}
 
 	plainOutput, sessionID := normalizeCodexJSONOutput(string(output))
@@ -1300,6 +1335,98 @@ func runCodexRunner(ctx context.Context, spec model.LaunchSpec, prompt string) (
 	}
 
 	return appendTrailingRunnerMetadata(plainOutput, runnerMetadata{RunnerSessionID: sessionID}), nil
+}
+
+type runnerOutputWriter struct {
+	buffer   bytes.Buffer
+	activity chan struct{}
+}
+
+func (w *runnerOutputWriter) Write(p []byte) (int, error) {
+	n, err := w.buffer.Write(p)
+	select {
+	case w.activity <- struct{}{}:
+	default:
+	}
+	return n, err
+}
+
+func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSpec) (string, error) {
+	timeout, err := runnerDuration(spec.Timeout, defaultRunnerTimeout)
+	if err != nil {
+		return "", err
+	}
+	noOutputTimeout, err := runnerDuration(spec.NoOutputTimeout, defaultRunnerNoOutputTimeout)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+	cmd.Dir = spec.Directory
+	cmd.Env = sanitizedEnv()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	writer := &runnerOutputWriter{activity: make(chan struct{}, 1)}
+	cmd.Stdout = writer
+	cmd.Stderr = writer
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("launch runner failed: %w", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	watchdog := time.NewTimer(noOutputTimeout)
+	defer watchdog.Stop()
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return "", &runnerExecutionError{err: errRunnerTimeout, output: writer.buffer.String()}
+				}
+				if errors.Is(parent.Err(), context.Canceled) || errors.Is(parent.Err(), context.DeadlineExceeded) {
+					return "", &runnerExecutionError{err: ctx.Err(), output: writer.buffer.String()}
+				}
+				return "", &runnerExecutionError{err: fmt.Errorf("launch runner failed: %w", err), output: writer.buffer.String()}
+			}
+			return writer.buffer.String(), nil
+		case <-writer.activity:
+			if !watchdog.Stop() {
+				select {
+				case <-watchdog.C:
+				default:
+				}
+			}
+			watchdog.Reset(noOutputTimeout)
+		case <-watchdog.C:
+			cancel()
+			<-done
+			return "", &runnerExecutionError{err: errRunnerNoOutputTimeout, output: writer.buffer.String()}
+		case <-ctx.Done():
+			<-done
+			if errors.Is(parent.Err(), context.Canceled) || errors.Is(parent.Err(), context.DeadlineExceeded) {
+				return "", &runnerExecutionError{err: ctx.Err(), output: writer.buffer.String()}
+			}
+			return "", &runnerExecutionError{err: errRunnerTimeout, output: writer.buffer.String()}
+		}
+	}
+}
+
+func runnerDuration(value string, fallback time.Duration) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("invalid runner timeout %q", value)
+	}
+	return duration, nil
 }
 
 func insertCodexJSONFlag(args []string) []string {
@@ -1659,6 +1786,12 @@ func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) 
 	spec.StructuredOutputRequired = spec.StructuredOutputRequired || profile.StructuredOutputRequired
 	if spec.StructuredOutputFields == nil && profile.StructuredOutputFields != nil {
 		spec.StructuredOutputFields = append([]string(nil), profile.StructuredOutputFields...)
+	}
+	if strings.TrimSpace(spec.Timeout) == "" {
+		spec.Timeout = profile.Timeout
+	}
+	if strings.TrimSpace(spec.NoOutputTimeout) == "" {
+		spec.NoOutputTimeout = profile.NoOutputTimeout
 	}
 
 	return spec
