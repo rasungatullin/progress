@@ -59,6 +59,7 @@ func (s *Service) Resolve(ctx context.Context, in model.Invocation) (model.Profi
 		StartupTimeout:           firstNonEmpty(entry.StartupTimeout, config.Defaults.StartupTimeout),
 		Timeout:                  firstNonEmpty(entry.Timeout, config.Defaults.Timeout),
 		NoOutputTimeout:          firstNonEmpty(entry.NoOutputTimeout, config.Defaults.NoOutputTimeout),
+		StructuredOutputTimeout:  firstNonEmpty(entry.StructuredOutputTimeout, config.Defaults.StructuredOutputTimeout),
 	}
 
 	fields, err := resolveStructuredOutputFields(config.Defaults.StructuredOutputFields, entry.StructuredOutputFields)
