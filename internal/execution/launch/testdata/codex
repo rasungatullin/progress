@@ -16,6 +16,13 @@ case "$7" in
 		printf '{"type":"item.completed","item":{"type":"agent_message","text":"partial"}}\n'
 		sleep .5
 		;;
+	pause)
+		printf '{"type":"thread.started","thread_id":"thread-test"}\n'
+		printf '{"type":"turn.started"}\n'
+		printf '{"type":"item.completed","item":{"type":"file_change","changes":[]}}\n'
+		sleep .15
+		printf '{"type":"item.completed","item":{"type":"agent_message","text":"continued"}}\n'
+		;;
 	*)
 		exit 4
 		;;

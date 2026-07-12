@@ -18,6 +18,7 @@ type LaunchSpec struct {
 	Timeout                  string           `json:"timeout,omitempty"`
 	StartupTimeout           string           `json:"startup_timeout,omitempty"`
 	NoOutputTimeout          string           `json:"no_output_timeout,omitempty"`
+	StructuredOutputTimeout  string           `json:"structured_output_timeout,omitempty"`
 }
 
 type StructuredExtensions map[string]json.RawMessage
@@ -191,6 +192,7 @@ type Profile struct {
 	Timeout                  string   `json:"timeout,omitempty"`
 	StartupTimeout           string   `json:"startup_timeout,omitempty"`
 	NoOutputTimeout          string   `json:"no_output_timeout,omitempty"`
+	StructuredOutputTimeout  string   `json:"structured_output_timeout,omitempty"`
 }
 
 type ProfileConfigFile struct {
@@ -209,6 +211,7 @@ type ProfileOptions struct {
 	Timeout                  string    `json:"timeout"`
 	StartupTimeout           string    `json:"startup-timeout"`
 	NoOutputTimeout          string    `json:"no-output-timeout"`
+	StructuredOutputTimeout  string    `json:"structured-output-timeout"`
 }
 
 type ProfileConfig struct {
@@ -223,6 +226,7 @@ type ProfileConfig struct {
 	Timeout                  string    `json:"timeout"`
 	StartupTimeout           string    `json:"startup-timeout"`
 	NoOutputTimeout          string    `json:"no-output-timeout"`
+	StructuredOutputTimeout  string    `json:"structured-output-timeout"`
 }
 
 type Allocation struct {

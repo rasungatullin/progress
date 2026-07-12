@@ -253,12 +253,13 @@ func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
 		t.Fatalf("resolve codex stand-in: %v", err)
 	}
 	spec := model.LaunchSpec{
-		Directory:       t.TempDir(),
-		Runner:          RunnerCodex,
-		Model:           "openai/gpt-5.4",
-		Timeout:         "5s",
-		StartupTimeout:  "1s",
-		NoOutputTimeout: "300ms",
+		Directory:               t.TempDir(),
+		Runner:                  RunnerCodex,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "5s",
+		StartupTimeout:          "1s",
+		NoOutputTimeout:         "300ms",
+		StructuredOutputTimeout: "300ms",
 	}
 	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "timeout")
 	_, err = runCodexRunnerCommand(context.Background(), spec, cmd)
@@ -268,6 +269,35 @@ func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
 	var runnerErr *runnerExecutionError
 	if !errors.As(err, &runnerErr) || !strings.Contains(runnerErr.output, `"thread_id":"thread-test"`) || runnerErr.lastOutputAt.IsZero() {
 		t.Fatalf("codex events were not preserved before Wait: %#v", runnerErr)
+	}
+	for _, expected := range []string{"last structured event=item.completed/agent_message", "idle=", "rule=300ms после события"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
+func TestRunCodexRunnerAllowsPauseAfterStructuredFileChange(t *testing.T) {
+	codexPath, err := filepath.Abs(filepath.Join("testdata", RunnerCodex))
+	if err != nil {
+		t.Fatalf("resolve codex stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerCodex,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "2s",
+		StartupTimeout:          "100ms",
+		NoOutputTimeout:         "50ms",
+		StructuredOutputTimeout: "300ms",
+	}
+	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "pause")
+	output, err := runCodexRunnerCommand(context.Background(), spec, cmd)
+	if err != nil {
+		t.Fatalf("structured event pause must be allowed: %v", err)
+	}
+	if !strings.Contains(output, "continued") {
+		t.Fatalf("output after structured event was lost: %q", output)
 	}
 }
 

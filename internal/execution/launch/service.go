@@ -39,9 +39,10 @@ const runnerMetadataEnd = "</progress-runner-metadata>"
 const runRecordFilePrefix = "execution-"
 
 const (
-	defaultRunnerTimeout         = 30 * time.Minute
-	defaultRunnerNoOutputTimeout = 5 * time.Minute
-	worktreeDiagnosticTimeout    = 10 * time.Second
+	defaultRunnerTimeout                 = 30 * time.Minute
+	defaultRunnerNoOutputTimeout         = 5 * time.Minute
+	defaultRunnerStructuredOutputTimeout = 15 * time.Minute
+	worktreeDiagnosticTimeout            = 10 * time.Second
 )
 
 var (
@@ -50,14 +51,26 @@ var (
 )
 
 type runnerExecutionError struct {
-	err          error
-	output       string
-	stopReason   string
-	lastOutputAt time.Time
+	err                 error
+	output              string
+	stopReason          string
+	lastOutputAt        time.Time
+	lastStructuredEvent string
+	structuredEventAt   time.Time
+	idleDuration        time.Duration
+	timeoutRule         string
 }
 
 func (e *runnerExecutionError) Error() string {
-	return fmt.Sprintf("%s\n%s", e.err, strings.TrimSpace(e.output))
+	diagnostic := ""
+	if e.stopReason == "no-output-timeout" {
+		lastEvent := e.lastStructuredEvent
+		if lastEvent == "" {
+			lastEvent = "отсутствует"
+		}
+		diagnostic = fmt.Sprintf("\nlast structured event=%s idle=%s rule=%s", lastEvent, e.idleDuration.Round(time.Millisecond), e.timeoutRule)
+	}
+	return fmt.Sprintf("%s%s\n%s", e.err, diagnostic, strings.TrimSpace(e.output))
 }
 func (e *runnerExecutionError) Unwrap() error { return e.err }
 
@@ -1434,10 +1447,14 @@ func runCodexRunnerCommand(ctx context.Context, spec model.LaunchSpec, cmd *exec
 }
 
 type runnerOutputWriter struct {
-	mu           sync.Mutex
-	buffer       bytes.Buffer
-	activity     chan struct{}
-	lastOutputAt time.Time
+	mu                  sync.Mutex
+	buffer              bytes.Buffer
+	activity            chan struct{}
+	lastOutputAt        time.Time
+	structuredEvents    bool
+	structuredPending   []byte
+	lastStructuredEvent string
+	structuredEventAt   time.Time
 }
 
 func (w *runnerOutputWriter) Write(p []byte) (int, error) {
@@ -1446,6 +1463,9 @@ func (w *runnerOutputWriter) Write(p []byte) (int, error) {
 	n, err := w.buffer.Write(p)
 	if n > 0 {
 		w.lastOutputAt = time.Now()
+		if w.structuredEvents {
+			w.recordStructuredEvents(p)
+		}
 	}
 	select {
 	case w.activity <- struct{}{}:
@@ -1454,10 +1474,43 @@ func (w *runnerOutputWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+func (w *runnerOutputWriter) recordStructuredEvents(p []byte) {
+	w.structuredPending = append(w.structuredPending, p...)
+	for {
+		lineEnd := bytes.IndexByte(w.structuredPending, '\n')
+		if lineEnd < 0 {
+			return
+		}
+		line := w.structuredPending[:lineEnd]
+		w.structuredPending = w.structuredPending[lineEnd+1:]
+		var event struct {
+			Type string `json:"type"`
+			Item struct {
+				Type string `json:"type"`
+			} `json:"item"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(line), &event) != nil || strings.TrimSpace(event.Type) == "" {
+			continue
+		}
+		name := event.Type
+		if strings.TrimSpace(event.Item.Type) != "" {
+			name += "/" + event.Item.Type
+		}
+		w.lastStructuredEvent = name
+		w.structuredEventAt = w.lastOutputAt
+	}
+}
+
 func (w *runnerOutputWriter) snapshot() (string, time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buffer.String(), w.lastOutputAt
+}
+
+func (w *runnerOutputWriter) structuredSnapshot() (string, time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastStructuredEvent, w.structuredEventAt
 }
 
 func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSpec) (string, error) {
@@ -1466,6 +1519,10 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 		return "", err
 	}
 	noOutputTimeout, err := runnerDuration(spec.NoOutputTimeout, defaultRunnerNoOutputTimeout)
+	if err != nil {
+		return "", err
+	}
+	structuredOutputTimeout, err := runnerDuration(spec.StructuredOutputTimeout, defaultRunnerStructuredOutputTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -1480,7 +1537,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	cmd.Env = sanitizedEnv()
 	configureRunnerProcess(cmd)
 	cmd.Cancel = func() error { return terminateRunnerProcess(cmd) }
-	writer := &runnerOutputWriter{activity: make(chan struct{}, 1)}
+	writer := &runnerOutputWriter{activity: make(chan struct{}, 1), structuredEvents: spec.Runner == RunnerCodex}
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 	if err := cmd.Start(); err != nil {
@@ -1511,7 +1568,11 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			if !startedOutput && !lastOutputAt.IsZero() {
 				startedOutput = true
 			}
-			resetRunnerWatchdog(watchdog, noOutputTimeout, lastOutputAt, startedAt)
+			timeout := noOutputTimeout
+			if _, structuredEventAt := writer.structuredSnapshot(); !structuredEventAt.IsZero() && structuredEventAt.Equal(lastOutputAt) {
+				timeout = structuredOutputTimeout
+			}
+			resetRunnerWatchdog(watchdog, timeout, lastOutputAt, startedAt)
 		case <-watchdog.C:
 			_, lastOutputAt := writer.snapshot()
 			startedOutput = startedOutput || !lastOutputAt.IsZero()
@@ -1519,16 +1580,20 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 				cancel()
 				<-done
 				output, lastOutputAt := writer.snapshot()
-				return "", &runnerExecutionError{err: errRunnerNoOutputTimeout, output: output, stopReason: "no-output-timeout", lastOutputAt: lastOutputAt}
+				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout)
 			}
-			if remaining := runnerNoOutputRemaining(noOutputTimeout, lastOutputAt, startedAt); remaining > 0 {
+			watchdogTimeout := noOutputTimeout
+			if _, structuredEventAt := writer.structuredSnapshot(); !structuredEventAt.IsZero() && structuredEventAt.Equal(lastOutputAt) {
+				watchdogTimeout = structuredOutputTimeout
+			}
+			if remaining := runnerNoOutputRemaining(watchdogTimeout, lastOutputAt, startedAt); remaining > 0 {
 				watchdog.Reset(remaining)
 				continue
 			}
 			cancel()
 			<-done
 			output, lastOutputAt := writer.snapshot()
-			return "", &runnerExecutionError{err: errRunnerNoOutputTimeout, output: output, stopReason: "no-output-timeout", lastOutputAt: lastOutputAt}
+			return "", newNoOutputTimeoutError(output, lastOutputAt, writer, watchdogTimeout)
 		case <-ctx.Done():
 			<-done
 			output, lastOutputAt := writer.snapshot()
@@ -1538,6 +1603,33 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			return "", &runnerExecutionError{err: errRunnerTimeout, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
 		}
 	}
+}
+
+func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout time.Duration) *runnerExecutionError {
+	lastEvent, eventAt := writer.structuredSnapshot()
+	if eventAt.IsZero() || !eventAt.Equal(lastOutputAt) {
+		lastEvent = ""
+	}
+	idleDuration := time.Duration(0)
+	if !lastOutputAt.IsZero() {
+		idleDuration = time.Since(lastOutputAt)
+	}
+	return &runnerExecutionError{
+		err:                 errRunnerNoOutputTimeout,
+		output:              output,
+		stopReason:          "no-output-timeout",
+		lastOutputAt:        lastOutputAt,
+		lastStructuredEvent: lastEvent,
+		idleDuration:        idleDuration,
+		timeoutRule:         runnerTimeoutRule(lastEvent, timeout),
+	}
+}
+
+func runnerTimeoutRule(lastEvent string, timeout time.Duration) string {
+	if lastEvent == "" {
+		return fmt.Sprintf("%s без принятого события", timeout)
+	}
+	return fmt.Sprintf("%s после события", timeout)
 }
 
 func runnerNoOutputRemaining(timeout time.Duration, lastOutputAt, startedAt time.Time) time.Duration {
@@ -1955,6 +2047,9 @@ func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) 
 	}
 	if strings.TrimSpace(spec.NoOutputTimeout) == "" {
 		spec.NoOutputTimeout = profile.NoOutputTimeout
+	}
+	if strings.TrimSpace(spec.StructuredOutputTimeout) == "" {
+		spec.StructuredOutputTimeout = profile.StructuredOutputTimeout
 	}
 
 	return spec

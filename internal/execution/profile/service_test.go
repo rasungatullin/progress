@@ -19,6 +19,7 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 			"model-binding": "default",
 			"allow-model-fallback": true,
 			"startup-timeout": "150ms",
+			"structured-output-timeout": "900ms",
 			"prompt-additions": ["Default context.", "Always verify the result."],
 			"structured-output": true,
 			"structured-output-required": false,
@@ -57,6 +58,9 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	}
 	if defaultProfile.StartupTimeout != "150ms" {
 		t.Fatalf("unexpected default startup-timeout: %q", defaultProfile.StartupTimeout)
+	}
+	if defaultProfile.StructuredOutputTimeout != "900ms" {
+		t.Fatalf("unexpected structured-output-timeout: %q", defaultProfile.StructuredOutputTimeout)
 	}
 	if !defaultProfile.StructuredOutput || defaultProfile.StructuredOutputRequired {
 		t.Fatalf("unexpected default structured output flags: %#v", defaultProfile)
