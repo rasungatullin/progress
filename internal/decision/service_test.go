@@ -598,6 +598,32 @@ func TestServiceConsiderUsesCompatibleDefaultRouteForLegacyMethodologyCatalog(t 
 	}
 }
 
+func TestLoadWorkflowConfigRejectsUntrustedLegacySkills(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"default_route": "task-processing",
+		"routes": [{
+			"name": "task-processing",
+			"skills": [{"name":"unregistered","scope":"local","path":"skill.md","checksum":"sha256:claimed"}],
+			"checks": [{"name":"start","action":"implement"}]
+		}]
+	}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	service := &Service{resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
+	_, err := service.loadWorkflowConfig(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "зарегистрированы в каталоге методик") {
+		t.Fatalf("expected untrusted legacy skills error, got: %v", err)
+	}
+}
+
 func TestServiceConsiderUsesLegacyMethodologyDefaultWhenNoRouteMatches(t *testing.T) {
 	t.Parallel()
 

@@ -339,6 +339,9 @@ func readSkill(root, path string) (string, string, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "", "", fmt.Errorf("symbolic links are forbidden")
 	}
+	if !info.IsDir() && !info.Mode().IsRegular() {
+		return "", "", fmt.Errorf("skill must be a regular file or directory of regular files")
+	}
 	h := sha256.New()
 	var files []string
 	if info.IsDir() {
@@ -350,6 +353,13 @@ func readSkill(root, path string) (string, string, error) {
 				return fmt.Errorf("symbolic links are forbidden: %s", file)
 			}
 			if !entry.IsDir() {
+				entryInfo, err := entry.Info()
+				if err != nil {
+					return err
+				}
+				if !entryInfo.Mode().IsRegular() {
+					return fmt.Errorf("skill must contain only regular files: %s", file)
+				}
 				files = append(files, file)
 			}
 			return nil

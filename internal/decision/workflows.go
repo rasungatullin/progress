@@ -197,6 +197,9 @@ func (s *Service) loadWorkflowConfig(ctx context.Context) (workflowConfigFile, e
 	if err := json.Unmarshal(content, &config); err != nil {
 		return workflowConfigFile{}, fmt.Errorf("parse decision workflow config %s: %w", configPath, err)
 	}
+	if err := rejectLegacyWorkflowSkills(config); err != nil {
+		return workflowConfigFile{}, fmt.Errorf("invalid decision workflow config %s: %w", configPath, err)
+	}
 	config = applyLegacyWorkflowConfigCompatibility(config)
 	config = normalizeWorkflowConfig(config)
 	if err := validateWorkflowConfig(config); err != nil {
@@ -204,6 +207,23 @@ func (s *Service) loadWorkflowConfig(ctx context.Context) (workflowConfigFile, e
 	}
 
 	return config, nil
+}
+
+func rejectLegacyWorkflowSkills(config workflowConfigFile) error {
+	if len(config.Defaults.Skills) != 0 {
+		return fmt.Errorf("навыки в совместимом маршруте должны быть зарегистрированы в каталоге методик")
+	}
+	for _, route := range config.Routes {
+		if len(route.Skills) != 0 {
+			return fmt.Errorf("навыки в совместимом маршруте %q должны быть зарегистрированы в каталоге методик", route.Name)
+		}
+		for _, check := range route.Checks {
+			if len(check.Skills) != 0 {
+				return fmt.Errorf("навыки в проверке маршрута %q должны быть зарегистрированы в каталоге методик", check.Name)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoot string) (workflowConfigFile, error) {
@@ -343,6 +363,9 @@ func checksumSkill(root, path string) (string, error) {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return "", fmt.Errorf("символическая ссылка запрещена")
 		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("навык должен быть обычным файлом или каталогом обычных файлов")
+		}
 		f, err := os.Open(path)
 		if err != nil {
 			return "", err
@@ -363,6 +386,13 @@ func checksumSkill(root, path string) (string, error) {
 		}
 		if entry.IsDir() {
 			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("навык должен содержать только обычные файлы: %s", file)
 		}
 		files = append(files, file)
 		return nil
