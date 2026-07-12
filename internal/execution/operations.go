@@ -2202,7 +2202,11 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	if branch != workplaceBranch {
 		return e.failRebase(state, operation, name, "Текущая ветка не совпадает с рабочей веткой.", "rebase_head_ref_mismatch", fmt.Errorf("current branch %q does not match workplace branch %q", branch, input.HeadRef))
 	}
-	if branch == normalizeRebaseRef(input.BaseRef) {
+	protectedBranch := strings.TrimSpace(input.ProtectedRef)
+	if protectedBranch == "" {
+		protectedBranch = "main"
+	}
+	if branch == normalizeRebaseRef(protectedBranch) {
 		return e.failRebase(state, operation, name, "Перебазирование основной ветки запрещено.", "rebase_base_branch", fmt.Errorf("current branch %q is the rebase base branch", branch))
 	}
 
@@ -2269,6 +2273,7 @@ func rebaseInputFromOperation(state *operationExecution, operation OperationSpec
 	input.Directory, _ = operationMappingValue[string](state, operation.In["directory"])
 	input.BaseRef, _ = operationMappingValue[string](state, operation.In["base_ref"])
 	input.HeadRef, _ = operationMappingValue[string](state, operation.In["head_ref"])
+	input.ProtectedRef, _ = operationMappingValue[string](state, operation.In["protected_ref"])
 	input.Push, _ = operationMappingValue[bool](state, operation.In["push"])
 	input.ForceWithLease, _ = operationMappingValue[bool](state, operation.In["force_with_lease"])
 	if mapping, ok := operation.In["git"]; ok {
@@ -2286,6 +2291,7 @@ func rebaseInputSummary(input model.RebaseInput, operation OperationSpec) string
 		"directory":        input.Directory,
 		"base_ref":         input.BaseRef,
 		"head_ref":         input.HeadRef,
+		"protected_ref":    input.ProtectedRef,
 		"push":             fmt.Sprintf("%t", input.Push),
 		"force_with_lease": fmt.Sprintf("%t", input.ForceWithLease),
 	})

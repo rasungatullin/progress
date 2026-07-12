@@ -157,6 +157,30 @@ func TestRebaseRejectsBaseBranch(t *testing.T) {
 	}
 }
 
+func TestRebaseRejectsProtectedBranchWhenBaseRefIsSHAAndHeadRefIsMain(t *testing.T) {
+	var calls []string
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		call := strings.Join(args, " ")
+		calls = append(calls, call)
+		switch call {
+		case "rev-parse --is-inside-work-tree":
+			return "true", nil
+		case "branch --show-current":
+			return "main", nil
+		default:
+			return "", nil
+		}
+	}}
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "0123456789abcdef0123456789abcdef01234567", HeadRef: "main"}
+	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), rebaseTestState(service, input), rebaseTestOperation(input), "rebase")
+	if err == nil || !strings.Contains(err.Error(), "base branch") {
+		t.Fatalf("expected protected-branch refusal, got %v", err)
+	}
+	if strings.Contains(strings.Join(calls, "\n"), "fetch") {
+		t.Fatalf("protected branch must not fetch: %v", calls)
+	}
+}
+
 func TestRebaseConflictAbortsInTemporaryRepository(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -222,8 +246,9 @@ func rebaseTestOperation(input model.RebaseInput) OperationSpec {
 		Name: "rebase", Kind: OperationKindRebase,
 		In: model.OperationMap{
 			"directory": rebaseMapping(input.Directory), "base_ref": rebaseMapping(input.BaseRef),
-			"head_ref": rebaseMapping(input.HeadRef),
-			"push":     rebaseMapping(input.Push), "force_with_lease": rebaseMapping(input.ForceWithLease), "git": rebaseMapping(input.Git),
+			"head_ref":      rebaseMapping(input.HeadRef),
+			"protected_ref": rebaseMapping(input.ProtectedRef),
+			"push":          rebaseMapping(input.Push), "force_with_lease": rebaseMapping(input.ForceWithLease), "git": rebaseMapping(input.Git),
 		},
 		Out: model.OperationMap{"rebase_summary": {Ref: "data.rebase_summary"}},
 	}
