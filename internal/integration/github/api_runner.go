@@ -78,9 +78,17 @@ func (r *APIRunner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedC
 		config.Token = token.Token
 		// Installation token не определяет GitHub App через /user.
 		// Идентичность приложения определяется JWT, которым создан token.
-		if login, identityErr := r.githubAppLogin(ctx, config); identityErr == nil {
-			result.Stdout = mustJSON(map[string]string{"login": login})
+		login, err := r.githubAppLogin(ctx, config)
+		if err != nil {
+			result.ExitCode = -1
+			return result, apiResolvedConfig(config), &Error{
+				Code:    ErrorCodeInternalIntegration,
+				Message: fmt.Sprintf("determine GitHub App identity: %v", err),
+				Err:     err,
+				Result:  result,
+			}
 		}
+		result.Stdout = mustJSON(map[string]string{"login": login})
 		return result, apiResolvedConfig(config), nil
 	}
 	if config.Token == "" {

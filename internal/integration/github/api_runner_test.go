@@ -272,6 +272,47 @@ func TestAPITransportUsesGitHubAppInstallationToken(t *testing.T) {
 	}
 }
 
+func TestAPIAuthStatusFailsWhenGitHubAppIdentityCannotBeDetermined(t *testing.T) {
+	t.Parallel()
+
+	keyPEM := testRSAPrivateKeyPEM(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/42/access_tokens":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"token":      "installation-secret",
+				"expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			})
+		case "/app":
+			http.Error(w, "identity unavailable", http.StatusForbidden)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                     server.URL,
+			GitHubAppID:                 "12345",
+			GitHubAppInstallationID:     "42",
+			GitHubAppPrivateKeyPath:     "/keys/progress.pem",
+			GitHubAppTokenRefreshBefore: "5m",
+		},
+		client:   server.Client(),
+		readFile: func(string) ([]byte, error) { return keyPEM, nil },
+		now:      time.Now,
+	}
+
+	result, _, err := runner.RunAuthStatus(context.Background())
+	if err == nil {
+		t.Fatal("expected GitHub App identity error")
+	}
+	if result.ExitCode == 0 || !strings.Contains(err.Error(), "determine GitHub App identity") {
+		t.Fatalf("unexpected identity failure: result=%#v err=%v", result, err)
+	}
+}
+
 func TestAPITransportDeletesReviewWithGitHubAppInstallationToken(t *testing.T) {
 	t.Parallel()
 
