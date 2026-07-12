@@ -927,6 +927,36 @@ func TestServiceConsiderRequiresMergeRequestForReview(t *testing.T) {
 	}
 }
 
+func TestServiceConsiderDoesNotStartImplementationWhenMergeRequestExists(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{logger: log.Default()}
+	result, err := service.Consider(context.Background(), ConsiderationInput{Context: DecisionContext{
+		Signal: Signal{Source: SignalSourceTask, Kind: SignalKindTask, TaskNumber: 143},
+		Issue: &integration.TrackerIssue{
+			Repository: "owner/name",
+			ID:         "143",
+			Title:      "Продолжить выполнение",
+		},
+		MergeRequest: &integration.MergeRequest{
+			Repository: "owner/name",
+			Number:     144,
+			BaseRef:    "main",
+			HeadRef:    "143",
+			State:      "OPEN",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("consider: %v", err)
+	}
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionReviewPullRequest {
+		t.Fatalf("expected review execution plan, got %#v", result.ExecutionPlan)
+	}
+	if len(result.Checks) == 0 || result.Checks[len(result.Checks)-1].Name != "open-merge-request-invariant" {
+		t.Fatalf("expected open merge request invariant check, got %#v", result.Checks)
+	}
+}
+
 func TestServiceConsiderPassesMergeRequestToReviewAssignment(t *testing.T) {
 	t.Parallel()
 
