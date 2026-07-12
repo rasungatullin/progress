@@ -177,6 +177,30 @@ func TestLoadCatalogRejectsInstructionBodyFileSymlinkOutsideMethodologyRoot(t *t
 	}
 }
 
+func TestLoadCatalogAllowsInstructionBodyFileWhenMethodologyRootIsSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	realMethodologyDir := t.TempDir()
+	methodologyLink := filepath.Join(root, ".progress", "methodology")
+	if err := os.MkdirAll(filepath.Dir(methodologyLink), 0o755); err != nil {
+		t.Fatalf("create methodology parent directory: %v", err)
+	}
+	if err := os.Symlink(realMethodologyDir, methodologyLink); err != nil {
+		t.Fatalf("create methodology root symlink: %v", err)
+	}
+	writeTestFile(t, filepath.Join(methodologyLink, "catalog.json"), `{"instructions":[{"name":"directive","body_file":"texts/directive.md"}]}`)
+	writeTestFile(t, filepath.Join(methodologyLink, "texts", "directive.md"), "внутренний текст")
+
+	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	if got := snapshot.Catalog.Instructions[0].Body; got != "внутренний текст" {
+		t.Fatalf("unexpected instruction body: %q", got)
+	}
+}
+
 func TestWriteCatalogFilesOmitsLoadedInstructionBody(t *testing.T) {
 	written := map[string][]byte{}
 	writeFile := func(path string, content []byte, _ fs.FileMode) error {

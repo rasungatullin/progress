@@ -412,6 +412,11 @@ func loadInstructionBody(instruction Instruction, descriptionPath, methodologyRo
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return Instruction{}, fmt.Errorf("instruction %q body_file %q escapes methodology catalog", instruction.Name, instruction.BodyFile)
 	}
+	if evaluatedRoot, err := filepath.EvalSymlinks(root); err == nil {
+		root = evaluatedRoot
+	} else if !os.IsNotExist(err) {
+		return Instruction{}, fmt.Errorf("resolve methodology catalog root %s: %w", root, err)
+	}
 	if evaluatedPath, err := filepath.EvalSymlinks(bodyPath); err == nil {
 		evaluatedRelative, relativeErr := filepath.Rel(root, evaluatedPath)
 		if relativeErr != nil || evaluatedRelative == ".." || strings.HasPrefix(evaluatedRelative, ".."+string(filepath.Separator)) {
