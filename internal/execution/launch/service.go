@@ -1569,7 +1569,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 				startedOutput = true
 			}
 			timeout := noOutputTimeout
-			if _, structuredEventAt := writer.structuredSnapshot(); !structuredEventAt.IsZero() && structuredEventAt.Equal(lastOutputAt) {
+			if _, structuredEventAt := writer.structuredSnapshot(); !structuredEventAt.IsZero() {
 				timeout = structuredOutputTimeout
 			}
 			resetRunnerWatchdog(watchdog, timeout, lastOutputAt, startedAt)
@@ -1583,7 +1583,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout)
 			}
 			watchdogTimeout := noOutputTimeout
-			if _, structuredEventAt := writer.structuredSnapshot(); !structuredEventAt.IsZero() && structuredEventAt.Equal(lastOutputAt) {
+			if _, structuredEventAt := writer.structuredSnapshot(); !structuredEventAt.IsZero() {
 				watchdogTimeout = structuredOutputTimeout
 			}
 			if remaining := runnerNoOutputRemaining(watchdogTimeout, lastOutputAt, startedAt); remaining > 0 {
@@ -1607,7 +1607,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 
 func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout time.Duration) *runnerExecutionError {
 	lastEvent, eventAt := writer.structuredSnapshot()
-	if eventAt.IsZero() || !eventAt.Equal(lastOutputAt) {
+	if eventAt.IsZero() {
 		lastEvent = ""
 	}
 	idleDuration := time.Duration(0)
