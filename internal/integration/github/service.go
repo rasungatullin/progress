@@ -25,6 +25,7 @@ type ghRunner interface {
 	RunPRCreate(context.Context, string, PRCreateRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreads(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRReviews(context.Context, string, int) (CommandResult, resolvedConfig, error)
+	RunPRReviewComments(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRCommentCreate(context.Context, string, int, PRCommentCreateRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewSubmit(context.Context, string, int, int64) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadReply(context.Context, PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error)
@@ -153,9 +154,8 @@ type ghPRReviewCommentCreateResponse struct {
 }
 
 type ghPRReview struct {
-	ID       int64  `json:"id"`
-	State    string `json:"state"`
-	Comments *int   `json:"comments"`
+	ID    int64  `json:"id"`
+	State string `json:"state"`
 }
 
 type ghPRReviewThreadResolveResponse struct {
@@ -564,7 +564,10 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		if err != nil {
 			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pull request review state lookup failed after comment create")
 		}
-		if !pending || pendingReviewID == 0 {
+		if pendingReviewID == 0 {
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d was not found after review comment creation", reviewID), Result: result}, "pull request review was not visible after comment create")
+		}
+		if !pending {
 			return successfulPRCommentCreate(response, remark, config, repository, number)
 		}
 		reviewID = pendingReviewID
@@ -608,18 +611,51 @@ func (s *Service) findPendingPRReview(ctx context.Context, repository string, nu
 			reviews = append(reviews, page...)
 		}
 	}
+	pending := make(map[int64]struct{})
 	for _, review := range reviews {
-		if review.ID <= 0 || !strings.EqualFold(strings.TrimSpace(review.State), "pending") || review.Comments == nil {
-			continue
-		}
-		if *review.Comments == 0 {
-			return 0, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks", review.ID), Result: result}
-		}
-		if *review.Comments > 0 {
-			return review.ID, nil
+		if review.ID > 0 && strings.EqualFold(strings.TrimSpace(review.State), "pending") {
+			pending[review.ID] = struct{}{}
 		}
 	}
+	if len(pending) == 0 {
+		return 0, nil
+	}
+	commentResult, _, err := s.runner.RunPRReviewComments(ctx, repository, number)
+	if err != nil {
+		return 0, err
+	}
+	if commentResult.ExitCode != 0 {
+		return 0, &Error{Code: ErrorCodeExternalFailure, Message: "GitHub pull request review comments lookup exited with a non-zero code", Result: commentResult}
+	}
+	comments, err := decodePRReviewComments(commentResult)
+	if err != nil {
+		return 0, err
+	}
+	for _, comment := range comments {
+		if _, found := pending[comment.ReviewID]; found {
+			return comment.ReviewID, nil
+		}
+	}
+	for reviewID := range pending {
+		return 0, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review %d is pending but contains no publishable remarks", reviewID), Result: commentResult}
+	}
 	return 0, nil
+}
+
+func decodePRReviewComments(result CommandResult) ([]ghPRReviewCommentCreateResponse, error) {
+	var comments []ghPRReviewCommentCreateResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &comments); err == nil {
+		return comments, nil
+	} else {
+		var pages [][]ghPRReviewCommentCreateResponse
+		if pageErr := json.Unmarshal([]byte(result.Stdout), &pages); pageErr != nil {
+			return nil, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub pull request review comments JSON response: %v", err), Result: result, Err: err}
+		}
+		for _, page := range pages {
+			comments = append(comments, page...)
+		}
+		return comments, nil
+	}
 }
 
 func (s *Service) findPRReviewState(ctx context.Context, repository string, number int, reviewID int64) (int64, bool, error) {

@@ -723,6 +723,33 @@ func TestRunnerRunPRReviewThreadResolveBuildsGraphQLCommand(t *testing.T) {
 	}
 }
 
+func TestRunnerRunPRReviewCommentsBuildsPaginatedRESTCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := NewRunner()
+	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
+	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
+		if path != "/usr/bin/gh" {
+			t.Fatalf("unexpected path: %q", path)
+		}
+		expected := []string{"api", "--paginate", "--slurp", "repos/owner/name/pulls/42/comments"}
+		if fmt.Sprint(args) != fmt.Sprint(expected) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return commandRunner{stdout: `[[{"id":101,"pull_request_review_id":77}]]`}
+	}
+
+	result, _, err := runner.RunPRReviewComments(context.Background(), "owner/name", 42)
+	if err != nil {
+		t.Fatalf("list review comments: %v", err)
+	}
+	if !strings.Contains(result.Stdout, "pull_request_review_id") {
+		t.Fatalf("unexpected response: %s", result.Stdout)
+	}
+}
+
 func TestRunnerRunPRCommentCreateUsesRESTEndpoint(t *testing.T) {
 	t.Parallel()
 
