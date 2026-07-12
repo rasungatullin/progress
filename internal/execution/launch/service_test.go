@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	codexRunnerStartupTimeout = "5s"
-	codexRunnerTimeout        = "10s"
+	codexRunnerStartupTimeout = "10s"
+	codexRunnerTimeout        = "30s"
 )
 
 func TestLaunchCommitPushDisabled(t *testing.T) {
@@ -155,6 +155,26 @@ func TestRunRunnerCommandUsesStartupTimeoutBeforeFirstOutput(t *testing.T) {
 	}
 	if output != "ready" {
 		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestRunRunnerCommandStopsOnExplicitStartupTimeoutWithoutOutput(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Now()
+	_, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "sleep 1"), model.LaunchSpec{
+		Timeout:         "500ms",
+		StartupTimeout:  "50ms",
+		NoOutputTimeout: "1s",
+	})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected explicit startup timeout, got %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 300*time.Millisecond {
+		t.Fatalf("explicit startup timeout was not applied before overall timeout: %s", elapsed)
+	}
+	if !strings.Contains(err.Error(), "rule=50ms без принятого события") {
+		t.Fatalf("startup timeout diagnostics must identify the explicit rule: %v", err)
 	}
 }
 
