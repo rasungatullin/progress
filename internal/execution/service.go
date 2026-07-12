@@ -165,13 +165,22 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 	assignment = assignmentFromInvocation(in)
 
 	state := &operationExecution{
-		in:            in,
-		assignment:    assignment,
-		action:        action,
+		in:                in,
+		assignment:        assignment,
+		action:            action,
 		actionCatalogRoot: s.actionCatalogRoot(ctx),
-		historyRoot:   historyRoot,
-		historyHandle: historyHandle,
-		tracker:       newOperationTracker(action),
+		historyRoot:       historyRoot,
+		historyHandle:     historyHandle,
+		tracker:           newOperationTracker(action),
+	}
+	state.policies = s.loadTextPublicationPolicies(ctx, state)
+	if err := validateActionPreconditions(state); err != nil {
+		state.result = failedStartResult(err)
+		if operation := firstActionOperation(action); operation != nil {
+			state.tracker.fail(operationResultName(*operation), "Предварительные условия действия не выполнены.", err, "action_precondition_failed", false, true)
+		}
+		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile{}, allocation{}, workplace{}, state.result, err)
+		return OperationResult{Name: operationName, Kind: model.OperationKind(operationName), Origin: OperationOriginBuiltin, Status: model.OperationStatus(OperationStatusFailed), Failure: &model.Failure{Code: "action_precondition_failed", Message: err.Error()}}, err
 	}
 	executor := builtinOperationExecutor{service: s}
 	for _, operation := range action.Operations {
@@ -238,14 +247,15 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 	s.logger.Printf("Контур исполнения принят к пуску: задача=%q", in.Task)
 
 	state := &operationExecution{
-		in:            in,
-		assignment:    assignment,
-		action:        action,
+		in:                in,
+		assignment:        assignment,
+		action:            action,
 		actionCatalogRoot: s.actionCatalogRoot(ctx),
-		historyRoot:   historyRoot,
-		historyHandle: historyHandle,
-		tracker:       newOperationTracker(action),
+		historyRoot:       historyRoot,
+		historyHandle:     historyHandle,
+		tracker:           newOperationTracker(action),
 	}
+	state.policies = s.loadTextPublicationPolicies(ctx, state)
 	err = s.runActionOperations(ctx, state)
 	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), state.result, err), err
 }

@@ -12,20 +12,20 @@ import (
 )
 
 type operationExecution struct {
-	in            invocation
-	assignment    *ExecutionAssignment
-	action        Action
+	in                invocation
+	assignment        *ExecutionAssignment
+	action            Action
 	actionCatalogRoot string
-	profile       profile
-	allocation    allocation
-	workplace     workplace
-	result        LaunchResult
-	pullRequest   *integration.MergeRequest
-	reviewRemarks []integration.ReviewRemark
-	policies      []textPublicationPolicy
-	historyRoot   string
-	historyHandle history.Handle
-	tracker       *operationTracker
+	profile           profile
+	allocation        allocation
+	workplace         workplace
+	result            LaunchResult
+	pullRequest       *integration.MergeRequest
+	reviewRemarks     []integration.ReviewRemark
+	policies          []textPublicationPolicy
+	historyRoot       string
+	historyHandle     history.Handle
+	tracker           *operationTracker
 }
 
 type builtinOperationExecutor struct {
@@ -37,6 +37,13 @@ type commitPusher interface {
 }
 
 func (s *Service) runActionOperations(ctx context.Context, state *operationExecution) error {
+	if err := validateActionPreconditions(state); err != nil {
+		state.result = failedStartResult(err)
+		if operation := firstActionOperation(state.action); operation != nil {
+			state.tracker.fail(operationResultName(*operation), "Предварительные условия действия не выполнены.", err, "action_precondition_failed", false, true)
+		}
+		return err
+	}
 	executor := builtinOperationExecutor{service: s}
 	for _, operation := range state.action.Operations {
 		if err := executor.Execute(ctx, state, operation); err != nil {
@@ -53,6 +60,23 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 	}
 
 	return nil
+}
+
+func validateActionPreconditions(state *operationExecution) error {
+	if state == nil || !actionContainsOperation(state.action, OperationKindPublishTaskComment) {
+		return nil
+	}
+	if state.assignment == nil || state.assignment.CanonicalTask == nil || state.assignment.CanonicalTask.Number <= 0 {
+		return fmt.Errorf("task number is required")
+	}
+	return nil
+}
+
+func firstActionOperation(action Action) *OperationSpec {
+	if len(action.Operations) == 0 {
+		return nil
+	}
+	return &action.Operations[0]
 }
 
 func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationExecution, operation OperationSpec) error {
@@ -218,7 +242,9 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	if strings.TrimSpace(state.in.Launch.ModelBinding) == "" {
 		state.in.Launch.ModelBinding = state.allocation.ModelBinding
 	}
-	state.policies = e.service.loadTextPublicationPolicies(ctx, state)
+	if len(state.policies) == 0 {
+		state.policies = e.service.loadTextPublicationPolicies(ctx, state)
+	}
 	if len(state.policies) != 0 {
 		input := ensureExecutionStructuredInput(state)
 		appendPublicationPolicyContext(input, state.policies)

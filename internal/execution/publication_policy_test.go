@@ -370,6 +370,25 @@ func TestTaskCommentUsesTaskCommentPolicy(t *testing.T) {
 	}
 }
 
+func TestTaskCommentActionRequiresTaskBeforeExternalOperations(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{action: model.Action{
+		Operations: []model.OperationSpec{
+			{Name: OperationKindCommitPush, Kind: OperationKindCommitPush},
+			{Name: OperationKindPublishTaskComment, Kind: OperationKindPublishTaskComment},
+		},
+	}}
+	if err := validateActionPreconditions(state); err == nil {
+		t.Fatal("expected task number precondition")
+	}
+
+	state.assignment = &ExecutionAssignment{CanonicalTask: &ObjectRef{Number: 143}}
+	if err := validateActionPreconditions(state); err != nil {
+		t.Fatalf("task number must satisfy precondition: %v", err)
+	}
+}
+
 func TestPolicyForStatePublicationUsesOnlyCurrentOperation(t *testing.T) {
 	t.Parallel()
 
