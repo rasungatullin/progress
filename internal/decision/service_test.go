@@ -1332,6 +1332,7 @@ func TestHasUnresolvedExternalReviewRemarksClassifiesReviewConclusions(t *testin
 		{name: "approve", body: "## Заключение ревизии\n\napprove\n\nПроверка завершена", want: false},
 		{name: "approve in thread", body: "## Заключение ревизии\n\nСтатус: approve", want: false},
 		{name: "request changes", body: "## Заключение ревизии\n\nrequest-changes\n\nТребуется доработка", want: true},
+		{name: "unknown status", body: "## Заключение ревизии\n\nunknown", want: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

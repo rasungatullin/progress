@@ -464,6 +464,28 @@ func TestServiceProcessTaskReworksForRequestChangesConclusion(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskReworksForUnknownReviewConclusion(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{{
+		ReplyToID: "thread-1",
+		Body:      "## Заключение ревизии\n\nunknown\n\nНужна проверка результата",
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	cycle := result.Cycles[0]
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	}
+}
+
 func TestServiceProcessTaskReworksForNewConversationComment(t *testing.T) {
 	t.Parallel()
 

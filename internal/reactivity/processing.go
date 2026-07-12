@@ -338,10 +338,8 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 			if isApprovedExternalReviewConclusion(remark.Body) {
 				continue
 			}
-			if isReworkExternalReviewConclusion(remark.Body) {
-				return true
-			}
-			continue
+			// Неизвестное заключение обрабатывается как нерешённое.
+			return true
 		}
 		if strings.TrimSpace(remark.ReplyToID) == "" {
 			if strings.Contains(remark.Body, "## Ответ на замечание ревизии") {
