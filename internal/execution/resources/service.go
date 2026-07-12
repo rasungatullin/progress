@@ -215,10 +215,10 @@ func validateReasoningEffort(runner, modelName, effort string) error {
 	if effort == "" {
 		return nil
 	}
-	if runner != "codex" {
-		return fmt.Errorf("runner %q does not support reasoning-effort", runner)
-	}
-	if !strings.HasPrefix(strings.TrimPrefix(modelName, "openai/"), "gpt-5") {
+	if !model.ReasoningEffortSupported(runner, modelName) {
+		if strings.TrimSpace(runner) != "codex" {
+			return fmt.Errorf("runner %q does not support reasoning-effort", runner)
+		}
 		return fmt.Errorf("model %q does not support reasoning-effort", modelName)
 	}
 	switch effort {

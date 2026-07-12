@@ -721,10 +721,10 @@ func validateReasoningEffort(spec model.LaunchSpec) error {
 	if effort == "" {
 		return nil
 	}
-	if spec.Runner != RunnerCodex {
-		return fmt.Errorf("runner %q does not support reasoning-effort", spec.Runner)
-	}
-	if !strings.HasPrefix(codexModelName(spec.Model), "gpt-5") {
+	if !model.ReasoningEffortSupported(spec.Runner, spec.Model) {
+		if spec.Runner != RunnerCodex {
+			return fmt.Errorf("runner %q does not support reasoning-effort", spec.Runner)
+		}
 		return fmt.Errorf("model %q does not support reasoning-effort", spec.Model)
 	}
 	switch effort {

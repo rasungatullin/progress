@@ -77,6 +77,24 @@ func TestAllocateRejectsReasoningEffortForUnsupportedBinding(t *testing.T) {
 	}
 }
 
+func TestAllocateRejectsReasoningEffortForUnknownCodexModel(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"runners": ["codex"],
+		"models": ["gpt-5-future"],
+		"bindings": {
+			"default": {"runner": "codex", "model": "gpt-5-future", "reasoning-effort": "medium"}
+		}
+	}`)
+
+	_, err := service.Allocate(context.Background(), model.Invocation{}, model.Profile{ModelBinding: "default"})
+	if err == nil || !strings.Contains(err.Error(), `model "gpt-5-future" does not support reasoning-effort`) {
+		t.Fatalf("expected unsupported model error, got %v", err)
+	}
+}
+
 func TestAllocateUsesGlobalResourcesWhenLocalIsMissing(t *testing.T) {
 	t.Setenv("PROGRESS_CONFIG_HOME", "/global")
 	service := newTestServiceWithGlobalFallback(`{

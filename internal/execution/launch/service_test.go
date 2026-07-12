@@ -2326,6 +2326,20 @@ func TestValidateLaunchRejectsReasoningEffortForOpenCode(t *testing.T) {
 	}
 }
 
+func TestValidateLaunchRejectsReasoningEffortForUnknownCodexModel(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	invocation.Launch.Model = "gpt-5-future"
+	invocation.Launch.ReasoningEffort = "medium"
+
+	err := validateLaunch(invocation, validWorkplace(t))
+	if err == nil || !strings.Contains(err.Error(), "does not support reasoning-effort") {
+		t.Fatalf("expected unsupported model error, got %v", err)
+	}
+}
+
 func TestBuildRunnerCommandCodexResume(t *testing.T) {
 	t.Parallel()
 
