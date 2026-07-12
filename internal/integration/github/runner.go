@@ -141,6 +141,10 @@ func (r *Runner) RunRepoView(ctx context.Context, repository string) (CommandRes
 }
 
 func (r *Runner) RunIssueView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	if _, err := normalizeIssueNumber(number); err != nil {
+		result := CommandResult{Command: defaultCommand, ExitCode: -1}
+		return result, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error(), Result: result}
+	}
 	return r.runIssueViewByID(ctx, repository, strconv.Itoa(number))
 }
 

@@ -131,9 +131,10 @@ func (r *APIRunner) RunIssueView(ctx context.Context, repository string, number 
 }
 
 func (r *APIRunner) RunIssueViewByID(ctx context.Context, repository string, identifier string) (CommandResult, resolvedConfig, error) {
-	number, err := strconv.Atoi(strings.TrimSpace(identifier))
+	identifier = strings.TrimSpace(identifier)
+	number, err := strconv.Atoi(identifier)
 	if err != nil {
-		return apiErrorResult("issue view", apiConfig{}, &Error{Code: ErrorCodeUnsupportedOperation, Message: fmt.Sprintf("GitHub API issue identifiers must be numeric, got %q", strings.TrimSpace(identifier))})
+		return apiErrorResult("issue view", apiConfig{}, &Error{Code: ErrorCodeUnsupportedOperation, Message: fmt.Sprintf("GitHub API transport does not support opaque issue identifier %q", identifier)})
 	}
 	return r.RunIssueView(ctx, repository, number)
 }

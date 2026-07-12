@@ -88,7 +88,7 @@
 
 ## 5. Каноничные Go-типы
 
-Для предметного контракта используются типы `issue`, `repo`, `messenger` и `wiki`. Хранилище приватных значений не является типом интеграции. Запрос `Request` содержит строковое поле `ID` — непрозрачный идентификатор объекта; разбор составных ссылок не выполняется. Поле `Number` сохраняется только на переходный период для старых адаптеров.
+Для предметного контракта используются типы `issue`, `repo`, `messenger` и `wiki`. Хранилище приватных значений не является типом интеграции. Запрос `Request` содержит строковое поле `ID` — непрозрачный идентификатор объекта; разбор составных ссылок не выполняется. Числовой идентификатор не является частью типо-ориентированного запроса.
 
 Выбор системы выполняется реестром: `System` задаётся явно флагом `--system` либо определяется по системе по умолчанию для предметного типа. Неизвестная система, отсутствующая система по умолчанию и неподдерживаемая операция возвращаются как диагностируемый отказ.
 
@@ -105,7 +105,7 @@ type Request struct {
     ObjectType      string
     Operation       string
     Repository      string
-    Number          int
+    ID              string // непрозрачный идентификатор объекта
     ExternalID      string
     Base            string
     Head            string
@@ -311,7 +311,7 @@ type Service interface {
 - `messenger.thread.get`;
 - `wiki.page.search`.
 
-Внешние имена команд, например `github issue comments` или `bitbucket pr get`, не являются каноническими именами операций. Они остаются диагностическим способом вызова конкретного адаптера.
+Внешние имена команд, например `github issue comments` или `bitbucket pr get`, не являются каноническими именами операций. Они сохраняются как совместимый переход и сопровождаются диагностикой устаревшей формы.
 
 Публичная модель каталога:
 
@@ -497,9 +497,9 @@ type OperationOutputContract struct {
 
 ```go
 type IssueGetRequest struct {
-    IntegrationType string // "tracker"
+    IntegrationType string // "issue", "repo", "messenger" или "wiki"
     System          string
-    ObjectType      string // "task" или "issue"
+    ObjectType      string // канонический объект типа интеграции
     Operation       string // "get"
     Repository      string
     Number          int
@@ -508,7 +508,7 @@ type IssueGetRequest struct {
 
 Семантика полей:
 
-- `IntegrationType` — тип интеграции, например `tracker`, `repository` или `messenger`;
+- `IntegrationType` — тип интеграции: `issue`, `repo`, `messenger` или `wiki`;
 - `System` — конкретная интегрируемая система, если нужно переопределить систему по умолчанию;
 - `ObjectType` — тип канонического объекта;
 - `Operation` — интеграционная операция;

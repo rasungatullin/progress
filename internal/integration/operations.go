@@ -58,11 +58,11 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			continue
 		}
 		descriptor := OperationDescriptor{
-			Name:            template.Name,
+			Name:            canonicalOperationName(template.IntegrationType, template.ObjectType, template.Operation),
 			IntegrationType: template.IntegrationType,
 			System:          state.Name,
 			AdapterType:     state.Type,
-			ObjectType:      template.ObjectType,
+			ObjectType:      canonicalObjectType(template.ObjectType),
 			Operation:       template.Operation,
 			Enabled:         state.Enabled,
 			Available:       state.Enabled && state.Registered,
@@ -73,6 +73,8 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			FailureKinds:    append([]string(nil), template.FailureKinds...),
 		}
 		descriptor.Diagnostics = operationDiagnostics(state, descriptor.Available)
+		descriptor.Output.Resource = canonicalObjectType(descriptor.Output.Resource)
+		descriptor.Output.Shape = operationOutputShape(descriptor.IntegrationType, descriptor.ObjectType, descriptor.Operation)
 		result = append(result, descriptor)
 	}
 
@@ -260,20 +262,21 @@ func operationFieldType(name string) string {
 }
 
 func operationOutputShape(integrationType string, objectType string, operation string) string {
+	objectType = canonicalObjectType(objectType)
 	switch normalizeIntegrationType(integrationType) {
 	case model.IntegrationTypeTracker:
 		switch objectType {
-		case "task":
+		case "issue":
 			if operation == "search" || operation == "list" {
 				return "TrackerSearchResult[]"
 			}
 			return "CanonicalTask"
-		case "task-comment", "comment":
+		case "issue-comment", "comment":
 			if operation == "create" {
 				return "OperationResult"
 			}
 			return "TaskComment[]"
-		case "task-label", "label":
+		case "issue-label", "label":
 			return "OperationResult"
 		}
 	case model.IntegrationTypeRepository:
@@ -313,6 +316,17 @@ func operationOutputShape(integrationType string, objectType string, operation s
 		}
 	}
 	return "Response"
+}
+
+func canonicalOperationName(integrationType, objectType, operation string) string {
+	return normalizeIntegrationType(integrationType) + "." + canonicalObjectType(objectType) + "." + normalizeOperation(operation)
+}
+
+func canonicalObjectType(objectType string) string {
+	if normalizeObjectType(objectType) == "task" {
+		return "issue"
+	}
+	return normalizeObjectType(objectType)
 }
 
 func normalizeOperationFilter(filter OperationFilter) OperationFilter {

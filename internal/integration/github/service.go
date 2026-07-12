@@ -1037,7 +1037,7 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
 		case isIssueNotFound(result), isRepoNotFound(result):
 			status.State = ErrorCodeNotFound
-			status.Message = fmt.Sprintf("GitHub issue not found: %s#%d", repository, number)
+			status.Message = fmt.Sprintf("GitHub issue not found: %s#%s", repository, identifier)
 			status.Diagnostics = append(status.Diagnostics, "gh issue view could not resolve the requested issue")
 			response.IssueStatus = &status
 			return response, &Error{Code: ErrorCodeNotFound, Message: status.Message, Result: result}
