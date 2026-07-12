@@ -17,6 +17,7 @@ HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 
 CLI_CHECKS = (
     ("README.md", ("--help",), "Доступные команды:"),
+    ("README.md", ("decision", "start", "--task", "123", "--help"), "Порядок вызова:"),
     ("docs/contours/decision/CLI.md", ("decision", "--help"), "Контур принятия решения"),
     ("docs/contours/execution/CLI.md", ("execution", "--help"), "Контур исполнения"),
     ("docs/contours/integration/CLI.md", ("integration", "--help"), "Контур интеграции"),
