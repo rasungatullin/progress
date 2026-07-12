@@ -1233,6 +1233,7 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 			System:     "github",
 			Repository: comment.Repository,
 			TaskNumber: comment.Number,
+			TaskID:     strconv.Itoa(comment.Number),
 			Author: model.User{
 				System:   "github",
 				Login:    comment.Author.Login,
@@ -1379,6 +1380,7 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 		System:     "github",
 		Repository: repository,
 		TaskNumber: number,
+		TaskID:     strconv.Itoa(number),
 		Author: model.User{
 			System:   "github",
 			Login:    author.Login,

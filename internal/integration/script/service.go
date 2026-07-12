@@ -524,6 +524,7 @@ func (task scriptTask) toCanonicalTask() model.CanonicalTask {
 		System:     task.System,
 		Repository: task.Repository,
 		Number:     task.Number,
+		ID:         firstNonEmpty(task.ExternalID, strconv.Itoa(task.Number)),
 		ExternalID: task.ExternalID,
 		Title:      strings.TrimSpace(task.Title),
 		Body:       task.Body,
@@ -539,14 +540,12 @@ func (task scriptTask) toCanonicalTask() model.CanonicalTask {
 }
 
 func (comment scriptComment) toTaskComment() model.TaskComment {
-	number := comment.TaskNumber
-	if number == 0 {
-		number = comment.Number
-	}
+	taskID := firstNonEmpty(strconv.Itoa(comment.TaskNumber), strconv.Itoa(comment.Number))
 	return model.TaskComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		TaskNumber: number,
+		TaskNumber: comment.TaskNumber,
+		TaskID:     taskID,
 		ExternalID: comment.ExternalID,
 		Author:     comment.Author.toUser(),
 		Body:       comment.Body,
@@ -604,7 +603,7 @@ func trackerIssueFromTask(task model.CanonicalTask) model.TrackerIssue {
 	return model.TrackerIssue{
 		System:     task.System,
 		Repository: task.Repository,
-		Number:     task.Number,
+		Number:     parseLegacyNumber(task.ID),
 		Title:      task.Title,
 		Body:       task.Body,
 		State:      task.State,
@@ -621,7 +620,7 @@ func trackerCommentFromTaskComment(comment model.TaskComment) model.TrackerComme
 	return model.TrackerComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		Number:     comment.TaskNumber,
+		Number:     parseLegacyNumber(comment.TaskID),
 		Author:     trackerUserFromUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,
@@ -635,7 +634,7 @@ func searchResultFromTask(task model.CanonicalTask) model.TrackerSearchResult {
 		System:     task.System,
 		Repository: task.Repository,
 		Kind:       "task",
-		Number:     task.Number,
+		Number:     parseLegacyNumber(task.ID),
 		Title:      task.Title,
 		State:      task.State,
 		URL:        task.URL,
@@ -757,6 +756,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseLegacyNumber(value string) int {
+	number, _ := strconv.Atoi(strings.TrimSpace(value))
+	return number
 }
 
 func resolveRepoRoot(ctx context.Context) (string, error) {

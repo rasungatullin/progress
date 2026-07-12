@@ -339,9 +339,9 @@ func (s *Service) resolveRoute(req Request) (Route, error) {
 
 	state, known := s.systems[normalized.System]
 	if !known {
-		err := fmt.Errorf("integration system is not configured: %s", normalized.System)
-		s.logger.Printf("Реестр интеграции отклонил запрос: система=%q причина=%q", normalized.System, err)
-		return s.errorRoute(req, err), err
+		// Неизвестная система остаётся маршрутом с диагностикой: окончательный
+		// отказ формируется Execute после разрешения запроса.
+		return s.routeForUnknownSystem(normalized), nil
 	}
 	if !systemSupportsOperation(state, normalized.IntegrationType, normalized.ObjectType, normalized.Operation) {
 		err := fmt.Errorf("integration operation is not supported: %s.%s.%s", normalized.IntegrationType, canonicalObjectType(normalized.ObjectType), normalized.Operation)
@@ -389,6 +389,10 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	normalized.Route = route
 	provider, ok := s.providers[route.System]
 	if !ok || !route.ProviderAvailable {
+		if _, known := s.systems[route.System]; !known {
+			err := fmt.Errorf("integration system is not configured: %s", route.System)
+			return responseWithFailure(route, model.FailureKindNotConfigured, false, err), err
+		}
 		if state, known := s.systems[route.System]; known {
 			switch {
 			case !state.Enabled:
@@ -523,6 +527,24 @@ func (s *Service) errorRoute(req Request, err error) Route {
 			"registry mode=direct-resolution",
 			"invalid-request missing system",
 			fmt.Sprintf("invalid-request %s", err.Error()),
+		},
+	}
+}
+
+func (s *Service) routeForUnknownSystem(req ProviderRequest) Route {
+	return Route{
+		IntegrationType: req.IntegrationType,
+		System:          req.System,
+		Provider:        req.System,
+		Resource:        req.Resource,
+		ObjectType:      req.ObjectType,
+		Operation:       req.Operation,
+		ExpectedResult:  expectedResult(req.IntegrationType, req.ObjectType, req.Resource, req.Operation),
+		Diagnostics: []string{
+			fmt.Sprintf("request system=%s resource=%s operation=%s", req.System, req.Resource, req.Operation),
+			"registry mode=direct-resolution",
+			fmt.Sprintf("provider=%s unknown to current integration configuration", req.System),
+			fmt.Sprintf("registered systems=%s", strings.Join(s.registeredSystems(), ",")),
 		},
 	}
 }
@@ -700,6 +722,11 @@ func systemSupportsIntegrationType(state systemState, integrationType string) bo
 }
 
 func systemSupportsOperation(state systemState, integrationType string, objectType string, operation string) bool {
+	// Состояние авторизации является общей служебной операцией адаптера и не
+	// относится к типо-ориентированным объектам.
+	if normalizeObjectType(objectType) == "auth" && normalizeOperation(operation) == "status" {
+		return true
+	}
 	// Сценарный адаптер получает каталог операций из конфигурации. Пустой
 	// каталог не ограничивает контракт: это позволяет проверять маршрут до
 	// подключения конкретного сценария.
@@ -1052,7 +1079,6 @@ func canonicalTaskFromTrackerIssue(issue TrackerIssue) *CanonicalTask {
 	return &CanonicalTask{
 		System:     issue.System,
 		Repository: issue.Repository,
-		Number:     issue.Number,
 		ID:         firstNonEmpty(issue.ExternalID, strconv.Itoa(issue.Number)),
 		Title:      issue.Title,
 		Body:       issue.Body,
@@ -1070,7 +1096,7 @@ func trackerIssueFromCanonicalTask(task CanonicalTask) TrackerIssue {
 	return TrackerIssue{
 		System:     task.System,
 		Repository: task.Repository,
-		Number:     task.Number,
+		Number:     parseLegacyNumber(task.ID),
 		Title:      task.Title,
 		Body:       task.Body,
 		State:      task.State,
@@ -1088,6 +1114,7 @@ func taskCommentFromTrackerComment(comment TrackerComment) TaskComment {
 		System:     comment.System,
 		Repository: comment.Repository,
 		TaskNumber: comment.Number,
+		TaskID:     strconv.Itoa(comment.Number),
 		Author:     userFromTrackerUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,
@@ -1100,7 +1127,7 @@ func trackerCommentFromTaskComment(comment TaskComment) TrackerComment {
 	return TrackerComment{
 		System:     comment.System,
 		Repository: comment.Repository,
-		Number:     comment.TaskNumber,
+		Number:     firstNonZero(comment.TaskNumber, parseLegacyNumber(comment.TaskID)),
 		Author:     trackerUserFromUser(comment.Author),
 		Body:       comment.Body,
 		URL:        comment.URL,
@@ -1391,4 +1418,18 @@ func firstNonEmpty(values ...string) string {
 	}
 
 	return ""
+}
+
+func parseLegacyNumber(value string) int {
+	number, _ := strconv.Atoi(strings.TrimSpace(value))
+	return number
+}
+
+func firstNonZero(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }

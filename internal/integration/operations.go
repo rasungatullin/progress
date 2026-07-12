@@ -224,6 +224,16 @@ func parseOperationName(name string) (string, string, string) {
 	}
 	objectType := strings.Join(parts[1:len(parts)-1], "-")
 	objectType = normalizeObjectType(objectType)
+	// Каноническое имя операции допускает вложенные объектные пространства,
+	// тогда как реестр сопоставляет их с единым объектом адаптера.
+	switch objectType {
+	case "issue-comment":
+		objectType = "comment"
+	case "issue-label":
+		objectType = "label"
+	case "merge-request-comment":
+		objectType = "comment"
+	}
 	if integrationType == model.IntegrationTypeIssue && objectType == "task" {
 		objectType = "issue"
 	}

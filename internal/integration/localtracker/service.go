@@ -162,7 +162,7 @@ func (s *Service) searchTasks(ctx context.Context, db *sql.DB, response model.Re
 		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
 			System:    req.System,
 			Kind:      "task",
-			Number:    task.Number,
+			Number:    parseLegacyNumber(task.ID),
 			Title:     task.Title,
 			State:     task.State,
 			URL:       task.URL,
@@ -458,6 +458,7 @@ func canonicalTask(system string, record taskRecord) model.CanonicalTask {
 	return model.CanonicalTask{
 		System:     system,
 		Number:     record.Number,
+		ID:         firstNonEmpty(record.ExternalID, strconv.Itoa(record.Number)),
 		ExternalID: record.ExternalID,
 		Title:      record.Title,
 		Body:       record.Body,
@@ -474,7 +475,7 @@ func canonicalTask(system string, record taskRecord) model.CanonicalTask {
 func trackerIssue(task model.CanonicalTask) model.TrackerIssue {
 	return model.TrackerIssue{
 		System:    task.System,
-		Number:    task.Number,
+		Number:    parseLegacyNumber(task.ID),
 		Title:     task.Title,
 		Body:      task.Body,
 		State:     task.State,
@@ -490,6 +491,7 @@ func taskComment(system string, record commentRecord) model.TaskComment {
 	return model.TaskComment{
 		System:     system,
 		TaskNumber: record.TaskNumber,
+		TaskID:     firstNonEmpty(record.ExternalID, strconv.Itoa(record.TaskNumber)),
 		ExternalID: firstNonEmpty(record.ExternalID, strconv.Itoa(record.ID)),
 		Author:     model.User{System: system, Login: record.Author},
 		Body:       record.Body,
@@ -502,7 +504,7 @@ func taskComment(system string, record commentRecord) model.TaskComment {
 func trackerComment(comment model.TaskComment) model.TrackerComment {
 	return model.TrackerComment{
 		System:    comment.System,
-		Number:    comment.TaskNumber,
+		Number:    parseLegacyNumber(comment.TaskID),
 		Author:    model.TrackerUser{System: comment.System, Login: comment.Author.Login},
 		Body:      comment.Body,
 		URL:       comment.URL,
@@ -647,6 +649,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseLegacyNumber(value string) int {
+	number, _ := strconv.Atoi(strings.TrimSpace(value))
+	return number
 }
 
 func nullableString(value string) any {

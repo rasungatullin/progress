@@ -340,7 +340,7 @@ type OperationOutputContract struct {
 type CanonicalTask struct {
 	System     string
 	Repository string
-	Number     int
+	Number     int // Совместимое поле; новые запросы используют ID.
 	ID         string
 	ExternalID string
 	Title      string
@@ -359,7 +359,8 @@ type CanonicalTask struct {
 type TaskComment struct {
 	System     string
 	Repository string
-	TaskNumber int
+	TaskNumber int // Совместимое поле; новые запросы используют TaskID.
+	TaskID     string
 	ExternalID string
 	Author     User
 	Body       string
