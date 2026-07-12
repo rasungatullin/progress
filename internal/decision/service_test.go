@@ -1393,7 +1393,7 @@ func TestHasUnresolvedExternalReviewRemarksClassifiesReviewConclusions(t *testin
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := hasUnresolvedExternalReviewRemarks([]integration.ReviewRemark{{ReplyToID: "thread-1", Body: test.body}}); got != test.want {
+			if got := hasUnresolvedExternalReviewRemarks([]integration.ReviewRemark{{ReplyToID: "thread-1", Author: integration.User{Login: "progress"}, Body: test.body}}, "progress"); got != test.want {
 				t.Fatalf("hasUnresolvedExternalReviewRemarks() = %t, want %t", got, test.want)
 			}
 		})

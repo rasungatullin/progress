@@ -419,6 +419,7 @@ func TestServiceProcessTaskIgnoresApprovedReviewConclusion(t *testing.T) {
 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
 	integrations.reviewRemarks = []integration.ReviewRemark{{
+		Author:    integration.User{Login: "progress"},
 		ReplyToID: "thread-1",
 		Body:      "## Заключение ревизии\n\napprove\n\nПроверка завершена",
 	}}
@@ -440,6 +441,7 @@ func TestServiceProcessTaskStopsAfterApprovedReviewConclusionWithoutSingleCycle(
 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
 	integrations.reviewRemarks = []integration.ReviewRemark{{
+		Author:    integration.User{Login: "progress"},
 		ReplyToID: "thread-1",
 		Body:      "## Заключение ревизии\n\napprove\n\nПроверка завершена",
 	}}
@@ -464,7 +466,7 @@ func TestServiceProcessTaskReworksWhenNewRemarkAccompaniesApprovedConclusion(t *
 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
 	integrations.reviewRemarks = []integration.ReviewRemark{
-		{ReplyToID: "thread-1", Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена"},
+		{ReplyToID: "thread-1", Author: integration.User{Login: "progress"}, Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена"},
 		{ExternalID: "comment-1", ReplyToID: "thread-2", State: "unresolved", Body: "Исправить обработку"},
 	}
 	service := NewService(nil)
@@ -487,7 +489,7 @@ func TestServiceProcessTaskIgnoresRemarksBeforeApprovedConclusion(t *testing.T) 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
 	integrations.reviewRemarks = []integration.ReviewRemark{
 		{ExternalID: "old-remark", ReplyToID: "thread-1", State: "unresolved", Body: "Старое замечание"},
-		{ReplyToID: "thread-2", Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена"},
+		{ReplyToID: "thread-2", Author: integration.User{Login: "progress"}, Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена"},
 	}
 	service := NewService(nil)
 	service.integration = integrations
@@ -507,7 +509,7 @@ func TestServiceProcessTaskOrdersRemarksByCreatedAtBeforeApprovedConclusion(t *t
 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
 	integrations.reviewRemarks = []integration.ReviewRemark{
-		{ReplyToID: "thread-2", Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена", CreatedAt: "2026-07-13T12:00:00Z"},
+		{ReplyToID: "thread-2", Author: integration.User{Login: "progress"}, Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена", CreatedAt: "2026-07-13T12:00:00Z"},
 		{ExternalID: "old-remark", ReplyToID: "thread-1", State: "unresolved", Body: "Старое замечание", CreatedAt: "2026-07-13T11:00:00Z"},
 	}
 	service := NewService(nil)
@@ -1227,6 +1229,8 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 		issue := s.issue
 		issue.Labels = append([]string(nil), s.issue.Labels...)
 		return integration.Response{Issue: &issue}, nil
+	case request.System == "github" && request.Resource == "auth" && request.Operation == "status":
+		return integration.Response{AuthStatus: &integration.AuthStatus{Authenticated: true, Login: "progress"}}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "search":
 		if s.searchErr != nil {
 			return integration.Response{}, s.searchErr

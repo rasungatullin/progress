@@ -1702,6 +1702,7 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 		status.State = StateReady
 		status.Available = true
 		status.Authenticated = true
+		status.Login = githubAuthLogin(config.Command, result.Stdout)
 		if config.Command == "http" {
 			status.Message = "GitHub API token is accepted and API is available"
 			status.Diagnostics = append(status.Diagnostics, "GitHub API auth status completed successfully")
@@ -1777,6 +1778,26 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 	status.Diagnostics = append(status.Diagnostics, "gh auth status exited with a non-zero code")
 	response.AuthStatus = &status
 	return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+}
+
+func githubAuthLogin(command, stdout string) string {
+	if command == "http" {
+		var user struct {
+			Login string `json:"login"`
+		}
+		if json.Unmarshal([]byte(stdout), &user) == nil {
+			return strings.TrimSpace(user.Login)
+		}
+		return ""
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		const prefix = "Logged in to github.com account "
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
 }
 
 func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {

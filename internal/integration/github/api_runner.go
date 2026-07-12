@@ -79,6 +79,12 @@ func (r *APIRunner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedC
 	}
 	var raw map[string]any
 	result, err := r.do(ctx, config, http.MethodGet, "user", nil, &raw)
+	if err == nil {
+		if login, ok := raw["login"].(string); ok {
+			payload, _ := json.Marshal(map[string]string{"login": login})
+			result.Stdout = string(payload)
+		}
+	}
 	return result, apiResolvedConfig(config), err
 }
 

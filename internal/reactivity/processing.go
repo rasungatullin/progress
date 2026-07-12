@@ -347,6 +347,11 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 	state := &decision.MergeRequestExternalState{
 		HasMergeConflict: mergeRequestHasConflict(mergeRequest),
 	}
+	ownAuthorLogin := ""
+	authResponse, _ := s.integration.Execute(ctx, integration.Request{System: "github", Resource: "auth", Operation: "status"})
+	if authResponse.AuthStatus != nil && authResponse.AuthStatus.Authenticated {
+		ownAuthorLogin = strings.TrimSpace(authResponse.AuthStatus.Login)
+	}
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType:    integrationTypeRepository,
 		Resource:           "review-remark",
@@ -363,19 +368,23 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		return nil, err
 	}
 	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
-	state.HasUnresolvedReviewRemarks = hasUnresolvedExternalReviewRemarks(response.ReviewRemarks)
+	state.HasUnresolvedReviewRemarks = hasUnresolvedExternalReviewRemarks(response.ReviewRemarks, ownAuthorLogin)
 	if !state.HasMergeConflict && !state.HasUnresolvedReviewRemarks {
 		return nil, nil
 	}
 	return state, nil
 }
 
-func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
+func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark, ownAuthorLogins ...string) bool {
+	ownAuthorLogin := ""
+	if len(ownAuthorLogins) > 0 {
+		ownAuthorLogin = strings.TrimSpace(ownAuthorLogins[0])
+	}
 	remarks = orderReviewRemarksByCreatedAt(remarks)
 	respondedRemarkIDs := map[string]struct{}{}
 	start := 0
 	for index, remark := range remarks {
-		if isOwnExternalReviewConclusion(remark) && isApprovedExternalReviewConclusion(remark.Body) {
+		if isOwnExternalReviewConclusion(remark, ownAuthorLogin) && isApprovedExternalReviewConclusion(remark.Body) {
 			start = index + 1
 		}
 	}
@@ -389,7 +398,7 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 	for _, remark := range remarks[start:] {
 		if isExternalReviewConclusion(remark.Body) {
 			if isApprovedExternalReviewConclusion(remark.Body) {
-				if !isOwnExternalReviewConclusion(remark) {
+				if !isOwnExternalReviewConclusion(remark, ownAuthorLogin) {
 					return true
 				}
 				continue
@@ -419,14 +428,8 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 	return false
 }
 
-func isOwnExternalReviewConclusion(remark integration.ReviewRemark) bool {
-	if !isExternalReviewConclusion(remark.Body) {
-		return false
-	}
-	if strings.Contains(remark.Body, "Источник: исполнительный контур") || remark.Author.IsBot {
-		return true
-	}
-	return strings.TrimSpace(remark.Author.Login) == "" && strings.TrimSpace(remark.Author.Name) == ""
+func isOwnExternalReviewConclusion(remark integration.ReviewRemark, ownAuthorLogin string) bool {
+	return isExternalReviewConclusion(remark.Body) && ownAuthorLogin != "" && strings.EqualFold(strings.TrimSpace(remark.Author.Login), ownAuthorLogin)
 }
 
 func isExternalReviewConclusion(body string) bool {
