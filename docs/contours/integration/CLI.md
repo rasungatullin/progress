@@ -192,9 +192,15 @@ type Provider interface {
 
 ## 6. Состав CLI-команд
 
-В текущей конфигурации поддерживаются следующие команды:
+В текущей конфигурации поддерживаются следующие команды. Команды с именем
+внешней системы сохранены только как переходная форма: при запуске они выводят
+предупреждение и должны постепенно заменяться типо-ориентированными командами
+с флагом `--system`.
 
 - `progress integration operations`;
+- `progress integration issue get --id 123`;
+- `progress integration issue search --query "текст"`;
+- `progress integration repo get --system github`;
 - `progress integration github auth status`;
 - `progress integration github repo get`;
 - `progress integration github issue get`;

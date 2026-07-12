@@ -251,12 +251,11 @@ func requestMap(req model.ProviderRequest) map[string]any {
 	putString(request, "system", req.System)
 	putString(request, "repository", req.Repository)
 	putString(request, "id", req.ID)
-	legacyNumber := req.Number
-	if legacyNumber == 0 && req.IntegrationType == model.IntegrationTypeIssue {
-		legacyNumber, _ = strconv.Atoi(req.ID)
-	}
-	if legacyNumber > 0 {
-		request["number"] = legacyNumber
+	// Новый контракт передаёт идентификатор как непрозрачную строку. Числовое
+	// поле сохраняется только для старых внутренних вызовов, которые явно
+	// заполнили Number и не передали ID.
+	if req.Number > 0 && strings.TrimSpace(req.ID) == "" {
+		request["number"] = req.Number
 	}
 	putString(request, "external_id", req.ExternalID)
 	putString(request, "base", req.Base)
