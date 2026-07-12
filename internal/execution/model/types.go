@@ -16,6 +16,7 @@ type LaunchSpec struct {
 	StructuredOutputFields   []string         `json:"structured_output_fields,omitempty"`
 	CommitPush               bool             `json:"commit_push,omitempty"`
 	Timeout                  string           `json:"timeout,omitempty"`
+	StartupTimeout           string           `json:"startup_timeout,omitempty"`
 	NoOutputTimeout          string           `json:"no_output_timeout,omitempty"`
 }
 
