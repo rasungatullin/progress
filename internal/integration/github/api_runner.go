@@ -76,11 +76,10 @@ func (r *APIRunner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedC
 			return result, apiResolvedConfig(config), err
 		}
 		config.Token = token.Token
-		var user struct {
-			Login string `json:"login"`
-		}
-		if _, userErr := r.do(ctx, config, http.MethodGet, "user", nil, &user); userErr == nil {
-			result.Stdout = mustJSON(user)
+		// Installation token не определяет GitHub App через /user.
+		// Идентичность приложения определяется JWT, которым создан token.
+		if login, identityErr := r.githubAppLogin(ctx, config); identityErr == nil {
+			result.Stdout = mustJSON(map[string]string{"login": login})
 		}
 		return result, apiResolvedConfig(config), nil
 	}
@@ -96,6 +95,29 @@ func (r *APIRunner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedC
 		}
 	}
 	return result, apiResolvedConfig(config), err
+}
+
+func (r *APIRunner) githubAppLogin(ctx context.Context, config apiConfig) (string, error) {
+	privateKey, err := r.githubAppPrivateKey(config)
+	if err != nil {
+		return "", err
+	}
+	jwt, err := githubAppJWT(privateKey, config.GitHubAppIssuer, r.currentTime())
+	if err != nil {
+		return "", err
+	}
+	appConfig := config
+	appConfig.Token = jwt
+	var app struct {
+		Slug string `json:"slug"`
+	}
+	if _, err := r.do(ctx, appConfig, http.MethodGet, "app", nil, &app); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(app.Slug) == "" {
+		return "", fmt.Errorf("GitHub App response does not contain slug")
+	}
+	return strings.TrimSpace(app.Slug) + "[bot]", nil
 }
 
 func (r *APIRunner) RunRepoView(ctx context.Context, repository string) (CommandResult, resolvedConfig, error) {

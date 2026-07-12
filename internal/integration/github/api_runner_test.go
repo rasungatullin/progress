@@ -211,8 +211,11 @@ func TestAPITransportUsesGitHubAppInstallationToken(t *testing.T) {
 				"state":    "open",
 				"html_url": "https://github.com/owner/name/issues/123",
 			})
-		case "/user":
-			_ = json.NewEncoder(w).Encode(map[string]any{"login": "progress-app[bot]"})
+		case "/app":
+			if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ey") {
+				t.Fatalf("GitHub App identity must use an app JWT, got %q", r.Header.Get("Authorization"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"slug": "progress-app"})
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -244,6 +247,9 @@ func TestAPITransportUsesGitHubAppInstallationToken(t *testing.T) {
 	}
 	if strings.Contains(authResult.Stdout, "installation-secret") {
 		t.Fatalf("auth status must not expose installation token: %s", authResult.Stdout)
+	}
+	if !strings.Contains(authResult.Stdout, "progress-app[bot]") {
+		t.Fatalf("auth status must expose the GitHub App bot login: %s", authResult.Stdout)
 	}
 	assertGitHubAppJWT(t, seenJWT, "12345", now)
 
