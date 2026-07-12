@@ -99,7 +99,7 @@
       "name": "load-pull-request",
       "in": {
         "invocation": {
-          "ref": "data.invocation"
+          "ref": "in.invocation"
         }
       },
       "out": {
@@ -117,11 +117,11 @@
     {
       "name": "load-review-remarks",
       "in": {
-        "repository": {
-          "ref": "in.repository_url"
+        "invocation": {
+          "ref": "data.invocation"
         },
-        "number": {
-          "ref": "data.pull_request.number"
+        "pull_request": {
+          "ref": "data.pull_request"
         }
       },
       "out": {
@@ -304,17 +304,11 @@
     {
       "name": "publish-review-remarks",
       "in": {
-        "repository": {
-          "ref": "in.repository_url"
+        "invocation": {
+          "ref": "data.invocation"
         },
-        "number": {
-          "ref": "data.pull_request.number"
-        },
-        "result_status": {
-          "ref": "data.result.status"
-        },
-        "result_summary": {
-          "ref": "data.result.summary"
+        "result": {
+          "ref": "data.result"
         },
         "structured_output": {
           "ref": "data.structured_output"

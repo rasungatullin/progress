@@ -2729,63 +2729,60 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 	}
 }
 
-func TestProjectReviewActionLoadsRelatedPullRequest(t *testing.T) {
-	t.Parallel()
-
+func TestProjectReviewActionsLoadRelatedPullRequestFromPublicInput(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatalf("resolve repository root: %v", err)
 	}
-	snapshot, err := methodology.LoadCatalogWithHome(repoRoot, t.TempDir(), nil)
-	if err != nil {
-		t.Fatalf("load project methodology catalog: %v", err)
-	}
-	action, err := resolveActionFromCatalog(snapshot.Catalog, invocation{Action: ActionReviewPullRequest})
-	if err != nil {
-		t.Fatalf("resolve project review action: %v", err)
-	}
-	operation := findOperationSpec(action, OperationKindLoadPullRequest)
-	if operation == nil {
-		t.Fatalf("project review action must include load-pull-request: %#v", action.Operations)
-	}
 
-	state := &operationExecution{
-		action: action,
-		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{
-				CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 167},
-				RelatedObjects: []ObjectRef{{
-					Type:       "merge-request",
-					Repository: "owner/name",
-					Number:     184,
-				}},
-			}},
-		},
-		tracker: newOperationTracker(action),
-	}
-	integrations := &stubIntegrationExecutor{execute: func(_ context.Context, request integration.Request) (integration.Response, error) {
-		if request.Operation != "get" || request.Repository != "owner/name" || request.Number != 184 {
-			t.Fatalf("unexpected integration request: %#v", request)
-		}
-		return integration.Response{MergeRequest: &integration.MergeRequest{
-			Repository: "owner/name",
-			Number:     184,
-			BaseRef:    "main",
-			HeadRef:    "167",
-			URL:        "https://github.com/owner/name/pull/184",
-		}}, nil
-	}}
+	for _, actionName := range []string{ActionReviewPullRequest, ActionApplyReviewComments} {
+		t.Run(actionName, func(t *testing.T) {
+			resolver := newMethodologyActionResolver()
+			resolver.getwd = func() (string, error) { return repoRoot, nil }
+			integrations := &stubIntegrationExecutor{execute: func(_ context.Context, request integration.Request) (integration.Response, error) {
+				switch request.Operation {
+				case "get":
+					if request.Repository != "owner/name" || request.Number != 184 {
+						t.Fatalf("unexpected pull request request: %#v", request)
+					}
+					return integration.Response{MergeRequest: &integration.MergeRequest{
+						Repository: "owner/name",
+						Number:     184,
+						BaseRef:    "main",
+						HeadRef:    "167",
+						URL:        "https://github.com/owner/name/pull/184",
+					}}, nil
+				case "comments":
+					return integration.Response{}, nil
+				default:
+					t.Fatalf("unexpected integration request: %#v", request)
+					return integration.Response{}, nil
+				}
+			}}
+			workplaceRoot := t.TempDir()
+			service := &Service{
+				logger:       log.Default(),
+				actions:      resolver,
+				profiles:     &stubProfileResolver{profile: model.Profile{Name: "review", Mode: "manual", ModelBinding: "review"}},
+				resources:    &stubResourceProvider{allocation: model.Allocation{Resource: "binding:review", Reserved: true, Runner: "codex", Model: "openai/gpt-5.6-sol", ModelBinding: "review"}},
+				workplaces:   &stubWorkplaceManager{workplace: model.Workplace{Name: workplaceRoot, Ready: true}},
+				launcher:     &stubLauncher{result: model.LaunchResult{Status: "completed", StructuredOutput: &model.StructuredOutput{Summary: "Операция выполнена.", CommitMessage: "Проверить передачу запроса"}}},
+				integrations: integrations,
+			}
 
-	err = (builtinOperationExecutor{service: &Service{logger: log.Default(), integrations: integrations}}).Execute(context.Background(), state, *operation)
-	if err != nil {
-		t.Fatalf("execute project load-pull-request operation: %v", err)
-	}
-	if len(integrations.calls) != 1 || integrations.calls[0].Number != 184 {
-		t.Fatalf("load-pull-request must receive related merge request: %#v", integrations.calls)
-	}
-	pullRequest, ok := state.data["pull_request"].(integration.MergeRequest)
-	if !ok || pullRequest.Number != 184 {
-		t.Fatalf("load-pull-request must write loaded merge request: %#v", state.data)
+			_, err := service.ExecuteAction(context.Background(), ActionInvocation{Assignment: &ExecutionAssignment{
+				Action:          actionName,
+				CanonicalTask:   &ObjectRef{Type: "task", Repository: "owner/name", Number: 167},
+				RelatedObjects:  []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 184}},
+				StructuredInput: &StructuredInput{Task: "Обработать запрос на слияние."},
+			}})
+			if err != nil {
+				t.Fatalf("execute project action: %v", err)
+			}
+			if len(integrations.calls) < 1 || integrations.calls[0].Operation != "get" || integrations.calls[0].Number != 184 {
+				t.Fatalf("first integration call must load related pull request: %#v", integrations.calls)
+			}
+		})
 	}
 }
 
