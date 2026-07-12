@@ -1578,6 +1578,25 @@ func TestServicePRCommentCreateInline(t *testing.T) {
 	}
 }
 
+func TestServicePRCommentCreateReusesAndSubmitsPendingReview(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result:              CommandResult{ExitCode: 0, Stdout: `{"id":101,"node_id":"PRRC_comment-1","body":"Inline remark","html_url":"https://github.com/owner/name/pull/42#discussion_r101","path":"file.go","line":12,"side":"RIGHT","pull_request_review_id":77}`},
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, System: "github", Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.prSubmitCalls != 2 || response.Status != model.ResponseStatusOK {
+		t.Fatalf("pending review was not completed before and after comment create: submits=%d response=%#v", stub.prSubmitCalls, response)
+	}
+}
+
 func TestServicePRCommentCreateInlineAcceptsNumericRESTIdentifier(t *testing.T) {
 	t.Parallel()
 
@@ -1613,6 +1632,57 @@ func TestServicePRCommentCreateInlineChecksExistingRemarkBeforeCreate(t *testing
 	}
 }
 
+func TestServicePRCommentCreateSubmitsPendingReviewAfterExistingRemark(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result:              CommandResult{ExitCode: 0, Stdout: `{"id": 77, "state": "submitted"}`},
+		reviewResult:        CommandResult{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.prCommentCalls != 0 || stub.prReviewsCalls != 1 || stub.prSubmitCalls != 1 || response.Status != model.ResponseStatusOK {
+		t.Fatalf("existing remark did not close pending review: calls=%d/%d/%d response=%#v", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls, response)
+	}
+}
+
+func TestServicePRCommentCreatePublishesMultipleInlineRemarksThroughSeparateReviews(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		commentResults: []CommandResult{
+			{ExitCode: 0, Stdout: `{"id": 101, "node_id": "PRRC_comment-1", "body": "Inline remark", "html_url": "https://github.com/owner/name/pull/42#discussion_r101", "path": "file.go", "line": 12, "side": "RIGHT", "pull_request_review_id": 77}`},
+			{ExitCode: 0, Stdout: `{"id": 102, "node_id": "PRRC_comment-2", "body": "Second inline remark", "html_url": "https://github.com/owner/name/pull/42#discussion_r102", "path": "file.go", "line": 18, "side": "RIGHT", "pull_request_review_id": 78}`},
+		},
+		pendingReviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[]`},
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Path: "file.go", Line: 12, Side: "RIGHT"}
+	request.Body = "Inline remark"
+	if _, err := service.Execute(context.Background(), request); err != nil {
+		t.Fatalf("first comment create: %v", err)
+	}
+	request.Body = "Second inline remark"
+	if _, err := service.Execute(context.Background(), request); err != nil {
+		t.Fatalf("second comment create: %v", err)
+	}
+
+	if stub.prCommentCalls != 2 || stub.prReviewsCalls != 2 || stub.prSubmitCalls != 2 {
+		t.Fatalf("inline remarks were not published through separate submitted reviews: comments=%d reviews=%d submits=%d", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls)
+	}
+}
+
 func TestServicePRCommentCreateInlineClassifiesPartialPayload(t *testing.T) {
 	t.Parallel()
 
@@ -1624,6 +1694,66 @@ func TestServicePRCommentCreateInlineClassifiesPartialPayload(t *testing.T) {
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || !strings.Contains(ghErr.Message, "createReviewComment") || !strings.Contains(ghErr.Message, "https://github.com/owner/name/pull/42") || strings.Contains(ghErr.Message, "secret") {
 		t.Fatalf("unexpected partial payload error: %#v", err)
+	}
+}
+
+func TestServicePRCommentCreateClosesPendingReviewAfterRecoveringExistingRemark(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{ExitCode: 0, Stdout: `{}`},
+		reviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`},
+			{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
+		},
+		pendingReviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.prCommentCalls != 1 || stub.prReviewsCalls != 2 || stub.prSubmitCalls != 1 || response.Status != model.ResponseStatusOK {
+		t.Fatalf("recovered remark did not close pending review: comments=%d reviews=%d submits=%d response=%#v", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls, response)
+	}
+}
+
+func TestServicePRCommentCreateRetriesAfterReviewSubmitFailure(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{ExitCode: 0, Stdout: `{"id":101,"node_id":"PRRC_comment-1","body":"Inline remark","html_url":"https://github.com/owner/name/pull/42#discussion_r101","path":"file.go","line":12,"side":"RIGHT","pull_request_review_id":77}`},
+		reviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`},
+			{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
+		},
+		pendingReviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		},
+		submitResults: []CommandResult{
+			{ExitCode: 1, Stderr: "submit failed"},
+			{ExitCode: 0, Stdout: `{"id":77,"state":"COMMENTED"}`},
+		},
+	}
+	service := NewService()
+	service.runner = stub
+	request := model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"}
+
+	if _, err := service.Execute(context.Background(), request); err == nil {
+		t.Fatal("expected first review submission to fail")
+	}
+	response, err := service.Execute(context.Background(), request)
+	if err != nil {
+		t.Fatalf("retry execute: %v", err)
+	}
+	if stub.prCommentCalls != 1 || stub.prReviewCalls != 2 || stub.prReviewsCalls != 2 || stub.prSubmitCalls != 2 || response.Status != model.ResponseStatusOK {
+		t.Fatalf("retry did not recover existing remark: comments=%d threads=%d reviews=%d submits=%d response=%#v", stub.prCommentCalls, stub.prReviewCalls, stub.prReviewsCalls, stub.prSubmitCalls, response)
 	}
 }
 
@@ -1871,34 +2001,42 @@ func TestServicePRCommentReplySupportsReviewRemarkObject(t *testing.T) {
 }
 
 type stubRunner struct {
-	result            CommandResult
-	config            resolvedConfig
-	err               error
-	repo              string
-	repoCalls         int
-	issueCalls        int
-	issueListCalls    int
-	issueCommentCalls int
-	issueLabelCalls   int
-	prViewCalls       int
-	prListCalls       int
-	prReviewCalls     int
-	prCommentCalls    int
-	prReplyCalls      int
-	prResolveCalls    int
-	number            int
-	base              string
-	head              string
-	title             string
-	body              string
-	labels            []string
-	draft             bool
-	issueListRequest  IssueListRequest
-	prListRequest     PRListRequest
-	prCommentRequest  PRCommentCreateRequest
-	prReplyRequest    PRReviewThreadReplyRequest
-	threadID          string
-	reviewResult      CommandResult
+	result              CommandResult
+	config              resolvedConfig
+	err                 error
+	repo                string
+	repoCalls           int
+	issueCalls          int
+	issueListCalls      int
+	issueCommentCalls   int
+	issueLabelCalls     int
+	prViewCalls         int
+	prListCalls         int
+	prReviewCalls       int
+	prCommentCalls      int
+	commentResults      []CommandResult
+	prReplyCalls        int
+	prResolveCalls      int
+	prReviewsCalls      int
+	prSubmitCalls       int
+	number              int
+	base                string
+	head                string
+	title               string
+	body                string
+	labels              []string
+	draft               bool
+	issueListRequest    IssueListRequest
+	prListRequest       PRListRequest
+	prCommentRequest    PRCommentCreateRequest
+	prReplyRequest      PRReviewThreadReplyRequest
+	threadID            string
+	reviewResult        CommandResult
+	reviewResults       []CommandResult
+	pendingReviewResult CommandResult
+
+	pendingReviewResults []CommandResult
+	submitResults        []CommandResult
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -1984,10 +2122,30 @@ func (r *stubRunner) RunPRReviewThreads(_ context.Context, repository string, nu
 	r.prReviewCalls++
 	r.repo = repository
 	r.number = number
+	if len(r.reviewResults) > 0 {
+		result := r.reviewResults[0]
+		r.reviewResults = r.reviewResults[1:]
+		return result, r.config, r.err
+	}
 	if r.reviewResult.Stdout != "" || r.reviewResult.Stderr != "" || r.reviewResult.Command != "" || r.reviewResult.ExitCode != 0 {
 		return r.reviewResult, r.config, r.err
 	}
 	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRReviews(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	r.prReviewsCalls++
+	r.repo = repository
+	r.number = number
+	if len(r.pendingReviewResults) > 0 {
+		result := r.pendingReviewResults[0]
+		r.pendingReviewResults = r.pendingReviewResults[1:]
+		return result, r.config, r.err
+	}
+	if r.pendingReviewResult.Stdout != "" || r.pendingReviewResult.Stderr != "" || r.pendingReviewResult.Command != "" || r.pendingReviewResult.ExitCode != 0 {
+		return r.pendingReviewResult, r.config, r.err
+	}
+	return CommandResult{ExitCode: 0, Stdout: "[]"}, r.config, r.err
 }
 
 func (r *stubRunner) RunPRCommentCreate(_ context.Context, repository string, number int, request PRCommentCreateRequest) (CommandResult, resolvedConfig, error) {
@@ -1995,6 +2153,23 @@ func (r *stubRunner) RunPRCommentCreate(_ context.Context, repository string, nu
 	r.repo = repository
 	r.number = number
 	r.prCommentRequest = request
+	if len(r.commentResults) > 0 {
+		result := r.commentResults[0]
+		r.commentResults = r.commentResults[1:]
+		return result, r.config, r.err
+	}
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRReviewSubmit(_ context.Context, repository string, number int, reviewID int64) (CommandResult, resolvedConfig, error) {
+	r.prSubmitCalls++
+	r.repo = repository
+	r.number = number
+	if len(r.submitResults) > 0 {
+		result := r.submitResults[0]
+		r.submitResults = r.submitResults[1:]
+		return result, r.config, r.err
+	}
 	return r.result, r.config, r.err
 }
 

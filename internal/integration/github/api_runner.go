@@ -508,6 +508,36 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 	return result, apiResolvedConfig(config), nil
 }
 
+func (r *APIRunner) RunPRReviews(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		return apiErrorResult("pr reviews", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	config, err := r.resolveConfig(ctx)
+	if err != nil {
+		return apiErrorResult("pr reviews", config, err)
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return apiErrorResult("pr reviews", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	var result CommandResult
+	var reviews []ghPRReview
+	for page := 1; ; page++ {
+		var raw []ghPRReview
+		result, err = r.do(ctx, config, http.MethodGet, fmt.Sprintf("repos/%s/pulls/%d/reviews?per_page=100&page=%d", repository, number, page), nil, &raw)
+		if err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		reviews = append(reviews, raw...)
+		if len(raw) < 100 {
+			break
+		}
+	}
+	result.Stdout = mustJSON(reviews)
+	return result, apiResolvedConfig(config), nil
+}
+
 func (r *APIRunner) enrichPullRequestView(ctx context.Context, config apiConfig, repository string, view *ghPRView) (CommandResult, error) {
 	if view == nil || view.Number <= 0 {
 		return CommandResult{}, nil
@@ -569,6 +599,31 @@ func (r *APIRunner) RunPRCommentCreate(ctx context.Context, repository string, n
 		return result, apiResolvedConfig(config), err
 	}
 	result.Stdout = mustJSON(raw)
+	return result, apiResolvedConfig(config), nil
+}
+
+func (r *APIRunner) RunPRReviewSubmit(ctx context.Context, repository string, number int, reviewID int64) (CommandResult, resolvedConfig, error) {
+	if reviewID <= 0 {
+		return apiErrorResult("pr review submit", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review id must be greater than zero"})
+	}
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		return apiErrorResult("pr review submit", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	config, err := r.resolveConfig(ctx)
+	if err != nil {
+		return apiErrorResult("pr review submit", config, err)
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return apiErrorResult("pr review submit", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	var raw json.RawMessage
+	result, err := r.do(ctx, config, http.MethodPost, fmt.Sprintf("repos/%s/pulls/%d/reviews/%d/events", repository, number, reviewID), map[string]any{"event": "COMMENT"}, &raw)
+	if err != nil {
+		return result, apiResolvedConfig(config), err
+	}
+	result.Stdout = string(raw)
 	return result, apiResolvedConfig(config), nil
 }
 
