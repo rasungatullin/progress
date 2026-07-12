@@ -435,6 +435,52 @@ func TestServiceProcessTaskIgnoresApprovedReviewConclusion(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskStopsAfterApprovedReviewConclusionWithoutSingleCycle(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{{
+		ReplyToID: "thread-1",
+		Body:      "## Заключение ревизии\n\napprove\n\nПроверка завершена",
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, MaxCycles: 3})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if !result.Completed || result.StopReason != StopReasonNoNextOperation {
+		t.Fatalf("expected completed processing, got %#v", result)
+	}
+	if len(result.Cycles) != 1 {
+		t.Fatalf("expected one cycle after approved conclusion, got %#v", result.Cycles)
+	}
+}
+
+func TestServiceProcessTaskReworksWhenNewRemarkAccompaniesApprovedConclusion(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{
+		{ReplyToID: "thread-1", Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена"},
+		{ExternalID: "comment-1", ReplyToID: "thread-2", State: "unresolved", Body: "Исправить обработку"},
+	}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	cycle := result.Cycles[0]
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	}
+}
+
 func TestServiceProcessTaskReworksForRemarkQuotingConclusionHeader(t *testing.T) {
 	t.Parallel()
 
