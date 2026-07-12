@@ -221,12 +221,12 @@ func validateReasoningEffort(runner, modelName, effort string) error {
 		}
 		return fmt.Errorf("model %q does not support reasoning-effort", modelName)
 	}
-	switch effort {
-	case "none", "minimal", "low", "medium", "high", "xhigh":
-		return nil
-	default:
-		return fmt.Errorf("unsupported value %q", effort)
+	for _, supported := range model.ReasoningEffortValues(runner, modelName) {
+		if effort == supported {
+			return nil
+		}
 	}
+	return fmt.Errorf("unsupported value %q", effort)
 }
 
 func resolveDefaultBinding(config resourceConfig, in model.Invocation) (model.Allocation, error) {
