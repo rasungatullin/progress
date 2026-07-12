@@ -2,7 +2,11 @@ package configuration
 
 import (
 	"context"
+	"sort"
 	"strings"
+
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
+	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
 type SnapshotInput struct {
@@ -19,9 +23,15 @@ type SnapshotFailure struct {
 	ManualIntervention bool
 }
 
+type PrivateValueSnapshot struct {
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
+}
+
 type Snapshot struct {
 	Integration        *IntegrationConfig
 	ExecutionResources *ExecutionResourceConfig
+	PrivateValues      []PrivateValueSnapshot `json:"private_values,omitempty"`
 	Failures           []SnapshotFailure
 }
 
@@ -75,6 +85,64 @@ func (s *Service) Snapshot(ctx context.Context, input SnapshotInput) (Snapshot, 
 			snapshot.ExecutionResources = &config
 		}
 	}
+	if snapshot.ExecutionResources != nil || snapshot.Integration != nil {
+		config := model.ResourcePrivateStoreConfig{}
+		if snapshot.ExecutionResources != nil {
+			config = snapshot.ExecutionResources.Config.PrivateStore
+		}
+		if !hasPrivateStoreConfig(config) && snapshot.Integration != nil {
+			config = snapshot.Integration.Config.PrivateStore
+		}
+		refs := privateValueReferences(snapshot.Integration, snapshot.ExecutionResources)
+		if len(refs) > 0 {
+			reader, _, err := secrets.NewStore(config, input.ConfigHome)
+			for _, name := range refs {
+				available := false
+				if err == nil {
+					value, getErr := reader.Get(ctx, name)
+					available = getErr == nil && strings.TrimSpace(value) != ""
+				}
+				snapshot.PrivateValues = append(snapshot.PrivateValues, PrivateValueSnapshot{Name: name, Available: available})
+			}
+		}
+	}
+	redactSnapshot(snapshot)
 
 	return snapshot, nil
+}
+
+func privateValueReferences(integration *IntegrationConfig, resources *ExecutionResourceConfig) []string {
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name = strings.TrimSpace(name); name != "" {
+			seen[name] = true
+		}
+	}
+	if integration != nil {
+		for _, system := range integration.Config.Systems {
+			add(system.TokenPrivate)
+			add(system.GitHubAppPrivateKeyPrivate)
+		}
+	}
+	if resources != nil && resources.Config.Git != nil && resources.Config.Git.Push != nil {
+		add(resources.Config.Git.Push.SSHIdentityPrivate)
+	}
+	refs := make([]string, 0, len(seen))
+	for name := range seen {
+		refs = append(refs, name)
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+func redactSnapshot(snapshot Snapshot) {
+	if snapshot.Integration != nil {
+		config := snapshot.Integration.Config
+		for name, system := range config.Systems {
+			system.Token = ""
+			system.GitHubAppPrivateKey = ""
+			config.Systems[name] = system
+		}
+		snapshot.Integration.Config = config
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -42,6 +43,19 @@ func TestFileStoreWritesReadsAndDeletesPrivateValues(t *testing.T) {
 	_, err = store.Get(context.Background(), "mt_auth_token")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestMaskErrorHidesPrivateValuesAndPreservesCause(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("backend returned actual-secret")
+	err := MaskError(fmt.Errorf("read failed: %w", cause), "actual-secret")
+	if strings.Contains(err.Error(), "actual-secret") {
+		t.Fatalf("masked error contains private value: %v", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("masked error did not preserve cause: %v", err)
 	}
 }
 

@@ -32,6 +32,40 @@ type Store interface {
 	Delete(context.Context, string) error
 }
 
+// Reader — ограниченный контракт чтения приватного значения по именованной ссылке.
+// Контуры-потребители не получают операции изменения хранилища.
+type Reader interface {
+	Get(context.Context, string) (string, error)
+}
+
+const maskedValue = "[private value masked]"
+
+// MaskError удаляет фактические приватные значения из текста ошибки, сохраняя
+// исходную ошибку для проверки через errors.Is и errors.As.
+func MaskError(err error, values ...string) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			message = strings.ReplaceAll(message, value, maskedValue)
+		}
+	}
+	if message == err.Error() {
+		return err
+	}
+	return maskedError{message: message, cause: err}
+}
+
+type maskedError struct {
+	message string
+	cause   error
+}
+
+func (e maskedError) Error() string { return e.message }
+func (e maskedError) Unwrap() error { return e.cause }
+
 type Descriptor struct {
 	Type     string
 	Location string
