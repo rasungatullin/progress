@@ -130,7 +130,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		runnerSessionID = strings.TrimSpace(s.extractSessionID(in, rawRunnerOutput))
 	}
 	runnerOutput, _ = stripTrailingRunnerMetadata(rawRunnerOutput)
-	rawOutputPath := persistRunnerOutput(workplace.Name, runnerOutput)
+	rawOutputPath := ""
 
 	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState, structuredOutputErr := parseStructuredOutput(runnerOutput)
 	result := model.LaunchResult{
@@ -148,6 +148,12 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		if structuredOutputState != trailingStructuredBlockValid {
 			result.StructuredOutput = nil
 		}
+		runnerOutput = maskLaunchPrivateText(runnerOutput, allocation)
+		result.RawOutput = runnerOutput
+		result.Summary = maskLaunchPrivateText(result.Summary, allocation)
+		result.RawStructuredOutput = maskLaunchPrivateText(result.RawStructuredOutput, allocation)
+		rawOutputPath = persistRunnerOutput(workplace.Name, runnerOutput)
+		result.RawOutputPath = rawOutputPath
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, err, err)
 		return result, err
 	}
@@ -156,12 +162,14 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	if in.Launch.CommitPush {
 		result, err := s.commitAndPush(ctx, commitPushInputFromLaunch(in, allocation, workplace, structuredOutput))
 		if err != nil {
+			maskedRunnerOutput := maskLaunchPrivateText(runnerOutput, allocation)
+			rawOutputPath = persistRunnerOutput(workplace.Name, maskedRunnerOutput)
 			launchResult := model.LaunchResult{
 				Status:              "failed",
-				Summary:             strings.TrimSpace(plainRunnerOutput),
-				RawOutput:           runnerOutput,
+				Summary:             maskLaunchPrivateText(strings.TrimSpace(plainRunnerOutput), allocation),
+				RawOutput:           maskedRunnerOutput,
 				RawOutputPath:       rawOutputPath,
-				RawStructuredOutput: rawStructuredOutput,
+				RawStructuredOutput: maskLaunchPrivateText(rawStructuredOutput, allocation),
 				StructuredOutput:    structuredOutput,
 				RunnerSessionID:     runnerSessionID,
 				RunRecordPath:       "",
@@ -187,6 +195,10 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		gitSummary,
 	)
 
+	runnerOutput = maskLaunchPrivateText(runnerOutput, allocation)
+	plainRunnerOutput = maskLaunchPrivateText(plainRunnerOutput, allocation)
+	rawStructuredOutput = maskLaunchPrivateText(rawStructuredOutput, allocation)
+	rawOutputPath = persistRunnerOutput(workplace.Name, runnerOutput)
 	result = model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutput: runnerOutput, RawOutputPath: rawOutputPath, RawStructuredOutput: rawStructuredOutput}
 	result.RunnerSessionID = runnerSessionID
 	if structuredOutputState == trailingStructuredBlockValid {
@@ -971,6 +983,10 @@ func privateValues(config *model.GitConfig) []string {
 		return []string{value}
 	}
 	return nil
+}
+
+func maskLaunchPrivateText(text string, allocation model.Allocation) string {
+	return secrets.MaskText(text, privateValues(allocation.Git)...)
 }
 
 func maskPrivateError(err error, values []string) error {

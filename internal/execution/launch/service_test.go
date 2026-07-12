@@ -128,6 +128,46 @@ func TestPersistExecutionRunRecordMasksPrivateValueInRecordAndHistoryPayload(t *
 	}
 }
 
+func TestLaunchMasksPrivateValueInFullRunnerOutput(t *testing.T) {
+	t.Parallel()
+
+	secret := "actual-private-key"
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return strings.Join([]string{
+				"runner output: " + secret,
+				structuredOutputStart,
+				`{"summary":"completed"}`,
+				structuredOutputEnd,
+			}, "\n"), nil
+		},
+	}
+	allocation := validAllocation()
+	allocation.Git = &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivateValue: secret}}
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), allocation, validWorkplace(t))
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+
+	if strings.Contains(result.RawOutput, secret) {
+		t.Fatalf("launch result contains private value: %q", result.RawOutput)
+	}
+	rawOutput, err := os.ReadFile(result.RawOutputPath)
+	if err != nil {
+		t.Fatalf("read runner output: %v", err)
+	}
+	if strings.Contains(string(rawOutput), secret) {
+		t.Fatalf("runner output file contains private value: %s", rawOutput)
+	}
+	payload, err := os.ReadFile(result.RunRecordPath)
+	if err != nil {
+		t.Fatalf("read run record: %v", err)
+	}
+	if strings.Contains(string(payload), secret) {
+		t.Fatalf("run record contains private value: %s", payload)
+	}
+}
+
 func TestLaunchUpdatesExistingHistoryHandle(t *testing.T) {
 	t.Parallel()
 
