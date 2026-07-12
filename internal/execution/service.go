@@ -163,6 +163,13 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 		in.Profile = strings.TrimSpace(action.Profile)
 	}
 	assignment = assignmentFromInvocation(in)
+	var selectedOperation OperationSpec
+	for _, candidate := range action.Operations {
+		if operationResultName(candidate) == operationName {
+			selectedOperation = candidate
+			break
+		}
+	}
 
 	state := &operationExecution{
 		in:                in,
@@ -174,11 +181,9 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 		tracker:           newOperationTracker(action),
 	}
 	state.policies = s.loadTextPublicationPolicies(ctx, state)
-	if err := validateActionPreconditions(state); err != nil {
+	if err := validateOperationPreconditions(state, selectedOperation); err != nil {
 		state.result = failedStartResult(err)
-		if operation := firstActionOperation(action); operation != nil {
-			state.tracker.fail(operationResultName(*operation), "Предварительные условия действия не выполнены.", err, "action_precondition_failed", false, true)
-		}
+		state.tracker.fail(operationName, "Предварительные условия операции не выполнены.", err, "action_precondition_failed", false, true)
 		s.updateStartHistory(ctx, historyRoot, historyHandle, in, profile{}, allocation{}, workplace{}, state.result, err)
 		return OperationResult{Name: operationName, Kind: model.OperationKind(operationName), Origin: OperationOriginBuiltin, Status: model.OperationStatus(OperationStatusFailed), Failure: &model.Failure{Code: "action_precondition_failed", Message: err.Error()}}, err
 	}

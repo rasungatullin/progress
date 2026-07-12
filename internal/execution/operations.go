@@ -42,6 +42,7 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 		if operation := firstActionOperation(state.action); operation != nil {
 			state.tracker.fail(operationResultName(*operation), "Предварительные условия действия не выполнены.", err, "action_precondition_failed", false, true)
 		}
+		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
 		return err
 	}
 	executor := builtinOperationExecutor{service: s}
@@ -63,7 +64,19 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 }
 
 func validateActionPreconditions(state *operationExecution) error {
-	if state == nil || !actionContainsOperation(state.action, OperationKindPublishTaskComment) {
+	if state == nil {
+		return nil
+	}
+	for _, operation := range state.action.Operations {
+		if err := validateOperationPreconditions(state, operation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOperationPreconditions(state *operationExecution, operation OperationSpec) error {
+	if operationKind(operation) != OperationKindPublishTaskComment {
 		return nil
 	}
 	if state.assignment == nil || state.assignment.CanonicalTask == nil || state.assignment.CanonicalTask.Number <= 0 {

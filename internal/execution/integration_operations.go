@@ -983,77 +983,54 @@ func policyForStatePublication(state *operationExecution, target string, steps .
 	if state == nil {
 		return textPublicationPolicy{}, false
 	}
-	allSteps := normalizePolicyList(append([]string{state.action.Name}, steps...))
-	requestedStepSet := make(map[string]struct{}, len(steps))
-	for _, step := range steps {
-		step = strings.TrimSpace(strings.ToLower(step))
-		if step == "" {
-			continue
-		}
-		requestedStepSet[step] = struct{}{}
+	operationName, operationKind := currentPublicationOperation(state.action, steps...)
+	if policy, ok := policyForExactStep(state.policies, target, operationName); ok {
+		return policy, true
 	}
+	if policy, ok := policyForExactStep(state.policies, target, operationKind); ok {
+		return policy, true
+	}
+	if policy, ok := policyForExactStep(state.policies, target, state.action.Name); ok {
+		return policy, true
+	}
+	for index := 0; index < len(state.policies); index++ {
+		policy := state.policies[index]
+		if policyMatchesTarget(policy, target) && len(policy.Steps) == 0 {
+			return policy, true
+		}
+	}
+	return textPublicationPolicy{}, false
+}
 
-	operationKindsByAnyMatch := make(map[string]struct{}, len(state.action.Operations))
-	operationKindMatchCounts := make(map[string]int, len(state.action.Operations))
-	operationKindsByNameMatch := make(map[string]struct{}, len(state.action.Operations))
-	actionName := strings.TrimSpace(strings.ToLower(state.action.Name))
-	requestedOperationNames := make([]string, 0, len(state.action.Operations))
-	for _, operation := range state.action.Operations {
+func currentPublicationOperation(action Action, steps ...string) (string, string) {
+	requested := normalizePolicyList(steps)
+	for _, operation := range action.Operations {
 		name := strings.TrimSpace(strings.ToLower(operationResultName(operation)))
-		if name == "" {
-			continue
+		if policyHas(requested, name) {
+			return name, strings.TrimSpace(strings.ToLower(string(operationKind(operation))))
 		}
+	}
+	for _, operation := range action.Operations {
 		kind := strings.TrimSpace(strings.ToLower(string(operationKind(operation))))
-		_, requestedByName := requestedStepSet[name]
-		_, requestedByKind := requestedStepSet[kind]
-		if !requestedByName && !requestedByKind {
-			continue
-		}
-		if requestedByKind {
-			operationKindsByAnyMatch[kind] = struct{}{}
-		}
-		if kind != "" {
-			operationKindMatchCounts[kind]++
-		}
-		if requestedByName {
-			requestedOperationNames = append(requestedOperationNames, name)
-			operationKindsByNameMatch[kind] = struct{}{}
+		if policyHas(requested, kind) {
+			return "", kind
 		}
 	}
+	return "", ""
+}
 
-	specificSteps := normalizePolicyList(append(requestedOperationNames, actionName))
-	if actionName == "" {
-		specificSteps = normalizePolicyList(requestedOperationNames)
-	}
-	if len(specificSteps) > 0 {
-		if policy, ok := policyForPublicationByFirstMatch(state.policies, target, specificSteps...); ok {
-			return policy, true
-		}
-		if policy, ok := policyForPublication(state.policies, target, specificSteps...); ok {
-			return policy, true
-		}
-		kindsForFallback := operationKindsByAnyMatch
-		if len(operationKindsByNameMatch) > 0 {
-			kindsForFallback = make(map[string]struct{}, len(operationKindsByNameMatch))
-			for kind := range operationKindsByNameMatch {
-				if operationKindMatchCounts[kind] == 1 {
-					kindsForFallback[kind] = struct{}{}
-				}
-			}
-		}
-		specificOperationKinds := make([]string, 0, len(kindsForFallback))
-		for step := range kindsForFallback {
-			specificOperationKinds = append(specificOperationKinds, step)
-		}
-		if len(specificOperationKinds) > 0 {
-			if policy, ok := policyForPublication(state.policies, target, specificOperationKinds...); ok {
-				return policy, true
-			}
-		}
+func policyForExactStep(policies []textPublicationPolicy, target string, step string) (textPublicationPolicy, bool) {
+	step = strings.TrimSpace(strings.ToLower(step))
+	if step == "" {
 		return textPublicationPolicy{}, false
 	}
-
-	return policyForPublication(state.policies, target, allSteps...)
+	for index := 0; index < len(policies); index++ {
+		policy := policies[index]
+		if policyMatchesTarget(policy, target) && policyHas(policy.Steps, step) {
+			return policy, true
+		}
+	}
+	return textPublicationPolicy{}, false
 }
 
 func policyForPublicationByFirstMatch(policies []textPublicationPolicy, target string, steps ...string) (textPublicationPolicy, bool) {
