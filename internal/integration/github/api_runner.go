@@ -521,12 +521,20 @@ func (r *APIRunner) RunPRReviews(ctx context.Context, repository string, number 
 	if err != nil {
 		return apiErrorResult("pr reviews", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	var raw []ghPRReview
-	result, err := r.do(ctx, config, http.MethodGet, fmt.Sprintf("repos/%s/pulls/%d/reviews", repository, number), nil, &raw)
-	if err != nil {
-		return result, apiResolvedConfig(config), err
+	var result CommandResult
+	var reviews []ghPRReview
+	for page := 1; ; page++ {
+		var raw []ghPRReview
+		result, err = r.do(ctx, config, http.MethodGet, fmt.Sprintf("repos/%s/pulls/%d/reviews?per_page=100&page=%d", repository, number, page), nil, &raw)
+		if err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		reviews = append(reviews, raw...)
+		if len(raw) < 100 {
+			break
+		}
 	}
-	result.Stdout = mustJSON(raw)
+	result.Stdout = mustJSON(reviews)
 	return result, apiResolvedConfig(config), nil
 }
 
