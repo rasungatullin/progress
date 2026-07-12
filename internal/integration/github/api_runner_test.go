@@ -451,6 +451,100 @@ func TestAPITransportMapsNotFound(t *testing.T) {
 	}
 }
 
+func TestAPITransportRemovesMissingLabelIdempotentlyAndContinues(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		switch len(requests) {
+		case 1:
+			http.Error(w, `{"message":"Label does not exist"}`, http.StatusNotFound)
+		case 2:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	service := NewServiceWithConfig(model.IntegrationSystemConfig{
+		Transport:  "api",
+		BaseURL:    server.URL,
+		Token:      "secret",
+		Repository: "owner/name",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "github",
+		Resource:        "label",
+		ObjectType:      "label",
+		Operation:       "remove",
+		Number:          123,
+		Labels:          []string{"missing", "existing"},
+	})
+	if err != nil {
+		t.Fatalf("remove labels: %v", err)
+	}
+	if response.OperationResult == nil || response.Status != model.ResponseStatusOK {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	if len(requests) != 2 || requests[0] != "/repos/owner/name/issues/123/labels/missing" || requests[1] != "/repos/owner/name/issues/123/labels/existing" {
+		t.Fatalf("unexpected requests: %#v", requests)
+	}
+}
+
+func TestAPITransportKeepsOtherLabelNotFoundAsError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	runner := NewAPIRunnerWithSystemConfig(model.IntegrationSystemConfig{
+		BaseURL:    server.URL,
+		Token:      "secret",
+		Repository: "owner/name",
+	})
+
+	_, _, err := runner.RunIssueLabelsRemove(context.Background(), "owner/name", 123, []string{"missing"})
+	var ghErr *Error
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodeNotFound {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+}
+
+func TestAPITransportRemovesOnlyMissingLabelSuccessfully(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Label does not exist"}`, http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	service := NewServiceWithConfig(model.IntegrationSystemConfig{
+		Transport:  "api",
+		BaseURL:    server.URL,
+		Token:      "secret",
+		Repository: "owner/name",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeTracker,
+		System:          "github",
+		Resource:        "label",
+		ObjectType:      "label",
+		Operation:       "remove",
+		Number:          123,
+		Labels:          []string{"missing"},
+	})
+	if err != nil || response.Status != model.ResponseStatusOK {
+		t.Fatalf("unexpected response: %#v, error: %v", response, err)
+	}
+}
+
 func TestAPITransportPRGetEnrichesLabelsAndReviewDecision(t *testing.T) {
 	t.Parallel()
 

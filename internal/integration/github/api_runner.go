@@ -274,10 +274,29 @@ func (r *APIRunner) runIssueLabelsChange(ctx context.Context, repository string,
 		var raw any
 		result, err = r.do(ctx, config, http.MethodDelete, fmt.Sprintf("repos/%s/issues/%d/labels/%s", repository, number, url.PathEscape(label)), nil, &raw)
 		if err != nil {
+			if isMissingIssueLabelError(err) {
+				result.ExitCode = 0
+				continue
+			}
 			return result, apiResolvedConfig(config), err
 		}
 	}
 	return result, apiResolvedConfig(config), nil
+}
+
+func isMissingIssueLabelError(err error) bool {
+	var ghErr *Error
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodeNotFound || ghErr.Result.ExitCode != http.StatusNotFound {
+		return false
+	}
+
+	var response struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(ghErr.Result.Stdout), &response) != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(response.Message), "Label does not exist")
 }
 
 func (r *APIRunner) RunPRView(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
