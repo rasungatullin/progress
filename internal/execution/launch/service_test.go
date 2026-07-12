@@ -169,15 +169,16 @@ func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
 	codexPath := filepath.Join(dir, RunnerCodex)
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" != \"exec\" ] || [ \"$2\" != \"--json\" ]; then exit 3; fi\n" +
-		"for value in 1 2 3 4; do\n" +
+		"for value in 1 2 3 4 5 6; do\n" +
 		"  printf '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"%s\"}}\\n' \"$value\"\n" +
-		"  sleep .05\n" +
+		"  sleep .1\n" +
 		"done\n"
 	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write codex stand-in: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
+	startedAt := time.Now()
 	output, err := runCodexRunner(context.Background(), model.LaunchSpec{
 		Directory:       t.TempDir(),
 		Runner:          RunnerCodex,
@@ -188,9 +189,32 @@ func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codex JSON stream must keep runner active: %v", err)
 	}
-	if output != "1\n2\n3\n4" {
+	if elapsed := time.Since(startedAt); elapsed < 500*time.Millisecond {
+		t.Fatalf("codex runner finished before the streaming process: %s", elapsed)
+	}
+	if output != "1\n2\n3\n4\n5\n6" {
 		t.Fatalf("unexpected normalized codex output: %q", output)
 	}
+}
+
+func TestRunnerOutputWriterSnapshotsBeforeProcessExit(t *testing.T) {
+	writer := &runnerOutputWriter{activity: make(chan struct{}, 1)}
+	processExit := make(chan struct{})
+	go func() {
+		_, _ = writer.Write([]byte(`{"type":"item.completed"}\n`))
+		<-processExit
+	}()
+
+	select {
+	case <-writer.activity:
+		output, lastOutputAt := writer.snapshot()
+		if output != `{"type":"item.completed"}\n` || lastOutputAt.IsZero() {
+			t.Fatalf("output was not accumulated before process exit: %q, %v", output, lastOutputAt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("output was not reported before process exit")
+	}
+	close(processExit)
 }
 
 func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
