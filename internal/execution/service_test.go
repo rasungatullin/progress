@@ -3438,6 +3438,26 @@ func TestReviewRemarkCommentsPreservesExternalIdentifiers(t *testing.T) {
 	}
 }
 
+func TestUpdateReviewRemarkThreadsReopensExistingChain(t *testing.T) {
+	integrations := &stubIntegrationExecutor{}
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+
+	updated, err := executor.updateReviewRemarkThreads(context.Background(), []reviewRemarkComment{{
+		ThreadID: "PRRT_thread-1",
+		Status:   "open",
+	}})
+	if err != nil {
+		t.Fatalf("update review thread state: %v", err)
+	}
+	if updated != 1 || len(integrations.calls) != 1 {
+		t.Fatalf("expected one thread state update, updated=%d calls=%#v", updated, integrations.calls)
+	}
+	request := integrations.calls[0]
+	if request.Operation != "unresolve" || request.ThreadID != "PRRT_thread-1" || request.ExternalID != "PRRT_thread-1" {
+		t.Fatalf("open remark must reopen its existing thread: %#v", request)
+	}
+}
+
 func TestServiceExecuteReviewPullRequestContinuesWhenOptionalRemarksFail(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)

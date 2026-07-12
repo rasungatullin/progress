@@ -2185,6 +2185,22 @@ func TestBuildRunnerPromptAllowsNoOptionalStructuredOutputFields(t *testing.T) {
 	}
 }
 
+func TestBuildRunnerPromptDoesNotMentionUnselectedReviewResponses(t *testing.T) {
+	t.Parallel()
+
+	prompt, err := buildRunnerPrompt(model.LaunchSpec{
+		Prompt:                 "Повторно провести ревизию.",
+		StructuredOutput:       true,
+		StructuredOutputFields: []string{"summary", "remarks", "conclusion"},
+	})
+	if err != nil {
+		t.Fatalf("buildRunnerPrompt: %v", err)
+	}
+	if strings.Contains(prompt, "review_responses") {
+		t.Fatalf("prompt must not mention an unselected structured output field: %q", prompt)
+	}
+}
+
 func TestBuildRunnerPromptTreatsSummaryAsMandatoryEvenWhenSelected(t *testing.T) {
 	t.Parallel()
 

@@ -539,6 +539,9 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 	if err != nil {
 		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Замечания ревизии не записаны.", err, "review_remarks_publish_failed")
 	}
+	if _, err := e.updateReviewRemarkThreads(ctx, comments); err != nil {
+		return e.failPublishReviewRemarksOperation(ctx, state, operation, input, name, "Замечания записаны, но состояние цепочки обсуждения не обновлено.", err, "review_thread_state_update_failed")
+	}
 
 	summary := fmt.Sprintf("review-remarks-published=%d", count)
 	result := input.result
@@ -770,6 +773,7 @@ type reviewRemarkComment struct {
 	Side       string
 	ExternalID string
 	ThreadID   string
+	Status     string
 }
 
 func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context, state *operationExecution, ref pullRequestRef, comments []reviewRemarkComment) (int, error) {
@@ -902,6 +906,40 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 	}
 
 	return resolved, nil
+}
+
+func (e builtinOperationExecutor) updateReviewRemarkThreads(ctx context.Context, comments []reviewRemarkComment) (int, error) {
+	executor, err := e.integrationExecutor()
+	if err != nil {
+		return 0, err
+	}
+
+	updated := 0
+	seen := map[string]struct{}{}
+	for _, comment := range comments {
+		threadID := strings.TrimSpace(comment.ThreadID)
+		operation := reviewRemarkThreadOperation(comment.Status)
+		if threadID == "" || operation == "" {
+			continue
+		}
+		if _, ok := seen[threadID]; ok {
+			continue
+		}
+		seen[threadID] = struct{}{}
+		if _, err := executor.Execute(ctx, integration.Request{
+			IntegrationType: integrationmodel.IntegrationTypeRepository,
+			Resource:        "comment",
+			ObjectType:      "comment",
+			Operation:       operation,
+			ExternalID:      threadID,
+			ThreadID:        threadID,
+		}); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+
+	return updated, nil
 }
 
 func (e builtinOperationExecutor) integrationExecutor() (integrationExecutor, error) {
@@ -1321,10 +1359,22 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 				Side:       strings.TrimSpace(remark.Side),
 				ExternalID: strings.TrimSpace(remark.ExternalID),
 				ThreadID:   strings.TrimSpace(remark.ThreadID),
+				Status:     strings.TrimSpace(remark.Status),
 			})
 		}
 	}
 	return comments
+}
+
+func reviewRemarkThreadOperation(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "open", "unresolved", "reopened":
+		return "unresolve"
+	case "resolved", "fixed", "done", "ok", "closed":
+		return "resolve"
+	default:
+		return ""
+	}
 }
 
 func reviewRemarkCommentOperation(comment reviewRemarkComment) string {
