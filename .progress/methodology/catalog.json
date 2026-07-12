@@ -149,6 +149,7 @@
         {"name": "build-directive", "kind": "build-directive", "title": "Сборка исполнительной директивы", "origin": "builtin", "required": true},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "title": "Запуск синтеза", "origin": "builtin", "required": true},
         {"name": "parse-result", "kind": "parse-result", "title": "Разбор результата", "origin": "builtin", "required": true},
+        {"name": "publish-task-comment", "kind": "publish-task-comment", "title": "Запись комментария задачи", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "title": "Завершающая фиксация", "origin": "builtin", "required": true}
       ],
       "description": "Выполнение инженерного изменения по готовому контексту задачи.",
@@ -173,6 +174,7 @@
         {"name": "build-directive", "kind": "build-directive", "title": "Сборка исполнительной директивы", "origin": "builtin", "required": true},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "title": "Запуск синтеза", "origin": "builtin", "required": true},
         {"name": "parse-result", "kind": "parse-result", "title": "Разбор результата", "origin": "builtin", "required": true},
+        {"name": "publish-task-comment", "kind": "publish-task-comment", "title": "Запись комментария задачи", "origin": "builtin", "required": true},
         {"name": "commit-push", "kind": "commit-push", "title": "Создание коммита и отправка ветки", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "title": "Завершающая фиксация", "origin": "builtin", "required": true}
       ],
@@ -448,6 +450,7 @@
           "start-implementation-pr",
           "review-pull-request",
           "apply-review-comments",
+          "publish-task-comment",
           "publish-merge-request",
           "publish-review-remarks",
           "publish-review-responses"

@@ -223,7 +223,7 @@ func (e builtinOperationExecutor) publishReviewRemarks(ctx context.Context, stat
 		return nil
 	}
 
-	count, err := e.publishPullRequestComments(ctx, state, ref, comments)
+	count, err := e.publishPullRequestComments(ctx, state, ref, comments, name)
 	if err != nil {
 		return e.failIntegrationOperation(ctx, state, name, "Замечания ревизии не записаны.", err, "review_remarks_publish_failed")
 	}
@@ -271,7 +271,7 @@ type reviewRemarkComment struct {
 	Side string
 }
 
-func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context, state *operationExecution, ref pullRequestRef, comments []reviewRemarkComment) (int, error) {
+func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context, state *operationExecution, ref pullRequestRef, comments []reviewRemarkComment, operationNames ...string) (int, error) {
 	executor, err := e.integrationExecutor()
 	if err != nil {
 		return 0, err
@@ -279,8 +279,12 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 
 	count := 0
 	var failures []error
+	operationName := OperationKindPublishReviewRemarks
+	if len(operationNames) > 0 && strings.TrimSpace(operationNames[0]) != "" {
+		operationName = strings.TrimSpace(operationNames[0])
+	}
 	for _, comment := range comments {
-		body := publicationCommentBody(state, OperationKindPublishReviewRemarks, comment.Body)
+		body := publicationCommentBody(state, operationName, comment.Body)
 		if body == "" {
 			continue
 		}
