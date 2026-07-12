@@ -26,6 +26,11 @@ func LoadPrivateStoreConfig(repoRoot, configHome string, readFile ReadFileFunc) 
 
 	legacy, legacyErr := LoadIntegrationPrivateStoreConfigWithHome(repoRoot, configHome, readFile)
 	if legacyErr != nil {
+		if strings.Contains(legacyErr.Error(), "integration config not found") {
+			// Отсутствие обоих файлов означает настройку по умолчанию. Это
+			// позволяет новой установке сразу выбрать файловое хранилище.
+			return model.ResourcePrivateStoreConfig{}, configHome, nil
+		}
 		return model.ResourcePrivateStoreConfig{}, "", legacyErr
 	}
 	return legacy.Config, legacy.ConfigHome, nil

@@ -3,6 +3,8 @@ package configuration
 import (
 	"io/fs"
 	"testing"
+
+	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
 func TestLoadPrivateStoreConfigPrefersSettingsAndResourcesContour(t *testing.T) {
@@ -43,5 +45,20 @@ func TestLoadPrivateStoreConfigKeepsLegacyIntegrationSetting(t *testing.T) {
 	}
 	if config.Path != "private/old.json" {
 		t.Fatalf("legacy private store setting was not preserved: %#v", config)
+	}
+}
+
+func TestLoadPrivateStoreConfigUsesDefaultWhenNoContourConfigExists(t *testing.T) {
+	readFile := func(string) ([]byte, error) { return nil, fs.ErrNotExist }
+
+	config, home, err := LoadPrivateStoreConfig("", "/config-home", readFile)
+	if err != nil {
+		t.Fatalf("load default private store config: %v", err)
+	}
+	if config != (model.ResourcePrivateStoreConfig{}) {
+		t.Fatalf("unexpected default private store config: %#v", config)
+	}
+	if home != "/config-home" {
+		t.Fatalf("unexpected config home: %q", home)
 	}
 }

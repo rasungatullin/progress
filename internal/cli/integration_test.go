@@ -205,6 +205,30 @@ func TestIntegrationPrivateSetCommandStoresValueWithoutPrintingIt(t *testing.T) 
 	}
 }
 
+func TestConfigurationPrivateCommandAcceptsJSONFormat(t *testing.T) {
+	cmd := NewRootCommand()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetArgs([]string{"configuration", "private", "status", "--format", "json"})
+
+	original := integrationPrivateStoreFactory
+	integrationPrivateStoreFactory = func(*cobra.Command) (secrets.Store, secrets.Descriptor, error) {
+		return &capturingPrivateStore{values: map[string]string{}}, secrets.Descriptor{Type: "file", Location: "/tmp/private.json"}, nil
+	}
+	t.Cleanup(func() { integrationPrivateStoreFactory = original })
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute configuration private status: %v", err)
+	}
+	var payload integrationPrivateResult
+	if err := json.Unmarshal([]byte(stdout.String()), &payload); err != nil {
+		t.Fatalf("configuration private json parse: %v, output: %q", err, stdout.String())
+	}
+	if payload.Status != "ready" || payload.Store != "file" {
+		t.Fatalf("unexpected configuration private status: %#v", payload)
+	}
+}
+
 func TestIntegrationPrivateSetCommandReadsValueFromStdin(t *testing.T) {
 	cmd := NewRootCommand()
 	stdout := &bytes.Buffer{}
