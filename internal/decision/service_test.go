@@ -1278,6 +1278,61 @@ func TestHasUnresolvedExternalReviewRemarksRequiresResolvedResponseState(t *test
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksIgnoresResolvedGeneralRemarkByID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		state string
+		body  string
+		want  bool
+	}{
+		{name: "resolved", state: "resolved", body: "Замечание закрыто", want: false},
+		{name: "closed", state: "closed", body: "Замечание закрыто", want: false},
+		{name: "fixed", state: "fixed", body: "Замечание закрыто", want: false},
+		{name: "explicit closure with normalized state", state: "resolved", body: "Замечание закрыто: исправление подтверждено", want: false},
+		{name: "closure-like text without normalized state", body: "Замечание закрыто: исправление подтверждено", want: true},
+		{name: "closure mention in open remark", body: "Замечание закрыто не было; требуется исправление", want: true},
+		{name: "negative closure statement", body: "Замечание закрыто: не было подтверждено", want: true},
+		{name: "open", state: "open", body: "Ожидается исправление", want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			remarks := []integration.ReviewRemark{{
+				State: "conversation",
+				Body:  "## Замечание ревизии\n\nИдентификатор: remark-1\n\nСостояние: " + test.state + "\n\n" + test.body,
+			}}
+			if got := hasUnresolvedExternalReviewRemarks(remarks); got != test.want {
+				t.Fatalf("hasUnresolvedExternalReviewRemarks() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHasUnresolvedExternalReviewRemarksIgnoresConfirmationByID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-1\n\nИсправить обработку"},
+		{State: "conversation", Body: "## Ответ на замечание ревизии\n\nЗамечание: remark-1\n\nСостояние: resolved\n\nЗамечание закрыто: исправление подтверждено"},
+	}
+	if got := hasUnresolvedExternalReviewRemarks(remarks); got {
+		t.Fatal("resolved confirmation must suppress the original general remark")
+	}
+}
+
+func TestHasUnresolvedExternalReviewRemarksDoesNotTreatUnstructuredResolvedCommentAsConfirmation(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{
+		State: "conversation",
+		Body:  "Замечание: remark-2\n\nСостояние: resolved\n\nЗамечание закрыто: исправление подтверждено",
+	}}
+	if got := hasUnresolvedExternalReviewRemarks(remarks); !got {
+		t.Fatal("unstructured resolved comment must remain unresolved")
+	}
+}
+
 func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *testing.T) {
 	t.Parallel()
 

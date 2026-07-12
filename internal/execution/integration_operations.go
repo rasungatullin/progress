@@ -1445,6 +1445,7 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 			formatNamedLine("Идентификатор", remark.ID),
 			formatNamedLine("Критичность", remark.Severity),
 			formatNamedLine("Тип", remark.Type),
+			formatNamedLine("Состояние", remark.Status),
 			formatNamedLine("Заголовок", remark.Title),
 			remark.Body,
 		}), "\n\n"))

@@ -327,10 +327,9 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
 	respondedRemarkIDs := map[string]struct{}{}
 	for _, remark := range remarks {
-		if strings.Contains(remark.Body, "## Ответ на замечание ревизии") {
-			if id := externalReviewRemarkID(remark.Body, "Замечание:"); id != "" && isResolvedExternalReviewResponse(remark.Body) {
-				respondedRemarkIDs[id] = struct{}{}
-			}
+		id := externalReviewRemarkReferenceID(remark.Body)
+		if id != "" && (isResolvedExternalReviewResponse(remark.Body) || isResolvedExternalReviewRemark(remark.Body)) {
+			respondedRemarkIDs[id] = struct{}{}
 		}
 	}
 
@@ -339,8 +338,8 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 			if strings.Contains(remark.Body, "## Ответ на замечание ревизии") || strings.Contains(remark.Body, "## Заключение ревизии") {
 				continue
 			}
-			if id := externalReviewRemarkID(remark.Body, "Идентификатор:"); id != "" {
-				if _, ok := respondedRemarkIDs[id]; ok {
+			if id := externalReviewRemarkReferenceID(remark.Body); id != "" {
+				if _, ok := respondedRemarkIDs[id]; ok || isResolvedExternalReviewRemark(remark.Body) {
 					continue
 				}
 			}
@@ -357,7 +356,22 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 	return false
 }
 
+func isResolvedExternalReviewRemark(body string) bool {
+	if !strings.Contains(body, "## Замечание ревизии") {
+		return false
+	}
+	state := strings.ToLower(strings.TrimSpace(externalReviewRemarkID(body, "Состояние:")))
+	switch state {
+	case "resolved", "fixed", "done", "ok", "closed", "outdated":
+		return true
+	}
+	return false
+}
+
 func isResolvedExternalReviewResponse(body string) bool {
+	if !strings.Contains(body, "## Ответ на замечание ревизии") {
+		return false
+	}
 	state := strings.ToLower(strings.TrimSpace(externalReviewRemarkID(body, "Состояние:")))
 	switch state {
 	case "resolved", "fixed", "done", "ok", "closed", "outdated":
@@ -372,6 +386,15 @@ func externalReviewRemarkID(body string, prefix string) string {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, prefix) {
 			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
+}
+
+func externalReviewRemarkReferenceID(body string) string {
+	for _, prefix := range []string{"Идентификатор:", "Замечание:"} {
+		if id := externalReviewRemarkID(body, prefix); id != "" {
+			return id
 		}
 	}
 	return ""
