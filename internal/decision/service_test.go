@@ -127,6 +127,44 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	}
 }
 
+func TestChecksumSkillSeparatesDirectoryEntriesAndContents(t *testing.T) {
+	t.Parallel()
+
+	first := t.TempDir()
+	second := t.TempDir()
+	if err := os.WriteFile(filepath.Join(first, "a"), []byte("bc\x00d"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "a"), []byte("b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "c"), []byte("d"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	firstChecksum, err := checksumSkill(first, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondChecksum, err := checksumSkill(second, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstChecksum == secondChecksum {
+		t.Fatalf("structurally different skills have the same checksum: %s", firstChecksum)
+	}
+}
+
+func TestMergeWorkflowSkillRefsKeepsRouteAndCheckSkills(t *testing.T) {
+	merged := mergeWorkflowSkillRefs(
+		[]execution.SkillRef{{Name: "route"}, {Name: "shared"}},
+		[]execution.SkillRef{{Name: "check"}, {Name: "shared"}},
+	)
+	if len(merged) != 3 || merged[0].Name != "route" || merged[1].Name != "shared" || merged[2].Name != "check" {
+		t.Fatalf("unexpected merged skills: %#v", merged)
+	}
+}
+
 func TestServiceStartRecoversMergeRequestForReviewRoute(t *testing.T) {
 	t.Parallel()
 

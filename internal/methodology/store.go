@@ -526,6 +526,9 @@ func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mk
 			return fmt.Errorf("remove methodology registry directory %s: %w", dirPath, err)
 		}
 	}
+	if err := removeAll(filepath.Join(root, "skills", ".registry")); err != nil {
+		return fmt.Errorf("remove methodology skill registry directory: %w", err)
+	}
 	if err := writeCatalogConfig(path, catalog, writeFile, mkdirAll); err != nil {
 		return err
 	}

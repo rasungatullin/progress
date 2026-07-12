@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -150,9 +151,7 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 				firstNonEmpty(strings.TrimSpace(checkConfig.Name), fmt.Sprintf("check-%d", index+1)): firstNonEmpty(strings.TrimSpace(checkConfig.Source), strings.TrimSpace(processingRoute.Source)),
 			},
 		}
-		if len(selected.Skills) == 0 {
-			selected.Skills = append([]execution.SkillRef(nil), checkConfig.Skills...)
-		}
+		selected.Skills = mergeWorkflowSkillRefs(selected.Skills, checkConfig.Skills)
 		bestScore = score
 	}
 	if bestScore < 0 {
@@ -160,6 +159,22 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 	}
 
 	return selected, nil
+}
+
+func mergeWorkflowSkillRefs(groups ...[]execution.SkillRef) []execution.SkillRef {
+	seen := make(map[string]struct{})
+	result := make([]execution.SkillRef, 0)
+	for _, group := range groups {
+		for _, skill := range group {
+			name := strings.TrimSpace(skill.Name)
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			result = append(result, skill)
+		}
+	}
+	return result
 }
 
 func (s *Service) loadWorkflowConfig(ctx context.Context) (workflowConfigFile, error) {
@@ -418,18 +433,21 @@ func checksumSkill(root, path string) (string, error) {
 	sort.Strings(files)
 	for _, file := range files {
 		rel, _ := filepath.Rel(path, file)
-		_, _ = io.WriteString(h, rel+"\x00")
-		f, err := os.Open(file)
+		data, err := os.ReadFile(file)
 		if err != nil {
 			return "", err
 		}
-		if _, err := io.Copy(h, f); err != nil {
-			f.Close()
-			return "", err
-		}
-		f.Close()
+		writeSkillHashPart(h, []byte(rel))
+		writeSkillHashPart(h, data)
 	}
 	return fmt.Sprintf("sha256:%x", h.Sum(nil)), nil
+}
+
+func writeSkillHashPart(h io.Writer, data []byte) {
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(data)))
+	_, _ = h.Write(length[:])
+	_, _ = h.Write(data)
 }
 
 func ensureExecutionPathInside(root, path string) error {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -388,11 +389,23 @@ func readSkill(root, path string) (string, string, error) {
 		if err != nil {
 			return "", "", err
 		}
-		_, _ = h.Write(data)
+		if info.IsDir() {
+			writeSkillHashPart(h, []byte(rel))
+			writeSkillHashPart(h, data)
+		} else {
+			_, _ = h.Write(data)
+		}
 		content.WriteString("\n--- " + rel + " ---\n")
 		content.Write(data)
 	}
 	return fmt.Sprintf("sha256:%x", h.Sum(nil)), content.String(), nil
+}
+
+func writeSkillHashPart(h io.Writer, data []byte) {
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(data)))
+	_, _ = h.Write(length[:])
+	_, _ = h.Write(data)
 }
 
 func failedLaunchResult(err error) model.LaunchResult {
