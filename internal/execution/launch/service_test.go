@@ -895,6 +895,49 @@ func TestCommitAndPushStagesTrackedRuntimeDeletionWithoutAddingNewRuntimeFile(t 
 	}
 }
 
+func TestChangedPathsForCommitRecognizesNestedRuntimeDeletion(t *testing.T) {
+	t.Parallel()
+
+	repo := tempDir(t)
+	runGitTestCommand(t, repo, "init")
+	runGitTestCommand(t, repo, "config", "user.email", "test@example.com")
+	runGitTestCommand(t, repo, "config", "user.name", "Test User")
+
+	trackedPath := filepath.Join(repo, "internal", "execution", ".progress", "execution-runs", "execution.db")
+	if err := os.MkdirAll(filepath.Dir(trackedPath), 0o755); err != nil {
+		t.Fatalf("mkdir tracked path: %v", err)
+	}
+	if err := os.WriteFile(trackedPath, []byte("database"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	runGitTestCommand(t, repo, "add", "--", "internal/execution/.progress/execution-runs/execution.db")
+	runGitTestCommand(t, repo, "commit", "-m", "initial")
+
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("internal/execution/.progress/execution-runs/\n"), 0o644); err != nil {
+		t.Fatalf("write gitignore: %v", err)
+	}
+	runGitTestCommand(t, repo, "add", ".gitignore")
+	runGitTestCommand(t, repo, "commit", "-m", "ignore runtime files")
+	if err := os.Remove(trackedPath); err != nil {
+		t.Fatalf("remove tracked file: %v", err)
+	}
+	ignoredPath := filepath.Join(repo, "internal", "execution", ".progress", "execution-runs", "new.db")
+	if err := os.WriteFile(ignoredPath, []byte("new database"), 0o644); err != nil {
+		t.Fatalf("write ignored file: %v", err)
+	}
+
+	paths, deletionPaths, err := NewService().changedPathsForCommit(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("inspect changes: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("new ignored file must not be visible: %#v", paths)
+	}
+	if !reflect.DeepEqual(deletionPaths, []string{"internal/execution/.progress/execution-runs/execution.db"}) {
+		t.Fatalf("unexpected nested deletion paths: %#v", deletionPaths)
+	}
+}
+
 func TestLaunchCommitPushDropsCollapsedProgressDirectoryPath(t *testing.T) {
 	t.Parallel()
 
@@ -2342,6 +2385,15 @@ func tempDir(t *testing.T) string {
 		t.Fatalf("mkdir temp repo: %v", err)
 	}
 	return dir
+}
+
+func runGitTestCommand(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = dir
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
 }
 
 func buildStructuredJSON(value any) (string, error) {

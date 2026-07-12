@@ -1142,12 +1142,19 @@ func isRenameOrCopyStatus(entry string) bool {
 
 func isProgressRuntimePath(pathValue string) bool {
 	pathValue = strings.Trim(pathValue, "\"")
-	return pathValue == ".progress" ||
-		pathValue == ".progress/" ||
-		pathValue == ".progress/runner-output" ||
-		strings.HasPrefix(pathValue, ".progress/runner-output/") ||
-		pathValue == ".progress/execution-runs" ||
-		strings.HasPrefix(pathValue, ".progress/execution-runs/")
+	parts := strings.Split(pathValue, "/")
+	for index, part := range parts {
+		if part != ".progress" {
+			continue
+		}
+
+		suffix := strings.Trim(strings.Join(parts[index+1:], "/"), "/")
+		return suffix == "" ||
+			suffix == "runner-output" || strings.HasPrefix(suffix, "runner-output/") ||
+			suffix == "execution-runs" || strings.HasPrefix(suffix, "execution-runs/")
+	}
+
+	return false
 }
 
 func (s *Service) upstreamBranch(ctx context.Context, dir, branch string) (string, error) {
