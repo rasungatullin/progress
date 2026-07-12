@@ -481,6 +481,12 @@ func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mk
 	}
 	for _, instruction := range catalog.Instructions {
 		if instruction.BodyFile != "" {
+			bodyPath := filepath.Join(root, instruction.BodyFile)
+			relativeBodyPath, err := filepath.Rel(filepath.Join(root, "instructions"), bodyPath)
+			if err != nil {
+				return fmt.Errorf("relativize instruction body file %q: %w", instruction.BodyFile, err)
+			}
+			instruction.BodyFile = relativeBodyPath
 			instruction.Body = ""
 		}
 		path, err := registryFilePath(root, "instructions", instructionRegistryKey(instruction))

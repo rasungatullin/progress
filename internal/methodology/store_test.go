@@ -216,8 +216,42 @@ func TestWriteCatalogFilesOmitsLoadedInstructionBody(t *testing.T) {
 	}
 
 	content := string(written["/repo/.progress/methodology/instructions/directive.json"])
-	if strings.Contains(content, `"body"`) || !strings.Contains(content, `"body_file": "texts/directive.md"`) {
+	if strings.Contains(content, `"body"`) || !strings.Contains(content, `"body_file": "../texts/directive.md"`) {
 		t.Fatalf("unexpected instruction content: %s", content)
+	}
+}
+
+func TestSaveCatalogMigratesInstructionBodyFilePath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"instructions":[{"name":"directive","body_file":"texts/directive.md"}]}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "texts", "directive.md"), "текст инструкции")
+
+	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("load legacy catalog: %v", err)
+	}
+	if _, err := SaveCatalogWithHome(root, t.TempDir(), CatalogWriteScopeLocal, snapshot.Catalog, nil, nil, nil); err != nil {
+		t.Fatalf("migrate catalog: %v", err)
+	}
+
+	migratedPath := filepath.Join(methodologyDir, "instructions", "directive.json")
+	migratedContent, err := os.ReadFile(migratedPath)
+	if err != nil {
+		t.Fatalf("read migrated instruction: %v", err)
+	}
+	if !strings.Contains(string(migratedContent), `"body_file": "../texts/directive.md"`) {
+		t.Fatalf("unexpected migrated instruction: %s", migratedContent)
+	}
+
+	reloaded, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("reload migrated catalog: %v", err)
+	}
+	if got := reloaded.Catalog.Instructions[0].Body; got != "текст инструкции" {
+		t.Fatalf("unexpected reloaded instruction body: %q", got)
 	}
 }
 
