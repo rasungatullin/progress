@@ -431,6 +431,11 @@ func loadInstructionBody(instruction Instruction, descriptionPath, methodologyRo
 		return Instruction{}, fmt.Errorf("read instruction body file %s: %w", bodyPath, err)
 	}
 	instruction.Body = strings.TrimSpace(string(content))
+	relativeBodyPath, err := filepath.Rel(root, bodyPath)
+	if err != nil {
+		return Instruction{}, fmt.Errorf("relativize instruction body file %s: %w", bodyPath, err)
+	}
+	instruction.BodyFile = relativeBodyPath
 	return instruction, nil
 }
 

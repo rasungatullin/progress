@@ -255,6 +255,35 @@ func TestSaveCatalogMigratesInstructionBodyFilePath(t *testing.T) {
 	}
 }
 
+func TestSaveCatalogKeepsInstructionBodyFilePathAfterFileCatalogReload(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "instructions", "directive.json"), `{"name":"directive","body_file":"../texts/directive.md"}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "texts", "directive.md"), "текст инструкции")
+
+	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("load file catalog: %v", err)
+	}
+	if got := snapshot.Catalog.Instructions[0].BodyFile; got != filepath.Join("texts", "directive.md") {
+		t.Fatalf("unexpected normalized body file: %q", got)
+	}
+	if _, err := SaveCatalogWithHome(root, t.TempDir(), CatalogWriteScopeLocal, snapshot.Catalog, nil, nil, nil); err != nil {
+		t.Fatalf("save file catalog: %v", err)
+	}
+
+	reloaded, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("reload file catalog: %v", err)
+	}
+	if got := reloaded.Catalog.Instructions[0].Body; got != "текст инструкции" {
+		t.Fatalf("unexpected reloaded instruction body: %q", got)
+	}
+}
+
 func TestLoadCatalogKeepsLocalAliasPriorityOverGlobalAlias(t *testing.T) {
 	t.Parallel()
 
