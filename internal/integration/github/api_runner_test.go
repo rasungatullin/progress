@@ -264,6 +264,56 @@ func TestAPITransportUsesGitHubAppInstallationToken(t *testing.T) {
 	}
 }
 
+func TestAPITransportDeletesReviewWithGitHubAppInstallationToken(t *testing.T) {
+	t.Parallel()
+
+	keyPEM := testRSAPrivateKeyPEM(t)
+	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	var seenAuth string
+	tokenRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/42/access_tokens":
+			tokenRequests++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"token":      "installation-secret",
+				"expires_at": now.Add(time.Hour).Format(time.RFC3339),
+			})
+		case "/repos/owner/name/pulls/123/reviews/456":
+			if r.Method != http.MethodDelete {
+				t.Fatalf("unexpected review method: %s", r.Method)
+			}
+			seenAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{
+			BaseURL:                 server.URL,
+			Repository:              "owner/name",
+			GitHubAppClientID:       "Iv1.client",
+			GitHubAppInstallationID: "42",
+			GitHubAppPrivateKey:     string(keyPEM),
+		},
+		client: server.Client(),
+		now:    func() time.Time { return now },
+	}
+
+	if _, _, err := runner.RunPRReviewDelete(context.Background(), "", 123, 456); err != nil {
+		t.Fatalf("delete review through GitHub App: %v", err)
+	}
+	if tokenRequests != 1 {
+		t.Fatalf("expected one installation token request, got %d", tokenRequests)
+	}
+	if seenAuth != "Bearer installation-secret" {
+		t.Fatalf("unexpected auth header: %q", seenAuth)
+	}
+}
+
 func TestGitHubAppInstallationTokenCacheRefreshesBeforeExpiry(t *testing.T) {
 	t.Parallel()
 

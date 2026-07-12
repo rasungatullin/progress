@@ -665,7 +665,7 @@ func (r *APIRunner) RunPRReviewDelete(ctx context.Context, repository string, nu
 	if err != nil {
 		return apiErrorResult("pr review delete", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	config, err := r.resolveBaseConfig()
+	config, err := r.resolveConfig(ctx)
 	if err != nil {
 		return apiErrorResult("pr review delete", config, err)
 	}
