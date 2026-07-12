@@ -502,6 +502,27 @@ func TestServiceProcessTaskIgnoresRemarksBeforeApprovedConclusion(t *testing.T) 
 	}
 }
 
+func TestServiceProcessTaskOrdersRemarksByCreatedAtBeforeApprovedConclusion(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{
+		{ReplyToID: "thread-2", Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена", CreatedAt: "2026-07-13T12:00:00Z"},
+		{ExternalID: "old-remark", ReplyToID: "thread-1", State: "unresolved", Body: "Старое замечание", CreatedAt: "2026-07-13T11:00:00Z"},
+	}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if !result.Completed || len(result.Cycles) != 1 {
+		t.Fatalf("expected processing to complete after ordered approved conclusion, got %#v", result)
+	}
+}
+
 func TestServiceProcessTaskStopsOnRepeatedState(t *testing.T) {
 	t.Parallel()
 
@@ -523,6 +544,31 @@ func TestServiceProcessTaskStopsOnRepeatedState(t *testing.T) {
 	}
 	if len(result.Cycles) != repeatedStateLimit {
 		t.Fatalf("expected diagnostic stop on repeated-state limit, got %d cycles", len(result.Cycles))
+	}
+}
+
+func TestServiceProcessTaskStopsOnAlternatingRepeatedStates(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{{ReplyToID: "thread-1", State: "unresolved", Body: "Исправить обработку"}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{results: []decision.ConsiderationResult{
+		processingConsideration(execution.ActionApplyReviewComments),
+		processingConsideration(execution.ActionReviewPullRequest),
+		processingConsideration(execution.ActionApplyReviewComments),
+		processingConsideration(execution.ActionReviewPullRequest),
+		processingConsideration(execution.ActionApplyReviewComments),
+	}}
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, MaxCycles: 10})
+	if err == nil || !strings.Contains(err.Error(), "повторяющееся состояние") {
+		t.Fatalf("expected alternating repeated-state error, got result=%#v err=%v", result, err)
+	}
+	if len(result.Cycles) != 5 {
+		t.Fatalf("expected diagnostic stop after third occurrence of alternating state, got %d cycles", len(result.Cycles))
 	}
 }
 

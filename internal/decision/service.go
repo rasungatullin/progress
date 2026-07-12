@@ -7,8 +7,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/integration"
@@ -197,6 +199,7 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 }
 
 func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
+	remarks = orderReviewRemarksByCreatedAt(remarks)
 	respondedRemarkIDs := map[string]struct{}{}
 	start := 0
 	for index, remark := range remarks {
@@ -239,6 +242,19 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 		}
 	}
 	return false
+}
+
+func orderReviewRemarksByCreatedAt(remarks []integration.ReviewRemark) []integration.ReviewRemark {
+	ordered := append([]integration.ReviewRemark(nil), remarks...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(ordered[i].CreatedAt))
+		right, rightErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(ordered[j].CreatedAt))
+		if leftErr != nil || rightErr != nil {
+			return false
+		}
+		return left.Before(right)
+	})
+	return ordered
 }
 
 func isExternalReviewConclusion(body string) bool {

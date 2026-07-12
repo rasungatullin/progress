@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rasungatullin/progress/internal/decision"
 	"github.com/rasungatullin/progress/internal/execution"
@@ -72,8 +74,7 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 
 	result := TaskProcessingResult{TaskNumber: input.TaskNumber}
 	var knownMergeRequest *integration.MergeRequest
-	previousState := ""
-	repeatedStates := 0
+	stateCounts := map[string]int{}
 	for index := 1; index <= maxCycles; index++ {
 		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index, knownMergeRequest)
 		result.Cycles = append(result.Cycles, cycle)
@@ -82,14 +83,9 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 			return result, err
 		}
 		state := processingStateSignature(cycle)
-		if state == previousState {
-			repeatedStates++
-		} else {
-			previousState = state
-			repeatedStates = 1
-		}
-		if repeatedStates >= repeatedStateLimit {
-			return result, fmt.Errorf("обработка задачи %d остановлена: повторяющееся состояние обработки (%d циклов подряд)", input.TaskNumber, repeatedStates)
+		stateCounts[state]++
+		if stateCounts[state] >= repeatedStateLimit {
+			return result, fmt.Errorf("обработка задачи %d остановлена: повторяющееся состояние обработки (%d раз, цикл %d)", input.TaskNumber, stateCounts[state], index)
 		}
 		if cycle.ExecutionResult != nil && cycle.ExecutionResult.MergeRequest != nil {
 			knownMergeRequest = integrationMergeRequestFromExecutionResult(cycle.ExecutionResult.MergeRequest)
@@ -126,6 +122,19 @@ func processingStateSignature(cycle TaskProcessingCycle) string {
 	}
 	encoded, _ := json.Marshal(state)
 	return string(encoded)
+}
+
+func orderReviewRemarksByCreatedAt(remarks []integration.ReviewRemark) []integration.ReviewRemark {
+	ordered := append([]integration.ReviewRemark(nil), remarks...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(ordered[i].CreatedAt))
+		right, rightErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(ordered[j].CreatedAt))
+		if leftErr != nil || rightErr != nil {
+			return false
+		}
+		return left.Before(right)
+	})
+	return ordered
 }
 
 func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (TaskProcessingResult, error) {
@@ -359,6 +368,7 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 }
 
 func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
+	remarks = orderReviewRemarksByCreatedAt(remarks)
 	respondedRemarkIDs := map[string]struct{}{}
 	start := 0
 	for index, remark := range remarks {
