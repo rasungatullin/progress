@@ -1598,7 +1598,19 @@ func enrichReviewResponse(response *StructuredResponse, remarks map[string]integ
 	if !ok {
 		return
 	}
-	if strings.TrimSpace(response.Type) == "" && strings.TrimSpace(response.ThreadID) == "" {
+	if canonicalType := reviewResponseTypeFromRemark(remark); canonicalType != "" {
+		response.Type = canonicalType
+		if canonicalType == "inline" {
+			response.ThreadID = strings.TrimSpace(remark.ReplyToID)
+		} else {
+			response.ThreadID = ""
+		}
+		return
+	}
+	if strings.TrimSpace(response.Type) == "" && strings.TrimSpace(response.ThreadID) != "" {
+		return
+	}
+	if strings.TrimSpace(response.Type) == "" {
 		response.Type = reviewResponseTypeFromRemark(remark)
 	}
 	if strings.TrimSpace(response.ThreadID) == "" {
@@ -1615,7 +1627,7 @@ func reviewResponseTypeFromRemark(remark integration.ReviewRemark) string {
 	if strings.TrimSpace(remark.ReplyToID) != "" {
 		return "inline"
 	}
-	if strings.TrimSpace(remark.ExternalID) != "" || strings.TrimSpace(remark.URL) != "" {
+	if strings.TrimSpace(remark.URL) != "" || strings.HasPrefix(strings.TrimSpace(remark.ExternalID), "PRRC_") {
 		return "comment"
 	}
 	return ""
