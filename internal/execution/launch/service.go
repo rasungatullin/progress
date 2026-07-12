@@ -1413,6 +1413,10 @@ func runCodexRunner(ctx context.Context, spec model.LaunchSpec, prompt string) (
 	if err != nil {
 		return "", err
 	}
+	return runCodexRunnerCommand(ctx, spec, cmd)
+}
+
+func runCodexRunnerCommand(ctx context.Context, spec model.LaunchSpec, cmd *exec.Cmd) (string, error) {
 	cmd.Args = insertCodexJSONFlag(cmd.Args)
 	cmd.Dir = spec.Directory
 	cmd.Env = sanitizedEnv()

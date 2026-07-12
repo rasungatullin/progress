@@ -140,14 +140,14 @@ func TestRunRunnerCommandStopsOnNoOutputTimeoutWithoutOutput(t *testing.T) {
 func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
 	t.Parallel()
 
-	output, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "for value in 1 2 3 4; do printf '%s\\n' \"$value\"; sleep .03; done"), model.LaunchSpec{
+	output, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "for value in 1 2 3 4 5 6; do printf '%s\\n' \"$value\"; sleep .05; done"), model.LaunchSpec{
 		Timeout:         "1s",
-		NoOutputTimeout: "50ms",
+		NoOutputTimeout: "150ms",
 	})
 	if err != nil {
 		t.Fatalf("streaming output must keep runner active: %v", err)
 	}
-	if output != "1\n2\n3\n4\n" {
+	if output != "1\n2\n3\n4\n5\n6\n" {
 		t.Fatalf("unexpected streaming output: %q", output)
 	}
 }
@@ -155,9 +155,9 @@ func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
 func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	t.Parallel()
 
-	_, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "printf first; sleep .2"), model.LaunchSpec{
+	_, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "printf first; sleep .5"), model.LaunchSpec{
 		Timeout:         "1s",
-		NoOutputTimeout: "50ms",
+		NoOutputTimeout: "200ms",
 	})
 	if !errors.Is(err, errRunnerNoOutputTimeout) {
 		t.Fatalf("expected no-output timeout, got %v", err)
@@ -185,27 +185,20 @@ func TestResetRunnerWatchdogUsesLastOutputTime(t *testing.T) {
 }
 
 func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
-	dir := t.TempDir()
-	codexPath := filepath.Join(dir, RunnerCodex)
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" != \"exec\" ] || [ \"$2\" != \"--json\" ]; then exit 3; fi\n" +
-		"for value in 1 2 3 4 5 6; do\n" +
-		"  printf '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"%s\"}}\\n' \"$value\"\n" +
-		"  sleep .1\n" +
-		"done\n"
-	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write codex stand-in: %v", err)
+	codexPath, err := filepath.Abs(filepath.Join("testdata", RunnerCodex))
+	if err != nil {
+		t.Fatalf("resolve codex stand-in: %v", err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
 	startedAt := time.Now()
-	output, err := runCodexRunner(context.Background(), model.LaunchSpec{
+	spec := model.LaunchSpec{
 		Directory:       t.TempDir(),
 		Runner:          RunnerCodex,
 		Model:           "openai/gpt-5.4",
 		Timeout:         "5s",
-		NoOutputTimeout: "200ms",
-	}, "ship it")
+		NoOutputTimeout: "500ms",
+	}
+	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "stream")
+	output, err := runCodexRunnerCommand(context.Background(), spec, cmd)
 	if err != nil {
 		t.Fatalf("codex JSON stream must keep runner active: %v", err)
 	}
@@ -238,24 +231,19 @@ func TestRunnerOutputWriterSnapshotsBeforeProcessExit(t *testing.T) {
 }
 
 func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
-	dir := t.TempDir()
-	codexPath := filepath.Join(dir, RunnerCodex)
-	script := "#!/bin/sh\n" +
-		"printf '{\"type\":\"thread.started\",\"thread_id\":\"thread-test\"}\\n'\n" +
-		"printf '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"partial\"}}\\n'\n" +
-		"sleep .5\n"
-	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write codex stand-in: %v", err)
+	codexPath, err := filepath.Abs(filepath.Join("testdata", RunnerCodex))
+	if err != nil {
+		t.Fatalf("resolve codex stand-in: %v", err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	_, err := runCodexRunner(context.Background(), model.LaunchSpec{
+	spec := model.LaunchSpec{
 		Directory:       t.TempDir(),
 		Runner:          RunnerCodex,
 		Model:           "openai/gpt-5.4",
 		Timeout:         "5s",
-		NoOutputTimeout: "200ms",
-	}, "ship it")
+		NoOutputTimeout: "300ms",
+	}
+	cmd := exec.Command(codexPath, "exec", "-C", spec.Directory, "-m", "gpt-5.4", "timeout")
+	_, err = runCodexRunnerCommand(context.Background(), spec, cmd)
 	if !errors.Is(err, errRunnerNoOutputTimeout) {
 		t.Fatalf("expected no-output timeout, got %v", err)
 	}
