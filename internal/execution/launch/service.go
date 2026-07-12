@@ -1497,17 +1497,12 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			}
 			return output, nil
 		case <-writer.activity:
-			if !watchdog.Stop() {
-				select {
-				case <-watchdog.C:
-				default:
-				}
-			}
-			watchdog.Reset(noOutputTimeout)
+			_, lastOutputAt := writer.snapshot()
+			resetRunnerWatchdog(watchdog, noOutputTimeout, lastOutputAt)
 		case <-watchdog.C:
 			_, lastOutputAt := writer.snapshot()
-			if !lastOutputAt.IsZero() && time.Since(lastOutputAt) < noOutputTimeout {
-				watchdog.Reset(noOutputTimeout - time.Since(lastOutputAt))
+			if remaining := runnerNoOutputRemaining(noOutputTimeout, lastOutputAt); remaining > 0 {
+				watchdog.Reset(remaining)
 				continue
 			}
 			cancel()
@@ -1523,6 +1518,27 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			return "", &runnerExecutionError{err: errRunnerTimeout, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
 		}
 	}
+}
+
+func runnerNoOutputRemaining(timeout time.Duration, lastOutputAt time.Time) time.Duration {
+	if lastOutputAt.IsZero() {
+		return timeout
+	}
+	return timeout - time.Since(lastOutputAt)
+}
+
+func resetRunnerWatchdog(watchdog *time.Timer, timeout time.Duration, lastOutputAt time.Time) {
+	if !watchdog.Stop() {
+		select {
+		case <-watchdog.C:
+		default:
+		}
+	}
+	remaining := runnerNoOutputRemaining(timeout, lastOutputAt)
+	if remaining <= 0 {
+		remaining = time.Nanosecond
+	}
+	watchdog.Reset(remaining)
 }
 
 func runnerStopReason(err error) string {

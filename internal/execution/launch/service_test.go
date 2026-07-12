@@ -148,6 +148,63 @@ func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	}
 }
 
+func TestRunCodexRunnerStreamsJSONEventsBeforeProcessExit(t *testing.T) {
+	dir := t.TempDir()
+	codexPath := filepath.Join(dir, RunnerCodex)
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" != \"exec\" ] || [ \"$2\" != \"--json\" ]; then exit 3; fi\n" +
+		"for value in 1 2 3 4; do\n" +
+		"  printf '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"%s\"}}\\n' \"$value\"\n" +
+		"  sleep .03\n" +
+		"done\n"
+	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write codex stand-in: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, err := runCodexRunner(context.Background(), model.LaunchSpec{
+		Directory:       t.TempDir(),
+		Runner:          RunnerCodex,
+		Model:           "openai/gpt-5.4",
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("codex JSON stream must keep runner active: %v", err)
+	}
+	if output != "1\n2\n3\n4" {
+		t.Fatalf("unexpected normalized codex output: %q", output)
+	}
+}
+
+func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
+	dir := t.TempDir()
+	codexPath := filepath.Join(dir, RunnerCodex)
+	script := "#!/bin/sh\n" +
+		"printf '{\"type\":\"thread.started\",\"thread_id\":\"thread-test\"}\\n'\n" +
+		"printf '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"partial\"}}\\n'\n" +
+		"sleep .2\n"
+	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write codex stand-in: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := runCodexRunner(context.Background(), model.LaunchSpec{
+		Directory:       t.TempDir(),
+		Runner:          RunnerCodex,
+		Model:           "openai/gpt-5.4",
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	}, "ship it")
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || !strings.Contains(runnerErr.output, `"thread_id":"thread-test"`) || runnerErr.lastOutputAt.IsZero() {
+		t.Fatalf("codex events were not preserved before Wait: %#v", runnerErr)
+	}
+}
+
 func TestLaunchPersistsTimedOutRunnerOutputAndHistory(t *testing.T) {
 	t.Parallel()
 
