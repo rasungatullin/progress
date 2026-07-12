@@ -50,8 +50,10 @@ var (
 )
 
 type runnerExecutionError struct {
-	err    error
-	output string
+	err          error
+	output       string
+	stopReason   string
+	lastOutputAt time.Time
 }
 
 func (e *runnerExecutionError) Error() string {
@@ -153,10 +155,12 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			status = "interrupted"
 		}
 		result := model.LaunchResult{
-			Status:        status,
-			Summary:       strings.TrimSpace(err.Error()),
-			RawOutput:     partialOutput,
-			RawOutputPath: rawOutputPath,
+			Status:           status,
+			Summary:          strings.TrimSpace(err.Error()),
+			RawOutput:        partialOutput,
+			RawOutputPath:    rawOutputPath,
+			RunnerStopReason: runnerStopReason(err),
+			LastOutputAt:     runnerLastOutputAt(err),
 		}
 		enrichFailedLaunchWithWorktree(ctx, s, &result, workplace)
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
@@ -703,6 +707,8 @@ type runRecord struct {
 type runRecordResult struct {
 	Status             string                    `json:"status"`
 	Summary            string                    `json:"summary"`
+	RunnerStopReason   string                    `json:"runner_stop_reason,omitempty"`
+	LastOutputAt       string                    `json:"last_output_at,omitempty"`
 	RawOutputPath      string                    `json:"raw_output_path"`
 	WorktreeDiagnostic *model.WorktreeDiagnostic `json:"worktree_diagnostic,omitempty"`
 }
@@ -776,6 +782,8 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 		Result: runRecordResult{
 			Status:             launchResult.Status,
 			Summary:            launchResult.Summary,
+			RunnerStopReason:   launchResult.RunnerStopReason,
+			LastOutputAt:       launchResult.LastOutputAt,
 			RawOutputPath:      launchResult.RawOutputPath,
 			WorktreeDiagnostic: launchResult.WorktreeDiagnostic,
 		},
@@ -1422,20 +1430,30 @@ func runCodexRunner(ctx context.Context, spec model.LaunchSpec, prompt string) (
 }
 
 type runnerOutputWriter struct {
-	mu       sync.Mutex
-	buffer   bytes.Buffer
-	activity chan struct{}
+	mu           sync.Mutex
+	buffer       bytes.Buffer
+	activity     chan struct{}
+	lastOutputAt time.Time
 }
 
 func (w *runnerOutputWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	n, err := w.buffer.Write(p)
+	if n > 0 {
+		w.lastOutputAt = time.Now().UTC()
+	}
 	select {
 	case w.activity <- struct{}{}:
 	default:
 	}
 	return n, err
+}
+
+func (w *runnerOutputWriter) snapshot() (string, time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buffer.String(), w.lastOutputAt
 }
 
 func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSpec) (string, error) {
@@ -1467,16 +1485,17 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	for {
 		select {
 		case err := <-done:
+			output, lastOutputAt := writer.snapshot()
 			if err != nil {
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-					return "", &runnerExecutionError{err: errRunnerTimeout, output: writer.buffer.String()}
+					return "", &runnerExecutionError{err: errRunnerTimeout, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
 				}
 				if errors.Is(parent.Err(), context.Canceled) || errors.Is(parent.Err(), context.DeadlineExceeded) {
-					return "", &runnerExecutionError{err: ctx.Err(), output: writer.buffer.String()}
+					return "", &runnerExecutionError{err: ctx.Err(), output: output, stopReason: "interrupted", lastOutputAt: lastOutputAt}
 				}
-				return "", &runnerExecutionError{err: fmt.Errorf("launch runner failed: %w", err), output: writer.buffer.String()}
+				return "", &runnerExecutionError{err: fmt.Errorf("launch runner failed: %w", err), output: output, stopReason: "process-failed", lastOutputAt: lastOutputAt}
 			}
-			return writer.buffer.String(), nil
+			return output, nil
 		case <-writer.activity:
 			if !watchdog.Stop() {
 				select {
@@ -1486,17 +1505,40 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			}
 			watchdog.Reset(noOutputTimeout)
 		case <-watchdog.C:
+			_, lastOutputAt := writer.snapshot()
+			if !lastOutputAt.IsZero() && time.Since(lastOutputAt) < noOutputTimeout {
+				watchdog.Reset(noOutputTimeout - time.Since(lastOutputAt))
+				continue
+			}
 			cancel()
 			<-done
-			return "", &runnerExecutionError{err: errRunnerNoOutputTimeout, output: writer.buffer.String()}
+			output, lastOutputAt := writer.snapshot()
+			return "", &runnerExecutionError{err: errRunnerNoOutputTimeout, output: output, stopReason: "no-output-timeout", lastOutputAt: lastOutputAt}
 		case <-ctx.Done():
 			<-done
+			output, lastOutputAt := writer.snapshot()
 			if errors.Is(parent.Err(), context.Canceled) || errors.Is(parent.Err(), context.DeadlineExceeded) {
-				return "", &runnerExecutionError{err: ctx.Err(), output: writer.buffer.String()}
+				return "", &runnerExecutionError{err: ctx.Err(), output: output, stopReason: "interrupted", lastOutputAt: lastOutputAt}
 			}
-			return "", &runnerExecutionError{err: errRunnerTimeout, output: writer.buffer.String()}
+			return "", &runnerExecutionError{err: errRunnerTimeout, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
 		}
 	}
+}
+
+func runnerStopReason(err error) string {
+	var runnerErr *runnerExecutionError
+	if errors.As(err, &runnerErr) {
+		return runnerErr.stopReason
+	}
+	return ""
+}
+
+func runnerLastOutputAt(err error) string {
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || runnerErr.lastOutputAt.IsZero() {
+		return ""
+	}
+	return runnerErr.lastOutputAt.Format(time.RFC3339Nano)
 }
 
 func runnerDuration(value string, fallback time.Duration) (time.Duration, error) {

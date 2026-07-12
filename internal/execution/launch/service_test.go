@@ -117,6 +117,37 @@ func TestRunRunnerCommandStopsOnNoOutputTimeout(t *testing.T) {
 	}
 }
 
+func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
+	t.Parallel()
+
+	output, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "for value in 1 2 3 4; do printf '%s\\n' \"$value\"; sleep .03; done"), model.LaunchSpec{
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	})
+	if err != nil {
+		t.Fatalf("streaming output must keep runner active: %v", err)
+	}
+	if output != "1\n2\n3\n4\n" {
+		t.Fatalf("unexpected streaming output: %q", output)
+	}
+}
+
+func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
+	t.Parallel()
+
+	_, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "printf first; sleep .2"), model.LaunchSpec{
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || runnerErr.output != "first" || runnerErr.lastOutputAt.IsZero() {
+		t.Fatalf("missing last-output diagnostics: %#v", runnerErr)
+	}
+}
+
 func TestLaunchPersistsTimedOutRunnerOutputAndHistory(t *testing.T) {
 	t.Parallel()
 
