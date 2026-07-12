@@ -63,7 +63,7 @@ func TestRebaseRejectsDirtyWorktreeAndDoesNotFetch(t *testing.T) {
 	}
 }
 
-func TestRebaseRejectsProtectedBranchWhenBaseRefIsSHA(t *testing.T) {
+func TestRebaseRejectsConfiguredProtectedBranchWhenBaseRefIsSHA(t *testing.T) {
 	var calls []string
 	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
 		call := strings.Join(args, " ")
@@ -72,14 +72,14 @@ func TestRebaseRejectsProtectedBranchWhenBaseRefIsSHA(t *testing.T) {
 		case "rev-parse --is-inside-work-tree":
 			return "true", nil
 		case "branch --show-current":
-			return "main", nil
+			return "master", nil
 		default:
 			return "", nil
 		}
 	}}
-	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "0123456789abcdef0123456789abcdef01234567", HeadRef: "feature"}
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "0123456789abcdef0123456789abcdef01234567", HeadRef: "master", ProtectedRef: "master"}
 	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), rebaseTestState(service, input), rebaseTestOperation(input), "rebase")
-	if err == nil || !strings.Contains(err.Error(), "workplace branch") {
+	if err == nil || !strings.Contains(err.Error(), "rebase base branch") {
 		t.Fatalf("expected protected-branch refusal, got %v", err)
 	}
 	if strings.Contains(strings.Join(calls, "\n"), "fetch") {
@@ -225,6 +225,55 @@ func TestRebaseConflictAbortsInTemporaryRepository(t *testing.T) {
 	}
 }
 
+func TestRebaseForceWithLeaseRejectsConcurrentRemoteUpdate(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	work := filepath.Join(root, "work")
+	gitTestCommand(t, ctx, "", "init", "--bare", remote)
+	gitTestCommand(t, ctx, "", "init", "-b", "main", seed)
+	gitTestCommand(t, ctx, seed, "config", "user.name", "Test")
+	gitTestCommand(t, ctx, seed, "config", "user.email", "test@example.com")
+	writeGitTestFile(t, filepath.Join(seed, "base.txt"), "base\n")
+	gitTestCommand(t, ctx, seed, "add", ".")
+	gitTestCommand(t, ctx, seed, "commit", "-m", "base")
+	gitTestCommand(t, ctx, seed, "remote", "add", "origin", remote)
+	gitTestCommand(t, ctx, seed, "push", "-u", "origin", "main")
+	gitTestCommand(t, ctx, seed, "checkout", "-b", "feature")
+	writeGitTestFile(t, filepath.Join(seed, "feature.txt"), "feature\n")
+	gitTestCommand(t, ctx, seed, "add", ".")
+	gitTestCommand(t, ctx, seed, "commit", "-m", "feature")
+	gitTestCommand(t, ctx, seed, "push", "-u", "origin", "feature")
+	gitTestCommand(t, ctx, "", "clone", remote, work)
+	gitTestCommand(t, ctx, work, "checkout", "feature")
+	gitTestCommand(t, ctx, work, "config", "user.name", "Test")
+	gitTestCommand(t, ctx, work, "config", "user.email", "test@example.com")
+
+	var expectedOID, competitorOID string
+	service := &Service{runGitOutput: func(ctx context.Context, dir string, args ...string) (string, error) {
+		call := strings.Join(args, " ")
+		output, err := runGitOutput(ctx, dir, args...)
+		if call == "rev-parse --verify refs/remotes/origin/feature" && err == nil && competitorOID == "" {
+			expectedOID = strings.TrimSpace(output)
+			writeGitTestFile(t, filepath.Join(seed, "competitor.txt"), "competitor\n")
+			gitTestCommand(t, ctx, seed, "add", ".")
+			gitTestCommand(t, ctx, seed, "commit", "-m", "competitor")
+			competitorOID = strings.TrimSpace(mustGitTestOutput(t, ctx, seed, "rev-parse", "HEAD"))
+			gitTestCommand(t, ctx, seed, "push", "origin", "feature")
+		}
+		return output, err
+	}}
+	input := model.RebaseInput{Directory: work, BaseRef: "main", HeadRef: "feature", Push: true, ForceWithLease: true, Git: &model.GitConfig{Push: &model.GitPushConfig{AllowForceWithLease: true}}}
+	err := (builtinOperationExecutor{service: service}).rebase(ctx, rebaseTestState(service, input), rebaseTestOperation(input), "rebase")
+	if err == nil || !strings.Contains(err.Error(), "rebase_push_failed") && !strings.Contains(err.Error(), "rejected") {
+		t.Fatalf("expected force-with-lease refusal, got %v", err)
+	}
+	if expectedOID == "" || competitorOID == "" || expectedOID == competitorOID {
+		t.Fatalf("concurrent update was not established: expected=%q competitor=%q", expectedOID, competitorOID)
+	}
+}
+
 func gitTestCommand(t *testing.T, ctx context.Context, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -239,6 +288,15 @@ func writeGitTestFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func mustGitTestOutput(t *testing.T, ctx context.Context, dir string, args ...string) string {
+	t.Helper()
+	output, err := runGitOutput(ctx, dir, args...)
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return output
 }
 
 func rebaseTestOperation(input model.RebaseInput) OperationSpec {
