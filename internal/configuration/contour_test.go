@@ -89,7 +89,7 @@ func TestServiceSnapshotListsPrivateValueNamesAndAvailabilityWithoutValues(t *te
 		"private_store": {"type": "file", "path": "private.json"},
 		"systems": {
 			"mattermost": {"type": "mattermost", "token_private": "mt_token"},
-			"github": {"type": "github", "token": "actual-token"}
+			"github": {"type": "github", "token_private": "github-token"}
 		}
 	}`), 0o600); err != nil {
 		t.Fatalf("write integration config: %v", err)
@@ -100,7 +100,7 @@ func TestServiceSnapshotListsPrivateValueNamesAndAvailabilityWithoutValues(t *te
 	}`), 0o600); err != nil {
 		t.Fatalf("write resource config: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "private.json"), []byte(`{"mt_token":"actual-secret"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "private.json"), []byte(`{"mt_token":"actual-secret","github-token":"actual-token"}`), 0o600); err != nil {
 		t.Fatalf("write private store: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestServiceSnapshotListsPrivateValueNamesAndAvailabilityWithoutValues(t *te
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if len(snapshot.PrivateValues) != 1 || snapshot.PrivateValues[0].Name != "mt_token" || !snapshot.PrivateValues[0].Available {
+	if len(snapshot.PrivateValues) != 2 || snapshot.PrivateValues[0].Name != "github-token" || !snapshot.PrivateValues[0].Available || snapshot.PrivateValues[1].Name != "mt_token" || !snapshot.PrivateValues[1].Available {
 		t.Fatalf("unexpected private value snapshot: %#v", snapshot.PrivateValues)
 	}
 	encoded, err := json.Marshal(snapshot)

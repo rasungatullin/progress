@@ -2,6 +2,8 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	executionmodel "github.com/rasungatullin/progress/internal/execution/model"
 )
@@ -159,6 +161,9 @@ func (c *IntegrationSystemConfig) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	c.Token = aux.Token
+	if strings.TrimSpace(c.Token) != "" {
+		return fmt.Errorf("field token is no longer supported; store the value in the private-value store and configure token_private")
+	}
 	return nil
 }
 

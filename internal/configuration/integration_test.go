@@ -3,6 +3,7 @@ package configuration
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 )
 
@@ -27,7 +28,6 @@ func TestLoadIntegrationConfigMergesLayersAndTracksSources(t *testing.T) {
 						"project": "global-project",
 						"repository": "global/repository",
 						"default_repo": "global/repo",
-						"token": "global-direct-token",
 						"token_env": "GITHUB_TOKEN",
 						"operations": {
 							"issue.get": {"timeout": "20s"},
@@ -248,7 +248,6 @@ func TestLoadIntegrationConfigGitHubAppSettingsClearInheritedTokenSources(t *tes
 	t.Parallel()
 
 	tests := map[string]string{
-		"token":         `"token": "direct-token"`,
 		"token_private": `"token_private": "github_auth_token"`,
 		"token_env":     `"token_env": "GITHUB_TOKEN"`,
 	}
@@ -422,7 +421,7 @@ func TestLoadIntegrationConfigRejectsGitHubAppWithoutAPITransport(t *testing.T) 
 	}
 }
 
-func TestLoadIntegrationConfigAllowsTokenToOverrideIncompleteGitHubAppSettings(t *testing.T) {
+func TestLoadIntegrationConfigRejectsLegacyTokenInGitHubAppSettings(t *testing.T) {
 	t.Parallel()
 
 	readFile := func(path string) ([]byte, error) {
@@ -441,12 +440,9 @@ func TestLoadIntegrationConfigAllowsTokenToOverrideIncompleteGitHubAppSettings(t
 		return nil, fs.ErrNotExist
 	}
 
-	config, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
-	if err != nil {
-		t.Fatalf("load integration config: %v", err)
-	}
-	if config.Config.Systems["github-app"].Token != "direct-token" {
-		t.Fatalf("unexpected token: %q", config.Config.Systems["github-app"].Token)
+	_, err := LoadIntegrationConfigWithHome("/repo", "/config-home", readFile)
+	if err == nil || !strings.Contains(err.Error(), "token_private") {
+		t.Fatalf("expected migration message for legacy token, got %v", err)
 	}
 }
 
@@ -460,7 +456,6 @@ func TestLoadIntegrationConfigKeepsTokenPriorityWithinLayer(t *testing.T) {
 					"mattermost": {
 						"type": "mattermost",
 						"base_url": "https://mattermost.example",
-						"token": "direct-token",
 						"token_private": "mt_auth_token",
 						"token_env": "MATTERMOST_TOKEN"
 					},
@@ -481,11 +476,8 @@ func TestLoadIntegrationConfigKeepsTokenPriorityWithinLayer(t *testing.T) {
 	}
 
 	mattermost := config.Config.Systems["mattermost"]
-	if mattermost.Token != "direct-token" {
-		t.Fatalf("expected direct token to win within one layer, got: %q", mattermost.Token)
-	}
-	if mattermost.TokenPrivate != "" || mattermost.TokenEnv != "" {
-		t.Fatalf("expected direct token to clear alternative sources, got private=%q env=%q", mattermost.TokenPrivate, mattermost.TokenEnv)
+	if mattermost.Token != "" || mattermost.TokenPrivate != "mt_auth_token" || mattermost.TokenEnv != "" {
+		t.Fatalf("expected private value source to remain, got token=%q private=%q env=%q", mattermost.Token, mattermost.TokenPrivate, mattermost.TokenEnv)
 	}
 
 	telegram := config.Config.Systems["telegram"]
