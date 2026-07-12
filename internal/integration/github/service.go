@@ -138,9 +138,8 @@ type ghPRReviewComment struct {
 type ghPRReviewThreadCreateResponse struct {
 	Data struct {
 		AddPullRequestReviewThread struct {
-			Thread  ghPRReviewThread  `json:"thread"`
-			Comment ghPRReviewComment `json:"comment"`
-			Errors  []ghPayloadError  `json:"userErrors"`
+			Thread ghPRReviewThread `json:"thread"`
+			Errors []ghPayloadError `json:"userErrors"`
 		} `json:"addPullRequestReviewThread"`
 	} `json:"data"`
 }
@@ -499,12 +498,10 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		}
 		payload := raw.Data.AddPullRequestReviewThread
 		if len(payload.Errors) > 0 {
-			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned payload errors: %s", payloadErrorsMessage(payload.Errors)), Result: result}, "gh pull request inline comment create returned payload errors")
+			reference := githubPullRequestReference(repository, number)
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned payload errors: %s (operation=addPullRequestReviewThread reference=%s)", payloadErrorsMessage(payload.Errors), reference), Result: result}, "code=external-failure operation=addPullRequestReviewThread reference="+reference+"; GitHub returned payload errors")
 		}
 		remarks := reviewRemarksFromThreads(repository, number, []ghPRReviewThread{payload.Thread})
-		if len(remarks) == 0 && payload.Comment.ID != "" {
-			remarks = []model.ReviewRemark{reviewRemarkFromThreadReply(payload.Thread.ID, payload.Comment)}
-		}
 		if len(remarks) > 0 {
 			remark = remarks[0]
 		}
@@ -513,7 +510,7 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		if existing, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
 			remark = existing
 		} else {
-			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned no stable identifier for %s#%d (response=%s)", repository, number, safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "gh pull request inline comment create returned a partial payload; existing remarks were checked before retry")
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned no stable identifier for %s#%d (operation=addPullRequestReviewThread reference=%s response=%s)", repository, number, githubPullRequestReference(repository, number), safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=partial-payload operation=addPullRequestReviewThread reference="+githubPullRequestReference(repository, number)+"; existing remarks were checked before retry")
 		}
 	}
 
@@ -569,6 +566,10 @@ func safeGitHubResponseDiagnostic(raw string) string {
 		return "empty-payload"
 	}
 	return fmt.Sprintf("payload-bytes=%d", len(raw))
+}
+
+func githubPullRequestReference(repository string, number int) string {
+	return fmt.Sprintf("https://github.com/%s/pull/%d", strings.Trim(strings.TrimSpace(repository), "/"), number)
 }
 
 func (s *Service) executePRCommentReply(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {

@@ -1632,7 +1632,7 @@ func TestServicePRCommentCreateInlineClassifiesPartialPayload(t *testing.T) {
 
 	_, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
 	var ghErr *Error
-	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || !strings.Contains(ghErr.Message, "addPullRequestReviewThread") || strings.Contains(ghErr.Message, "secret") {
+	if !errors.As(err, &ghErr) || ghErr.Code != ErrorCodePartialPayload || !strings.Contains(ghErr.Message, "addPullRequestReviewThread") || !strings.Contains(ghErr.Message, "https://github.com/owner/name/pull/42") || strings.Contains(ghErr.Message, "secret") {
 		t.Fatalf("unexpected partial payload error: %#v", err)
 	}
 }
