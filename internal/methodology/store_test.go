@@ -92,6 +92,234 @@ func TestLoadCatalogMergesGlobalAndLocalLayersWithLocalPriority(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogLoadsInstructionBodyFromMarkdown(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/repo/.progress/methodology/catalog.json":
+			return []byte(`{"instructions":[{"name":"directive","body_file":"markdown/directive.md"}]}`), nil
+		case "/repo/.progress/methodology/markdown/directive.md":
+			return []byte("# Инструкция\n\nВыполнить действие."), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	snapshot, err := LoadCatalogWithHome("/repo", "/missing-config", readFile)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	instruction := snapshot.Catalog.Instructions[0]
+	if instruction.Body != "# Инструкция\n\nВыполнить действие." || instruction.BodyFile != "markdown/directive.md" {
+		t.Fatalf("unexpected instruction: %#v", instruction)
+	}
+}
+
+func TestLoadCatalogRejectsInstructionBodyFileOutsideMethodologyRoot(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{"instructions":[{"name":"directive","body_file":"../../directive.md"}]}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/missing-config", readFile)
+	if err == nil || !strings.Contains(err.Error(), "escapes methodology catalog") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsMissingInstructionBodyFile(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{"instructions":[{"name":"directive","body_file":"missing.md"}]}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/missing-config", readFile)
+	if err == nil || !strings.Contains(err.Error(), "read instruction body file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsInstructionBodyAndBodyFile(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{"instructions":[{"name":"directive","body":"inline","body_file":"directive.md"}]}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/missing-config", readFile)
+	if err == nil || !strings.Contains(err.Error(), "has both body and body_file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsInstructionBodyFileSymlinkOutsideMethodologyRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	outsideDir := t.TempDir()
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"instructions":[{"name":"directive","body_file":"texts/directive.md"}]}`)
+	writeTestFile(t, filepath.Join(outsideDir, "directive.md"), "внешний текст")
+	if err := os.MkdirAll(filepath.Join(methodologyDir, "texts"), 0o755); err != nil {
+		t.Fatalf("create instruction directory: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outsideDir, "directive.md"), filepath.Join(methodologyDir, "texts", "directive.md")); err != nil {
+		t.Fatalf("create instruction symlink: %v", err)
+	}
+
+	_, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err == nil || !strings.Contains(err.Error(), "escapes methodology catalog") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogAllowsInstructionBodyFileWhenMethodologyRootIsSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	realMethodologyDir := t.TempDir()
+	methodologyLink := filepath.Join(root, ".progress", "methodology")
+	if err := os.MkdirAll(filepath.Dir(methodologyLink), 0o755); err != nil {
+		t.Fatalf("create methodology parent directory: %v", err)
+	}
+	if err := os.Symlink(realMethodologyDir, methodologyLink); err != nil {
+		t.Fatalf("create methodology root symlink: %v", err)
+	}
+	writeTestFile(t, filepath.Join(methodologyLink, "catalog.json"), `{"instructions":[{"name":"directive","body_file":"texts/directive.md"}]}`)
+	writeTestFile(t, filepath.Join(methodologyLink, "texts", "directive.md"), "внутренний текст")
+
+	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	if got := snapshot.Catalog.Instructions[0].Body; got != "внутренний текст" {
+		t.Fatalf("unexpected instruction body: %q", got)
+	}
+}
+
+func TestWriteCatalogFilesOmitsLoadedInstructionBody(t *testing.T) {
+	written := map[string][]byte{}
+	writeFile := func(path string, content []byte, _ fs.FileMode) error {
+		written[path] = append([]byte(nil), content...)
+		return nil
+	}
+
+	err := writeCatalogFiles("/repo/.progress/methodology/catalog.json", Catalog{
+		Instructions: []Instruction{{Name: "directive", Body: "загруженный текст", BodyFile: "texts/directive.md"}},
+	}, writeFile, func(string, fs.FileMode) error { return nil }, func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("write catalog files: %v", err)
+	}
+
+	content := string(written["/repo/.progress/methodology/instructions/directive.json"])
+	if strings.Contains(content, `"body"`) || !strings.Contains(content, `"body_file": "../texts/directive.md"`) {
+		t.Fatalf("unexpected instruction content: %s", content)
+	}
+}
+
+func TestWriteCatalogElementRejectsInstructionBodyWhenBodyFileIsSet(t *testing.T) {
+	written := map[string][]byte{}
+	writeFile := func(path string, content []byte, _ fs.FileMode) error {
+		written[path] = append([]byte(nil), content...)
+		return nil
+	}
+
+	err := writeCatalogElement("/repo/.progress/methodology/catalog.json", ElementUpsert{
+		Instruction: &Instruction{Name: "directive", Body: "inline", BodyFile: "texts/directive.md"},
+	}, writeFile, func(string, fs.FileMode) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "has both body and body_file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(written) != 0 {
+		t.Fatalf("invalid instruction must not be written: %#v", written)
+	}
+}
+
+func TestSaveCatalogRejectsUnsafeInstructionBodyFileBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	writes := 0
+	_, err := SaveCatalogWithHome("/repo", "/config-home", CatalogWriteScopeLocal, Catalog{
+		Instructions: []Instruction{{Name: "directive", BodyFile: "../../directive.md"}},
+	}, nil, func(string, []byte, fs.FileMode) error {
+		writes++
+		return nil
+	}, func(string, fs.FileMode) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "escapes methodology catalog") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if writes != 0 {
+		t.Fatalf("invalid instruction must not be written: %d writes", writes)
+	}
+}
+
+func TestSaveCatalogMigratesInstructionBodyFilePath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{"instructions":[{"name":"directive","body_file":"texts/directive.md"}]}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "texts", "directive.md"), "текст инструкции")
+
+	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("load legacy catalog: %v", err)
+	}
+	if _, err := SaveCatalogWithHome(root, t.TempDir(), CatalogWriteScopeLocal, snapshot.Catalog, nil, nil, nil); err != nil {
+		t.Fatalf("migrate catalog: %v", err)
+	}
+
+	migratedPath := filepath.Join(methodologyDir, "instructions", "directive.json")
+	migratedContent, err := os.ReadFile(migratedPath)
+	if err != nil {
+		t.Fatalf("read migrated instruction: %v", err)
+	}
+	if !strings.Contains(string(migratedContent), `"body_file": "../texts/directive.md"`) {
+		t.Fatalf("unexpected migrated instruction: %s", migratedContent)
+	}
+
+	reloaded, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("reload migrated catalog: %v", err)
+	}
+	if got := reloaded.Catalog.Instructions[0].Body; got != "текст инструкции" {
+		t.Fatalf("unexpected reloaded instruction body: %q", got)
+	}
+}
+
+func TestSaveCatalogKeepsInstructionBodyFilePathAfterFileCatalogReload(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "catalog.json"), `{}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "instructions", "directive.json"), `{"name":"directive","body_file":"../texts/directive.md"}`)
+	writeTestFile(t, filepath.Join(methodologyDir, "texts", "directive.md"), "текст инструкции")
+
+	snapshot, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("load file catalog: %v", err)
+	}
+	if got := snapshot.Catalog.Instructions[0].BodyFile; got != filepath.Join("texts", "directive.md") {
+		t.Fatalf("unexpected normalized body file: %q", got)
+	}
+	if _, err := SaveCatalogWithHome(root, t.TempDir(), CatalogWriteScopeLocal, snapshot.Catalog, nil, nil, nil); err != nil {
+		t.Fatalf("save file catalog: %v", err)
+	}
+
+	reloaded, err := LoadCatalogWithHome(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("reload file catalog: %v", err)
+	}
+	if got := reloaded.Catalog.Instructions[0].Body; got != "текст инструкции" {
+		t.Fatalf("unexpected reloaded instruction body: %q", got)
+	}
+}
+
 func TestLoadCatalogKeepsLocalAliasPriorityOverGlobalAlias(t *testing.T) {
 	t.Parallel()
 
@@ -684,6 +912,42 @@ func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 	}
 	if !containsAll(string(content), `"name": "implement"`, `"class": "engineering-synthesis"`) {
 		t.Fatalf("written action does not include action fields: %s", string(content))
+	}
+}
+
+func TestServiceUpsertKeepsInstructionBodyFilePathAfterReload(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "texts", "directive.md"), "текст инструкции")
+
+	service := NewService(nil)
+	if _, err := service.Upsert(context.Background(), CatalogWriteRequest{
+		RepoRoot: root,
+		Scope:    CatalogWriteScopeLocal,
+		Element: ElementUpsert{Instruction: &Instruction{
+			Name:     "directive",
+			BodyFile: "texts/directive.md",
+		}},
+	}); err != nil {
+		t.Fatalf("upsert instruction: %v", err)
+	}
+
+	written, err := os.ReadFile(filepath.Join(methodologyDir, "instructions", "directive.json"))
+	if err != nil {
+		t.Fatalf("read written instruction: %v", err)
+	}
+	if !strings.Contains(string(written), `"body_file": "../texts/directive.md"`) {
+		t.Fatalf("unexpected written instruction: %s", written)
+	}
+
+	snapshot, err := service.Load(context.Background(), CatalogRequest{RepoRoot: root})
+	if err != nil {
+		t.Fatalf("reload catalog: %v", err)
+	}
+	if got := snapshot.Catalog.Instructions[0].Body; got != "текст инструкции" {
+		t.Fatalf("unexpected reloaded instruction body: %q", got)
 	}
 }
 

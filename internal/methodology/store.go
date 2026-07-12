@@ -164,6 +164,9 @@ func SaveCatalogWithHomeFS(repoRoot, configHome string, scope configuration.Conf
 	if err := validateCatalog(catalog); err != nil {
 		return CatalogWriteResult{}, fmt.Errorf("invalid methodology catalog: %w", err)
 	}
+	if err := validateCatalogInstructionBodyFiles(path, catalog); err != nil {
+		return CatalogWriteResult{}, fmt.Errorf("invalid methodology catalog: %w", err)
+	}
 	catalog = normalizeCatalog(catalog)
 	if err := writeCatalogFiles(path, catalog, writeFile, mkdirAll, removeAll); err != nil {
 		return CatalogWriteResult{}, err
@@ -214,6 +217,9 @@ func UpsertCatalogElementWithHomeFS(repoRoot, configHome string, scope configura
 	if err != nil {
 		return CatalogWriteResult{}, err
 	}
+	if err := validateCatalogInstructionBodyFiles(path, catalog); err != nil {
+		return CatalogWriteResult{}, fmt.Errorf("invalid methodology catalog: %w", err)
+	}
 	if legacy {
 		err = writeCatalogFiles(path, catalog, writeFile, mkdirAll, removeAll)
 	} else {
@@ -260,6 +266,12 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 	} else if !isNotExistErr(err) {
 		return CatalogLayer{}, false, err
 	}
+	for index, instruction := range catalog.Instructions {
+		catalog.Instructions[index], err = loadInstructionBody(instruction, path, filepath.Dir(path), readFile)
+		if err != nil {
+			return CatalogLayer{}, false, err
+		}
+	}
 
 	registryCatalog, registryFound, err := readCatalogRegistries(filepath.Dir(path), readFile, readDir)
 	if err != nil {
@@ -270,7 +282,13 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 	}
 	catalog.Routes = append(catalog.Routes, registryCatalog.Routes...)
 	catalog.Actions = append(catalog.Actions, registryCatalog.Actions...)
-	catalog.Instructions = append(catalog.Instructions, registryCatalog.Instructions...)
+	for _, instruction := range registryCatalog.Instructions {
+		instruction, err = loadInstructionBody(instruction, filepath.Join(filepath.Dir(path), "instructions", instructionRegistryKey(instruction)+".json"), filepath.Dir(path), readFile)
+		if err != nil {
+			return CatalogLayer{}, false, err
+		}
+		catalog.Instructions = append(catalog.Instructions, instruction)
+	}
 	catalog.Operations = append(catalog.Operations, registryCatalog.Operations...)
 	catalog.Entities = append(catalog.Entities, registryCatalog.Entities...)
 
@@ -383,6 +401,92 @@ func decodeCatalog(content []byte) (Catalog, error) {
 	return catalog, nil
 }
 
+func loadInstructionBody(instruction Instruction, descriptionPath, methodologyRoot string, readFile ReadFileFunc) (Instruction, error) {
+	instruction = normalizeInstruction(instruction)
+	if instruction.BodyFile == "" {
+		return instruction, nil
+	}
+	if instruction.Body != "" {
+		return Instruction{}, fmt.Errorf("instruction %q has both body and body_file", instruction.Name)
+	}
+	if filepath.IsAbs(instruction.BodyFile) {
+		return Instruction{}, fmt.Errorf("instruction %q body_file %q must stay inside methodology catalog", instruction.Name, instruction.BodyFile)
+	}
+	bodyPath := filepath.Clean(filepath.Join(filepath.Dir(descriptionPath), instruction.BodyFile))
+	root := filepath.Clean(methodologyRoot)
+	relative, err := filepath.Rel(root, bodyPath)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return Instruction{}, fmt.Errorf("instruction %q body_file %q escapes methodology catalog", instruction.Name, instruction.BodyFile)
+	}
+	if evaluatedRoot, err := filepath.EvalSymlinks(root); err == nil {
+		root = evaluatedRoot
+	} else if !os.IsNotExist(err) {
+		return Instruction{}, fmt.Errorf("resolve methodology catalog root %s: %w", root, err)
+	}
+	if evaluatedPath, err := filepath.EvalSymlinks(bodyPath); err == nil {
+		evaluatedRelative, relativeErr := filepath.Rel(root, evaluatedPath)
+		if relativeErr != nil || evaluatedRelative == ".." || strings.HasPrefix(evaluatedRelative, ".."+string(filepath.Separator)) {
+			return Instruction{}, fmt.Errorf("instruction %q body_file %q escapes methodology catalog", instruction.Name, instruction.BodyFile)
+		}
+		bodyPath = evaluatedPath
+	} else if !os.IsNotExist(err) {
+		return Instruction{}, fmt.Errorf("resolve instruction body file %s: %w", bodyPath, err)
+	}
+	content, err := readFile(bodyPath)
+	if err != nil {
+		return Instruction{}, fmt.Errorf("read instruction body file %s: %w", bodyPath, err)
+	}
+	instruction.Body = strings.TrimSpace(string(content))
+	instruction.bodyLoaded = true
+	relativeBodyPath, err := filepath.Rel(root, bodyPath)
+	if err != nil {
+		return Instruction{}, fmt.Errorf("relativize instruction body file %s: %w", bodyPath, err)
+	}
+	instruction.BodyFile = relativeBodyPath
+	return instruction, nil
+}
+
+func validateCatalogInstructionBodyFiles(catalogPath string, catalog Catalog) error {
+	methodologyRoot := filepath.Dir(catalogPath)
+	lexicalRoot := filepath.Clean(methodologyRoot)
+	root := lexicalRoot
+	if evaluatedRoot, err := filepath.EvalSymlinks(lexicalRoot); err == nil {
+		root = evaluatedRoot
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("resolve methodology catalog root %s: %w", root, err)
+	}
+
+	for _, rawInstruction := range catalog.Instructions {
+		instruction := normalizeInstruction(rawInstruction)
+		if instruction.BodyFile == "" {
+			continue
+		}
+		if filepath.IsAbs(instruction.BodyFile) {
+			return fmt.Errorf("instruction %q body_file %q must stay inside methodology catalog", instruction.Name, instruction.BodyFile)
+		}
+		bodyPath := filepath.Clean(filepath.Join(methodologyRoot, instruction.BodyFile))
+		if err := ensurePathInsideRoot(lexicalRoot, bodyPath); err != nil {
+			return fmt.Errorf("instruction %q body_file %q: %w", instruction.Name, instruction.BodyFile, err)
+		}
+		if evaluatedPath, err := filepath.EvalSymlinks(bodyPath); err == nil {
+			if err := ensurePathInsideRoot(root, evaluatedPath); err != nil {
+				return fmt.Errorf("instruction %q body_file %q: %w", instruction.Name, instruction.BodyFile, err)
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("resolve instruction body file %s: %w", bodyPath, err)
+		}
+	}
+	return nil
+}
+
+func ensurePathInsideRoot(root, path string) error {
+	relative, err := filepath.Rel(root, filepath.Clean(path))
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("escapes methodology catalog")
+	}
+	return nil
+}
+
 func writeCatalog(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) error {
 	content, err := json.MarshalIndent(catalog, "", "  ")
 	if err != nil {
@@ -429,6 +533,15 @@ func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mk
 		}
 	}
 	for _, instruction := range catalog.Instructions {
+		if instruction.BodyFile != "" {
+			bodyPath := filepath.Join(root, instruction.BodyFile)
+			relativeBodyPath, err := filepath.Rel(filepath.Join(root, "instructions"), bodyPath)
+			if err != nil {
+				return fmt.Errorf("relativize instruction body file %q: %w", instruction.BodyFile, err)
+			}
+			instruction.BodyFile = relativeBodyPath
+			instruction.Body = ""
+		}
 		path, err := registryFilePath(root, "instructions", instructionRegistryKey(instruction))
 		if err != nil {
 			return err
@@ -481,6 +594,18 @@ func writeCatalogElement(path string, element ElementUpsert, writeFile WriteFile
 		return writeRegistryObject(path, action, writeFile, mkdirAll)
 	case element.Instruction != nil:
 		instruction := normalizeInstruction(*element.Instruction)
+		if err := validateCatalog(Catalog{Instructions: []Instruction{instruction}}); err != nil {
+			return err
+		}
+		if instruction.BodyFile != "" {
+			bodyPath := filepath.Join(root, instruction.BodyFile)
+			relativeBodyPath, err := filepath.Rel(filepath.Join(root, "instructions"), bodyPath)
+			if err != nil {
+				return fmt.Errorf("relativize instruction body file %q: %w", instruction.BodyFile, err)
+			}
+			instruction.BodyFile = relativeBodyPath
+			instruction.Body = ""
+		}
 		path, err := registryFilePath(root, "instructions", instructionRegistryKey(instruction))
 		if err != nil {
 			return err
