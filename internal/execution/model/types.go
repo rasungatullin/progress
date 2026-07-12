@@ -158,6 +158,16 @@ type ExecutionAssignment struct {
 	RelatedObjects  []ObjectRef        `json:"related_objects,omitempty"`
 	Reasons         []AssignmentReason `json:"reasons,omitempty"`
 	StructuredInput *StructuredInput   `json:"structured_input,omitempty"`
+	Skills          []SkillRef         `json:"skills,omitempty"`
+}
+
+// SkillRef — снимок выбранного локального навыка.
+type SkillRef struct {
+	Name     string `json:"name"`
+	Purpose  string `json:"purpose,omitempty"`
+	Checksum string `json:"checksum"`
+	Scope    string `json:"scope"`
+	Path     string `json:"path"`
 }
 
 type ActionInvocation struct {

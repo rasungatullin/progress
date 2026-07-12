@@ -24,6 +24,7 @@ type SelectionResult struct {
 	Action            Action                         `json:"action"`
 	Profile           string                         `json:"profile,omitempty"`
 	Instruction       Instruction                    `json:"instruction,omitempty"`
+	Skills            []Skill                        `json:"skills,omitempty"`
 	Diagnostics       []string                       `json:"diagnostics,omitempty"`
 	RouteSource       configuration.ConfigFileSource `json:"route_source,omitempty"`
 	ActionSource      configuration.ConfigFileSource `json:"action_source,omitempty"`
@@ -190,6 +191,7 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 		Action:      action,
 		Profile:     profile,
 		Instruction: instruction,
+		Skills:      selectRouteSkills(catalog.Skills, route.Skills),
 		Diagnostics: []string{
 			fmt.Sprintf("route=%s", route.Name),
 		},
@@ -209,6 +211,32 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 
 	s.logger.Printf("Контур методик выбрал маршрут: маршрут=%q действие=%q профиль=%q", route.Name, action.Name, profile)
 	return result, nil
+}
+
+func selectRouteSkills(skills []Skill, names []string) []Skill {
+	if len(names) == 0 {
+		return nil
+	}
+	byName := make(map[string]Skill, len(skills))
+	for _, skill := range skills {
+		byName[normalizeName(skill.Name)] = normalizeSkill(skill)
+	}
+	selected := make([]Skill, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		name = normalizeName(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		if skill, ok := byName[name]; ok {
+			selected = append(selected, skill)
+			seen[name] = struct{}{}
+		}
+	}
+	return selected
 }
 
 func (s *Service) repoRootForWrite(ctx context.Context, repoRoot string, scope configuration.ConfigFileSource) (string, error) {

@@ -63,6 +63,7 @@ type ProcessingRoute struct {
 	Name        string
 	Title       string
 	Description string
+	Skills      []string
 }
 
 type RouteCheckResult struct {

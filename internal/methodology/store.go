@@ -263,6 +263,7 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 		catalog.Instructions = append(catalog.Instructions, rootCatalog.Instructions...)
 		catalog.Operations = append(catalog.Operations, rootCatalog.Operations...)
 		catalog.Entities = append(catalog.Entities, rootCatalog.Entities...)
+		catalog.Skills = append(catalog.Skills, rootCatalog.Skills...)
 	} else if !isNotExistErr(err) {
 		return CatalogLayer{}, false, err
 	}
@@ -291,6 +292,7 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 	}
 	catalog.Operations = append(catalog.Operations, registryCatalog.Operations...)
 	catalog.Entities = append(catalog.Entities, registryCatalog.Entities...)
+	catalog.Skills = append(catalog.Skills, registryCatalog.Skills...)
 
 	if err := validateCatalog(catalog); err != nil {
 		return CatalogLayer{}, false, fmt.Errorf("invalid methodology catalog %s: %w", path, err)
@@ -350,8 +352,17 @@ func readCatalogRegistries(root string, readFile ReadFileFunc, readDir ReadDirFu
 	found = found || ok
 	catalog.Operations = operations
 
+	skills, ok, err := readRegistryFiles[Skill](root, "skills", readFile, readDir, skillRegistryKey)
+	if err != nil {
+		return Catalog{}, false, err
+	}
+	found = found || ok
+	catalog.Skills = skills
+
 	return catalog, found, nil
 }
+
+func skillRegistryKey(skill Skill) string { return normalizeName(skill.Name) }
 
 func readRegistryFiles[T any](root string, dir string, readFile ReadFileFunc, readDir ReadDirFunc, keyFunc func(T) string) ([]T, bool, error) {
 	dirPath := filepath.Join(root, dir)

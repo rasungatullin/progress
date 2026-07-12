@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -16,6 +17,7 @@ const (
 	ElementKindInstruction = "instruction"
 	ElementKindEntity      = "entity"
 	ElementKindOperation   = "operation"
+	ElementKindSkill       = "skill"
 )
 
 type Catalog struct {
@@ -25,6 +27,14 @@ type Catalog struct {
 	Instructions []Instruction `json:"instructions,omitempty"`
 	Operations   []Operation   `json:"operations,omitempty"`
 	Entities     []Entity      `json:"entities,omitempty"`
+	Skills       []Skill       `json:"skills,omitempty"`
+}
+
+// Skill описывает установленный локальный навык методики.
+type Skill struct {
+	Name    string `json:"name"`
+	Purpose string `json:"purpose,omitempty"`
+	Path    string `json:"path"`
 }
 
 type Route struct {
@@ -44,6 +54,7 @@ type Route struct {
 	Constraints     []string     `json:"constraints,omitempty"`
 	ReasonCode      string       `json:"reason_code,omitempty"`
 	ReasonMessage   string       `json:"reason_message,omitempty"`
+	Skills          []string     `json:"skills,omitempty"`
 }
 
 type RouteCheck struct {
@@ -343,6 +354,7 @@ type CatalogSources struct {
 	Instructions map[string]configuration.ConfigFileSource `json:"instructions,omitempty"`
 	Operations   map[string]configuration.ConfigFileSource `json:"operations,omitempty"`
 	Entities     map[string]configuration.ConfigFileSource `json:"entities,omitempty"`
+	Skills       map[string]configuration.ConfigFileSource `json:"skills,omitempty"`
 }
 
 type CatalogSnapshot struct {
@@ -375,6 +387,7 @@ type ListedElement struct {
 	ActionEntry   *Action                        `json:"action_entry,omitempty"`
 	Instruction   *Instruction                   `json:"instruction,omitempty"`
 	Entity        *Entity                        `json:"entity,omitempty"`
+	Skill         *Skill                         `json:"skill,omitempty"`
 }
 
 func mergeCatalogLayers(layers []CatalogLayer) CatalogSnapshot {
@@ -385,6 +398,7 @@ func mergeCatalogLayers(layers []CatalogLayer) CatalogSnapshot {
 			Instructions: map[string]configuration.ConfigFileSource{},
 			Operations:   map[string]configuration.ConfigFileSource{},
 			Entities:     map[string]configuration.ConfigFileSource{},
+			Skills:       map[string]configuration.ConfigFileSource{},
 		},
 		Layers: append([]CatalogLayer(nil), layers...),
 	}
@@ -394,6 +408,7 @@ func mergeCatalogLayers(layers []CatalogLayer) CatalogSnapshot {
 	instructionIndexes := map[string]int{}
 	operationIndexes := map[string]int{}
 	entityIndexes := map[string]int{}
+	skillIndexes := map[string]int{}
 
 	for _, layer := range layers {
 		if layer.Source == configuration.ConfigFileSourceGlobal {
@@ -432,6 +447,11 @@ func mergeCatalogLayers(layers []CatalogLayer) CatalogSnapshot {
 			key := entitySourceKey(entity.Kind, entity.Name)
 			upsertEntity(&snapshot.Catalog, entityIndexes, entity)
 			snapshot.Sources.Entities[key] = layer.Source
+		}
+		for _, skill := range layer.Catalog.Skills {
+			skill = normalizeSkill(skill)
+			upsertSkill(&snapshot.Catalog, skillIndexes, skill)
+			snapshot.Sources.Skills[skill.Name] = layer.Source
 		}
 	}
 
@@ -522,6 +542,12 @@ func ListCatalogElements(snapshot CatalogSnapshot, filter ElementFilter) []Liste
 			})
 		}
 	}
+	if filter.Kind == "" || filter.Kind == ElementKindSkill {
+		for _, skill := range snapshot.Catalog.Skills {
+			skill := skill
+			elements = append(elements, ListedElement{Kind: ElementKindSkill, Name: skill.Name, Source: snapshot.Sources.Skills[skill.Name], Title: skill.Name, Description: skill.Purpose, Skill: &skill})
+		}
+	}
 
 	sort.SliceStable(elements, func(i, j int) bool {
 		left := elementSortKey(elements[i])
@@ -558,6 +584,7 @@ func normalizeCatalog(catalog Catalog) Catalog {
 	instructionIndexes := map[string]int{}
 	operationIndexes := map[string]int{}
 	entityIndexes := map[string]int{}
+	skillIndexes := map[string]int{}
 
 	for _, route := range catalog.Routes {
 		route = normalizeRoute(route)
@@ -599,8 +626,35 @@ func normalizeCatalog(catalog Catalog) Catalog {
 		}
 		upsertEntity(&result, entityIndexes, entity)
 	}
+	for _, skill := range catalog.Skills {
+		skill = normalizeSkill(skill)
+		if skill.Name == "" {
+			result.Skills = append(result.Skills, skill)
+			continue
+		}
+		upsertSkill(&result, skillIndexes, skill)
+	}
 
 	return result
+}
+
+func normalizeSkill(skill Skill) Skill {
+	skill.Name = normalizeName(skill.Name)
+	skill.Purpose = strings.TrimSpace(skill.Purpose)
+	skill.Path = filepath.Clean(strings.TrimSpace(skill.Path))
+	if skill.Path == "." {
+		skill.Path = ""
+	}
+	return skill
+}
+
+func upsertSkill(catalog *Catalog, indexes map[string]int, skill Skill) {
+	if index, ok := indexes[skill.Name]; ok {
+		catalog.Skills[index] = skill
+		return
+	}
+	indexes[skill.Name] = len(catalog.Skills)
+	catalog.Skills = append(catalog.Skills, skill)
 }
 
 func validateCatalog(catalog Catalog) error {
@@ -752,7 +806,29 @@ func validateCatalog(catalog Catalog) error {
 			return fmt.Errorf("entity %q contains invalid payload JSON", key)
 		}
 	}
+	seenSkills := map[string]struct{}{}
+	for index, rawSkill := range catalog.Skills {
+		skill := normalizeSkill(rawSkill)
+		if skill.Name == "" {
+			return fmt.Errorf("skills[%d].name must be non-empty", index)
+		}
+		if _, ok := seenSkills[skill.Name]; ok {
+			return fmt.Errorf("skills contains duplicate name %q", skill.Name)
+		}
+		seenSkills[skill.Name] = struct{}{}
+		if err := validateSkillPath(skill.Path); err != nil {
+			return fmt.Errorf("skill %q: %w", skill.Name, err)
+		}
+	}
 
+	return nil
+}
+
+func validateSkillPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" || filepath.IsAbs(path) || path == "." || path == string(filepath.Separator) || path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path must be relative and stay inside the skills catalog")
+	}
 	return nil
 }
 

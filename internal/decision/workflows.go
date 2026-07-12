@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/integration"
 	"github.com/rasungatullin/progress/internal/methodology"
 )
@@ -36,6 +37,7 @@ type workflowProcessingRouteConfig struct {
 	Constraints     []string                   `json:"constraints,omitempty"`
 	ReasonCode      string                     `json:"reason_code,omitempty"`
 	ReasonMessage   string                     `json:"reason_message,omitempty"`
+	Skills          []execution.SkillRef       `json:"skills,omitempty"`
 	Checks          []workflowRouteCheckConfig `json:"checks"`
 	Source          string                     `json:"-"`
 }
@@ -65,6 +67,7 @@ type selectedWorkflowRoute struct {
 	ReasonCode     string
 	ReasonMessage  string
 	Route          ProcessingRoute
+	Skills         []execution.SkillRef
 	Checks         []RouteCheckResult
 	RouteSource    string
 	CheckSources   map[string]string
@@ -135,6 +138,7 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 				Title:       strings.TrimSpace(processingRoute.Title),
 				Description: strings.TrimSpace(processingRoute.Description),
 			},
+			Skills:      append([]execution.SkillRef(nil), processingRoute.Skills...),
 			RouteSource: strings.TrimSpace(processingRoute.Source),
 			Checks:      []RouteCheckResult{check},
 			CheckSources: map[string]string{

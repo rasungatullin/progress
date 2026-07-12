@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ type workplace = model.Workplace
 type AssignmentReason = model.AssignmentReason
 type ObjectRef = model.ObjectRef
 type ExecutionAssignment = model.ExecutionAssignment
+type SkillRef = model.SkillRef
 type ActionInvocation = model.ActionInvocation
 type OperationInvocation = model.OperationInvocation
 type Action = model.Action
@@ -207,6 +209,9 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 
 func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, error) {
 	assignment := assignmentFromInvocation(in)
+	if err := validateAssignmentSkills(assignment); err != nil {
+		return executionResultFromLaunch(assignment, Action{Name: actionNameFromInvocation(in)}, nil, nil, failedStartResult(err), err), err
+	}
 	in.Assignment = assignment
 	if in.Launch.StructuredInput == nil && assignment.StructuredInput != nil {
 		in.Launch.StructuredInput = assignment.StructuredInput
@@ -242,6 +247,29 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 	err = s.runActionOperations(ctx, state)
 	data := executionDataFromState(state)
 	return executionResultFromLaunch(assignment, action, state.tracker.snapshot(), mergeRequestFromExecutionData(state), data.result, err), err
+}
+
+func validateAssignmentSkills(assignment *ExecutionAssignment) error {
+	if assignment == nil {
+		return nil
+	}
+	for _, skill := range assignment.Skills {
+		name := strings.TrimSpace(skill.Name)
+		if name == "" {
+			return fmt.Errorf("skill name must be non-empty")
+		}
+		if skill.Scope != "global" && skill.Scope != "local" {
+			return fmt.Errorf("skill %q has unsupported scope %q", name, skill.Scope)
+		}
+		path := strings.TrimSpace(skill.Path)
+		if path == "" || filepath.IsAbs(path) || path == "." || path == ".." || strings.HasPrefix(filepath.ToSlash(path), "../") || strings.Contains(path, "://") {
+			return fmt.Errorf("skill %q path must be relative and stay inside its catalog", name)
+		}
+		if strings.TrimSpace(skill.Checksum) == "" {
+			return fmt.Errorf("skill %q checksum must be present", name)
+		}
+	}
+	return nil
 }
 
 func invocationFromActionInvocation(request ActionInvocation) invocation {
