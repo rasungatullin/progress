@@ -1950,6 +1950,9 @@ func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) 
 	if strings.TrimSpace(spec.Timeout) == "" {
 		spec.Timeout = profile.Timeout
 	}
+	if strings.TrimSpace(spec.StartupTimeout) == "" {
+		spec.StartupTimeout = profile.StartupTimeout
+	}
 	if strings.TrimSpace(spec.NoOutputTimeout) == "" {
 		spec.NoOutputTimeout = profile.NoOutputTimeout
 	}

@@ -189,6 +189,7 @@ type Profile struct {
 	StructuredOutputRequired bool     `json:"structured_output_required,omitempty"`
 	StructuredOutputFields   []string `json:"structured_output_fields,omitempty"`
 	Timeout                  string   `json:"timeout,omitempty"`
+	StartupTimeout           string   `json:"startup_timeout,omitempty"`
 	NoOutputTimeout          string   `json:"no_output_timeout,omitempty"`
 }
 
@@ -206,6 +207,7 @@ type ProfileOptions struct {
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`
 	Timeout                  string    `json:"timeout"`
+	StartupTimeout           string    `json:"startup-timeout"`
 	NoOutputTimeout          string    `json:"no-output-timeout"`
 }
 
@@ -219,6 +221,7 @@ type ProfileConfig struct {
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`
 	Timeout                  string    `json:"timeout"`
+	StartupTimeout           string    `json:"startup-timeout"`
 	NoOutputTimeout          string    `json:"no-output-timeout"`
 }
 
