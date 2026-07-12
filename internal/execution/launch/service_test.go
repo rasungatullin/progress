@@ -239,14 +239,23 @@ func TestLaunchRecordsInterruptedRunOnContextCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	service := &Service{
-		runRunner: func(ctx context.Context, _ model.Invocation) (string, error) {
+		runRunner: func(ctx context.Context, invocation model.Invocation) (string, error) {
+			if err := os.WriteFile(filepath.Join(invocation.Launch.Directory, "partial.txt"), []byte("partial result"), 0o644); err != nil {
+				return "", err
+			}
 			cancel()
 			<-ctx.Done()
 			return "", ctx.Err()
 		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when launch is interrupted")
-			return "", nil
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "status --porcelain -z -uall":
+				return " M partial.txt\x00?? notes.txt\x00", nil
+			case "branch --show-current":
+				return "136\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
 		},
 	}
 
@@ -263,6 +272,9 @@ func TestLaunchRecordsInterruptedRunOnContextCancel(t *testing.T) {
 	record := readLaunchRunRecord(t, result.RunRecordPath)
 	if record.Result.Status != "interrupted" || strings.TrimSpace(record.Error) == "" {
 		t.Fatalf("interrupted run record must keep diagnostic details: %#v", record)
+	}
+	if record.Result.WorktreeDiagnostic == nil || !record.Result.WorktreeDiagnostic.DirtyWorktree || !reflect.DeepEqual(record.Result.WorktreeDiagnostic.ChangedPaths, []string{"partial.txt", "notes.txt"}) {
+		t.Fatalf("interrupted run record must keep dirty-worktree diagnostic: %#v", record.Result)
 	}
 
 	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10, Status: "interrupted"})
@@ -1346,9 +1358,15 @@ func TestLaunchRunnerErrorReturned(t *testing.T) {
 		runRunner: func(context.Context, model.Invocation) (string, error) {
 			return "", runnerErr
 		},
-		runGitOutput: func(context.Context, string, ...string) (string, error) {
-			t.Fatal("git must not be called when runner fails")
-			return "", nil
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "status --porcelain -z -uall":
+				return " M partial.go\x00", nil
+			case "branch --show-current":
+				return "136\n", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
 		},
 	}
 
@@ -1372,6 +1390,9 @@ func TestLaunchRunnerErrorReturned(t *testing.T) {
 	}
 	if !strings.Contains(record.Error, "launch runner failed") {
 		t.Fatalf("unexpected run record error: %#v", record.Error)
+	}
+	if record.Result.WorktreeDiagnostic == nil || !record.Result.WorktreeDiagnostic.DirtyWorktree || record.Result.WorktreeDiagnostic.Branch != "136" {
+		t.Fatalf("runner failure must keep dirty-worktree diagnostic: %#v", record.Result)
 	}
 
 	runs, err := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 10})
@@ -2472,9 +2493,10 @@ type persistedLaunchRunRecord struct {
 	StructuredOutputErr string                  `json:"structured_output_error,omitempty"`
 	Error               string                  `json:"error,omitempty"`
 	Result              struct {
-		Status        string `json:"status"`
-		Summary       string `json:"summary"`
-		RawOutputPath string `json:"raw_output_path"`
+		Status             string                    `json:"status"`
+		Summary            string                    `json:"summary"`
+		RawOutputPath      string                    `json:"raw_output_path"`
+		WorktreeDiagnostic *model.WorktreeDiagnostic `json:"worktree_diagnostic,omitempty"`
 	} `json:"result"`
 }
 
