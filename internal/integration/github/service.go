@@ -1702,7 +1702,7 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 		status.State = StateReady
 		status.Available = true
 		status.Authenticated = true
-		status.Login = githubAuthLogin(config.Command, result.Stdout)
+		status.Login = githubAuthLogin(config.Command, result.Stdout+"\n"+result.Stderr)
 		if config.Command == "http" {
 			status.Message = "GitHub API token is accepted and API is available"
 			status.Diagnostics = append(status.Diagnostics, "GitHub API auth status completed successfully")
@@ -1780,7 +1780,8 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 	return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
 }
 
-func githubAuthLogin(command, stdout string) string {
+func githubAuthLogin(command string, outputs ...string) string {
+	stdout := strings.Join(outputs, "\n")
 	if command == "http" {
 		var user struct {
 			Login string `json:"login"`

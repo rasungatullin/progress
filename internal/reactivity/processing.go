@@ -348,7 +348,10 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		HasMergeConflict: mergeRequestHasConflict(mergeRequest),
 	}
 	ownAuthorLogin := ""
-	authResponse, _ := s.integration.Execute(ctx, integration.Request{System: "github", Resource: "auth", Operation: "status"})
+	authResponse, authErr := s.integration.Execute(ctx, integration.Request{System: "github", Resource: "auth", Operation: "status"})
+	if authErr != nil {
+		return nil, fmt.Errorf("определить служебную идентичность GitHub: %w", authErr)
+	}
 	if authResponse.AuthStatus != nil && authResponse.AuthStatus.Authenticated {
 		ownAuthorLogin = strings.TrimSpace(authResponse.AuthStatus.Login)
 	}
