@@ -409,14 +409,24 @@ type DiagnosticLink struct {
 }
 
 type LaunchResult struct {
-	Status              string            `json:"status,omitempty"`
-	Summary             string            `json:"summary,omitempty"`
-	RawOutput           string            `json:"raw_output,omitempty"`
-	RawOutputPath       string            `json:"raw_output_path,omitempty"`
-	RawStructuredOutput string            `json:"raw_structured_output,omitempty"`
-	StructuredOutput    *StructuredOutput `json:"structured_output,omitempty"`
-	RunnerSessionID     string            `json:"runner_session_id,omitempty"`
-	RunRecordPath       string            `json:"run_record_path,omitempty"`
+	Status              string              `json:"status,omitempty"`
+	Summary             string              `json:"summary,omitempty"`
+	RawOutput           string              `json:"raw_output,omitempty"`
+	RawOutputPath       string              `json:"raw_output_path,omitempty"`
+	RawStructuredOutput string              `json:"raw_structured_output,omitempty"`
+	StructuredOutput    *StructuredOutput   `json:"structured_output,omitempty"`
+	RunnerSessionID     string              `json:"runner_session_id,omitempty"`
+	RunRecordPath       string              `json:"run_record_path,omitempty"`
+	WorktreeDiagnostic  *WorktreeDiagnostic `json:"worktree_diagnostic,omitempty"`
+}
+
+type WorktreeDiagnostic struct {
+	DirtyWorktree  bool     `json:"dirty_worktree"`
+	ChangedPaths   []string `json:"changed_paths,omitempty"`
+	Path           string   `json:"path,omitempty"`
+	Branch         string   `json:"branch,omitempty"`
+	Recommendation string   `json:"recommendation,omitempty"`
+	Error          string   `json:"error,omitempty"`
 }
 
 type ExecutionResult struct {

@@ -41,6 +41,7 @@ const runRecordFilePrefix = "execution-"
 const (
 	defaultRunnerTimeout         = 30 * time.Minute
 	defaultRunnerNoOutputTimeout = 5 * time.Minute
+	worktreeDiagnosticTimeout    = 10 * time.Second
 )
 
 var (
@@ -157,6 +158,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			RawOutput:     partialOutput,
 			RawOutputPath: rawOutputPath,
 		}
+		enrichFailedLaunchWithWorktree(ctx, s, &result, workplace)
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
 	}
@@ -184,6 +186,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		if structuredOutputState != trailingStructuredBlockValid {
 			result.StructuredOutput = nil
 		}
+		enrichFailedLaunchWithWorktree(ctx, s, &result, workplace)
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, err, err)
 		return result, err
 	}
@@ -206,6 +209,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			if structuredOutputState != trailingStructuredBlockValid {
 				launchResult.StructuredOutput = nil
 			}
+			enrichFailedLaunchWithWorktree(ctx, s, &launchResult, workplace)
 			launchResult.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, launchResult, rawStructuredOutput, structuredOutput, structuredOutputErr, err)
 			return launchResult, err
 		}
@@ -697,9 +701,10 @@ type runRecord struct {
 }
 
 type runRecordResult struct {
-	Status        string `json:"status"`
-	Summary       string `json:"summary"`
-	RawOutputPath string `json:"raw_output_path"`
+	Status             string                    `json:"status"`
+	Summary            string                    `json:"summary"`
+	RawOutputPath      string                    `json:"raw_output_path"`
+	WorktreeDiagnostic *model.WorktreeDiagnostic `json:"worktree_diagnostic,omitempty"`
 }
 
 func (r gitResult) summary() string {
@@ -769,9 +774,10 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 		StructuredOutputErr: errText,
 		Error:               launchErrText,
 		Result: runRecordResult{
-			Status:        launchResult.Status,
-			Summary:       launchResult.Summary,
-			RawOutputPath: launchResult.RawOutputPath,
+			Status:             launchResult.Status,
+			Summary:            launchResult.Summary,
+			RawOutputPath:      launchResult.RawOutputPath,
+			WorktreeDiagnostic: launchResult.WorktreeDiagnostic,
 		},
 	}
 
@@ -811,6 +817,84 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 	})
 
 	return recordPath
+}
+
+func enrichFailedLaunchWithWorktree(ctx context.Context, service *Service, result *model.LaunchResult, workplace model.Workplace) {
+	if service == nil || result == nil || service.runGitOutput == nil || !failedLaunchStatus(result.Status) {
+		return
+	}
+
+	path := firstNonEmptyPath(workplace.Name, workplace.RepositoryRoot)
+	diagnostic := &model.WorktreeDiagnostic{Path: path, Recommendation: "Продолжить вручную, очистить рабочее место или создать новый запуск."}
+	inspectContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), worktreeDiagnosticTimeout)
+	defer cancel()
+	statusOutput, err := service.runGitOutput(inspectContext, path, "status", "--porcelain", "-z", "-uall")
+	if err != nil {
+		diagnostic.Error = fmt.Sprintf("не удалось получить состояние рабочего места: %v", err)
+		result.WorktreeDiagnostic = diagnostic
+		return
+	}
+	diagnostic.ChangedPaths = allChangedPathsFromPorcelain(statusOutput)
+	diagnostic.DirtyWorktree = len(diagnostic.ChangedPaths) > 0
+	if branch, branchErr := service.runGitOutput(inspectContext, path, "branch", "--show-current"); branchErr == nil {
+		diagnostic.Branch = strings.TrimSpace(branch)
+	} else if diagnostic.Error == "" {
+		diagnostic.Error = fmt.Sprintf("не удалось получить ветку рабочего места: %v", branchErr)
+	}
+	if diagnostic.DirtyWorktree {
+		result.Summary = strings.TrimSpace(result.Summary + "; частичный результат сохранён без коммита в рабочем месте")
+	}
+	result.WorktreeDiagnostic = diagnostic
+}
+
+func failedLaunchStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "failed", "interrupted", "timeout", "runner-stalled":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstNonEmptyPath(paths ...string) string {
+	for _, path := range paths {
+		if trimmed := strings.TrimSpace(path); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func allChangedPathsFromPorcelain(output string) []string {
+	if output == "" {
+		return nil
+	}
+
+	paths := make([]string, 0)
+	seen := make(map[string]struct{})
+	entries := strings.Split(output, "\x00")
+	for index := 0; index < len(entries); index++ {
+		entry := entries[index]
+		if len(entry) < 4 {
+			continue
+		}
+		values := []string{strings.TrimSpace(entry[3:])}
+		if isRenameOrCopyStatus(entry) && index+1 < len(entries) {
+			index++
+			values = append(values, strings.TrimSpace(entries[index]))
+		}
+		for _, path := range values {
+			if path == "" {
+				continue
+			}
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func existingDirectory(path string) bool {
