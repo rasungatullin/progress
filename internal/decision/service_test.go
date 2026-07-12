@@ -1278,6 +1278,34 @@ func TestHasUnresolvedExternalReviewRemarksRequiresResolvedResponseState(t *test
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksIgnoresResolvedGeneralRemarkByID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		state string
+		body  string
+		want  bool
+	}{
+		{name: "resolved", state: "resolved", body: "Замечание закрыто", want: false},
+		{name: "closed", state: "closed", body: "Замечание закрыто", want: false},
+		{name: "fixed", state: "fixed", body: "Замечание закрыто", want: false},
+		{name: "explicit closure", body: "Замечание закрыто: исправление подтверждено", want: false},
+		{name: "open", state: "open", body: "Ожидается исправление", want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			remarks := []integration.ReviewRemark{{
+				State: "conversation",
+				Body:  "## Замечание ревизии\n\nИдентификатор: remark-1\n\nСостояние: " + test.state + "\n\n" + test.body,
+			}}
+			if got := hasUnresolvedExternalReviewRemarks(remarks); got != test.want {
+				t.Fatalf("hasUnresolvedExternalReviewRemarks() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *testing.T) {
 	t.Parallel()
 

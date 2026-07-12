@@ -3856,6 +3856,9 @@ func TestReviewRemarkCommentsPreservesExternalIdentifiers(t *testing.T) {
 	if got := reviewRemarkCommentOperation(comments[0]); got != "reply" {
 		t.Fatalf("existing review thread must be published as reply, got %q", got)
 	}
+	if !strings.Contains(comments[0].Body, "Состояние: open") {
+		t.Fatalf("review remark state must be preserved in published body: %q", comments[0].Body)
+	}
 }
 
 func TestUpdateReviewRemarkThreadsReopensExistingChain(t *testing.T) {
