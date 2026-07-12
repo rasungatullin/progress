@@ -530,7 +530,20 @@ func (r *APIRunner) RunPRCommentCreate(ctx context.Context, repository string, n
 	if err != nil {
 		return apiErrorResult("pr comment create", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	payload := map[string]any{"body": request.Body, "path": request.Path, "line": request.Line, "side": request.Side}
+	var pullRequest struct {
+		Head struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	headResult, err := r.do(ctx, config, http.MethodGet, fmt.Sprintf("repos/%s/pulls/%d", repository, number), nil, &pullRequest)
+	if err != nil {
+		return headResult, apiResolvedConfig(config), err
+	}
+	request.CommitID = strings.TrimSpace(pullRequest.Head.SHA)
+	if request.CommitID == "" {
+		return headResult, apiResolvedConfig(config), &Error{Code: ErrorCodePartialPayload, Message: "GitHub pull request head SHA is missing", Result: headResult}
+	}
+	payload := map[string]any{"body": request.Body, "commit_id": request.CommitID, "path": request.Path, "line": request.Line, "side": request.Side}
 	var raw ghPRReviewCommentCreateResponse
 	result, err := r.do(ctx, config, http.MethodPost, fmt.Sprintf("repos/%s/pulls/%d/comments", repository, number), payload, &raw)
 	if err != nil {
@@ -998,6 +1011,7 @@ type apiPullRequest struct {
 	} `json:"base"`
 	Head struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 	MergedAt string `json:"merged_at"`
 }

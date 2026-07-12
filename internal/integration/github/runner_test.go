@@ -730,11 +730,20 @@ func TestRunnerRunPRCommentCreateUsesRESTEndpoint(t *testing.T) {
 	runner.resolveRepoRoot = func(context.Context) (string, error) { return "/repo", nil }
 	runner.readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
 	runner.lookPath = func(string) (string, error) { return "/usr/bin/gh", nil }
+	var calls int
 	runner.runCommand = func(_ context.Context, path string, args []string) commandRunner {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"api", "--method", "POST", "repos/owner/name/pulls/42/comments", "-f", "body=Inline remark", "-f", "path=file.go", "-F", "line=12", "-f", "side=RIGHT"}
+		calls++
+		if calls == 1 {
+			expected := []string{"pr", "view", "42", "--repo", "owner/name", "--json", "headRefOid"}
+			if fmt.Sprint(args) != fmt.Sprint(expected) {
+				t.Fatalf("unexpected head request args: %#v", args)
+			}
+			return commandRunner{stdout: `{"headRefOid":"external-head-sha"}`}
+		}
+		expected := []string{"api", "--method", "POST", "repos/owner/name/pulls/42/comments", "-f", "body=Inline remark", "-f", "commit_id=external-head-sha", "-f", "path=file.go", "-F", "line=12", "-f", "side=RIGHT"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}
@@ -747,6 +756,9 @@ func TestRunnerRunPRCommentCreateUsesRESTEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(result.Stdout, "PRRC_comment-1") {
 		t.Fatalf("unexpected response: %s", result.Stdout)
+	}
+	if calls != 2 {
+		t.Fatalf("unexpected command count: %d", calls)
 	}
 }
 

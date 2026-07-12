@@ -847,6 +847,11 @@ func TestAPITransportPRCommentCreateUsesRESTAndNormalizesSubsequentRead(t *testi
 	var threadReads int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/repos/owner/name/pulls/42":
+			if r.Method != http.MethodGet {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"head": map[string]any{"sha": "external-head-sha"}})
 		case "/repos/owner/name/pulls/42/comments":
 			if r.Method != http.MethodPost {
 				t.Fatalf("unexpected method: %s", r.Method)
@@ -856,7 +861,7 @@ func TestAPITransportPRCommentCreateUsesRESTAndNormalizesSubsequentRead(t *testi
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatalf("decode REST request: %v", err)
 			}
-			if request["body"] != "remark" || request["path"] != "file.go" || request["line"] != float64(12) || request["side"] != "RIGHT" {
+			if request["body"] != "remark" || request["commit_id"] != "external-head-sha" || request["path"] != "file.go" || request["line"] != float64(12) || request["side"] != "RIGHT" || len(request) != 5 {
 				t.Fatalf("unexpected REST request: %#v", request)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 101, "node_id": "PRRC_comment-1", "html_url": "https://github.com/owner/name/pull/42#discussion_r101", "body": "remark", "path": "file.go", "line": 12, "side": "RIGHT"})
@@ -898,6 +903,41 @@ func TestAPITransportPRCommentCreateUsesRESTAndNormalizesSubsequentRead(t *testi
 	}
 	if len(read.ReviewRemarks) != 1 || read.ReviewRemarks[0].ExternalID != "PRRC_comment-1" || read.ReviewRemarks[0].ReplyToID != "thread-1" || read.ReviewRemarks[0].Path != "file.go" || read.ReviewRemarks[0].Line != 12 {
 		t.Fatalf("unexpected normalized read: %#v", read.ReviewRemarks)
+	}
+}
+
+func TestAPIRunnerPRCommentCreateReportsVersionConflictWithoutRetry(t *testing.T) {
+	t.Parallel()
+
+	var createCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/name/pulls/42":
+			_ = json.NewEncoder(w).Encode(map[string]any{"head": map[string]any{"sha": "external-head-sha"}})
+		case "/repos/owner/name/pulls/42/comments":
+			createCalls++
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode REST request: %v", err)
+			}
+			if request["commit_id"] != "external-head-sha" {
+				t.Fatalf("unexpected commit_id: %#v", request)
+			}
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": "pull request head changed"})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runner := NewAPIRunnerWithSystemConfig(model.IntegrationSystemConfig{Transport: "api", BaseURL: server.URL, Token: "secret", Repository: "owner/name"})
+	_, _, err := runner.RunPRCommentCreate(context.Background(), "owner/name", 42, PRCommentCreateRequest{Body: "remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err == nil || !strings.Contains(err.Error(), "422") {
+		t.Fatalf("expected diagnostic HTTP 422 error, got %v", err)
+	}
+	if createCalls != 1 {
+		t.Fatalf("comment creation must not be retried after version conflict: %d", createCalls)
 	}
 }
 
