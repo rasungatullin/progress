@@ -1478,6 +1478,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("launch runner failed: %w", err)
 	}
+	startedAt := time.Now()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	watchdog := time.NewTimer(noOutputTimeout)
@@ -1498,10 +1499,10 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			return output, nil
 		case <-writer.activity:
 			_, lastOutputAt := writer.snapshot()
-			resetRunnerWatchdog(watchdog, noOutputTimeout, lastOutputAt)
+			resetRunnerWatchdog(watchdog, noOutputTimeout, lastOutputAt, startedAt)
 		case <-watchdog.C:
 			_, lastOutputAt := writer.snapshot()
-			if remaining := runnerNoOutputRemaining(noOutputTimeout, lastOutputAt); remaining > 0 {
+			if remaining := runnerNoOutputRemaining(noOutputTimeout, lastOutputAt, startedAt); remaining > 0 {
 				watchdog.Reset(remaining)
 				continue
 			}
@@ -1520,21 +1521,21 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	}
 }
 
-func runnerNoOutputRemaining(timeout time.Duration, lastOutputAt time.Time) time.Duration {
+func runnerNoOutputRemaining(timeout time.Duration, lastOutputAt, startedAt time.Time) time.Duration {
 	if lastOutputAt.IsZero() {
-		return timeout
+		lastOutputAt = startedAt
 	}
 	return timeout - time.Since(lastOutputAt)
 }
 
-func resetRunnerWatchdog(watchdog *time.Timer, timeout time.Duration, lastOutputAt time.Time) {
+func resetRunnerWatchdog(watchdog *time.Timer, timeout time.Duration, lastOutputAt, startedAt time.Time) {
 	if !watchdog.Stop() {
 		select {
 		case <-watchdog.C:
 		default:
 		}
 	}
-	remaining := runnerNoOutputRemaining(timeout, lastOutputAt)
+	remaining := runnerNoOutputRemaining(timeout, lastOutputAt, startedAt)
 	if remaining <= 0 {
 		remaining = time.Nanosecond
 	}

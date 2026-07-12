@@ -117,6 +117,26 @@ func TestRunRunnerCommandStopsOnNoOutputTimeout(t *testing.T) {
 	}
 }
 
+func TestRunRunnerCommandStopsOnNoOutputTimeoutWithoutOutput(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Now()
+	_, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "sleep 1"), model.LaunchSpec{
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 500*time.Millisecond {
+		t.Fatalf("silent runner was allowed to run until overall timeout: %s", elapsed)
+	}
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || runnerErr.output != "" || !runnerErr.lastOutputAt.IsZero() {
+		t.Fatalf("unexpected silent-runner diagnostics: %#v", runnerErr)
+	}
+}
+
 func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
 	t.Parallel()
 
@@ -155,7 +175,7 @@ func TestResetRunnerWatchdogUsesLastOutputTime(t *testing.T) {
 	defer watchdog.Stop()
 	lastOutputAt := time.Now().Add(-80 * time.Millisecond)
 
-	resetRunnerWatchdog(watchdog, 100*time.Millisecond, lastOutputAt)
+	resetRunnerWatchdog(watchdog, 100*time.Millisecond, lastOutputAt, time.Now())
 
 	select {
 	case <-watchdog.C:
