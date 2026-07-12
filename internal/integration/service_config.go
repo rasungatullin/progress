@@ -34,11 +34,16 @@ func NewConfiguredService(logger *log.Logger) *Service {
 		return newEmptyService(logger)
 	}
 
+	if system, ok := configUsesLegacyToken(loaded.Config); ok {
+		logger.Printf("Контур интеграции не подключил систему %q: фактическое поле token больше не поддерживается; сохраните значение в хранилище приватных значений и укажите ссылку token_private", system)
+		return newEmptyService(logger)
+	}
+
 	if !configUsesPrivateValues(loaded.Config) {
 		return NewServiceFromConfig(logger, loaded.Config)
 	}
 
-	privateStoreConfig, configHome, err := configuration.LoadPrivateStoreConfig(repoRoot, "", os.ReadFile)
+	privateStoreConfig, configHome, err := configuration.LoadPrivateStoreConfig(repoRoot, loaded.ConfigHome, os.ReadFile)
 	if err != nil {
 		logger.Printf("Контур интеграции не подключил хранилище приватных значений: %v", err)
 		return NewServiceFromConfigWithPrivateStore(logger, loaded.Config, nil)
@@ -81,4 +86,13 @@ func configUsesPrivateValues(config model.IntegrationConfigFile) bool {
 		}
 	}
 	return false
+}
+
+func configUsesLegacyToken(config model.IntegrationConfigFile) (string, bool) {
+	for name, system := range config.Systems {
+		if strings.TrimSpace(system.Token) != "" {
+			return strings.TrimSpace(name), true
+		}
+	}
+	return "", false
 }
