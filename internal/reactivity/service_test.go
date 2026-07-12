@@ -564,6 +564,32 @@ func TestServiceProcessTaskReworksForClosureLikeTextWithoutState(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskReworksForUnstructuredResolvedComment(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{{
+		ExternalID: "comment-1",
+		State:      "conversation",
+		Body:       "Замечание: remark-2\n\nСостояние: resolved\n\nЗамечание закрыто: исправление подтверждено",
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	cycle := result.Cycles[0]
+	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasUnresolvedReviewRemarks {
+		t.Fatalf("unstructured resolved comment must remain unresolved: %#v", cycle.MergeRequestExternalState)
+	}
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	}
+}
+
 func TestServiceProcessTaskReworksReviewPassedTaskWithMergeConflict(t *testing.T) {
 	t.Parallel()
 

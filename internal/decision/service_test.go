@@ -1321,6 +1321,18 @@ func TestHasUnresolvedExternalReviewRemarksIgnoresConfirmationByID(t *testing.T)
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksDoesNotTreatUnstructuredResolvedCommentAsConfirmation(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{
+		State: "conversation",
+		Body:  "Замечание: remark-2\n\nСостояние: resolved\n\nЗамечание закрыто: исправление подтверждено",
+	}}
+	if got := hasUnresolvedExternalReviewRemarks(remarks); !got {
+		t.Fatal("unstructured resolved comment must remain unresolved")
+	}
+}
+
 func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *testing.T) {
 	t.Parallel()
 

@@ -229,6 +229,9 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 }
 
 func isResolvedExternalReviewRemark(body string) bool {
+	if !strings.Contains(body, "## Замечание ревизии") {
+		return false
+	}
 	state := strings.ToLower(strings.TrimSpace(externalReviewRemarkID(body, "Состояние:")))
 	switch state {
 	case "resolved", "fixed", "done", "ok", "closed", "outdated":
@@ -238,6 +241,9 @@ func isResolvedExternalReviewRemark(body string) bool {
 }
 
 func isResolvedExternalReviewResponse(body string) bool {
+	if !strings.Contains(body, "## Ответ на замечание ревизии") {
+		return false
+	}
 	state := strings.ToLower(strings.TrimSpace(externalReviewRemarkID(body, "Состояние:")))
 	switch state {
 	case "resolved", "fixed", "done", "ok", "closed", "outdated":
