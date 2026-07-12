@@ -41,6 +41,7 @@ const runRecordFilePrefix = "execution-"
 const (
 	defaultRunnerTimeout         = 30 * time.Minute
 	defaultRunnerNoOutputTimeout = 5 * time.Minute
+	worktreeDiagnosticTimeout    = 10 * time.Second
 )
 
 var (
@@ -825,7 +826,8 @@ func enrichFailedLaunchWithWorktree(ctx context.Context, service *Service, resul
 
 	path := firstNonEmptyPath(workplace.Name, workplace.RepositoryRoot)
 	diagnostic := &model.WorktreeDiagnostic{Path: path, Recommendation: "Продолжить вручную, очистить рабочее место или создать новый запуск."}
-	inspectContext := context.WithoutCancel(ctx)
+	inspectContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), worktreeDiagnosticTimeout)
+	defer cancel()
 	statusOutput, err := service.runGitOutput(inspectContext, path, "status", "--porcelain", "-z", "-uall")
 	if err != nil {
 		diagnostic.Error = fmt.Sprintf("не удалось получить состояние рабочего места: %v", err)

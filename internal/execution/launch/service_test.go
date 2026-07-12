@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
@@ -477,6 +478,42 @@ func TestEnrichFailedLaunchWithWorktreeUsesWorkplacePath(t *testing.T) {
 	enrichFailedLaunchWithWorktree(context.Background(), service, &result, model.Workplace{Name: workplacePath, RepositoryRoot: repositoryRoot})
 	if inspectedPath != workplacePath || result.WorktreeDiagnostic == nil || result.WorktreeDiagnostic.Path != workplacePath {
 		t.Fatalf("diagnostic must inspect workplace path: path=%q diagnostic=%#v", inspectedPath, result.WorktreeDiagnostic)
+	}
+}
+
+func TestEnrichFailedLaunchWithWorktreeUsesIndependentDeadline(t *testing.T) {
+	t.Parallel()
+
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	var deadline time.Time
+	service := &Service{
+		runGitOutput: func(ctx context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "status --porcelain -z -uall", "branch --show-current":
+				var ok bool
+				deadline, ok = ctx.Deadline()
+				if !ok {
+					t.Fatal("worktree diagnostic must have a deadline")
+				}
+				if ctx.Err() != nil {
+					t.Fatalf("worktree diagnostic must not inherit parent cancellation: %v", ctx.Err())
+				}
+				return "", nil
+			default:
+				t.Fatalf("unexpected git command: %v", args)
+				return "", nil
+			}
+		},
+	}
+
+	result := model.LaunchResult{Status: "failed"}
+	enrichFailedLaunchWithWorktree(parent, service, &result, model.Workplace{Name: t.TempDir()})
+	if deadline.IsZero() {
+		t.Fatal("worktree diagnostic deadline was not captured")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > worktreeDiagnosticTimeout {
+		t.Fatalf("unexpected worktree diagnostic deadline: %v", remaining)
 	}
 }
 
