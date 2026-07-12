@@ -37,6 +37,14 @@ func TestServiceAuthStatusSuccess(t *testing.T) {
 	}
 }
 
+func TestGitHubAuthLoginParsesCLIStatusMarker(t *testing.T) {
+	t.Parallel()
+
+	if got := githubAuthLogin("gh", "✓ Logged in to github.com account progress (keyring)\n"); got != "progress" {
+		t.Fatalf("githubAuthLogin() = %q, want %q", got, "progress")
+	}
+}
+
 func TestServiceAuthStatusMapsAuthRequired(t *testing.T) {
 	t.Parallel()
 

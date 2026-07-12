@@ -71,8 +71,18 @@ func (r *APIRunner) RunAuthStatus(ctx context.Context) (CommandResult, resolvedC
 		return apiErrorResult("auth status", config, err)
 	}
 	if config.Token == "" && githubAppAuthConfigured(config) {
-		_, result, err := r.installationAccessToken(ctx, config)
-		return result, apiResolvedConfig(config), err
+		token, result, err := r.installationAccessToken(ctx, config)
+		if err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		config.Token = token.Token
+		var user struct {
+			Login string `json:"login"`
+		}
+		if _, userErr := r.do(ctx, config, http.MethodGet, "user", nil, &user); userErr == nil {
+			result.Stdout = mustJSON(user)
+		}
+		return result, apiResolvedConfig(config), nil
 	}
 	if config.Token == "" {
 		return apiErrorResult("auth status", config, &Error{Code: ErrorCodeAuthRequired, Message: "GitHub API token or GitHub App settings are required"})

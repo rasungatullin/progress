@@ -211,6 +211,8 @@ func TestAPITransportUsesGitHubAppInstallationToken(t *testing.T) {
 				"state":    "open",
 				"html_url": "https://github.com/owner/name/issues/123",
 			})
+		case "/user":
+			_ = json.NewEncoder(w).Encode(map[string]any{"login": "progress-app[bot]"})
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
