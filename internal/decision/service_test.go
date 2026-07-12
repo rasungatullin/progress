@@ -1481,6 +1481,9 @@ type stubIntegrationExecutor struct {
 func (s *stubIntegrationExecutor) Execute(_ context.Context, request integration.Request) (integration.Response, error) {
 	s.requests = append(s.requests, request)
 	s.request = request
+	if request.System == "github" && request.Resource == "auth" && request.Operation == "status" {
+		return integration.Response{AuthStatus: &integration.AuthStatus{Authenticated: true, Login: "progress"}}, nil
+	}
 	if request.Operation == "search" && s.errOnSearch != nil {
 		return integration.Response{}, s.errOnSearch
 	}

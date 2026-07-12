@@ -352,8 +352,12 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 	if authErr != nil {
 		return nil, fmt.Errorf("определить служебную идентичность GitHub: %w", authErr)
 	}
-	if authResponse.AuthStatus != nil && authResponse.AuthStatus.Authenticated {
-		ownAuthorLogin = strings.TrimSpace(authResponse.AuthStatus.Login)
+	if authResponse.AuthStatus == nil || !authResponse.AuthStatus.Authenticated {
+		return nil, fmt.Errorf("определить служебную идентичность GitHub: служебная учётная запись не аутентифицирована")
+	}
+	ownAuthorLogin = strings.TrimSpace(authResponse.AuthStatus.Login)
+	if ownAuthorLogin == "" {
+		return nil, fmt.Errorf("определить служебную идентичность GitHub: логин служебной учётной записи не получен")
 	}
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType:    integrationTypeRepository,
