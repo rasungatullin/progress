@@ -992,6 +992,16 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		}
 	}
 	if err != nil {
+		var ghErr *Error
+		if errors.As(err, &ghErr) {
+			status := issueErrorStatus(config, result, repository, number)
+			status.State = repositoryStateForErrorCode(ghErr.Code)
+			status.Message = ghErr.Message
+			status.Diagnostics = append(status.Diagnostics, "gh issue view failed before returning an issue payload")
+			response.IssueStatus = &status
+			applyGitHubFailure(&response, ghErr.Code, status.Message, status.Diagnostics)
+			return response, ghErr
+		}
 		status := issueErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Number)
 		status.State = ErrorCodeInvalidRequest
 		status.Message = err.Error()

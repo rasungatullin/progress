@@ -1388,52 +1388,6 @@ func newIntegrationGitHubPRGetCommand() *cobra.Command {
 	return cmd
 }
 
-func newIntegrationDispatcherCommand() *cobra.Command {
-	flags := &integrationFlags{
-		system:    "github",
-		resource:  "issue",
-		operation: "get",
-	}
-
-	cmd := &cobra.Command{
-		Use:     "dispatcher",
-		Aliases: []string{"dispatch"},
-		Short:   "Диагностика маршрута диспетчера интеграции",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			format, err := integrationOutputFormat(cmd)
-			if err != nil {
-				return err
-			}
-
-			service := newIntegrationService(cmd)
-			response, err := service.Execute(cmd.Context(), integration.Request{
-				IntegrationType: flags.integrationType,
-				System:          flags.system,
-				SystemProvided:  cmd.Flags().Changed("system"),
-				Resource:        flags.resource,
-				ObjectType:      flags.object,
-				Operation:       flags.operation,
-			})
-			route := response.Route
-			if err := printIntegrationRouteOrJSON(cmd, route, format); err != nil {
-				return err
-			}
-			if err != nil {
-				return err
-			}
-
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&flags.integrationType, "type", flags.integrationType, "Тип интеграции")
-	cmd.Flags().StringVar(&flags.system, "system", flags.system, "Имя внешней системы")
-	cmd.Flags().StringVar(&flags.resource, "resource", flags.resource, "Тип внешнего ресурса")
-	cmd.Flags().StringVar(&flags.object, "object", flags.object, "Тип канонического объекта")
-	cmd.Flags().StringVar(&flags.operation, "operation", flags.operation, "Тип операции интеграции")
-	return cmd
-}
-
 func newIntegrationOperationsCommand() *cobra.Command {
 	flags := &integrationFlags{}
 	cmd := &cobra.Command{
@@ -1472,9 +1426,6 @@ func newIntegrationService(cmd *cobra.Command) *integration.Service {
 			cmd.PrintErrf("предупреждение: форма integration %s устарела; используйте типо-ориентированную команду и --system\n", system)
 			break
 		}
-	}
-	if strings.Contains(path, "integration dispatcher") {
-		cmd.PrintErrln("предупреждение: команда integration dispatcher устарела; разрешение выполняется через реестр типов и систем")
 	}
 	return integrationServiceFactory(cmd)
 }

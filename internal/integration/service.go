@@ -338,6 +338,11 @@ func (s *Service) resolveRoute(req Request) (Route, error) {
 	}
 
 	state, known := s.systems[normalized.System]
+	if !known {
+		err := fmt.Errorf("integration system is not configured: %s", normalized.System)
+		s.logger.Printf("Реестр интеграции отклонил запрос: система=%q причина=%q", normalized.System, err)
+		return s.errorRoute(req, err), err
+	}
 	_, registered := s.providers[normalized.System]
 	available := registered && systemSupportsIntegrationType(state, normalized.IntegrationType)
 
