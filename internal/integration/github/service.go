@@ -141,6 +141,9 @@ type ghPRReviewThreadCreateResponse struct {
 			Thread ghPRReviewThread `json:"thread"`
 		} `json:"addPullRequestReviewThread"`
 	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
 }
 
 type ghPRReviewThreadResolveResponse struct {
@@ -467,6 +470,11 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 	if err != nil {
 		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comment create request rejected before invoking gh")
 	}
+	if commentRequest.Path != "" {
+		if existing, config, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
+			return successfulPRCommentCreate(response, existing, config, repository, number)
+		}
+	}
 
 	result, config, err := s.runner.RunPRCommentCreate(ctx, repository, number, commentRequest)
 	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
@@ -489,15 +497,28 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
 			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub GraphQL JSON response: %v", err), Result: result, Err: err}, "gh pull request inline comment create returned malformed JSON")
 		}
-		remarks := reviewRemarksFromThreads(repository, number, []ghPRReviewThread{raw.Data.AddPullRequestReviewThread.Thread})
+		payload := raw.Data.AddPullRequestReviewThread
+		if len(raw.Errors) > 0 {
+			reference := githubPullRequestReference(repository, number)
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned GraphQL errors (operation=addPullRequestReviewThread reference=%s response=%s)", reference, safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=external-failure operation=addPullRequestReviewThread reference="+reference+"; GitHub returned GraphQL errors")
+		}
+		remarks := reviewRemarksFromThreads(repository, number, []ghPRReviewThread{payload.Thread})
 		if len(remarks) > 0 {
 			remark = remarks[0]
 		}
 	}
 	if remark.ExternalID == "" && remark.URL == "" {
-		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: "unexpected GitHub response: missing pull request comment identifier", Result: result}, "gh pull request comment create returned an incomplete payload")
+		if existing, _, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
+			remark = existing
+		} else {
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub addPullRequestReviewThread returned no stable identifier for %s#%d (operation=addPullRequestReviewThread reference=%s response=%s)", repository, number, githubPullRequestReference(repository, number), safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=partial-payload operation=addPullRequestReviewThread reference="+githubPullRequestReference(repository, number)+"; existing remarks were checked before retry")
+		}
 	}
 
+	return successfulPRCommentCreate(response, remark, config, repository, number)
+}
+
+func successfulPRCommentCreate(response model.Response, remark model.ReviewRemark, config resolvedConfig, repository string, number int) (model.Response, error) {
 	response.ReviewRemarks = []model.ReviewRemark{remark}
 	response.OperationResult = &model.OperationResult{
 		System:     "github",
@@ -512,6 +533,34 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
+}
+
+func (s *Service) findExistingPRRemark(ctx context.Context, repository string, number int, request PRCommentCreateRequest) (model.ReviewRemark, resolvedConfig, bool) {
+	result, config, err := s.runner.RunPRReviewThreads(ctx, repository, number)
+	if err != nil || result.ExitCode != 0 {
+		return model.ReviewRemark{}, config, false
+	}
+	var raw ghPRReviewThreadsResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil || raw.Data.Repository.PullRequest == nil {
+		return model.ReviewRemark{}, config, false
+	}
+	for _, remark := range reviewRemarksFromThreads(repository, number, raw.Data.Repository.PullRequest.ReviewThreads.Nodes) {
+		if remark.Path == request.Path && remark.Line == request.Line && remark.Body == request.Body {
+			return remark, config, true
+		}
+	}
+	return model.ReviewRemark{}, config, false
+}
+
+func safeGitHubResponseDiagnostic(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "empty-payload"
+	}
+	return fmt.Sprintf("payload-bytes=%d", len(raw))
+}
+
+func githubPullRequestReference(repository string, number int) string {
+	return fmt.Sprintf("https://github.com/%s/pull/%d", strings.Trim(strings.TrimSpace(repository), "/"), number)
 }
 
 func (s *Service) executePRCommentReply(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
@@ -2206,6 +2255,8 @@ func failureKindForGitHubError(code string) string {
 	case ErrorCodeUnsupportedOperation:
 		return model.FailureKindUnsupportedOperation
 	case ErrorCodeInternalIntegration:
+		return model.FailureKindPartialResponse
+	case ErrorCodePartialPayload:
 		return model.FailureKindPartialResponse
 	default:
 		return model.FailureKindExternalFailure
