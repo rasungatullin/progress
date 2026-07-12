@@ -2,11 +2,13 @@ package configuration
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	"github.com/rasungatullin/progress/internal/execution/model"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 type SnapshotInput struct {
@@ -136,13 +138,79 @@ func privateValueReferences(integration *IntegrationConfig, resources *Execution
 }
 
 func redactSnapshot(snapshot Snapshot) {
+	values := snapshotPrivateValues(snapshot)
 	if snapshot.Integration != nil {
 		config := snapshot.Integration.Config
-		for name, system := range config.Systems {
-			system.Token = ""
-			system.GitHubAppPrivateKey = ""
-			config.Systems[name] = system
-		}
+		redactIntegrationConfig(&config)
 		snapshot.Integration.Config = config
+		for index := range snapshot.Integration.Layers {
+			redactIntegrationConfig(&snapshot.Integration.Layers[index].Config)
+		}
 	}
+	if snapshot.ExecutionResources != nil {
+		redactResourceConfig(&snapshot.ExecutionResources.Config)
+		for index := range snapshot.ExecutionResources.Layers {
+			redactResourceConfig(&snapshot.ExecutionResources.Layers[index].Config)
+		}
+	}
+	for index := range snapshot.Failures {
+		snapshot.Failures[index].Message = secrets.MaskError(
+			fmt.Errorf("%s", snapshot.Failures[index].Message), values...,
+		).Error()
+	}
+}
+
+func snapshotPrivateValues(snapshot Snapshot) []string {
+	values := make([]string, 0)
+	if snapshot.Integration != nil {
+		addIntegrationPrivateValues(&values, snapshot.Integration.Config)
+		for _, layer := range snapshot.Integration.Layers {
+			addIntegrationPrivateValues(&values, layer.Config)
+		}
+	}
+	if snapshot.ExecutionResources != nil {
+		addResourcePrivateValues(&values, snapshot.ExecutionResources.Config)
+		for _, layer := range snapshot.ExecutionResources.Layers {
+			addResourcePrivateValues(&values, layer.Config)
+		}
+	}
+	return values
+}
+
+func addIntegrationPrivateValues(values *[]string, config integrationmodel.IntegrationConfigFile) {
+	for _, system := range config.Systems {
+		if value := strings.TrimSpace(system.Token); value != "" {
+			*values = append(*values, value)
+		}
+		if value := strings.TrimSpace(system.GitHubAppPrivateKey); value != "" {
+			*values = append(*values, value)
+		}
+	}
+}
+
+func addResourcePrivateValues(values *[]string, config model.ResourceConfigFile) {
+	if config.Git == nil || config.Git.Push == nil {
+		return
+	}
+	if value := strings.TrimSpace(config.Git.Push.SSHIdentityPrivateValue); value != "" {
+		*values = append(*values, value)
+	}
+}
+
+func redactIntegrationConfig(config *integrationmodel.IntegrationConfigFile) {
+	if config == nil {
+		return
+	}
+	for name, system := range config.Systems {
+		system.Token = ""
+		system.GitHubAppPrivateKey = ""
+		config.Systems[name] = system
+	}
+}
+
+func redactResourceConfig(config *model.ResourceConfigFile) {
+	if config == nil || config.Git == nil || config.Git.Push == nil {
+		return
+	}
+	config.Git.Push.SSHIdentityPrivateValue = ""
 }

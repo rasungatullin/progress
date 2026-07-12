@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 func TestServiceSnapshotLoadsAvailableLayers(t *testing.T) {
@@ -85,7 +87,10 @@ func TestServiceSnapshotListsPrivateValueNamesAndAvailabilityWithoutValues(t *te
 	}
 	if err := os.WriteFile(filepath.Join(root, ".progress", "integration", "systems.json"), []byte(`{
 		"private_store": {"type": "file", "path": "private.json"},
-		"systems": {"mattermost": {"type": "mattermost", "token_private": "mt_token"}}
+		"systems": {
+			"mattermost": {"type": "mattermost", "token_private": "mt_token"},
+			"github": {"type": "github", "token": "actual-token"}
+		}
 	}`), 0o600); err != nil {
 		t.Fatalf("write integration config: %v", err)
 	}
@@ -110,7 +115,33 @@ func TestServiceSnapshotListsPrivateValueNamesAndAvailabilityWithoutValues(t *te
 	if err != nil {
 		t.Fatalf("marshal snapshot: %v", err)
 	}
-	if string(encoded) == "" || strings.Contains(string(encoded), "actual-secret") {
+	if string(encoded) == "" || strings.Contains(string(encoded), "actual-secret") || strings.Contains(string(encoded), "actual-token") {
+		t.Fatalf("snapshot contains private value: %s", encoded)
+	}
+}
+
+func TestRedactSnapshotMasksPrivateValuesInLayersAndFailures(t *testing.T) {
+	t.Parallel()
+
+	config := integrationmodel.IntegrationConfigFile{
+		Systems: map[string]integrationmodel.IntegrationSystemConfig{
+			"github": {Token: "actual-token"},
+		},
+	}
+	snapshot := Snapshot{
+		Integration: &IntegrationConfig{
+			Config: config,
+			Layers: []IntegrationConfigLayer{{Config: config}},
+		},
+		Failures: []SnapshotFailure{{Message: "cannot use actual-token"}},
+	}
+
+	redactSnapshot(snapshot)
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	if strings.Contains(string(encoded), "actual-token") || strings.Contains(snapshot.Failures[0].Message, "actual-token") {
 		t.Fatalf("snapshot contains private value: %s", encoded)
 	}
 }
