@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
 const (
@@ -37,7 +37,7 @@ type Descriptor struct {
 	Location string
 }
 
-func NewStore(config model.IntegrationPrivateStoreConfig, configHome string) (Store, Descriptor, error) {
+func NewStore(config model.ResourcePrivateStoreConfig, configHome string) (Store, Descriptor, error) {
 	storeType := strings.TrimSpace(strings.ToLower(config.Type))
 	if storeType == "" {
 		storeType = defaultStoreType()

@@ -14,10 +14,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
-	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
-	"github.com/rasungatullin/progress/internal/integration/secrets"
 )
 
 const RunnerOpenCode = "opencode"
@@ -962,7 +961,7 @@ func resolvePrivateGitPushConfig(ctx context.Context, config *model.GitConfig, p
 	if config == nil || config.Push == nil || strings.TrimSpace(config.Push.SSHIdentityPrivate) == "" || strings.TrimSpace(config.Push.SSHIdentityPrivateValue) != "" {
 		return nil
 	}
-	store, _, err := secrets.NewStore(integrationmodel.IntegrationPrivateStoreConfig{
+	store, _, err := secrets.NewStore(model.ResourcePrivateStoreConfig{
 		Type:    privateStore.Type,
 		Service: privateStore.Service,
 		Path:    privateStore.Path,

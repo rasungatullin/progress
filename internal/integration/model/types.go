@@ -1,5 +1,7 @@
 package model
 
+import executionmodel "github.com/rasungatullin/progress/internal/execution/model"
+
 const (
 	IntegrationTypeTracker    = "tracker"
 	IntegrationTypeRepository = "repository"
@@ -99,11 +101,9 @@ type IntegrationConfigFile struct {
 	Systems        map[string]IntegrationSystemConfig `json:"systems"`
 }
 
-type IntegrationPrivateStoreConfig struct {
-	Type    string `json:"type,omitempty"`
-	Service string `json:"service,omitempty"`
-	Path    string `json:"path,omitempty"`
-}
+// IntegrationPrivateStoreConfig сохраняется как псевдоним для совместимости
+// со старыми потребителями модели интеграции.
+type IntegrationPrivateStoreConfig = executionmodel.ResourcePrivateStoreConfig
 
 type IntegrationSystemConfig struct {
 	Type                        string                                `json:"type"`

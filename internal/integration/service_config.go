@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/configuration"
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	"github.com/rasungatullin/progress/internal/integration/model"
-	"github.com/rasungatullin/progress/internal/integration/secrets"
 )
 
 var (
@@ -38,7 +38,12 @@ func NewConfiguredService(logger *log.Logger) *Service {
 		return NewServiceFromConfig(logger, loaded.Config)
 	}
 
-	store, _, err := secrets.NewStore(loaded.Config.PrivateStore, loaded.ConfigHome)
+	privateStoreConfig, configHome, err := configuration.LoadPrivateStoreConfig(repoRoot, "", os.ReadFile)
+	if err != nil {
+		logger.Printf("Контур интеграции не подключил хранилище приватных значений: %v", err)
+		return NewServiceFromConfigWithPrivateStore(logger, loaded.Config, nil)
+	}
+	store, _, err := secrets.NewStore(privateStoreConfig, configHome)
 	if err != nil {
 		logger.Printf("Контур интеграции не подключил хранилище приватных значений: %v", err)
 		return NewServiceFromConfigWithPrivateStore(logger, loaded.Config, nil)

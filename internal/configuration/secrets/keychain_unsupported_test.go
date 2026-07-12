@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
 func TestNewStoreRejectsExplicitKeychainWhenUnsupported(t *testing.T) {
 	t.Parallel()
 
-	_, _, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "keychain"}, t.TempDir())
+	_, _, err := NewStore(model.ResourcePrivateStoreConfig{Type: "keychain"}, t.TempDir())
 	if err == nil {
 		t.Fatal("expected unsupported keychain error")
 	}

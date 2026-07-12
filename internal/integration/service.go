@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
 	confluenceprovider "github.com/rasungatullin/progress/internal/integration/confluence"
 	githubprovider "github.com/rasungatullin/progress/internal/integration/github"
@@ -16,7 +17,6 @@ import (
 	mattermostprovider "github.com/rasungatullin/progress/internal/integration/mattermost"
 	"github.com/rasungatullin/progress/internal/integration/model"
 	scriptprovider "github.com/rasungatullin/progress/internal/integration/script"
-	"github.com/rasungatullin/progress/internal/integration/secrets"
 	telegramprovider "github.com/rasungatullin/progress/internal/integration/telegram"
 )
 

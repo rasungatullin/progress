@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	"github.com/rasungatullin/progress/internal/integration"
-	"github.com/rasungatullin/progress/internal/integration/secrets"
 	"github.com/spf13/cobra"
 )
 

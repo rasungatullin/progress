@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rasungatullin/progress/internal/integration/model"
+	"github.com/rasungatullin/progress/internal/execution/model"
 )
 
 func TestFileStoreWritesReadsAndDeletesPrivateValues(t *testing.T) {
 	t.Parallel()
 
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, t.TempDir())
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestFileStoreUsesRestrictedFilePermissions(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, dir)
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, dir)
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestFileStoreResolvesRelativePathFromConfigHome(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	_, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file", Path: "private/custom.json"}, dir)
+	_, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file", Path: "private/custom.json"}, dir)
 	if err != nil {
 		t.Fatalf("create file store with relative path: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestFileStoreResolvesRelativePathFromConfigHome(t *testing.T) {
 func TestFileStoreSerializesConcurrentMutations(t *testing.T) {
 	t.Parallel()
 
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, t.TempDir())
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestFileStoreSerializesConcurrentMutations(t *testing.T) {
 func TestFileStoreLockHonorsContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, t.TempDir())
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestFileStoreLockHonorsContextCancellation(t *testing.T) {
 func TestFileStoreRecoversStaleLock(t *testing.T) {
 	t.Parallel()
 
-	store, descriptor, err := NewStore(model.IntegrationPrivateStoreConfig{Type: "file"}, t.TempDir())
+	store, descriptor, err := NewStore(model.ResourcePrivateStoreConfig{Type: "file"}, t.TempDir())
 	if err != nil {
 		t.Fatalf("create file store: %v", err)
 	}

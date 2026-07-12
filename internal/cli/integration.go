@@ -13,8 +13,8 @@ import (
 	"unicode"
 
 	"github.com/rasungatullin/progress/internal/configuration"
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	"github.com/rasungatullin/progress/internal/integration"
-	"github.com/rasungatullin/progress/internal/integration/secrets"
 	"github.com/rasungatullin/progress/internal/logging"
 	"github.com/spf13/cobra"
 )
@@ -71,11 +71,11 @@ var integrationServiceFactory = func(cmd *cobra.Command) *integration.Service {
 
 var integrationPrivateStoreFactory = func(cmd *cobra.Command) (secrets.Store, secrets.Descriptor, error) {
 	repoRoot := resolveIntegrationPrivateRepoRoot(context.Background())
-	loaded, err := configuration.LoadIntegrationPrivateStoreConfig(repoRoot, os.ReadFile)
+	loaded, configHome, err := configuration.LoadPrivateStoreConfig(repoRoot, "", os.ReadFile)
 	if err != nil {
 		return nil, secrets.Descriptor{}, err
 	}
-	return secrets.NewStore(loaded.Config, loaded.ConfigHome)
+	return secrets.NewStore(loaded, configHome)
 }
 
 func newIntegrationCommand() *cobra.Command {

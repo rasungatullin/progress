@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	"github.com/rasungatullin/progress/internal/integration/model"
-	"github.com/rasungatullin/progress/internal/integration/secrets"
 	"github.com/rasungatullin/progress/internal/logging"
 )
 
