@@ -200,9 +200,9 @@
         {"name": "build-directive", "kind": "build-directive", "title": "Сборка исполнительной директивы", "origin": "builtin", "required": true},
         {"name": "launch-synthesis", "kind": "launch-synthesis", "title": "Запуск синтеза", "origin": "builtin", "required": true},
         {"name": "parse-result", "kind": "parse-result", "title": "Разбор результата", "origin": "builtin", "required": true},
-        {"name": "publish-task-comment", "kind": "publish-task-comment", "title": "Запись комментария задачи", "origin": "builtin", "required": true},
         {"name": "commit-push", "kind": "commit-push", "title": "Создание коммита и отправка ветки", "origin": "builtin", "required": true},
         {"name": "publish-merge-request", "kind": "publish-merge-request", "title": "Открытие запроса на слияние", "origin": "builtin", "required": true},
+        {"name": "publish-task-comment", "kind": "publish-task-comment", "title": "Запись комментария задачи", "origin": "builtin", "required": true},
         {"name": "finalize", "kind": "finalize", "title": "Завершающая фиксация", "origin": "builtin", "required": true}
       ],
       "description": "Реализация задачи с отправкой ветки и открытием запроса на слияние.",
