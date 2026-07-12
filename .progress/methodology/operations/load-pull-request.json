@@ -6,14 +6,16 @@
   "required": true,
   "contract": {
     "in": {
+      "invocation": {
+        "type": "object",
+        "description": "Ввод контура исполнения со связанным запросом на слияние."
+      },
       "repository": {
         "type": "string",
-        "required": true,
         "description": "Репозиторий запроса на слияние."
       },
       "number": {
         "type": "integer",
-        "required": true,
         "description": "Номер запроса на слияние."
       },
       "base_ref": {
@@ -30,6 +32,10 @@
         "type": "object",
         "required": true,
         "description": "Загруженный запрос на слияние из контура интеграции."
+      },
+      "invocation": {
+        "type": "object",
+        "description": "Ввод контура исполнения с ветками загруженного запроса на слияние."
       },
       "result": {
         "type": "object",

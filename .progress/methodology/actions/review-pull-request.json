@@ -98,22 +98,16 @@
     {
       "name": "load-pull-request",
       "in": {
-        "repository": {
-          "ref": "in.repository_url"
-        },
-        "number": {
-          "ref": "in.number"
-        },
-        "base_ref": {
-          "ref": "in.base_ref"
-        },
-        "head_ref": {
-          "ref": "in.head_ref"
+        "invocation": {
+          "ref": "data.invocation"
         }
       },
       "out": {
         "pull_request": {
           "ref": "data.pull_request"
+        },
+        "invocation": {
+          "ref": "data.invocation"
         },
         "result": {
           "ref": "data.result"
