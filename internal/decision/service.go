@@ -609,6 +609,7 @@ func buildExecuteDecision(context DecisionContext, route selectedWorkflowRoute) 
 		RelatedObjects:  executionRelatedObjectsFromDecisionContext(context),
 		Reasons:         executionReasonsFromDecisionReasons(reasons),
 		StructuredInput: structuredInput,
+		Skills:          append([]execution.SkillRef(nil), route.Skills...),
 	}
 
 	return Decision{

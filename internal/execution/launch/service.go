@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -147,6 +150,12 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
 	}
+	in, err = attachSelectedSkills(in, workplace)
+	if err != nil {
+		result := failedLaunchResult(err)
+		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		return result, err
+	}
 
 	runnerOutput, err := s.runRunner(ctx, in)
 	if err != nil {
@@ -252,6 +261,151 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, structuredOutputErr, nil)
 
 	return result, nil
+}
+
+func attachSelectedSkills(in model.Invocation, workplace model.Workplace) (model.Invocation, error) {
+	if in.Assignment == nil || len(in.Assignment.Skills) == 0 {
+		return in, nil
+	}
+	for _, skill := range in.Assignment.Skills {
+		root, err := skillCatalogRoot(skill.Scope, workplace)
+		if err != nil {
+			return in, err
+		}
+		if err := validateSkillPath(root, skill.Path); err != nil {
+			return in, fmt.Errorf("skill %q: %w", skill.Name, err)
+		}
+		path := filepath.Join(root, skill.Path)
+		checksum, content, err := readSkill(root, path)
+		if err != nil {
+			return in, fmt.Errorf("skill %q: %w", skill.Name, err)
+		}
+		if checksum != strings.TrimSpace(skill.Checksum) {
+			return in, fmt.Errorf("skill %q checksum does not match trusted snapshot", skill.Name)
+		}
+		in.Launch.PromptAdditions = append(in.Launch.PromptAdditions, "Подключён выбранный навык «"+skill.Name+"». Назначение: "+skill.Purpose+"\nСодержимое навыка:\n"+content)
+	}
+	return in, nil
+}
+
+func skillCatalogRoot(scope string, workplace model.Workplace) (string, error) {
+	if scope == "local" {
+		repositoryRoot := strings.TrimSpace(workplace.RepositoryRoot)
+		if repositoryRoot == "" {
+			repositoryRoot = strings.TrimSpace(workplace.Name)
+		}
+		if repositoryRoot == "" {
+			return "", fmt.Errorf("local skill catalog root is not defined")
+		}
+		return filepath.Join(repositoryRoot, ".progress", "methodology"), nil
+	}
+	if scope != "global" {
+		return "", fmt.Errorf("unsupported skill scope %q", scope)
+	}
+	home := strings.TrimSpace(os.Getenv("PROGRESS_CONFIG_HOME"))
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		home = filepath.Join(userHome, ".config", "progress")
+	}
+	return filepath.Join(home, "methodology"), nil
+}
+
+func validateSkillPath(root, relative string) error {
+	relative = strings.TrimSpace(relative)
+	if relative == "" || filepath.IsAbs(relative) || strings.Contains(relative, "://") {
+		return fmt.Errorf("path must be relative")
+	}
+	path := filepath.Clean(filepath.Join(root, relative))
+	root, _ = filepath.Abs(filepath.Clean(root))
+	path, _ = filepath.Abs(path)
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path escapes catalog")
+	}
+	return nil
+}
+
+func readSkill(root, path string) (string, string, error) {
+	evaluatedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", fmt.Errorf("catalog is not readable: %w", err)
+	}
+	evaluatedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", "", fmt.Errorf("path is not readable: %w", err)
+	}
+	if rel, err := filepath.Rel(evaluatedRoot, evaluatedPath); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("symbolic link escapes catalog")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", "", fmt.Errorf("path is not readable: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", "", fmt.Errorf("symbolic links are forbidden")
+	}
+	if !info.IsDir() && !info.Mode().IsRegular() {
+		return "", "", fmt.Errorf("skill must be a regular file or directory of regular files")
+	}
+	h := sha256.New()
+	var files []string
+	if info.IsDir() {
+		err = filepath.WalkDir(path, func(file string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("symbolic links are forbidden: %s", file)
+			}
+			if !entry.IsDir() {
+				entryInfo, err := entry.Info()
+				if err != nil {
+					return err
+				}
+				if !entryInfo.Mode().IsRegular() {
+					return fmt.Errorf("skill must contain only regular files: %s", file)
+				}
+				files = append(files, file)
+			}
+			return nil
+		})
+	} else {
+		files = []string{path}
+	}
+	if err != nil {
+		return "", "", err
+	}
+	sort.Strings(files)
+	var content strings.Builder
+	for _, file := range files {
+		rel, _ := filepath.Rel(path, file)
+		if info.IsDir() {
+			_, _ = io.WriteString(h, rel+"\x00")
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", "", err
+		}
+		if info.IsDir() {
+			writeSkillHashPart(h, []byte(rel))
+			writeSkillHashPart(h, data)
+		} else {
+			_, _ = h.Write(data)
+		}
+		content.WriteString("\n--- " + rel + " ---\n")
+		content.Write(data)
+	}
+	return fmt.Sprintf("sha256:%x", h.Sum(nil)), content.String(), nil
+}
+
+func writeSkillHashPart(h io.Writer, data []byte) {
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(data)))
+	_, _ = h.Write(length[:])
+	_, _ = h.Write(data)
 }
 
 func failedLaunchResult(err error) model.LaunchResult {

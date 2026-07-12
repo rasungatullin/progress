@@ -17,7 +17,7 @@
 
 Локальный слой определяется относительно корня репозитория. Для явного выбора корня используется `--repo-root`.
 
-Локальный слой имеет приоритет над глобальным при совпадении имён маршрутов, действий и инструкций. Для расширяемых сущностей приоритет применяется по ключу `kind/name`.
+Локальный слой имеет приоритет над глобальным при совпадении имён маршрутов, действий, инструкций и навыков. Для расширяемых сущностей приоритет применяется по ключу `kind/name`.
 
 ## Формат каталога
 
@@ -35,6 +35,8 @@
 methodology/
   catalog.json
   routes/task-processing.json
+  skills/.registry/release-checks.json
+  skills/release-checks.md
   actions/start-implementation-pr.json
   instructions/start-implementation-pr-directive.json
   entities/decision-rule--description-assessment.json
@@ -110,6 +112,7 @@ progress methodology list
 progress methodology list --kind route
 progress methodology list --kind action
 progress methodology list --kind instruction
+progress methodology list --kind skill
 ```
 
 Фильтр по расширяемой сущности для контура принятия решения:
@@ -143,6 +146,14 @@ progress methodology select --route task-processing --action start-implementatio
 
 Вывод содержит выбранные сущности, источники `global` или `local`, пути каталогов и диагностические строки выбора.
 
+Для проверки источника установленного навыка используйте:
+
+```bash
+progress methodology list --kind skill --json
+```
+
+В результате для каждой записи указаны `name`, `purpose`, `path` и `source`. Навык подключается к маршруту только после выбора его имени в поле `skills`; произвольный `SkillRef` в совместимом `workflows.json` не принимается.
+
 ## Сохранение каталога
 
 Сохранить полный файл каталога в локальный слой и разнести объекты по файловым реестрам:
@@ -158,6 +169,8 @@ progress methodology save --file ./catalog.json --scope global
 ```
 
 Команда заменяет содержимое выбранного слоя после проверки структуры каталога. Старый монолитный файл можно передать этой же команде для миграции.
+
+При сохранении навыков путь в поле `path` задаётся относительно корня соответствующего слоя `methodology/`. Поэтому файл `skills/release-checks.md` указывается как `skills/release-checks.md`. Общий и проектный слой могут содержать записи с одинаковым именем: при просмотре будет показана проектная запись, а её `source` будет `local`.
 
 ## Добавление экземпляров
 

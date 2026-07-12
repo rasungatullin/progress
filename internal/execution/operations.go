@@ -1725,11 +1725,23 @@ func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.St
 func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
 	input := launchSynthesisInputFromOperation(state, operation)
 	launchCtx := launch.WithHistoryHandle(ctx, state.historyHandle)
-	launchInvocation := invocation{Launch: launchSpec{Prompt: input.prompt, Directory: input.directory, Runner: input.runner, Model: input.model}}
+	launchInvocation := invocation{
+		Assignment: cloneAssignment(state.assignment),
+		Launch:     launchSpec{Prompt: input.prompt, Directory: input.directory, Runner: input.runner, Model: input.model},
+	}
 	if input.resumeSessionID != "" {
 		launchInvocation.Launch.Resume = &model.ResumeSpec{RunnerSessionID: input.resumeSessionID}
 	}
-	launchWorkplace := workplace{Name: input.directory, RepositoryRoot: input.directory, Ready: true}
+	launchWorkplace := input.workplace
+	if strings.TrimSpace(launchWorkplace.Name) == "" && strings.TrimSpace(launchWorkplace.RepositoryRoot) == "" {
+		launchWorkplace = workplace{Name: input.directory, RepositoryRoot: input.directory, Ready: true}
+	}
+	if preparedWorkplace, ok := state.data["workplace"].(workplace); ok {
+		launchWorkplace = preparedWorkplace
+		if strings.TrimSpace(launchWorkplace.Name) == "" {
+			launchWorkplace.Name = input.directory
+		}
+	}
 	launchAllocation := allocation{Runner: input.runner, Model: input.model}
 	result, err := e.service.launch(launchCtx, launchInvocation, profile{}, launchAllocation, launchWorkplace)
 	writeLaunchSynthesisData(state, operation, result)
@@ -1770,6 +1782,7 @@ type launchSynthesisInput struct {
 	runner          string
 	model           string
 	resumeSessionID string
+	workplace       workplace
 }
 
 func launchSynthesisInputFromOperation(state *operationExecution, operation OperationSpec) launchSynthesisInput {
@@ -1782,6 +1795,7 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 	input.runner, _ = operationMappingValue[string](state, operation.In["runner"])
 	input.model, _ = operationMappingValue[string](state, operation.In["model"])
 	input.resumeSessionID, _ = operationMappingValue[string](state, operation.In["resume_session_id"])
+	input.workplace, _ = operationMappingValue[workplace](state, operation.In["workplace"])
 	if strings.TrimSpace(input.prompt) == "" {
 		if directive, ok := directiveValueFromLaunchSynthesisMapping(state, operation.In["directive"]); ok {
 			input.prompt, _ = launch.BuildPrompt(directive)

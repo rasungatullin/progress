@@ -582,6 +582,7 @@ func cloneAssignment(assignment *model.ExecutionAssignment) *model.ExecutionAssi
 	cloned.Constraints = append([]string(nil), assignment.Constraints...)
 	cloned.RelatedObjects = append([]model.ObjectRef(nil), assignment.RelatedObjects...)
 	cloned.Reasons = append([]model.AssignmentReason(nil), assignment.Reasons...)
+	cloned.Skills = append([]model.SkillRef(nil), assignment.Skills...)
 	return &cloned
 }
 

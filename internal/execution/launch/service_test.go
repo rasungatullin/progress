@@ -2,6 +2,7 @@ package launch
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,60 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
+
+func TestReadSkillSingleFileChecksumMatchesCatalogSnapshot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, "skill.md")
+	data := []byte("single-file skill")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	checksum, content, err := readSkill(root, path)
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	want := fmt.Sprintf("sha256:%x", sha256.Sum256(data))
+	if checksum != want {
+		t.Fatalf("unexpected checksum: got %q, want %q", checksum, want)
+	}
+	if !strings.Contains(content, string(data)) {
+		t.Fatalf("skill content does not contain file data: %q", content)
+	}
+}
+
+func TestAttachSelectedSkillsReadsLocalSkillFromRepositoryRoot(t *testing.T) {
+	t.Parallel()
+
+	repositoryRoot := t.TempDir()
+	workplaceRoot := t.TempDir()
+	skillRoot := filepath.Join(repositoryRoot, ".progress", "methodology")
+	skillPath := filepath.Join(skillRoot, "skills", "release-checks.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatalf("create skill directory: %v", err)
+	}
+	data := []byte("local uncommitted skill")
+	if err := os.WriteFile(skillPath, data, 0o600); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	invocation := model.Invocation{Assignment: &model.ExecutionAssignment{Skills: []model.SkillRef{{
+		Name:     "release-checks",
+		Purpose:  "Проверка выпуска",
+		Checksum: fmt.Sprintf("sha256:%x", sha256.Sum256(data)),
+		Scope:    "local",
+		Path:     "skills/release-checks.md",
+	}}}}
+	result, err := attachSelectedSkills(invocation, model.Workplace{Name: workplaceRoot, RepositoryRoot: repositoryRoot})
+	if err != nil {
+		t.Fatalf("attach selected skill: %v", err)
+	}
+	if !strings.Contains(result.Launch.PromptAdditions[0], string(data)) {
+		t.Fatalf("attached skill content is missing: %#v", result.Launch.PromptAdditions)
+	}
+}
 
 const (
 	codexRunnerStartupTimeout = "10s"

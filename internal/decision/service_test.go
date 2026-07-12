@@ -127,6 +127,44 @@ func TestServiceStartBuildsExecuteDecisionAndLaunchesExecution(t *testing.T) {
 	}
 }
 
+func TestChecksumSkillSeparatesDirectoryEntriesAndContents(t *testing.T) {
+	t.Parallel()
+
+	first := t.TempDir()
+	second := t.TempDir()
+	if err := os.WriteFile(filepath.Join(first, "a"), []byte("bc\x00d"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "a"), []byte("b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "c"), []byte("d"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	firstChecksum, err := checksumSkill(first, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondChecksum, err := checksumSkill(second, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstChecksum == secondChecksum {
+		t.Fatalf("structurally different skills have the same checksum: %s", firstChecksum)
+	}
+}
+
+func TestMergeWorkflowSkillRefsKeepsRouteAndCheckSkills(t *testing.T) {
+	merged := mergeWorkflowSkillRefs(
+		[]execution.SkillRef{{Name: "route"}, {Name: "shared"}},
+		[]execution.SkillRef{{Name: "check"}, {Name: "shared"}},
+	)
+	if len(merged) != 3 || merged[0].Name != "route" || merged[1].Name != "shared" || merged[2].Name != "check" {
+		t.Fatalf("unexpected merged skills: %#v", merged)
+	}
+}
+
 func TestServiceStartRecoversMergeRequestForReviewRoute(t *testing.T) {
 	t.Parallel()
 
@@ -595,6 +633,32 @@ func TestServiceConsiderUsesCompatibleDefaultRouteForLegacyMethodologyCatalog(t 
 	}
 	if len(result.Checks) != 1 || result.Checks[0].Name != "task-processing-start" {
 		t.Fatalf("unexpected checks: %#v", result.Checks)
+	}
+}
+
+func TestLoadWorkflowConfigRejectsUntrustedLegacySkills(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".progress", "decision")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "workflows.json"), []byte(`{
+		"default_route": "task-processing",
+		"routes": [{
+			"name": "task-processing",
+			"skills": [{"name":"unregistered","scope":"local","path":"skill.md","checksum":"sha256:claimed"}],
+			"checks": [{"name":"start","action":"implement"}]
+		}]
+	}`), 0o600); err != nil {
+		t.Fatalf("write workflow config: %v", err)
+	}
+
+	service := &Service{resolveRepoRoot: func(context.Context) (string, error) { return root, nil }, readFile: os.ReadFile}
+	_, err := service.loadWorkflowConfig(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "зарегистрированы в каталоге методик") {
+		t.Fatalf("expected untrusted legacy skills error, got: %v", err)
 	}
 }
 

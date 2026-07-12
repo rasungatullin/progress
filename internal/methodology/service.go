@@ -24,6 +24,7 @@ type SelectionResult struct {
 	Action            Action                         `json:"action"`
 	Profile           string                         `json:"profile,omitempty"`
 	Instruction       Instruction                    `json:"instruction,omitempty"`
+	Skills            []Skill                        `json:"skills,omitempty"`
 	Diagnostics       []string                       `json:"diagnostics,omitempty"`
 	RouteSource       configuration.ConfigFileSource `json:"route_source,omitempty"`
 	ActionSource      configuration.ConfigFileSource `json:"action_source,omitempty"`
@@ -194,6 +195,10 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 			fmt.Sprintf("route=%s", route.Name),
 		},
 	}
+	result.Skills, err = selectRouteSkills(catalog.Skills, route.Skills)
+	if err != nil {
+		return SelectionResult{}, err
+	}
 	if action.Name != "" {
 		result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("action=%s", action.Name))
 	}
@@ -209,6 +214,34 @@ func (s *Service) Select(ctx context.Context, catalog Catalog, request Selection
 
 	s.logger.Printf("Контур методик выбрал маршрут: маршрут=%q действие=%q профиль=%q", route.Name, action.Name, profile)
 	return result, nil
+}
+
+func selectRouteSkills(skills []Skill, names []string) ([]Skill, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	byName := make(map[string]Skill, len(skills))
+	for _, skill := range skills {
+		byName[normalizeName(skill.Name)] = normalizeSkill(skill)
+	}
+	selected := make([]Skill, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		name = normalizeName(name)
+		if name == "" {
+			return nil, fmt.Errorf("маршрут обработки содержит пустое имя навыка")
+		}
+		if _, ok := seen[name]; ok {
+			return nil, fmt.Errorf("маршрут обработки содержит дублирующийся навык %q", name)
+		}
+		skill, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("навык %q не найден в каталоге методик", name)
+		}
+		selected = append(selected, skill)
+		seen[name] = struct{}{}
+	}
+	return selected, nil
 }
 
 func (s *Service) repoRootForWrite(ctx context.Context, repoRoot string, scope configuration.ConfigFileSource) (string, error) {

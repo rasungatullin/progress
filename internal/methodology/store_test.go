@@ -221,6 +221,27 @@ func TestWriteCatalogFilesOmitsLoadedInstructionBody(t *testing.T) {
 	}
 }
 
+func TestWriteCatalogFilesRemovesStaleSkillRegistryEntries(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyRoot := filepath.Join(root, "methodology")
+	registryPath := filepath.Join(methodologyRoot, "skills", ".registry", "obsolete.json")
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0o755); err != nil {
+		t.Fatalf("create skill registry: %v", err)
+	}
+	if err := os.WriteFile(registryPath, []byte(`{"name":"obsolete"}`), 0o600); err != nil {
+		t.Fatalf("write stale skill registry: %v", err)
+	}
+
+	if err := writeCatalogFiles(filepath.Join(methodologyRoot, "catalog.json"), Catalog{}, os.WriteFile, os.MkdirAll, os.RemoveAll); err != nil {
+		t.Fatalf("write catalog files: %v", err)
+	}
+	if _, err := os.Stat(registryPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale skill registry still exists: %v", err)
+	}
+}
+
 func TestWriteCatalogElementRejectsInstructionBodyWhenBodyFileIsSet(t *testing.T) {
 	written := map[string][]byte{}
 	writeFile := func(path string, content []byte, _ fs.FileMode) error {

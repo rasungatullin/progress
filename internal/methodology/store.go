@@ -48,6 +48,7 @@ type ElementUpsert struct {
 	Action      *Action
 	Instruction *Instruction
 	Entity      *Entity
+	Skill       *Skill
 }
 
 type CatalogWriteRequest struct {
@@ -263,6 +264,7 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 		catalog.Instructions = append(catalog.Instructions, rootCatalog.Instructions...)
 		catalog.Operations = append(catalog.Operations, rootCatalog.Operations...)
 		catalog.Entities = append(catalog.Entities, rootCatalog.Entities...)
+		catalog.Skills = append(catalog.Skills, rootCatalog.Skills...)
 	} else if !isNotExistErr(err) {
 		return CatalogLayer{}, false, err
 	}
@@ -291,6 +293,7 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 	}
 	catalog.Operations = append(catalog.Operations, registryCatalog.Operations...)
 	catalog.Entities = append(catalog.Entities, registryCatalog.Entities...)
+	catalog.Skills = append(catalog.Skills, registryCatalog.Skills...)
 
 	if err := validateCatalog(catalog); err != nil {
 		return CatalogLayer{}, false, fmt.Errorf("invalid methodology catalog %s: %w", path, err)
@@ -350,8 +353,17 @@ func readCatalogRegistries(root string, readFile ReadFileFunc, readDir ReadDirFu
 	found = found || ok
 	catalog.Operations = operations
 
+	skills, ok, err := readRegistryFiles[Skill](root, filepath.Join("skills", ".registry"), readFile, readDir, skillRegistryKey)
+	if err != nil {
+		return Catalog{}, false, err
+	}
+	found = found || ok
+	catalog.Skills = skills
+
 	return catalog, found, nil
 }
+
+func skillRegistryKey(skill Skill) string { return normalizeName(skill.Name) }
 
 func readRegistryFiles[T any](root string, dir string, readFile ReadFileFunc, readDir ReadDirFunc, keyFunc func(T) string) ([]T, bool, error) {
 	dirPath := filepath.Join(root, dir)
@@ -505,11 +517,17 @@ func writeCatalog(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAl
 
 func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc, removeAll RemoveAllFunc) error {
 	root := filepath.Dir(path)
+	// Каталог skills содержит установленные файлы и каталоги навыков, а не
+	// только JSON-реестр. Удалять его целиком при миграции нельзя: это
+	// уничтожает источники, на которые ссылается каталог.
 	for _, dir := range []string{"routes", "actions", "instructions", "operations", "entities"} {
 		dirPath := filepath.Join(root, dir)
 		if err := removeAll(dirPath); err != nil {
 			return fmt.Errorf("remove methodology registry directory %s: %w", dirPath, err)
 		}
+	}
+	if err := removeAll(filepath.Join(root, "skills", ".registry")); err != nil {
+		return fmt.Errorf("remove methodology skill registry directory: %w", err)
 	}
 	if err := writeCatalogConfig(path, catalog, writeFile, mkdirAll); err != nil {
 		return err
@@ -568,6 +586,15 @@ func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mk
 			return err
 		}
 	}
+	for _, skill := range catalog.Skills {
+		path, err := registryFilePath(root, filepath.Join("skills", ".registry"), skillRegistryKey(skill))
+		if err != nil {
+			return err
+		}
+		if err := writeRegistryObject(path, skill, writeFile, mkdirAll); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -618,6 +645,16 @@ func writeCatalogElement(path string, element ElementUpsert, writeFile WriteFile
 			return err
 		}
 		return writeRegistryObject(path, entity, writeFile, mkdirAll)
+	case element.Skill != nil:
+		skill := normalizeSkill(*element.Skill)
+		if err := validateCatalog(Catalog{Skills: []Skill{skill}}); err != nil {
+			return err
+		}
+		path, err := registryFilePath(root, filepath.Join("skills", ".registry"), skillRegistryKey(skill))
+		if err != nil {
+			return err
+		}
+		return writeRegistryObject(path, skill, writeFile, mkdirAll)
 	default:
 		return fmt.Errorf("должна быть задана ровно одна сущность методики")
 	}
@@ -659,6 +696,9 @@ func applyElementUpsert(catalog Catalog, element ElementUpsert) (Catalog, error)
 	if element.Entity != nil {
 		selected++
 	}
+	if element.Skill != nil {
+		selected++
+	}
 	if selected != 1 {
 		return Catalog{}, fmt.Errorf("должна быть задана ровно одна сущность методики")
 	}
@@ -668,6 +708,7 @@ func applyElementUpsert(catalog Catalog, element ElementUpsert) (Catalog, error)
 	actionIndexes := indexActions(catalog.Actions)
 	instructionIndexes := indexInstructions(catalog.Instructions)
 	entityIndexes := indexEntities(catalog.Entities)
+	skillIndexes := indexSkills(catalog.Skills)
 
 	if element.Route != nil {
 		route := normalizeRoute(*element.Route)
@@ -697,6 +738,13 @@ func applyElementUpsert(catalog Catalog, element ElementUpsert) (Catalog, error)
 			return Catalog{}, err
 		}
 		upsertEntity(&catalog, entityIndexes, entity)
+	}
+	if element.Skill != nil {
+		skill := normalizeSkill(*element.Skill)
+		if err := validateCatalog(Catalog{Skills: []Skill{skill}}); err != nil {
+			return Catalog{}, err
+		}
+		upsertSkill(&catalog, skillIndexes, skill)
 	}
 
 	if err := validateCatalog(catalog); err != nil {
@@ -737,8 +785,16 @@ func indexEntities(entities []Entity) map[string]int {
 	return indexes
 }
 
+func indexSkills(skills []Skill) map[string]int {
+	indexes := map[string]int{}
+	for index, skill := range skills {
+		indexes[skill.Name] = index
+	}
+	return indexes
+}
+
 func catalogHasObjects(catalog Catalog) bool {
-	return len(catalog.Routes) > 0 || len(catalog.Actions) > 0 || len(catalog.Operations) > 0 || len(catalog.Instructions) > 0 || len(catalog.Entities) > 0
+	return len(catalog.Routes) > 0 || len(catalog.Actions) > 0 || len(catalog.Operations) > 0 || len(catalog.Instructions) > 0 || len(catalog.Entities) > 0 || len(catalog.Skills) > 0
 }
 
 func routeRegistryKey(route Route) string {
