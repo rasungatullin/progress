@@ -37,10 +37,11 @@ type commitPusher interface {
 }
 
 func (s *Service) runActionOperations(ctx context.Context, state *operationExecution) error {
-	if err := validateActionPreconditions(state); err != nil {
+	operation, err := firstFailedActionPrecondition(state, true)
+	if err != nil {
 		state.result = failedStartResult(err)
-		if operation := firstActionOperation(state.action); operation != nil {
-			state.tracker.fail(operationResultName(*operation), "Предварительные условия действия не выполнены.", err, "action_precondition_failed", false, true)
+		if operation != nil {
+			state.tracker.fail(operationResultName(*operation), "Предварительные условия операции не выполнены.", err, "action_precondition_failed", false, true)
 		}
 		s.updateStartHistory(ctx, state.historyRoot, state.historyHandle, state.in, state.profile, state.allocation, state.workplace, state.result, err)
 		return err
@@ -64,15 +65,24 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 }
 
 func validateActionPreconditions(state *operationExecution) error {
+	_, err := firstFailedActionPrecondition(state, false)
+	return err
+}
+
+func firstFailedActionPrecondition(state *operationExecution, requiredOnly bool) (*OperationSpec, error) {
 	if state == nil {
-		return nil
+		return nil, nil
 	}
-	for _, operation := range state.action.Operations {
-		if err := validateOperationPreconditions(state, operation); err != nil {
-			return err
+	for index := range state.action.Operations {
+		operation := &state.action.Operations[index]
+		if requiredOnly && !operation.Required {
+			continue
+		}
+		if err := validateOperationPreconditions(state, *operation); err != nil {
+			return operation, err
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func validateOperationPreconditions(state *operationExecution, operation OperationSpec) error {
@@ -83,13 +93,6 @@ func validateOperationPreconditions(state *operationExecution, operation Operati
 		return fmt.Errorf("task number is required")
 	}
 	return nil
-}
-
-func firstActionOperation(action Action) *OperationSpec {
-	if len(action.Operations) == 0 {
-		return nil
-	}
-	return &action.Operations[0]
 }
 
 func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationExecution, operation OperationSpec) error {
@@ -121,6 +124,10 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	case OperationKindPublishMergeRequest:
 		return e.publishMergeRequest(ctx, state, name)
 	case OperationKindPublishTaskComment:
+		if !operation.Required && !hasTaskNumber(state) {
+			state.tracker.skip(name, "Комментарий задачи пропущен: номер задачи не задан.")
+			return nil
+		}
 		return e.publishTaskComment(ctx, state, name)
 	case OperationKindPublishReviewRemarks:
 		return e.publishReviewRemarks(ctx, state, name)
@@ -131,6 +138,10 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 	default:
 		return e.unsupported(ctx, state, operation, name)
 	}
+}
+
+func hasTaskNumber(state *operationExecution) bool {
+	return state != nil && state.assignment != nil && state.assignment.CanonicalTask != nil && state.assignment.CanonicalTask.Number > 0
 }
 
 func (e builtinOperationExecutor) prepareData(ctx context.Context, state *operationExecution, name string) error {

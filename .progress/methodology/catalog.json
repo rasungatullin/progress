@@ -202,7 +202,7 @@
         {"name": "parse-result", "kind": "parse-result", "title": "Разбор результата", "origin": "builtin", "required": true},
         {"name": "commit-push", "kind": "commit-push", "title": "Создание коммита и отправка ветки", "origin": "builtin", "required": true},
         {"name": "publish-merge-request", "kind": "publish-merge-request", "title": "Открытие запроса на слияние", "origin": "builtin", "required": true},
-        {"name": "publish-task-comment", "kind": "publish-task-comment", "title": "Запись комментария задачи", "origin": "builtin", "required": true},
+        {"name": "publish-task-comment", "kind": "publish-task-comment", "title": "Запись комментария задачи", "origin": "builtin", "required": false},
         {"name": "finalize", "kind": "finalize", "title": "Завершающая фиксация", "origin": "builtin", "required": true}
       ],
       "description": "Реализация задачи с отправкой ветки и открытием запроса на слияние.",

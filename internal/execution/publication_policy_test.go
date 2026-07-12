@@ -389,6 +389,41 @@ func TestTaskCommentActionRequiresTaskBeforeExternalOperations(t *testing.T) {
 	}
 }
 
+func TestActionPreconditionFailurePointsToPublishingOperation(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{action: model.Action{Operations: []model.OperationSpec{
+		{Name: OperationKindResolveAction, Kind: OperationKindResolveAction, Required: true},
+		{Name: OperationKindPublishTaskComment, Kind: OperationKindPublishTaskComment, Required: true},
+	}}}
+	operation, err := firstFailedActionPrecondition(state, true)
+	if err == nil {
+		t.Fatal("expected task number precondition")
+	}
+	if operation == nil || operationResultName(*operation) != OperationKindPublishTaskComment {
+		t.Fatalf("precondition failure must point to publishing operation: %#v", operation)
+	}
+}
+
+func TestOptionalTaskCommentSkipsWithoutTask(t *testing.T) {
+	t.Parallel()
+
+	action := model.Action{Operations: []model.OperationSpec{{
+		Name:     OperationKindPublishTaskComment,
+		Kind:     OperationKindPublishTaskComment,
+		Required: false,
+	}}}
+	state := &operationExecution{action: action, tracker: newOperationTracker(action)}
+	executor := builtinOperationExecutor{}
+	if err := executor.Execute(context.Background(), state, action.Operations[0]); err != nil {
+		t.Fatalf("optional task comment must be skipped: %v", err)
+	}
+	result := state.tracker.snapshot()[0]
+	if result.Status != model.OperationStatus(OperationStatusSkipped) {
+		t.Fatalf("optional task comment status = %q, want skipped", result.Status)
+	}
+}
+
 func TestPolicyForStatePublicationUsesOnlyCurrentOperation(t *testing.T) {
 	t.Parallel()
 
