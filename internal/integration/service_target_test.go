@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"context"
 	"io"
 	"testing"
 
@@ -73,7 +72,7 @@ func TestDispatchUsesDefaultSystemByIntegrationType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			route, err := service.Dispatch(context.Background(), tc.request)
+			route, err := service.resolveRoute(tc.request)
 			if err != nil {
 				t.Fatalf("dispatch: %v", err)
 			}
@@ -112,7 +111,7 @@ func TestDispatchInfersRepositoryTypeFromObjectBeforeSystemDefault(t *testing.T)
 		{System: "github", Resource: "repo", Operation: "get"},
 		{System: "github", Resource: "pr", Operation: "get"},
 	} {
-		route, err := service.Dispatch(context.Background(), request)
+		route, err := service.resolveRoute(request)
 		if err != nil {
 			t.Fatalf("dispatch: %v", err)
 		}

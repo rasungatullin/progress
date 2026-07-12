@@ -85,10 +85,14 @@ func newIntegrationCommand() *cobra.Command {
 	}
 	cmd.PersistentFlags().String("format", integrationOutputText, "Формат вывода: text (по умолчанию) или json")
 
-	cmd.AddCommand(newIntegrationDispatcherCommand())
+	dispatcher := newIntegrationDispatcherCommand()
+	dispatcher.Hidden = true
+	cmd.AddCommand(dispatcher)
 	cmd.AddCommand(newIntegrationOperationsCommand())
 	cmd.AddCommand(newIntegrationIssueCommand())
-	cmd.AddCommand(newIntegrationPrivateCommand())
+	private := newIntegrationPrivateCommand()
+	private.Hidden = true
+	cmd.AddCommand(private)
 	cmd.AddCommand(newIntegrationGitHubCommand())
 	cmd.AddCommand(newIntegrationBitbucketCommand())
 	cmd.AddCommand(newIntegrationMattermostCommand())
@@ -150,7 +154,7 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 		return err
 	}
 	request := integration.Request{
-		IntegrationType: "tracker",
+		IntegrationType: "issue",
 		System:          flags.system,
 		SystemProvided:  cmd.Flags().Changed("system"),
 		Resource:        "issue",
@@ -164,9 +168,6 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 		State:           flags.state,
 		Limit:           flags.limit,
 	}
-	if request.ID != "" {
-		request.Number, _ = strconv.Atoi(request.ID)
-	}
 	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
 	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
 		return printErr
@@ -177,7 +178,7 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 func printTypeOrientedIssueResponse(cmd *cobra.Command, response integration.Response) {
 	cmd.Printf("system=%s\nresource=issue\nobject=issue\noperation=%s\nstatus=%s\n", response.System, response.Operation, response.Status)
 	if response.Task != nil {
-		cmd.Printf("id=%s\n", firstNonEmpty(response.Task.ExternalID, strconv.Itoa(response.Task.Number)))
+		cmd.Printf("id=%s\n", firstNonEmpty(response.Task.ExternalID, response.Task.ID))
 		cmd.Printf("title=%s\nstate=%s\n", response.Task.Title, response.Task.State)
 	}
 	if response.Failure != nil {
@@ -1406,7 +1407,7 @@ func newIntegrationDispatcherCommand() *cobra.Command {
 			}
 
 			service := newIntegrationService(cmd)
-			route, err := service.Dispatch(cmd.Context(), integration.Request{
+			response, err := service.Execute(cmd.Context(), integration.Request{
 				IntegrationType: flags.integrationType,
 				System:          flags.system,
 				SystemProvided:  cmd.Flags().Changed("system"),
@@ -1414,6 +1415,7 @@ func newIntegrationDispatcherCommand() *cobra.Command {
 				ObjectType:      flags.object,
 				Operation:       flags.operation,
 			})
+			route := response.Route
 			if err := printIntegrationRouteOrJSON(cmd, route, format); err != nil {
 				return err
 			}
@@ -1465,6 +1467,16 @@ func newIntegrationOperationsCommand() *cobra.Command {
 }
 
 func newIntegrationService(cmd *cobra.Command) *integration.Service {
+	path := cmd.CommandPath()
+	for _, system := range []string{"github", "bitbucket", "mattermost", "telegram", "confluence"} {
+		if strings.Contains(path, "integration "+system) {
+			cmd.PrintErrf("предупреждение: форма integration %s устарела; используйте типо-ориентированную команду и --system\n", system)
+			break
+		}
+	}
+	if strings.Contains(path, "integration dispatcher") {
+		cmd.PrintErrln("предупреждение: команда integration dispatcher устарела; разрешение выполняется через реестр типов и систем")
+	}
 	return integrationServiceFactory(cmd)
 }
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
@@ -82,12 +83,12 @@ type systemState struct {
 
 func NewService(logger *log.Logger) *Service {
 	service := newEmptyService(logger)
-	service.defaultSystems[model.IntegrationTypeTracker] = "github"
-	service.defaultSystems[model.IntegrationTypeRepository] = "github"
+	service.defaultSystems[model.IntegrationTypeIssue] = "github"
+	service.defaultSystems[model.IntegrationTypeRepo] = "github"
 	service.registerConfiguredProvider("github", systemState{
 		Name:             "github",
 		Type:             "github",
-		IntegrationTypes: []string{model.IntegrationTypeTracker, model.IntegrationTypeRepository},
+		IntegrationTypes: []string{model.IntegrationTypeIssue, model.IntegrationTypeRepo},
 		Configured:       true,
 		Enabled:          true,
 		Default:          true,
@@ -326,23 +327,13 @@ func (s *Service) applyConfiguredDefaults() {
 		}
 	}
 
-	for system, state := range s.systems {
-		if !state.Enabled || len(state.IntegrationTypes) == 0 {
-			continue
-		}
-		for _, integrationType := range state.IntegrationTypes {
-			if _, exists := s.defaultSystems[integrationType]; !exists {
-				s.defaultSystems[integrationType] = system
-			}
-		}
-	}
 }
 
-func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
+func (s *Service) resolveRoute(req Request) (Route, error) {
 	normalized, err := s.normalizeRequest(req)
 	if err != nil {
 		route := s.errorRoute(req, err)
-		s.logger.Printf("Диспетчер интеграции отклонил запрос: система=%q тип=%q причина=%q", req.System, req.IntegrationType, err)
+		s.logger.Printf("Реестр интеграции отклонил запрос: система=%q тип=%q причина=%q", req.System, req.IntegrationType, err)
 		return route, err
 	}
 
@@ -362,7 +353,7 @@ func (s *Service) Dispatch(_ context.Context, req Request) (Route, error) {
 		ExpectedResult:    expectedResult(normalized.IntegrationType, normalized.ObjectType, normalized.Resource, normalized.Operation),
 		Diagnostics:       buildDiagnostics(normalized.IntegrationType, normalized.System, normalized.Resource, normalized.ObjectType, normalized.Operation, available, registered, known, state, s.registeredSystems()),
 	}
-	s.logger.Printf("Диспетчер интеграции сформировал маршрут: тип=%q система=%q объект=%q операция=%q провайдер=%q доступен=%t", route.IntegrationType, route.System, route.ObjectType, route.Operation, route.Provider, route.ProviderAvailable)
+	s.logger.Printf("Реестр интеграции сформировал маршрут: тип=%q система=%q объект=%q операция=%q провайдер=%q доступен=%t", route.IntegrationType, route.System, route.ObjectType, route.Operation, route.Provider, route.ProviderAvailable)
 	return route, nil
 }
 
@@ -380,7 +371,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 		}, err
 	}
 
-	route, err := s.Dispatch(ctx, req)
+	route, err := s.resolveRoute(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -434,6 +425,9 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	objectType := normalizeObjectType(firstNonEmpty(req.ObjectType, req.Resource))
 	integrationType := normalizeIntegrationType(req.IntegrationType)
+	if integrationType == "" {
+		integrationType = inferIntegrationType(objectType)
+	}
 	system := normalizeSystem(req.System)
 	if req.SystemProvided && system == "" {
 		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
@@ -442,13 +436,7 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		system = s.defaultSystemForType(integrationType)
 	}
 	if system == "" {
-		system = s.defaultSystem
-	}
-	if system == "" {
-		return ProviderRequest{}, fmt.Errorf("invalid integration request: system is required")
-	}
-	if integrationType == "" {
-		integrationType = inferIntegrationType(objectType)
+		return ProviderRequest{}, fmt.Errorf("invalid integration request: no default system configured for integration type %q", integrationType)
 	}
 	if integrationType == "" {
 		integrationType = s.firstIntegrationTypeForSystem(system)
@@ -516,7 +504,7 @@ func (s *Service) errorRoute(req Request, err error) Route {
 		Diagnostics: []string{
 			fmt.Sprintf("request system=%s resource=%s operation=%s", system, normalizeResource(req.Resource), normalizeOperation(req.Operation)),
 			fmt.Sprintf("request type=%s system=%s resource=%s object=%s operation=%s", integrationType, system, normalizeResource(req.Resource), objectType, normalizeOperation(req.Operation)),
-			"dispatcher mode=diagnostic-only",
+			"registry mode=direct-resolution",
 			"invalid-request missing system",
 			fmt.Sprintf("invalid-request %s", err.Error()),
 		},
@@ -558,7 +546,14 @@ func normalizeSystem(system string) string {
 }
 
 func normalizeIntegrationType(integrationType string) string {
-	return strings.TrimSpace(strings.ToLower(integrationType))
+	switch value := strings.TrimSpace(strings.ToLower(integrationType)); value {
+	case "tracker":
+		return model.IntegrationTypeIssue
+	case "repository":
+		return model.IntegrationTypeRepo
+	default:
+		return value
+	}
 }
 
 func normalizeObjectType(objectType string) string {
@@ -692,7 +687,7 @@ func buildDiagnostics(integrationType string, system string, resource string, ob
 	diagnostics := []string{
 		fmt.Sprintf("request system=%s resource=%s operation=%s", system, resource, operation),
 		fmt.Sprintf("request type=%s system=%s resource=%s object=%s operation=%s", integrationType, system, resource, objectType, operation),
-		"dispatcher mode=diagnostic-only",
+		"registry mode=direct-resolution",
 	}
 
 	if available {
@@ -1016,6 +1011,7 @@ func canonicalTaskFromTrackerIssue(issue TrackerIssue) *CanonicalTask {
 		System:     issue.System,
 		Repository: issue.Repository,
 		Number:     issue.Number,
+		ID:         firstNonEmpty(issue.ExternalID, strconv.Itoa(issue.Number)),
 		Title:      issue.Title,
 		Body:       issue.Body,
 		State:      issue.State,

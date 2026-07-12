@@ -1,10 +1,14 @@
 package model
 
 const (
-	IntegrationTypeTracker    = "tracker"
-	IntegrationTypeRepository = "repository"
-	IntegrationTypeMessenger  = "messenger"
-	IntegrationTypeWiki       = "wiki"
+	IntegrationTypeIssue     = "issue"
+	IntegrationTypeRepo      = "repo"
+	IntegrationTypeMessenger = "messenger"
+	IntegrationTypeWiki      = "wiki"
+
+	// Старые имена сохраняются только для чтения прежнего кода и настроек.
+	IntegrationTypeTracker    = IntegrationTypeIssue
+	IntegrationTypeRepository = IntegrationTypeRepo
 
 	ResponseStatusOK      = "ok"
 	ResponseStatusPartial = "partial"
@@ -34,31 +38,29 @@ type Request struct {
 	Operation       string
 	Repository      string
 	RepoProvided    bool
-	// ID — непрозрачный идентификатор внешнего объекта. Number сохранён для
-	// совместимости со старыми адаптерами и командами.
-	ID            string
-	Number        int
-	ExternalID    string
-	Base          string
-	Head          string
-	Title         string
-	Body          string
-	Text          string
-	Draft         bool
-	Query         string
-	State         string
-	Scope         string
-	Limit         int
-	Path          string
-	Line          int
-	Side          string
-	ChannelID     string
-	ThreadID      string
-	MessageID     string
-	Reaction      string
-	Fields        []string
-	Labels        []string
-	ExcludeLabels []string
+	ID              string
+	Number          int // переходное поле для старых адаптеров
+	ExternalID      string
+	Base            string
+	Head            string
+	Title           string
+	Body            string
+	Text            string
+	Draft           bool
+	Query           string
+	State           string
+	Scope           string
+	Limit           int
+	Path            string
+	Line            int
+	Side            string
+	ChannelID       string
+	ThreadID        string
+	MessageID       string
+	Reaction        string
+	Fields          []string
+	Labels          []string
+	ExcludeLabels   []string
 }
 
 type ProviderRequest struct {
@@ -71,7 +73,7 @@ type ProviderRequest struct {
 	Repository      string
 	RepoProvided    bool
 	ID              string
-	Number          int
+	Number          int // переходное поле для старых адаптеров
 	ExternalID      string
 	Base            string
 	Head            string
@@ -339,6 +341,7 @@ type CanonicalTask struct {
 	System     string
 	Repository string
 	Number     int
+	ID         string
 	ExternalID string
 	Title      string
 	Body       string
@@ -487,6 +490,7 @@ type TrackerIssue struct {
 	System     string
 	Repository string
 	Number     int
+	ExternalID string
 	Title      string
 	Body       string
 	State      string

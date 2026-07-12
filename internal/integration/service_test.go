@@ -24,7 +24,7 @@ func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{System: "gitlab", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "gitlab", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestNewServiceFromConfigUsesDefaultSystem(t *testing.T) {
 	})
 	service.RegisterProvider("github", stubProvider{})
 
-	route, err := service.Dispatch(context.Background(), Request{Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestDispatchReportsDisabledConfiguredSystem(t *testing.T) {
 		},
 	})
 
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestDispatchReportsConfiguredTransport(t *testing.T) {
 		},
 	})
 
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestDispatchReportsUnsupportedConfiguredSystemType(t *testing.T) {
 		},
 	})
 
-	route, err := service.Dispatch(context.Background(), Request{System: "gitlab", Resource: "issue", Operation: "get"})
+	route, err := service.resolveRoute(Request{System: "gitlab", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestDispatchRepositoryCommentReplyReturnsOperationResult(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{
+	route, err := service.resolveRoute(Request{
 		IntegrationType: model.IntegrationTypeRepository,
 		System:          "github",
 		Resource:        "comment",
@@ -312,7 +312,7 @@ func TestDispatchRepositoryReviewRemarkReplyReturnsOperationResult(t *testing.T)
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{
+	route, err := service.resolveRoute(Request{
 		IntegrationType: model.IntegrationTypeRepository,
 		System:          "github",
 		Resource:        "comment",
@@ -534,7 +534,7 @@ func TestDispatchReturnsErrorForMissingSystem(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	_, err := service.Dispatch(context.Background(), Request{Resource: "issue", Operation: "get"})
+	_, err := service.resolveRoute(Request{Resource: "issue", Operation: "get"})
 	if err == nil {
 		t.Fatal("expected dispatch error")
 	}
@@ -573,7 +573,7 @@ func TestNewServiceRegistersGitHubProvider(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "auth", Operation: "status"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "auth", Operation: "status"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestDispatchPRCreateUsesStatusResultContract(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
-	route, err := service.Dispatch(context.Background(), Request{System: "github", Resource: "pr", Operation: "create"})
+	route, err := service.resolveRoute(Request{System: "github", Resource: "pr", Operation: "create"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestDispatchWikiPageUsesWikiResultContract(t *testing.T) {
 			"docs": {Type: "confluence"},
 		},
 	})
-	route, err := service.Dispatch(context.Background(), Request{IntegrationType: "wiki", Resource: "page", Operation: "get"})
+	route, err := service.resolveRoute(Request{IntegrationType: "wiki", Resource: "page", Operation: "get"})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -823,7 +823,7 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 	if len(searchOperations) != 1 || searchOperations[0].Output.Shape != "TrackerSearchResult[]" {
 		t.Fatalf("expected local tracker search result contract, got %#v", searchOperations)
 	}
-	searchRoute, err := service.Dispatch(context.Background(), Request{
+	searchRoute, err := service.resolveRoute(Request{
 		IntegrationType: model.IntegrationTypeTracker,
 		System:          "local",
 		Resource:        "task",
@@ -930,7 +930,7 @@ func TestOperationsCatalogUsesSearchResultContractForTaskSearch(t *testing.T) {
 	if operations[0].Output.Shape != "TrackerSearchResult[]" {
 		t.Fatalf("unexpected search output shape: %#v", operations[0].Output)
 	}
-	route, err := service.Dispatch(context.Background(), Request{
+	route, err := service.resolveRoute(Request{
 		IntegrationType: model.IntegrationTypeTracker,
 		System:          "work-tracker",
 		Resource:        "task",

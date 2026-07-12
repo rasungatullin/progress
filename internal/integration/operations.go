@@ -152,6 +152,7 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 	if integrationType == "" {
 		return OperationDescriptor{}
 	}
+	canonicalName := integrationType + "." + objectType + "." + action
 
 	required := operationFields(operation.Required, operation.Defaults)
 	optional := operationFields(operation.Optional, operation.Defaults)
@@ -166,7 +167,7 @@ func operationDescriptorFromConfig(state systemState, name string, operation mod
 		available = false
 	}
 	descriptor := OperationDescriptor{
-		Name:            name,
+		Name:            canonicalName,
 		IntegrationType: integrationType,
 		System:          state.Name,
 		AdapterType:     state.Type,
@@ -315,6 +316,8 @@ func normalizeOperationFilter(filter OperationFilter) OperationFilter {
 	filter.System = normalizeSystem(filter.System)
 	filter.IntegrationType = normalizeIntegrationType(filter.IntegrationType)
 	filter.Name = strings.TrimSpace(strings.ToLower(filter.Name))
+	filter.Name = strings.Replace(filter.Name, "tracker.", "issue.", 1)
+	filter.Name = strings.Replace(filter.Name, "repository.", "repo.", 1)
 	return filter
 }
 
@@ -338,7 +341,7 @@ func sortedOperationConfigNames(operations map[string]model.IntegrationOperation
 
 func trackerTaskGetOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.get",
+		Name:            "issue.task.get",
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task",
 		Operation:       "get",
@@ -350,7 +353,7 @@ func trackerTaskGetOperation() operationTemplate {
 
 func trackerTaskCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.create",
+		Name:            "issue.task.create",
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task",
 		Operation:       "create",
@@ -367,7 +370,7 @@ func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
 		optional = append(optional, optionalFields("exclude_labels")...)
 	}
 	return operationTemplate{
-		Name:            "tracker.task.search",
+		Name:            "issue.task.search",
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task",
 		Operation:       "search",
@@ -379,7 +382,7 @@ func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
 
 func trackerTaskUpdateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.update",
+		Name:            "issue.task.update",
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task",
 		Operation:       "update",
@@ -392,7 +395,7 @@ func trackerTaskUpdateOperation() operationTemplate {
 
 func trackerTaskCommentListOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.comment.list",
+		Name:            "issue.task.comment.list",
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task",
 		Operation:       "comments",
@@ -404,7 +407,7 @@ func trackerTaskCommentListOperation() operationTemplate {
 
 func trackerTaskCommentCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "tracker.task.comment.create",
+		Name:            "issue.task.comment.create",
 		IntegrationType: model.IntegrationTypeTracker,
 		ObjectType:      "task-comment",
 		Operation:       "create",
@@ -416,11 +419,11 @@ func trackerTaskCommentCreateOperation() operationTemplate {
 }
 
 func trackerTaskLabelAddOperation() operationTemplate {
-	return trackerTaskLabelOperation("tracker.task.label.add", "add")
+	return trackerTaskLabelOperation("issue.task.label.add", "add")
 }
 
 func trackerTaskLabelRemoveOperation() operationTemplate {
-	return trackerTaskLabelOperation("tracker.task.label.remove", "remove")
+	return trackerTaskLabelOperation("issue.task.label.remove", "remove")
 }
 
 func trackerTaskLabelOperation(name string, operation string) operationTemplate {
@@ -438,7 +441,7 @@ func trackerTaskLabelOperation(name string, operation string) operationTemplate 
 
 func repositoryGetOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.repo.get",
+		Name:            "repo.repo.get",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "repository",
 		Operation:       "get",
@@ -450,7 +453,7 @@ func repositoryGetOperation() operationTemplate {
 
 func mergeRequestGetOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.get",
+		Name:            "repo.merge-request.get",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request",
 		Operation:       "get",
@@ -462,7 +465,7 @@ func mergeRequestGetOperation() operationTemplate {
 
 func mergeRequestSearchOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.search",
+		Name:            "repo.merge-request.search",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request",
 		Operation:       "search",
@@ -474,7 +477,7 @@ func mergeRequestSearchOperation() operationTemplate {
 
 func mergeRequestCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.create",
+		Name:            "repo.merge-request.create",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request",
 		Operation:       "create",
@@ -487,7 +490,7 @@ func mergeRequestCreateOperation() operationTemplate {
 
 func mergeRequestCommentListOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.comment.list",
+		Name:            "repo.merge-request.comment.list",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request-comment",
 		Operation:       "list",
@@ -499,7 +502,7 @@ func mergeRequestCommentListOperation() operationTemplate {
 
 func mergeRequestCommentCreateOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.merge-request.comment.create",
+		Name:            "repo.merge-request.comment.create",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "merge-request-comment",
 		Operation:       "create",
@@ -512,7 +515,7 @@ func mergeRequestCommentCreateOperation() operationTemplate {
 
 func reviewRemarkListOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.review-remark.list",
+		Name:            "repo.review-remark.list",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "review-remark",
 		Operation:       "list",
@@ -524,7 +527,7 @@ func reviewRemarkListOperation() operationTemplate {
 
 func reviewRemarkReplyOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.review-remark.reply",
+		Name:            "repo.review-remark.reply",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "review-remark",
 		Operation:       "reply",
@@ -537,7 +540,7 @@ func reviewRemarkReplyOperation() operationTemplate {
 
 func reviewRemarkResolveOperation() operationTemplate {
 	return operationTemplate{
-		Name:            "repository.review-remark.resolve",
+		Name:            "repo.review-remark.resolve",
 		IntegrationType: model.IntegrationTypeRepository,
 		ObjectType:      "review-remark",
 		Operation:       "resolve",
