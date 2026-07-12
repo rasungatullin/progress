@@ -948,6 +948,9 @@ func normalizePRReviewThreadReplyRequest(request PRReviewThreadReplyRequest) (PR
 	if request.ThreadID == "" {
 		return PRReviewThreadReplyRequest{}, fmt.Errorf("GitHub pull request review thread id is required")
 	}
+	if strings.HasPrefix(request.ThreadID, "PRRC_") {
+		return PRReviewThreadReplyRequest{}, fmt.Errorf("GitHub pull request review thread id must identify PullRequestReviewThread, got review comment id %q", request.ThreadID)
+	}
 	if request.Body == "" {
 		return PRReviewThreadReplyRequest{}, fmt.Errorf("GitHub pull request review thread reply body is required")
 	}

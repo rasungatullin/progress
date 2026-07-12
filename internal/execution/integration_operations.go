@@ -794,6 +794,7 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 		if body == "" {
 			continue
 		}
+		comment = normalizeReviewRemarkCommentIdentifiers(comment)
 		path := strings.TrimSpace(comment.Path)
 		side := strings.TrimSpace(comment.Side)
 		line := 0
@@ -870,6 +871,24 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 	}
 
 	return count, errors.Join(failures...)
+}
+
+func normalizeReviewRemarkCommentIdentifiers(comment reviewRemarkComment) reviewRemarkComment {
+	threadID := strings.TrimSpace(comment.ThreadID)
+	if !strings.HasPrefix(threadID, "PRRC_") {
+		return comment
+	}
+
+	// PRRC обозначает комментарий, а не PullRequestReviewThread. При такой
+	// подмене публикуем новое замечание, не передавая идентификатор комментария
+	// в GitHub как идентификатор цепочки.
+	if externalID := strings.TrimSpace(comment.ExternalID); strings.HasPrefix(externalID, "PRRT_") {
+		comment.ExternalID, comment.ThreadID = threadID, externalID
+		return comment
+	}
+	comment.ThreadID = ""
+	comment.ExternalID = ""
+	return comment
 }
 
 func unresolvedGitHubReviewLine(response integration.Response, err error) bool {
@@ -1503,7 +1522,7 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 			remark.Body,
 		}), "\n\n"))
 		if body != "" {
-			comments = append(comments, reviewRemarkComment{
+			comments = append(comments, normalizeReviewRemarkCommentIdentifiers(reviewRemarkComment{
 				Body:       body,
 				Path:       strings.TrimSpace(remark.Path),
 				Line:       remark.Line,
@@ -1511,7 +1530,7 @@ func reviewRemarkComments(output *StructuredOutput) []reviewRemarkComment {
 				ExternalID: strings.TrimSpace(remark.ExternalID),
 				ThreadID:   strings.TrimSpace(remark.ThreadID),
 				Status:     strings.TrimSpace(remark.Status),
-			})
+			}))
 		}
 	}
 	return comments
@@ -1681,6 +1700,9 @@ func validateReviewResponseThreadIDs(responses []StructuredResponse) error {
 		if strings.TrimSpace(response.ThreadID) == "" {
 			return fmt.Errorf("review response %d thread_id is required", index)
 		}
+		if strings.HasPrefix(strings.TrimSpace(response.ThreadID), "PRRC_") {
+			return fmt.Errorf("review response %d thread_id %q is a review comment identifier; PullRequestReviewThread identifier is required", index, strings.TrimSpace(response.ThreadID))
+		}
 	}
 	return nil
 }
@@ -1696,6 +1718,9 @@ func validateReviewResponses(responses []StructuredResponse) error {
 		case "inline":
 			if strings.TrimSpace(response.ThreadID) == "" && (strings.TrimSpace(reviewResponseCommentBody(response)) != "" || isResolvedReviewResponse(response)) {
 				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): thread_id is required; canonical external_id is missing or unknown", index, strings.TrimSpace(response.RemarkID)))
+			}
+			if strings.HasPrefix(strings.TrimSpace(response.ThreadID), "PRRC_") {
+				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): thread_id %q is a review comment identifier; PullRequestReviewThread identifier is required", index, strings.TrimSpace(response.RemarkID), strings.TrimSpace(response.ThreadID)))
 			}
 		case "comment":
 			// Общий комментарий формируется как новая связанная запись и thread_id не требует.
