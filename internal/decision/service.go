@@ -419,6 +419,14 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	result.RouteSource = route.RouteSource
 	result.CheckSources = route.CheckSources
 	result.Checks = route.Checks
+	if strings.TrimSpace(route.Action) == execution.ActionStartImplementationPR && isOpenMergeRequest(input.Context.MergeRequest) {
+		route = routeForExistingMergeRequest(route)
+		if externalMergeRequestBlocksCompletion(input.Context.MergeRequestExternalState) {
+			route = reworkRouteForExternalMergeRequestState(route, input.Context.MergeRequestExternalState)
+		}
+		result.Route = route.Route
+		result.Checks = route.Checks
+	}
 	if externalMergeRequestBlocksCompletion(input.Context.MergeRequestExternalState) && strings.TrimSpace(route.Outcome) != "" {
 		route = reworkRouteForExternalMergeRequestState(route, input.Context.MergeRequestExternalState)
 		result.Route = route.Route
@@ -442,6 +450,35 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	result.Reasons = append([]DecisionReason(nil), decision.Reasons...)
 	result.ExecutionPlan = decision.ExecutionPlan
 	return result, nil
+}
+
+func isOpenMergeRequest(mergeRequest *integration.MergeRequest) bool {
+	if mergeRequest == nil {
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(mergeRequest.State)) {
+	case "", "open":
+		return true
+	default:
+		return false
+	}
+}
+
+func routeForExistingMergeRequest(previous selectedWorkflowRoute) selectedWorkflowRoute {
+	previous.Action = execution.ActionReviewPullRequest
+	previous.ExpectedResult = "Проверить существующий открытый запрос на слияние и продолжить обработку его состояния."
+	previous.ReasonCode = "open_merge_request_found"
+	previous.ReasonMessage = "Для рабочей ветки уже найден открытый запрос на слияние; повторное создание запрещено."
+	previous.Checks = append(append([]RouteCheckResult(nil), previous.Checks...), RouteCheckResult{
+		Name:   "open-merge-request-invariant",
+		Status: RouteCheckStatusPassed,
+		Reasons: []DecisionReason{{
+			Code:    previous.ReasonCode,
+			Message: previous.ReasonMessage,
+		}},
+	})
+	return previous
 }
 
 func externalMergeRequestBlocksCompletion(state *MergeRequestExternalState) bool {
@@ -474,7 +511,7 @@ func reworkRouteForExternalMergeRequestState(previous selectedWorkflowRoute, sta
 			Title:       "Доработка внешнего состояния запроса на слияние",
 			Description: "Направляет задачу на доработку, если завершённая задача имеет открытые внешние препятствия в запросе на слияние.",
 		},
-		Checks: []RouteCheckResult{externalMergeRequestStateCheck(previous, state, reasonCode, reasonMessage)},
+		Checks: append(append([]RouteCheckResult(nil), previous.Checks...), externalMergeRequestStateCheck(previous, state, reasonCode, reasonMessage)),
 	}
 }
 

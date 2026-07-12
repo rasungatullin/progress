@@ -1722,6 +1722,9 @@ func TestPublishMergeRequestFillsOnlyActionData(t *testing.T) {
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			if req.Operation == "search" {
+				return integration.Response{}, nil
+			}
 			if req.Operation != "create" || req.Repository != "owner/name" || req.Base != "main" || req.Head != "132" {
 				t.Fatalf("unexpected integration request: %#v", req)
 			}
@@ -3545,8 +3548,14 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
-			if req.Operation != "create" || req.ObjectType != "merge-request" {
+			if req.ObjectType != "merge-request" {
 				t.Fatalf("unexpected integration request: %#v", req)
+			}
+			if req.Operation == "search" {
+				return integration.Response{}, nil
+			}
+			if req.Operation != "create" {
+				t.Fatalf("unexpected integration operation: %#v", req)
 			}
 			return integration.Response{
 				PullRequestStatus: &integration.PullRequestStatus{Repository: req.Repository, Number: 17, State: "OPEN", URL: "https://github.com/owner/name/pull/17"},
@@ -3589,11 +3598,15 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 	if workplaces.invocation.Workplace.Name != "132" || workplaces.invocation.Workplace.HeadRef != "" {
 		t.Fatalf("start implementation must prepare a new task branch without forced head_ref: %#v", workplaces.invocation.Workplace)
 	}
-	if len(integrations.calls) != 1 {
-		t.Fatalf("expected one integration request, got %#v", integrations.calls)
+	if len(integrations.calls) != 2 {
+		t.Fatalf("expected existence check and publication requests, got %#v", integrations.calls)
 	}
 	request := integrations.calls[0]
-	if request.Repository != "owner/name" || request.Base != "develop" || request.Head != "132" || request.Title == "" {
+	if request.Operation != "search" || request.Repository != "owner/name" || request.Query != "head:132" || request.State != "open" {
+		t.Fatalf("unexpected pull request existence check request: %#v", request)
+	}
+	request = integrations.calls[1]
+	if request.Operation != "create" || request.Repository != "owner/name" || request.Base != "develop" || request.Head != "132" || request.Title == "" {
 		t.Fatalf("unexpected pull request publication request: %#v", request)
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishMergeRequest)
@@ -3626,6 +3639,9 @@ func TestServiceExecuteStartImplementationUsesPullRequestBaseForWorkplace(t *tes
 	}
 	integrations := &stubIntegrationExecutor{
 		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+			if req.Operation == "search" {
+				return integration.Response{}, nil
+			}
 			if req.Operation != "create" || req.Base != "release" || req.Head != "112" {
 				t.Fatalf("unexpected integration request: %#v", req)
 			}
@@ -3670,8 +3686,8 @@ func TestServiceExecuteStartImplementationUsesPullRequestBaseForWorkplace(t *tes
 	if workplaces.invocation.Workplace.Name != "112" || workplaces.invocation.Workplace.BaseRef != "release" || workplaces.invocation.Workplace.HeadRef != "112" {
 		t.Fatalf("pull request refs must be synchronized with workplace: %#v", workplaces.invocation.Workplace)
 	}
-	if len(integrations.calls) != 1 {
-		t.Fatalf("expected one integration request, got %#v", integrations.calls)
+	if len(integrations.calls) != 2 || integrations.calls[0].Operation != "search" || integrations.calls[1].Operation != "create" {
+		t.Fatalf("expected existence check and publication requests, got %#v", integrations.calls)
 	}
 }
 

@@ -164,6 +164,43 @@ func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) 
 	}
 }
 
+func TestServiceProcessTaskKeepsOpenMergeRequestAfterReviewLabelsAreRemoved(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.searchReturnsEmpty = true
+	decisions := &processingDecisionStub{results: []decision.ConsiderationResult{
+		processingConsideration(execution.ActionStartImplementationPR),
+		processingConsideration(execution.ActionReviewPullRequest),
+		{Status: decision.ConsiderationStatusCompleted},
+	}}
+	executions := &processingExecutionStub{results: []execution.ExecutionResult{
+		{Status: "completed", MergeRequest: &execution.MergeRequest{Repository: "owner/name", Number: 184, BaseRef: "main", HeadRef: "123"}, Launch: &execution.LaunchResult{Status: "completed"}},
+		{Status: "completed", Launch: &execution.LaunchResult{Status: "completed", StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "ok"}}}},
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = decisions
+	service.execution = executions
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if len(result.Cycles) != 3 || len(decisions.inputs) != 3 {
+		t.Fatalf("expected three reactive cycles: result=%#v decisions=%#v", result, decisions.inputs)
+	}
+	if decisions.inputs[2].Context.MergeRequest == nil || decisions.inputs[2].Context.MergeRequest.Number != 184 {
+		t.Fatalf("third cycle must keep the published merge request: %#v", decisions.inputs[2].Context.MergeRequest)
+	}
+	if len(executions.requests) != 2 || executions.requests[1].Assignment.Action != execution.ActionReviewPullRequest {
+		t.Fatalf("second cycle must review the existing merge request: %#v", executions.requests)
+	}
+	if containsLabel(result.FinalIssue.Labels, LabelAwaitingReview) || !containsLabel(result.FinalIssue.Labels, LabelReviewPassed) {
+		t.Fatalf("review labels were not transitioned: %#v", result.FinalIssue.Labels)
+	}
+}
+
 func TestServiceProcessTaskOnceStopsAfterFirstCycle(t *testing.T) {
 	t.Parallel()
 

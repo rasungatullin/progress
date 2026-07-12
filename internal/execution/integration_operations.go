@@ -315,6 +315,32 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 		IntegrationType: integrationmodel.IntegrationTypeRepository,
 		Resource:        "merge-request",
 		ObjectType:      "merge-request",
+		Operation:       "search",
+		Repository:      ref.Repository,
+		RepoProvided:    true,
+		Query:           "head:" + ref.Head,
+		State:           "open",
+		Limit:           100,
+	})
+	if err != nil {
+		return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Наличие открытого запроса на слияние не проверено.", err, "pull_request_existence_check_failed")
+	}
+	for _, existing := range response.MergeRequests {
+		if strings.TrimSpace(existing.HeadRef) != ref.Head || (strings.TrimSpace(existing.BaseRef) != "" && strings.TrimSpace(existing.BaseRef) != ref.Base) {
+			continue
+		}
+		summary := fmt.Sprintf("pull-request=%d", existing.Number)
+		result := input.result
+		result.Summary = joinExecutionSummaries(result.Summary, summary)
+		writePublishMergeRequestData(state, operation, existing, summary, result)
+		state.tracker.skipIO(name, publishMergeRequestInputSummary(input, ref, operation), publishMergeRequestOutputSummary(existing, summary, result, operation), "Открытый запрос на слияние уже существует; создание пропущено.")
+		return nil
+	}
+
+	response, err = executor.Execute(ctx, integration.Request{
+		IntegrationType: integrationmodel.IntegrationTypeRepository,
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
 		Operation:       "create",
 		Repository:      ref.Repository,
 		RepoProvided:    true,
