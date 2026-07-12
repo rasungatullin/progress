@@ -144,6 +144,45 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 	return nil
 }
 
+func (e builtinOperationExecutor) publishTaskComment(ctx context.Context, state *operationExecution, name string) error {
+	var task *ObjectRef
+	if state != nil && state.assignment != nil {
+		task = state.assignment.CanonicalTask
+	}
+	if task == nil || task.Number <= 0 {
+		return e.failIntegrationOperation(ctx, state, name, "Номер задачи не задан.", fmt.Errorf("task number is required"), "task_number_required")
+	}
+
+	body := ""
+	if state.result.StructuredOutput != nil {
+		body = strings.TrimSpace(state.result.StructuredOutput.Summary)
+	}
+	body = publicationBodyForTarget(state, publicationTargetTaskComment, name, body)
+	if body == "" {
+		state.tracker.skip(name, "Структурированный вывод не содержит комментария задачи.")
+		return nil
+	}
+
+	executor, err := e.integrationExecutor()
+	if err != nil {
+		return e.failIntegrationOperation(ctx, state, name, "Контур интеграции недоступен.", err, "integration_unavailable")
+	}
+	_, err = executor.Execute(ctx, integration.Request{
+		IntegrationType: integrationmodel.IntegrationTypeTracker,
+		Resource:        "task-comment",
+		ObjectType:      "task-comment",
+		Operation:       "create",
+		Number:          task.Number,
+		Body:            body,
+		Text:            body,
+	})
+	if err != nil {
+		return e.failIntegrationOperation(ctx, state, name, "Комментарий задачи не записан.", err, "task_comment_publish_failed")
+	}
+	state.tracker.completeIO(name, fmt.Sprintf("task=%d", task.Number), "task-comment-published", "Комментарий задачи записан через контур интеграции.")
+	return nil
+}
+
 func (e builtinOperationExecutor) defaultMergeRequestBase(ctx context.Context, state *operationExecution) (string, error) {
 	repoRoot := ""
 	if state != nil {
@@ -293,7 +332,15 @@ func publicationCommentBody(state *operationExecution, operationName string, bod
 	if _, ok := policyForStatePublication(state, publicationTargetReviewRemark, operationName); ok {
 		return body
 	}
-	policy, ok := policyForStatePublication(state, publicationTargetMergeRequestComment, operationName)
+	return publicationBodyForTarget(state, publicationTargetMergeRequestComment, operationName, body)
+}
+
+func publicationBodyForTarget(state *operationExecution, target string, operationName string, body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	policy, ok := policyForStatePublication(state, target, operationName)
 	if !ok {
 		return body
 	}

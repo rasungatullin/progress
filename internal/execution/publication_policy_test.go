@@ -352,6 +352,24 @@ func TestPublicationCommentKeepsReviewRemarkPolicyPriority(t *testing.T) {
 	}
 }
 
+func TestTaskCommentUsesTaskCommentPolicy(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{Name: "publish-task-comment"},
+		policies: []textPublicationPolicy{{
+			Targets:   []string{publicationTargetTaskComment},
+			Steps:     []string{"publish-task-comment"},
+			NoHeading: true,
+		}},
+	}
+
+	body := publicationBodyForTarget(state, publicationTargetTaskComment, "publish-task-comment", "## Служебный заголовок\n\nТекст комментария.")
+	if body != "Текст комментария." {
+		t.Fatalf("task-comment policy must remove artificial heading, got %q", body)
+	}
+}
+
 func TestPolicyForStatePublicationUsesOnlyCurrentOperation(t *testing.T) {
 	t.Parallel()
 

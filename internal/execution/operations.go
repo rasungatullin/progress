@@ -83,6 +83,8 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 		return e.commitPush(ctx, state, name)
 	case OperationKindPublishMergeRequest:
 		return e.publishMergeRequest(ctx, state, name)
+	case OperationKindPublishTaskComment:
+		return e.publishTaskComment(ctx, state, name)
 	case OperationKindPublishReviewRemarks:
 		return e.publishReviewRemarks(ctx, state, name)
 	case OperationKindPublishReviewResponses:

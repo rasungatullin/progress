@@ -36,6 +36,7 @@ const (
 	OperationKindParseResult            = "parse-result"
 	OperationKindCommitPush             = "commit-push"
 	OperationKindPublishMergeRequest    = "publish-merge-request"
+	OperationKindPublishTaskComment     = "publish-task-comment"
 	OperationKindPublishReviewRemarks   = "publish-review-remarks"
 	OperationKindPublishReviewResponses = "publish-review-responses"
 	OperationKindFinalize               = "finalize"
@@ -270,6 +271,8 @@ func defaultOperationSpec(kind string) model.OperationSpec {
 		return builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true)
 	case OperationKindPublishMergeRequest:
 		return builtinOperation(OperationKindPublishMergeRequest, "Открытие запроса на слияние", true)
+	case OperationKindPublishTaskComment:
+		return builtinOperation(OperationKindPublishTaskComment, "Запись комментария задачи", true)
 	case OperationKindPublishReviewRemarks:
 		return builtinOperation(OperationKindPublishReviewRemarks, "Запись замечаний ревизии", true)
 	case OperationKindPublishReviewResponses:
