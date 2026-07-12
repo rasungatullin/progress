@@ -377,7 +377,7 @@ func TestServiceProcessTaskReworksReviewPassedTaskWithExternalRemarks(t *testing
 	}
 }
 
-func TestServiceProcessTaskIgnoresConversationCommentsForExternalRemarks(t *testing.T) {
+func TestServiceProcessTaskReworksForNewConversationComment(t *testing.T) {
 	t.Parallel()
 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
@@ -394,14 +394,38 @@ func TestServiceProcessTaskIgnoresConversationCommentsForExternalRemarks(t *test
 		t.Fatalf("expected one cycle, got %#v", result.Cycles)
 	}
 	cycle := result.Cycles[0]
-	if cycle.MergeRequestExternalState != nil {
-		t.Fatalf("conversation comments must not block completion: %#v", cycle.MergeRequestExternalState)
+	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasUnresolvedReviewRemarks {
+		t.Fatalf("conversation comment must block completion: %#v", cycle.MergeRequestExternalState)
 	}
-	if cycle.Consideration == nil || cycle.Consideration.Status != decision.ConsiderationStatusCompleted {
-		t.Fatalf("expected completed consideration, got %#v", cycle.Consideration)
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
+		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
 	}
-	if len(integrations.labels) != 0 {
+	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы|remove:Экспертиза пройдена" {
 		t.Fatalf("unexpected label operations: %#v", integrations.labels)
+	}
+}
+
+func TestServiceProcessTaskIgnoresProcessedConversationComment(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{
+		{ExternalID: "comment-1", State: "conversation", Body: "## Замечание ревизии\n\nИдентификатор: remark-2\n\nНабор проверок завершается ошибкой"},
+		{ExternalID: "comment-2", State: "conversation", Body: "## Ответ на замечание ревизии\n\nЗамечание: remark-2\n\nСостояние: resolved\n\nИсправлено."},
+	}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if result.Cycles[0].MergeRequestExternalState != nil {
+		t.Fatalf("processed conversation comment must not block completion: %#v", result.Cycles[0].MergeRequestExternalState)
+	}
+	if result.Cycles[0].Consideration == nil || result.Cycles[0].Consideration.Status != decision.ConsiderationStatusCompleted {
+		t.Fatalf("expected completed consideration, got %#v", result.Cycles[0].Consideration)
 	}
 }
 
