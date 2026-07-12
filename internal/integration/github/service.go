@@ -27,6 +27,7 @@ type ghRunner interface {
 	RunPRCommentCreate(context.Context, string, int, PRCommentCreateRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadReply(context.Context, PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadResolve(context.Context, string) (CommandResult, resolvedConfig, error)
+	RunPRReviewThreadUnresolve(context.Context, string) (CommandResult, resolvedConfig, error)
 }
 
 type Service struct {
@@ -159,6 +160,17 @@ type ghPRReviewThreadResolveResponse struct {
 	} `json:"data"`
 }
 
+type ghPRReviewThreadUnresolveResponse struct {
+	Data struct {
+		UnresolveReviewThread struct {
+			Thread struct {
+				ID         string `json:"id"`
+				IsResolved bool   `json:"isResolved"`
+			} `json:"thread"`
+		} `json:"unresolveReviewThread"`
+	} `json:"data"`
+}
+
 type ghPRReviewThreadReplyResponse struct {
 	Data struct {
 		AddPullRequestReviewThreadReply struct {
@@ -220,6 +232,8 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executePRCommentReply(ctx, response, req)
 	case isPullRequestCommentRequest(req) && req.Operation == "resolve":
 		return s.executePRCommentResolve(ctx, response, req)
+	case isPullRequestCommentRequest(req) && req.Operation == "unresolve":
+		return s.executePRCommentUnresolve(ctx, response, req)
 	default:
 		err := &Error{
 			Code:    ErrorCodeUnsupportedOperation,
@@ -660,6 +674,31 @@ func (s *Service) executePRCommentResolve(ctx context.Context, response model.Re
 		Endpoint:   "resolveReviewThread",
 		Message:    fmt.Sprintf("GitHub pull request review thread resolved: %s", resolvedThreadID),
 	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func (s *Service) executePRCommentUnresolve(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	threadID := strings.TrimSpace(firstNonEmpty(req.ThreadID, req.ExternalID))
+	if threadID == "" {
+		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review thread id is required"}, "pull request comment unresolve request rejected before invoking gh")
+	}
+
+	result, config, err := s.runner.RunPRReviewThreadUnresolve(ctx, threadID)
+	if err != nil {
+		return responseWithGitHubFailure(response, result, err, "gh pull request review thread unresolve failed before returning a payload")
+	}
+	if result.ExitCode != 0 {
+		return responseWithGitHubExitFailure(response, result, "", 0, "gh pull request review thread unresolve exited with a non-zero code")
+	}
+
+	var raw ghPRReviewThreadUnresolveResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
+		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub GraphQL JSON response: %v", err), Result: result, Err: err}, "gh pull request review thread unresolve returned malformed JSON")
+	}
+	threadID = firstNonEmpty(raw.Data.UnresolveReviewThread.Thread.ID, threadID)
+	response.ReviewRemarks = []model.ReviewRemark{{System: "github", ExternalID: threadID, ReplyToID: threadID, State: "unresolved"}}
+	response.OperationResult = &model.OperationResult{System: "github", ObjectType: "review-remark", Operation: "unresolve", Status: model.ResponseStatusOK, ExternalID: threadID, Method: methodFromConfig(config), Endpoint: "unresolveReviewThread", Message: fmt.Sprintf("GitHub pull request review thread reopened: %s", threadID)}
 	response.Status = model.ResponseStatusOK
 	return response, nil
 }

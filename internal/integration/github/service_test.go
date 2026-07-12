@@ -2009,3 +2009,9 @@ func (r *stubRunner) RunPRReviewThreadResolve(_ context.Context, threadID string
 	r.threadID = threadID
 	return r.result, r.config, r.err
 }
+
+func (r *stubRunner) RunPRReviewThreadUnresolve(_ context.Context, threadID string) (CommandResult, resolvedConfig, error) {
+	r.prResolveCalls++
+	r.threadID = threadID
+	return r.result, r.config, r.err
+}

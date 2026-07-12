@@ -3523,6 +3523,11 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 					ThreadID: "thread-1",
 					Status:   "resolved",
 					Summary:  "Исправлено.",
+				}, {
+					RemarkID: "thread-2",
+					ThreadID: "thread-2",
+					Status:   "open",
+					Summary:  "Требуется повторная проверка.",
 				}},
 			},
 		},
@@ -3549,6 +3554,8 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 			case "reply":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", ExternalID: "comment-1"}}, nil
 			case "resolve":
+				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", ExternalID: req.ThreadID}}, nil
+			case "unresolve":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", ExternalID: req.ThreadID}}, nil
 			default:
 				t.Fatalf("unexpected integration request: %#v", req)
@@ -3594,10 +3601,10 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 	if workplaces.invocation.Workplace.Name != "feature-fixes" || workplaces.invocation.Workplace.HeadRef != "feature/fixes" || workplaces.invocation.Workplace.BaseRef != "main" {
 		t.Fatalf("review rework action must use pull request head for workplace: %#v", workplaces.invocation.Workplace)
 	}
-	if len(integrations.calls) != 4 {
-		t.Fatalf("expected get, comments, reply and resolve integration calls, got %#v", integrations.calls)
+	if len(integrations.calls) != 6 {
+		t.Fatalf("expected get, comments, two replies and two thread state changes, got %#v", integrations.calls)
 	}
-	if integrations.calls[2].Operation != "reply" || integrations.calls[2].ThreadID != "thread-1" || integrations.calls[3].Operation != "resolve" || integrations.calls[3].ThreadID != "thread-1" {
+	if integrations.calls[2].Operation != "reply" || integrations.calls[2].ThreadID != "thread-1" || integrations.calls[3].Operation != "reply" || integrations.calls[3].ThreadID != "thread-2" || integrations.calls[4].Operation != "resolve" || integrations.calls[4].ThreadID != "thread-1" || integrations.calls[5].Operation != "unresolve" || integrations.calls[5].ThreadID != "thread-2" {
 		t.Fatalf("unexpected response publication calls: %#v", integrations.calls)
 	}
 	operation := findOperationResult(result.Operations, OperationKindPublishReviewResponses)

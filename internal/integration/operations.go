@@ -106,6 +106,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			reviewRemarkListOperation(),
 			reviewRemarkReplyOperation(),
 			reviewRemarkResolveOperation(),
+			reviewRemarkUnresolveOperation(),
 		}
 	case "bitbucket":
 		return []operationTemplate{
@@ -544,6 +545,13 @@ func reviewRemarkResolveOperation() operationTemplate {
 		Input:           input(requiredField("thread", "string")),
 		Output:          output("operation-result", "OperationResult"),
 		FailureKinds:    defaultFailureKinds(),
+	}
+}
+
+func reviewRemarkUnresolveOperation() operationTemplate {
+	return operationTemplate{
+		Name: "repository.review-remark.unresolve", IntegrationType: model.IntegrationTypeRepository, ObjectType: "review-remark", Operation: "unresolve", SideEffect: true,
+		Input: input(requiredField("thread", "string")), Output: output("operation-result", "OperationResult"), FailureKinds: defaultFailureKinds(),
 	}
 }
 

@@ -875,7 +875,8 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 	resolved := 0
 	seen := map[string]struct{}{}
 	for _, response := range responses {
-		if !isResolvedReviewResponse(response) {
+		operation := reviewResponseThreadOperation(response)
+		if operation == "" {
 			continue
 		}
 		threadID := strings.TrimSpace(response.ThreadID)
@@ -890,7 +891,7 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
 			ObjectType:      "comment",
-			Operation:       "resolve",
+			Operation:       operation,
 			ExternalID:      threadID,
 			ThreadID:        threadID,
 		})
@@ -1390,6 +1391,18 @@ func reviewResponseCommentBody(response StructuredResponse) string {
 func isResolvedReviewResponse(response StructuredResponse) bool {
 	status := strings.ToLower(strings.TrimSpace(response.Status))
 	return status == "resolved" || status == "fixed" || status == "done" || status == "ok"
+}
+
+func reviewResponseThreadOperation(response StructuredResponse) string {
+	status := strings.ToLower(strings.TrimSpace(response.Status))
+	switch {
+	case isResolvedReviewResponse(response):
+		return "resolve"
+	case status == "open" || status == "unresolved" || status == "reopened":
+		return "unresolve"
+	default:
+		return ""
+	}
 }
 
 func validateReviewResponseThreadIDs(responses []StructuredResponse) error {
