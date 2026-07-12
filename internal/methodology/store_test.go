@@ -915,6 +915,42 @@ func TestServiceUpsertWritesLocalCatalogElement(t *testing.T) {
 	}
 }
 
+func TestServiceUpsertKeepsInstructionBodyFilePathAfterReload(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	methodologyDir := filepath.Join(root, ".progress", "methodology")
+	writeTestFile(t, filepath.Join(methodologyDir, "texts", "directive.md"), "текст инструкции")
+
+	service := NewService(nil)
+	if _, err := service.Upsert(context.Background(), CatalogWriteRequest{
+		RepoRoot: root,
+		Scope:    CatalogWriteScopeLocal,
+		Element: ElementUpsert{Instruction: &Instruction{
+			Name:     "directive",
+			BodyFile: "texts/directive.md",
+		}},
+	}); err != nil {
+		t.Fatalf("upsert instruction: %v", err)
+	}
+
+	written, err := os.ReadFile(filepath.Join(methodologyDir, "instructions", "directive.json"))
+	if err != nil {
+		t.Fatalf("read written instruction: %v", err)
+	}
+	if !strings.Contains(string(written), `"body_file": "../texts/directive.md"`) {
+		t.Fatalf("unexpected written instruction: %s", written)
+	}
+
+	snapshot, err := service.Load(context.Background(), CatalogRequest{RepoRoot: root})
+	if err != nil {
+		t.Fatalf("reload catalog: %v", err)
+	}
+	if got := snapshot.Catalog.Instructions[0].Body; got != "текст инструкции" {
+		t.Fatalf("unexpected reloaded instruction body: %q", got)
+	}
+}
+
 func TestLoadCatalogReadsFileRegistries(t *testing.T) {
 	t.Parallel()
 
