@@ -251,6 +251,7 @@ type Instruction struct {
 	Title         string `json:"title,omitempty"`
 	Description   string `json:"description,omitempty"`
 	Body          string `json:"body,omitempty"`
+	BodyFile      string `json:"body_file,omitempty"`
 }
 
 type Operation struct {
@@ -1204,6 +1205,7 @@ func normalizeInstruction(instruction Instruction) Instruction {
 	instruction.Title = strings.TrimSpace(instruction.Title)
 	instruction.Description = strings.TrimSpace(instruction.Description)
 	instruction.Body = strings.TrimSpace(instruction.Body)
+	instruction.BodyFile = strings.TrimSpace(instruction.BodyFile)
 	return instruction
 }
 

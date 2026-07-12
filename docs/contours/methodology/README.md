@@ -83,6 +83,21 @@
 
 CLI доступен через `progress methodology`. Он позволяет просматривать, выбирать, сохранять и добавлять экземпляры сущностей каталога.
 
+Для большой инструкции поле `body_file` задаёт путь к Markdown относительно файла описания инструкции. Файл должен оставаться внутри каталога методик:
+
+```text
+methodology/
+  instructions/start-implementation-pr-directive.json
+  instructions-texts/start-implementation-pr-directive.md
+```
+
+```json
+{
+  "name": "start-implementation-pr-directive",
+  "body_file": "../instructions-texts/start-implementation-pr-directive.md"
+}
+```
+
 ## 5. Дополнительная документация
 
 - `docs/contours/methodology/TARGET_ARCHITECTURE.md` — целевое архитектурное состояние контура методик.

@@ -260,6 +260,12 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 	} else if !isNotExistErr(err) {
 		return CatalogLayer{}, false, err
 	}
+	for index, instruction := range catalog.Instructions {
+		catalog.Instructions[index], err = loadInstructionBody(instruction, path, filepath.Dir(path), readFile)
+		if err != nil {
+			return CatalogLayer{}, false, err
+		}
+	}
 
 	registryCatalog, registryFound, err := readCatalogRegistries(filepath.Dir(path), readFile, readDir)
 	if err != nil {
@@ -270,7 +276,13 @@ func readCatalogLayerDetailed(path string, source configuration.ConfigFileSource
 	}
 	catalog.Routes = append(catalog.Routes, registryCatalog.Routes...)
 	catalog.Actions = append(catalog.Actions, registryCatalog.Actions...)
-	catalog.Instructions = append(catalog.Instructions, registryCatalog.Instructions...)
+	for _, instruction := range registryCatalog.Instructions {
+		instruction, err = loadInstructionBody(instruction, filepath.Join(filepath.Dir(path), "instructions", instructionRegistryKey(instruction)+".json"), filepath.Dir(path), readFile)
+		if err != nil {
+			return CatalogLayer{}, false, err
+		}
+		catalog.Instructions = append(catalog.Instructions, instruction)
+	}
 	catalog.Operations = append(catalog.Operations, registryCatalog.Operations...)
 	catalog.Entities = append(catalog.Entities, registryCatalog.Entities...)
 
@@ -381,6 +393,31 @@ func decodeCatalog(content []byte) (Catalog, error) {
 		return Catalog{}, err
 	}
 	return catalog, nil
+}
+
+func loadInstructionBody(instruction Instruction, descriptionPath, methodologyRoot string, readFile ReadFileFunc) (Instruction, error) {
+	instruction = normalizeInstruction(instruction)
+	if instruction.BodyFile == "" {
+		return instruction, nil
+	}
+	if instruction.Body != "" {
+		return Instruction{}, fmt.Errorf("instruction %q has both body and body_file", instruction.Name)
+	}
+	if filepath.IsAbs(instruction.BodyFile) {
+		return Instruction{}, fmt.Errorf("instruction %q body_file %q must stay inside methodology catalog", instruction.Name, instruction.BodyFile)
+	}
+	bodyPath := filepath.Clean(filepath.Join(filepath.Dir(descriptionPath), instruction.BodyFile))
+	root := filepath.Clean(methodologyRoot)
+	relative, err := filepath.Rel(root, bodyPath)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return Instruction{}, fmt.Errorf("instruction %q body_file %q escapes methodology catalog", instruction.Name, instruction.BodyFile)
+	}
+	content, err := readFile(bodyPath)
+	if err != nil {
+		return Instruction{}, fmt.Errorf("read instruction body file %s: %w", bodyPath, err)
+	}
+	instruction.Body = strings.TrimSpace(string(content))
+	return instruction, nil
 }
 
 func writeCatalog(path string, catalog Catalog, writeFile WriteFileFunc, mkdirAll MkdirAllFunc) error {

@@ -92,6 +92,70 @@ func TestLoadCatalogMergesGlobalAndLocalLayersWithLocalPriority(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogLoadsInstructionBodyFromMarkdown(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/repo/.progress/methodology/catalog.json":
+			return []byte(`{"instructions":[{"name":"directive","body_file":"markdown/directive.md"}]}`), nil
+		case "/repo/.progress/methodology/markdown/directive.md":
+			return []byte("# Инструкция\n\nВыполнить действие."), nil
+		default:
+			return nil, fs.ErrNotExist
+		}
+	}
+
+	snapshot, err := LoadCatalogWithHome("/repo", "/missing-config", readFile)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	instruction := snapshot.Catalog.Instructions[0]
+	if instruction.Body != "# Инструкция\n\nВыполнить действие." || instruction.BodyFile != "markdown/directive.md" {
+		t.Fatalf("unexpected instruction: %#v", instruction)
+	}
+}
+
+func TestLoadCatalogRejectsInstructionBodyFileOutsideMethodologyRoot(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{"instructions":[{"name":"directive","body_file":"../../directive.md"}]}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/missing-config", readFile)
+	if err == nil || !strings.Contains(err.Error(), "escapes methodology catalog") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsMissingInstructionBodyFile(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{"instructions":[{"name":"directive","body_file":"missing.md"}]}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/missing-config", readFile)
+	if err == nil || !strings.Contains(err.Error(), "read instruction body file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsInstructionBodyAndBodyFile(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		if path == "/repo/.progress/methodology/catalog.json" {
+			return []byte(`{"instructions":[{"name":"directive","body":"inline","body_file":"directive.md"}]}`), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+
+	_, err := LoadCatalogWithHome("/repo", "/missing-config", readFile)
+	if err == nil || !strings.Contains(err.Error(), "has both body and body_file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadCatalogKeepsLocalAliasPriorityOverGlobalAlias(t *testing.T) {
 	t.Parallel()
 
