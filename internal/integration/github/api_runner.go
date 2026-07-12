@@ -538,6 +538,36 @@ func (r *APIRunner) RunPRReviews(ctx context.Context, repository string, number 
 	return result, apiResolvedConfig(config), nil
 }
 
+func (r *APIRunner) RunPRReviewComments(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		return apiErrorResult("pr review comments", apiConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	config, err := r.resolveConfig(ctx)
+	if err != nil {
+		return apiErrorResult("pr review comments", config, err)
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return apiErrorResult("pr review comments", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
+	}
+	var result CommandResult
+	var comments []ghPRReviewCommentCreateResponse
+	for page := 1; ; page++ {
+		var raw []ghPRReviewCommentCreateResponse
+		result, err = r.do(ctx, config, http.MethodGet, fmt.Sprintf("repos/%s/pulls/%d/comments?per_page=100&page=%d", repository, number, page), nil, &raw)
+		if err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		comments = append(comments, raw...)
+		if len(raw) < 100 {
+			break
+		}
+	}
+	result.Stdout = mustJSON(comments)
+	return result, apiResolvedConfig(config), nil
+}
+
 func (r *APIRunner) enrichPullRequestView(ctx context.Context, config apiConfig, repository string, view *ghPRView) (CommandResult, error) {
 	if view == nil || view.Number <= 0 {
 		return CommandResult{}, nil

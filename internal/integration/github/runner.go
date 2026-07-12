@@ -494,6 +494,22 @@ func (r *Runner) RunPRReviews(ctx context.Context, repository string, number int
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--paginate", "--slurp", fmt.Sprintf("repos/%s/pulls/%d/reviews", repository, number)})
 }
 
+func (r *Runner) RunPRReviewComments(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		return CommandResult{Command: defaultCommand, ExitCode: -1}, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return CommandResult{Command: config.Command, ExitCode: -1}, config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--paginate", "--slurp", fmt.Sprintf("repos/%s/pulls/%d/comments", repository, number)})
+}
+
 func resolveRepository(repository string, fallback string) (string, error) {
 	return normalizeRepository(firstNonEmpty(repository, fallback))
 }

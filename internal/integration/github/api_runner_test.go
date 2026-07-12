@@ -1291,6 +1291,51 @@ func TestAPITransportPRReviewsReadsPagesUntilEnd(t *testing.T) {
 	}
 }
 
+func TestAPITransportPRReviewCommentsReadsPagesUntilEnd(t *testing.T) {
+	t.Parallel()
+
+	var requestedPages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/name/pulls/42/comments" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("per_page") != "100" {
+			t.Fatalf("unexpected per_page: %s", r.URL.Query().Get("per_page"))
+		}
+		requestedPages = append(requestedPages, r.URL.Query().Get("page"))
+		if r.URL.Query().Get("page") == "1" {
+			comments := make([]map[string]any, 0, 100)
+			for i := 1; i <= 100; i++ {
+				comments = append(comments, map[string]any{"id": i, "pull_request_review_id": 77})
+			}
+			_ = json.NewEncoder(w).Encode(comments)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 101, "pull_request_review_id": 78}})
+	}))
+	defer server.Close()
+
+	runner := &APIRunner{
+		systemConfig: model.IntegrationSystemConfig{BaseURL: server.URL, Token: "secret", Repository: "owner/name"},
+		client:       server.Client(),
+	}
+
+	result, _, err := runner.RunPRReviewComments(context.Background(), "", 42)
+	if err != nil {
+		t.Fatalf("list pull request review comments: %v", err)
+	}
+	if strings.Join(requestedPages, ",") != "1,2" {
+		t.Fatalf("unexpected requested pages: %#v", requestedPages)
+	}
+	var comments []ghPRReviewCommentCreateResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &comments); err != nil {
+		t.Fatalf("decode comments: %v", err)
+	}
+	if len(comments) != 101 || comments[100].ID != 101 || comments[100].ReviewID != 78 {
+		t.Fatalf("unexpected comments: len=%d last=%#v", len(comments), comments[len(comments)-1])
+	}
+}
+
 func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
 	t.Parallel()
 
