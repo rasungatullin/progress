@@ -81,6 +81,53 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	}
 }
 
+func TestPersistExecutionRunRecordMasksPrivateValueInRecordAndHistoryPayload(t *testing.T) {
+	t.Parallel()
+
+	root := tempDir(t)
+	secret := "actual-private-key"
+	structured := &model.StructuredOutput{Summary: secret}
+	invocation := model.Invocation{Launch: model.LaunchSpec{StructuredInput: &model.StructuredInput{Task: secret}}}
+	handle, err := history.Begin(context.Background(), root, history.Run{
+		CreatedAt:          "2026-07-13T10:00:00Z",
+		Status:             "running",
+		Model:              "model",
+		ProfileName:        "profile",
+		Runner:             "runner",
+		LaunchDirectory:    root,
+		RawStructuredInput: history.StructuredInputJSON(invocation.Launch.StructuredInput),
+	})
+	if err != nil {
+		t.Fatalf("begin history: %v", err)
+	}
+	path := persistExecutionRunRecord(
+		handle, root, invocation,
+		model.Profile{},
+		model.Allocation{Git: &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivateValue: secret}}},
+		model.Workplace{Name: root},
+		model.LaunchResult{Status: "failed", Summary: secret},
+		`{"summary":"`+secret+`"}`,
+		structured, errors.New("structured output failed: "+secret), errors.New("launch failed: "+secret))
+
+	if path == "" {
+		t.Fatal("expected run record path")
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read run record: %v", err)
+	}
+	if strings.Contains(string(payload), secret) {
+		t.Fatalf("run record contains private value: %s", payload)
+	}
+	runs, err := history.List(context.Background(), root, history.ListFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(runs) != 1 || strings.Contains(runs[0].Summary+" "+runs[0].RawStructuredInput+" "+runs[0].RawStructuredOutput+" "+runs[0].Error, secret) {
+		t.Fatalf("history contains private value: %#v", runs)
+	}
+}
+
 func TestLaunchUpdatesExistingHistoryHandle(t *testing.T) {
 	t.Parallel()
 

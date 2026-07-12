@@ -718,6 +718,11 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 	if launchErr != nil {
 		launchErrText = launchErr.Error()
 	}
+	privateValueList := privateValues(allocation.Git)
+	mask := func(value string) string { return secrets.MaskText(value, privateValueList...) }
+	rawStructuredOutput = mask(rawStructuredOutput)
+	errText = mask(errText)
+	launchErrText = mask(launchErrText)
 
 	createdAt := time.Now().UTC().Format(time.RFC3339)
 	record := runRecord{
@@ -745,6 +750,7 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 			if recordFile, err := os.CreateTemp(recordDir, runRecordFilePrefix+"*.json"); err == nil {
 				payload, marshalErr := json.MarshalIndent(record, "", "  ")
 				if marshalErr == nil {
+					payload = []byte(mask(string(payload)))
 					if _, writeErr := io.WriteString(recordFile, string(payload)); writeErr == nil {
 						recordPath = recordFile.Name()
 					}
@@ -757,7 +763,7 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 	_ = history.Update(context.Background(), historyHandle, history.Run{
 		CreatedAt:           createdAt,
 		Status:              launchResult.Status,
-		Summary:             launchResult.Summary,
+		Summary:             mask(launchResult.Summary),
 		Name:                in.Workplace.Name,
 		ProfileName:         fallbackHistoryValue(profile.Name),
 		Runner:              fallbackHistoryValue(in.Launch.Runner),
@@ -767,9 +773,9 @@ func persistExecutionRunRecord(historyHandle history.Handle, workplaceDir string
 		ResumeMessageSource: resumeMessageSource(in),
 		Model:               fallbackHistoryValue(in.Launch.Model),
 		LaunchDirectory:     in.Launch.Directory,
-		RawStructuredInput:  history.StructuredInputJSON(structuredInput),
+		RawStructuredInput:  mask(history.StructuredInputJSON(structuredInput)),
 		RawOutputPath:       launchResult.RawOutputPath,
-		RawStructuredOutput: history.StructuredOutputJSON(structuredOutput, rawStructuredOutput),
+		RawStructuredOutput: mask(history.StructuredOutputJSON(structuredOutput, rawStructuredOutput)),
 		RunRecordPath:       recordPath,
 		Error:               launchErrText,
 	})
@@ -929,7 +935,7 @@ func gitPushEnv(ctx context.Context, config *model.GitConfig, privateStore model
 		return nil, cleanup, nil
 	}
 	if err := resolvePrivateGitPushConfig(ctx, config, privateStore, configHome); err != nil {
-		return nil, cleanup, err
+		return nil, cleanup, maskPrivateError(err, privateValues(config))
 	}
 	identityFile := strings.TrimSpace(config.Push.SSHIdentityFile)
 	if identityFile == "" && strings.TrimSpace(config.Push.SSHIdentityPrivateValue) != "" {
@@ -941,7 +947,7 @@ func gitPushEnv(ctx context.Context, config *model.GitConfig, privateStore model
 		cleanup = func() { _ = os.Remove(path) }
 	}
 	if identityFile == "" && strings.TrimSpace(config.Push.SSHIdentityPrivate) != "" {
-		return nil, cleanup, fmt.Errorf("git.push.ssh-identity-private is configured but private value is unavailable")
+		return nil, cleanup, maskPrivateError(fmt.Errorf("git.push.ssh-identity-private is configured but private value is unavailable"), privateValues(config))
 	}
 	if identityFile == "" && (strings.TrimSpace(config.Push.KnownHostsFile) != "" || config.Push.IdentitiesOnly) {
 		return nil, cleanup, fmt.Errorf("git.push must define ssh-identity-file or ssh-identity-private when known-hosts-file or identities-only is set")
@@ -955,6 +961,20 @@ func gitPushEnv(ctx context.Context, config *model.GitConfig, privateStore model
 		parts = append(parts, "-o", "UserKnownHostsFile="+shellQuote(config.Push.KnownHostsFile))
 	}
 	return []string{"GIT_SSH_COMMAND=" + strings.Join(parts, " ")}, cleanup, nil
+}
+
+func privateValues(config *model.GitConfig) []string {
+	if config == nil || config.Push == nil {
+		return nil
+	}
+	if value := strings.TrimSpace(config.Push.SSHIdentityPrivateValue); value != "" {
+		return []string{value}
+	}
+	return nil
+}
+
+func maskPrivateError(err error, values []string) error {
+	return secrets.MaskError(err, values...)
 }
 
 func resolvePrivateGitPushConfig(ctx context.Context, config *model.GitConfig, privateStore model.ResourcePrivateStoreConfig, configHome string) error {
@@ -974,7 +994,7 @@ func resolvePrivateGitPushConfig(ctx context.Context, config *model.GitConfig, p
 		if errors.Is(err, secrets.ErrNotFound) {
 			return fmt.Errorf("git.push references missing private value %q", config.Push.SSHIdentityPrivate)
 		}
-		return fmt.Errorf("git.push cannot read private value %q: %w", config.Push.SSHIdentityPrivate, err)
+		return secrets.MaskError(fmt.Errorf("git.push cannot read private value %q: %w", config.Push.SSHIdentityPrivate, err), value)
 	}
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("git.push references empty private value %q", config.Push.SSHIdentityPrivate)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rasungatullin/progress/internal/configuration/secrets"
 	"github.com/rasungatullin/progress/internal/execution/history"
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
@@ -509,7 +510,7 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 	ctx = context.WithoutCancel(ctx)
 	errorText := ""
 	if launchErr != nil {
-		errorText = strings.TrimSpace(launchErr.Error())
+		errorText = maskExecutionPrivateText(strings.TrimSpace(launchErr.Error()), allocation)
 	}
 
 	runner := firstNonEmptyTrimmed(in.Launch.Runner, allocation.Runner)
@@ -528,18 +529,25 @@ func (s *Service) updateStartHistory(ctx context.Context, root string, handle hi
 	_ = history.Update(ctx, handle, history.Run{
 		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
 		Status:              result.Status,
-		Summary:             result.Summary,
+		Summary:             maskExecutionPrivateText(result.Summary, allocation),
 		Name:                in.Workplace.Name,
 		ProfileName:         fallbackExecutionHistoryValue(profileName),
 		Runner:              fallbackExecutionHistoryValue(runner),
 		Model:               fallbackExecutionHistoryValue(modelName),
 		LaunchDirectory:     fallbackLaunchDirectory(in, root),
-		RawStructuredInput:  history.StructuredInputJSON(in.Launch.StructuredInput),
+		RawStructuredInput:  maskExecutionPrivateText(history.StructuredInputJSON(in.Launch.StructuredInput), allocation),
 		RawOutputPath:       result.RawOutputPath,
-		RawStructuredOutput: history.StructuredOutputJSON(result.StructuredOutput, result.RawStructuredOutput),
+		RawStructuredOutput: maskExecutionPrivateText(history.StructuredOutputJSON(result.StructuredOutput, result.RawStructuredOutput), allocation),
 		RunRecordPath:       result.RunRecordPath,
 		Error:               errorText,
 	})
+}
+
+func maskExecutionPrivateText(text string, allocation allocation) string {
+	if allocation.Git == nil || allocation.Git.Push == nil {
+		return text
+	}
+	return secrets.MaskText(text, allocation.Git.Push.SSHIdentityPrivateValue)
 }
 
 func firstNonEmptyTrimmed(values ...string) string {

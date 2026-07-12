@@ -40,18 +40,25 @@ type Reader interface {
 
 const maskedValue = "[private value masked]"
 
+// MaskText удаляет фактические приватные значения из произвольного текста.
+// Функция используется на границах сохранения и диагностики, где исходная
+// ошибка уже может содержать значение, полученное из хранилища.
+func MaskText(text string, values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			text = strings.ReplaceAll(text, value, maskedValue)
+		}
+	}
+	return text
+}
+
 // MaskError удаляет фактические приватные значения из текста ошибки, сохраняя
 // исходную ошибку для проверки через errors.Is и errors.As.
 func MaskError(err error, values ...string) error {
 	if err == nil {
 		return nil
 	}
-	message := err.Error()
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			message = strings.ReplaceAll(message, value, maskedValue)
-		}
-	}
+	message := MaskText(err.Error(), values...)
 	if message == err.Error() {
 		return err
 	}

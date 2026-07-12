@@ -47,6 +47,14 @@ func TestFileStoreWritesReadsAndDeletesPrivateValues(t *testing.T) {
 	}
 }
 
+func TestMaskTextReplacesPrivateValues(t *testing.T) {
+	t.Parallel()
+
+	if got := MaskText("request failed: token=actual-token", "actual-token"); got != "request failed: token=[private value masked]" {
+		t.Fatalf("unexpected masked text: %q", got)
+	}
+}
+
 func TestMaskErrorHidesPrivateValuesAndPreservesCause(t *testing.T) {
 	t.Parallel()
 
