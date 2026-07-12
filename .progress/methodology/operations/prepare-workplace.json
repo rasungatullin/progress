@@ -2,7 +2,7 @@
   "name": "prepare-workplace",
   "kind": "prepare-workplace",
   "title": "Подготовка рабочего места",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {
@@ -62,6 +62,14 @@
         "type": "object",
         "required": true,
         "description": "Подготовленное рабочее место для последующих операций действия."
+      },
+      "base_ref": {
+        "type": "string",
+        "description": "Фактическая базовая ветка исполнительного рабочего места."
+      },
+      "head_ref": {
+        "type": "string",
+        "description": "Разрешённая ветка исполнительного рабочего места."
       }
     }
   }

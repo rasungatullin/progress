@@ -643,9 +643,7 @@ func cloneMethodologyAction(action methodology.Action) methodology.Action {
 	for index, operation := range action.Operations {
 		cloned.Operations[index] = methodology.ActionOperation{
 			Name:     operation.Name,
-			Kind:     operation.Kind,
 			Title:    operation.Title,
-			Origin:   operation.Origin,
 			In:       cloneMethodologyActionMapping(operation.In),
 			Out:      cloneMethodologyActionMapping(operation.Out),
 			Required: operation.Required,

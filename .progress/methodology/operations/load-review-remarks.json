@@ -2,7 +2,7 @@
   "name": "load-review-remarks",
   "kind": "load-review-remarks",
   "title": "Получение замечаний ревизии",
-  "origin": "builtin",
+  "type": "builtin",
   "contract": {
     "in": {
       "repository": {

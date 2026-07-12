@@ -107,7 +107,7 @@ func TestMethodologyCLIUpdateActionPreservesConfiguredFields(t *testing.T) {
 			"aliases": ["implement"],
 			"requires_workplace": true,
 			"operations": [
-				{"name": "prepare-data", "kind": "prepare-data", "title": "Подготовка данных", "origin": "builtin", "required": true}
+				{"name": "prepare-data", "kind": "prepare-data", "title": "Подготовка данных", "type":"builtin", "required": true}
 			],
 			"description": "Старое описание."
 		}]

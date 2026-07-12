@@ -2,7 +2,7 @@
   "name": "allocate-resources",
   "kind": "allocate-resources",
   "title": "Ресурсное снабжение",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

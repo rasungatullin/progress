@@ -2,7 +2,7 @@
   "name": "commit-push",
   "kind": "commit-push",
   "title": "Создание коммита и отправка ветки",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

@@ -59,6 +59,14 @@
         "type": "object",
         "description": "Подготовленная спецификация рабочего места с синхронизированными ветками."
       },
+      "head_ref": {
+        "type": "string",
+        "description": "Разрешённая ветка исполнительного рабочего места."
+      },
+      "base_ref": {
+        "type": "string",
+        "description": "Фактическая базовая ветка исполнительного рабочего места."
+      },
       "allocation": {
         "type": "object",
         "description": "Результат ресурсного снабжения для последующих операций действия."
@@ -82,18 +90,6 @@
       "publish_summary": {
         "type": "string",
         "description": "Сводка публикации запроса на слияние."
-      },
-      "prompt": {
-        "type": "string",
-        "description": "Готовая исполнительная директива."
-      },
-      "raw_output": {
-        "type": "string",
-        "description": "Фактический вывод исполнительного модуля."
-      },
-      "session_id": {
-        "type": "string",
-        "description": "Идентификатор сеанса исполнительного модуля."
       }
     }
   },
@@ -118,7 +114,7 @@
       "name": "allocate-resources",
       "in": {
         "model_binding": {
-          "ref": "in.model_binding"
+          "ref": "data.profile.model_binding"
         },
         "allow_model_fallback": {
           "ref": "data.profile.allow_model_fallback"
@@ -188,11 +184,17 @@
       "out": {
         "workplace": {
           "ref": "data.workplace"
+        },
+        "base_ref": {
+          "ref": "data.base_ref"
+        },
+        "head_ref": {
+          "ref": "data.head_ref"
         }
       }
     },
     {
-      "name": "build-prompt",
+      "name": "structured-synthesis",
       "in": {
         "prompt": {
           "ref": "in.launch.prompt"
@@ -200,30 +202,11 @@
         "prompt_additions": {
           "ref": "data.profile.prompt_additions"
         },
-        "structured_output": {
-          "ref": "data.profile.structured_output"
-        },
-        "structured_output_required": {
-          "ref": "data.profile.structured_output_required"
+        "structured_input": {
+          "ref": "in.structured_input"
         },
         "structured_output_fields": {
           "ref": "data.profile.structured_output_fields"
-        },
-        "structured_input": {
-          "ref": "in.structured_input"
-        }
-      },
-      "out": {
-        "prompt": {
-          "ref": "data.prompt"
-        }
-      }
-    },
-    {
-      "name": "launch-synthesis",
-      "in": {
-        "prompt": {
-          "ref": "data.prompt"
         },
         "directory": {
           "ref": "data.workplace.name"
@@ -239,30 +222,11 @@
         }
       },
       "out": {
-        "raw_output": {
-          "ref": "data.raw_output"
-        },
-        "session_id": {
-          "ref": "data.session_id"
-        }
-      }
-    },
-    {
-      "name": "parse-result",
-      "in": {
-        "raw_output": {
-          "ref": "data.raw_output"
-        },
-        "session_id": {
-          "ref": "data.session_id"
-        }
-      },
-      "out": {
-        "structured_output": {
-          "ref": "data.structured_output"
-        },
         "result": {
           "ref": "data.result"
+        },
+        "structured_output": {
+          "ref": "data.structured_output"
         }
       }
     },
@@ -307,10 +271,10 @@
           "ref": "data.structured_output.summary"
         },
         "base_ref": {
-          "ref": "in.base_ref"
+          "ref": "data.base_ref"
         },
         "head_ref": {
-          "ref": "in.head_ref"
+          "ref": "data.head_ref"
         },
         "draft": {
           "ref": "data.pull_request.draft"

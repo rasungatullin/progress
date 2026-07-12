@@ -48,7 +48,7 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 			return model.Workplace{}, fmt.Errorf("local environment cannot use repository url: %s", in.Repository.URL)
 		}
 
-		return model.Workplace{Name: in.Launch.Directory, Environment: environment, EnvironmentType: environmentType, Ready: true}, nil
+		return model.Workplace{Name: in.Launch.Directory, BaseRef: in.Workplace.BaseRef, HeadRef: in.Workplace.HeadRef, Environment: environment, EnvironmentType: environmentType, Ready: true}, nil
 	}
 
 	if environmentType == "" {
@@ -68,7 +68,7 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 		if err != nil {
 			return model.Workplace{}, err
 		}
-		return model.Workplace{Name: hostRepoRoot, Environment: environment, EnvironmentType: environmentType, RepositoryRoot: hostRepoRoot, Ready: true}, nil
+		return model.Workplace{Name: hostRepoRoot, BaseRef: in.Workplace.BaseRef, HeadRef: in.Workplace.HeadRef, Environment: environment, EnvironmentType: environmentType, RepositoryRoot: hostRepoRoot, Ready: true}, nil
 	}
 	if environmentType != configuration.EnvironmentTypeWorktree {
 		return model.Workplace{}, fmt.Errorf("execution environment is unsupported by workplace preparation: %s", environment)
@@ -135,7 +135,7 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 			return model.Workplace{}, err
 		}
 
-		return model.Workplace{Name: targetDir, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
+		return model.Workplace{Name: targetDir, BaseRef: baseBranch, HeadRef: branchName, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
 	} else if !os.IsNotExist(err) {
 		return model.Workplace{}, fmt.Errorf("check workplace directory: %w", err)
 	}
@@ -163,7 +163,7 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 		return model.Workplace{}, fmt.Errorf("create git worktree %q: %w", branchName, err)
 	}
 
-	return model.Workplace{Name: targetDir, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
+	return model.Workplace{Name: targetDir, BaseRef: baseBranch, HeadRef: branchName, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
 }
 
 func (s *Service) localBranchExists(ctx context.Context, dir string, name string) bool {

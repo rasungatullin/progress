@@ -2,7 +2,7 @@
   "name": "launch-synthesis",
   "kind": "launch-synthesis",
   "title": "Запуск синтеза",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

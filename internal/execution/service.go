@@ -34,6 +34,7 @@ type Action = model.Action
 type ActionClass = model.ActionClass
 type OperationKind = model.OperationKind
 type OperationSpec = model.OperationSpec
+type OperationType = model.OperationType
 type OperationStatus = model.OperationStatus
 type OperationResult = model.OperationResult
 type Artifact = model.Artifact
@@ -138,8 +139,8 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 		err := fmt.Errorf("operation %q is not part of action %q", operationName, action.Name)
 		result := OperationResult{
 			Name:   operationName,
+			Type:   model.OperationType(OperationTypeBuiltin),
 			Kind:   model.OperationKind(operationName),
-			Origin: OperationOriginBuiltin,
 			Status: model.OperationStatus(OperationStatusFailed),
 			Failure: &model.Failure{
 				Code:               "operation_not_in_action",
@@ -163,6 +164,7 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 		historyRoot:   historyRoot,
 		historyHandle: historyHandle,
 		tracker:       newOperationTracker(action),
+		callStack:     []string{action.Name},
 	}
 	executor := builtinOperationExecutor{service: s}
 	for _, operation := range action.Operations {
@@ -188,8 +190,8 @@ func (s *Service) ExecuteOperation(ctx context.Context, request OperationInvocat
 	err = fmt.Errorf("operation %q did not produce result", operationName)
 	result := OperationResult{
 		Name:   operationName,
+		Type:   model.OperationType(OperationTypeBuiltin),
 		Kind:   model.OperationKind(operationName),
-		Origin: OperationOriginBuiltin,
 		Status: model.OperationStatus(OperationStatusFailed),
 		Failure: &model.Failure{
 			Code:               "operation_result_missing",
@@ -234,6 +236,7 @@ func (s *Service) execute(ctx context.Context, in invocation) (ExecutionResult, 
 		historyRoot:   historyRoot,
 		historyHandle: historyHandle,
 		tracker:       newOperationTracker(action),
+		callStack:     []string{action.Name},
 	}
 	err = s.runActionOperations(ctx, state)
 	data := executionDataFromState(state)

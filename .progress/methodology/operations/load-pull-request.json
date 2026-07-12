@@ -2,7 +2,7 @@
   "name": "load-pull-request",
   "kind": "load-pull-request",
   "title": "Получение запроса на слияние",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

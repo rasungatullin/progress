@@ -1,0 +1,73 @@
+{
+  "name": "structured-synthesis",
+  "class": "engineering-synthesis",
+  "requires_workplace": false,
+  "contract": {
+    "in": {
+      "prompt": {"type": "string", "description": "Исходная исполнительная директива."},
+      "prompt_additions": {"type": "string_array", "description": "Дополнения исполнительной директивы."},
+      "structured_input": {"type": "object", "required": true, "description": "Структурированный ввод синтеза."},
+      "structured_output_fields": {"type": "string_array", "required": true, "description": "Поля структурированного вывода."},
+      "review_remarks": {"type": "object_array", "description": "Канонические замечания ревизии."},
+      "directory": {"type": "string", "required": true, "description": "Рабочий каталог исполнительного модуля."},
+      "runner": {"type": "string", "required": true, "description": "Исполнительный модуль."},
+      "model": {"type": "string", "required": true, "description": "Модель выполнения."},
+      "resume_session_id": {"type": "string", "description": "Идентификатор возобновляемого сеанса."}
+    },
+    "data": {
+      "prompt": {"type": "string", "description": "Готовая исполнительная директива."},
+      "raw_output": {"type": "string", "description": "Фактический вывод исполнительного модуля."},
+      "session_id": {"type": "string", "description": "Идентификатор сеанса исполнительного модуля."},
+      "result": {"type": "object", "description": "Нормализованный результат выполнения."},
+      "structured_output": {"type": "object", "description": "Структурированный вывод синтеза."}
+    },
+    "out": {
+      "result": {"type": "object", "required": true, "description": "Нормализованный результат выполнения."},
+      "structured_output": {"type": "object", "required": true, "description": "Структурированный вывод синтеза."}
+    }
+  },
+  "operations": [
+    {
+      "name": "build-prompt",
+      "in": {
+        "prompt": {"ref": "in.prompt"},
+        "prompt_additions": {"ref": "in.prompt_additions"},
+        "structured_output": {"value": true},
+        "structured_output_required": {"value": true},
+        "structured_output_fields": {"ref": "in.structured_output_fields"},
+        "structured_input": {"ref": "in.structured_input"},
+        "review_remarks": {"ref": "in.review_remarks"}
+      },
+      "out": {
+        "prompt": {"ref": "data.prompt"}
+      }
+    },
+    {
+      "name": "launch-synthesis",
+      "in": {
+        "prompt": {"ref": "data.prompt"},
+        "directory": {"ref": "in.directory"},
+        "runner": {"ref": "in.runner"},
+        "model": {"ref": "in.model"},
+        "resume_session_id": {"ref": "in.resume_session_id"}
+      },
+      "out": {
+        "raw_output": {"ref": "data.raw_output"},
+        "session_id": {"ref": "data.session_id"}
+      }
+    },
+    {
+      "name": "parse-result",
+      "in": {
+        "raw_output": {"ref": "data.raw_output"},
+        "session_id": {"ref": "data.session_id"}
+      },
+      "out": {
+        "result": {"ref": "data.result"},
+        "structured_output": {"ref": "data.structured_output"}
+      }
+    }
+  ],
+  "description": "Выполняет структурированный синтез в заранее подготовленном окружении исполнения.",
+  "expected_result": "Получить нормализованный результат и структурированный вывод синтеза."
+}

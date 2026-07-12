@@ -20,7 +20,7 @@ func TestServiceSelectsRouteActionAndInstruction(t *testing.T) {
 			Name:       "engineering-synthesis",
 			Class:      "engineering-synthesis",
 			Profile:    "default",
-			Operations: []ActionOperation{{Name: "prepare-data", Kind: "prepare-data"}, {Name: "launch-synthesis", Kind: "launch-synthesis"}},
+			Operations: []ActionOperation{{Name: "prepare-data"}, {Name: "launch-synthesis"}},
 		}},
 		Instructions: []Instruction{{
 			Name:    "default-directive",

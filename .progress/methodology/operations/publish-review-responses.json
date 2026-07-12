@@ -2,7 +2,7 @@
   "name": "publish-review-responses",
   "kind": "publish-review-responses",
   "title": "Запись ответов на замечания",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

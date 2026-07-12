@@ -2,7 +2,7 @@
   "name": "build-prompt",
   "kind": "build-prompt",
   "title": "Сборка исполнительной директивы",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

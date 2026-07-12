@@ -2,7 +2,7 @@
   "name": "resolve-profile",
   "kind": "resolve-profile",
   "title": "Выбор исполнительного профиля",
-  "origin": "builtin",
+  "type": "builtin",
   "required": true,
   "contract": {
     "in": {

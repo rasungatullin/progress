@@ -92,18 +92,17 @@
 
 Контур исполнения получает от внешнего инициатора только имя действия в `ExecutionAssignment.Action`. Само разрешение имени выполняется через объединённый каталог методик из глобального и локального слоёв до запуска операций и не входит в `Action.Operations`.
 
-Для действия инженерного синтеза типовой порядок в поставляемом каталоге методик включает:
+Для `start-implementation-pr` порядок в поставляемом каталоге методик включает:
 
-1. `prepare-data`;
-2. `resolve-profile`;
-3. `allocate-resources`;
-4. `prepare-workplace`;
-5. `build-directive`;
-6. `launch-synthesis`;
-7. `parse-result`;
-8. `finalize`.
+1. `resolve-profile`;
+2. `allocate-resources`;
+3. `prepare-workplace`;
+4. `structured-synthesis`;
+5. `commit-push`;
+6. `publish-merge-request`;
+7. `finalize`.
 
-Эти имена можно использовать для диагностического вызова `progress execution operation <operation>`, но сами стадии не становятся отдельными CLI-командами.
+Операция `structured-synthesis` имеет тип `action` и скрывает действие с операциями `build-prompt`, `launch-synthesis` и `parse-result`. Вложенное действие получает только явно связанные входы и возвращает нормализованный результат и структурированный вывод. Имена операций верхнего действия можно использовать для диагностического вызова `progress execution operation <operation>`, но сами стадии не становятся отдельными CLI-командами.
 
 Поставляемый каталог методик содержит действия ручного инженерного цикла:
 
@@ -111,7 +110,7 @@
 - `review-pull-request` - проверить открытый запрос на слияние и записать замечания ревизии;
 - `apply-review-comments` - получить замечания ревизии, исправить их, отправить ветку и записать ответы на замечания.
 
-Состав этих действий также задан в каталоге методик. Действие `start-implementation-pr` включает операции `commit-push` и `publish-merge-request`, действие `review-pull-request` включает операции `load-pull-request`, `load-review-remarks` и `publish-review-remarks`, действие `apply-review-comments` включает операции `load-pull-request`, `load-review-remarks`, `commit-push` и `publish-review-responses`.
+Состав этих действий также задан в каталоге методик. Действие `start-implementation-pr` использует переиспользуемую операцию `structured-synthesis`, а затем выполняет `commit-push` и `publish-merge-request`. Действие `review-pull-request` включает операции `load-pull-request`, `load-review-remarks` и `publish-review-remarks`, действие `apply-review-comments` включает операции `load-pull-request`, `load-review-remarks`, `commit-push` и `publish-review-responses`.
 
 ## 6. Выходной формат
 

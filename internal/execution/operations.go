@@ -16,6 +16,7 @@ import (
 
 type operationExecution struct {
 	in            invocation
+	inputs        map[string]any
 	assignment    *ExecutionAssignment
 	action        Action
 	data          map[string]any
@@ -28,6 +29,7 @@ type operationExecution struct {
 	historyRoot   string
 	historyHandle history.Handle
 	tracker       *operationTracker
+	callStack     []string
 }
 
 type builtinOperationExecutor struct {
@@ -64,9 +66,86 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 		e.service.recordOperationHistory(ctx, state, operation, err)
 		return err
 	}
-	err := e.execute(ctx, state, operation)
+	var err error
+	switch string(operation.Type) {
+	case "", OperationTypeBuiltin:
+		err = e.execute(ctx, state, operation)
+	case OperationTypeAction:
+		err = e.executeAction(ctx, state, operation)
+	default:
+		err = fmt.Errorf("operation %q has unsupported type %q", operationResultName(operation), operation.Type)
+		state.tracker.fail(operationResultName(operation), "Тип обработчика операции не поддержан.", err, "operation_type_unsupported", false, true)
+	}
 	e.service.recordOperationHistory(ctx, state, operation, err)
 	return err
+}
+
+const maxActionOperationDepth = 16
+
+func (e builtinOperationExecutor) executeAction(ctx context.Context, state *operationExecution, operation OperationSpec) error {
+	name := operationResultName(operation)
+	actionName := strings.TrimSpace(string(operation.Kind))
+	if len(state.callStack) >= maxActionOperationDepth {
+		err := fmt.Errorf("action operation depth exceeds %d", maxActionOperationDepth)
+		state.tracker.fail(name, "Превышена допустимая глубина вызова действий.", err, "action_operation_depth_exceeded", false, true)
+		return err
+	}
+	for _, current := range state.callStack {
+		if current == actionName {
+			err := fmt.Errorf("action operation cycle: %s", strings.Join(append(append([]string(nil), state.callStack...), actionName), " -> "))
+			state.tracker.fail(name, "Обнаружен циклический вызов действия.", err, "action_operation_cycle", false, true)
+			return err
+		}
+	}
+
+	inputs := make(map[string]any, len(operation.In))
+	for field, mapping := range operation.In {
+		value, ok := operationMappingRawValue(state, mapping)
+		if ok {
+			inputs[field] = value
+		}
+	}
+	childInvocation := invocation{Action: actionName, Assignment: &ExecutionAssignment{Action: actionName}}
+	childAction, err := e.service.resolveAction(ctx, childInvocation)
+	if err != nil {
+		state.tracker.fail(name, "Действие-обработчик операции не разрешено.", err, "action_operation_not_resolved", false, true)
+		return err
+	}
+	childState := &operationExecution{
+		in:            childInvocation,
+		inputs:        inputs,
+		assignment:    childInvocation.Assignment,
+		action:        childAction,
+		data:          map[string]any{},
+		historyRoot:   state.historyRoot,
+		historyHandle: state.historyHandle,
+		tracker:       newOperationTracker(childAction),
+		callStack:     append(append([]string(nil), state.callStack...), actionName),
+	}
+	err = e.service.runActionOperations(ctx, childState)
+	children := childState.tracker.snapshot()
+	state.tracker.setOperations(name, children)
+	if err != nil {
+		state.tracker.fail(name, "Действие-обработчик операции завершилось с отказом.", err, "action_operation_failed", false, true)
+		state.tracker.setOperations(name, children)
+		return err
+	}
+	for _, field := range childAction.RequiredOut {
+		if _, ok := childState.data[field]; !ok {
+			err := fmt.Errorf("action %q required output %q is not resolved", childAction.Name, field)
+			state.tracker.fail(name, "Обязательный выход действия-обработчика не сформирован.", err, "action_required_output_missing", false, true)
+			state.tracker.setOperations(name, children)
+			return err
+		}
+	}
+	for _, field := range childAction.OutputFields {
+		if value, ok := childState.data[field]; ok {
+			writeOperationData(state, operation.Out, field, value)
+		}
+	}
+	state.tracker.completeIO(name, operationIOSummary(operation.In, nil), operationIOSummary(operation.Out, nil), fmt.Sprintf("Действие %q выполнено.", childAction.Name))
+	state.tracker.setOperations(name, children)
+	return nil
 }
 
 func validateRequiredOperationInput(state *operationExecution, operation OperationSpec) error {
@@ -136,10 +215,24 @@ func operationMappingRawValue(state *operationExecution, mapping model.Operation
 		}
 		return reflectedPathValue(reflect.ValueOf(value), parts[2:])
 	case "in":
+		if value, ok := operationInputValue(state.inputs, parts[1:]); ok {
+			return value, true
+		}
 		return invocationInputValue(state.in, parts[1:])
 	default:
 		return nil, false
 	}
+}
+
+func operationInputValue(inputs map[string]any, path []string) (any, bool) {
+	if len(path) == 0 || inputs == nil {
+		return nil, false
+	}
+	value, ok := inputs[path[0]]
+	if !ok {
+		return nil, false
+	}
+	return reflectedPathValue(reflect.ValueOf(value), path[1:])
 }
 
 func invocationInputValue(in invocation, path []string) (any, bool) {
@@ -1053,7 +1146,7 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 	}
 	if !input.requiresWorkplace {
 		workplace := workplace{Name: strings.TrimSpace(input.invocation.Launch.Directory), Ready: true}
-		writePrepareWorkplaceData(state, operation, workplace, input.invocation)
+		writePrepareWorkplaceData(state, operation, workplace, input.invocation, input.resolvedBaseRef(), input.resolvedHeadRef())
 		state.tracker.skipIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), "Рабочее место не требуется для разрешённого действия.")
 		return nil
 	}
@@ -1068,12 +1161,12 @@ func (e builtinOperationExecutor) prepareWorkplace(ctx context.Context, state *o
 	if strings.TrimSpace(preparedInvocation.Launch.Directory) == "" {
 		preparedInvocation.Launch.Directory = workplace.Name
 	}
-	writePrepareWorkplaceData(state, operation, workplace, preparedInvocation)
+	writePrepareWorkplaceData(state, operation, workplace, preparedInvocation, firstNonEmptyTrimmed(workplace.BaseRef, input.resolvedBaseRef()), firstNonEmptyTrimmed(workplace.HeadRef, input.resolvedHeadRef()))
 	state.tracker.completeIO(name, prepareWorkplaceInputSummary(input, operation), prepareWorkplaceOutputSummary(workplace, operation), fmt.Sprintf("workplace=%s ready=%t", workplace.Name, workplace.Ready))
 	return nil
 }
 
-func writePrepareWorkplaceData(state *operationExecution, operation OperationSpec, workplace workplace, in invocation) {
+func writePrepareWorkplaceData(state *operationExecution, operation OperationSpec, workplace workplace, in invocation, baseRef string, headRef string) {
 	out := operation.Out
 	if len(out) == 0 {
 		out = model.OperationMap{
@@ -1083,6 +1176,8 @@ func writePrepareWorkplaceData(state *operationExecution, operation OperationSpe
 	}
 	writeOperationData(state, out, "workplace", workplace)
 	writeOperationData(state, out, "invocation", in)
+	writeOperationData(state, out, "base_ref", strings.TrimSpace(baseRef))
+	writeOperationData(state, out, "head_ref", strings.TrimSpace(headRef))
 }
 
 type prepareWorkplaceInput struct {
@@ -1101,6 +1196,14 @@ type prepareWorkplaceInput struct {
 	actionName               string
 	allocatedEnvironment     string
 	allocatedEnvironmentType string
+}
+
+func (input prepareWorkplaceInput) resolvedHeadRef() string {
+	return firstNonEmptyTrimmed(input.headRef, input.pullRequestHeadRef, input.workplaceName)
+}
+
+func (input prepareWorkplaceInput) resolvedBaseRef() string {
+	return firstNonEmptyTrimmed(input.baseRef, input.pullRequestBaseRef)
 }
 
 func (input prepareWorkplaceInput) resolvedInvocation() invocation {
