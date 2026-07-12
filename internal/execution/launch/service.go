@@ -1794,7 +1794,7 @@ func selectedStructuredObjectForms(fields []string) []string {
 		form  string
 	}{
 		{field: "remarks", form: "remarks[{id,external_id,thread_id,status,severity,type,title,body,path,line,side,answer,resolution}]"},
-		{field: "review_responses", form: "review_responses[{id,remark_id,thread_id,status,summary,body}]"},
+		{field: "review_responses", form: "review_responses[{id,remark_id,thread_id,type,status,summary,body}]"},
 		{field: "questions", form: "questions[{id,status,title,body,answer}]"},
 		{field: "follow_up_actions", form: "follow_up_actions[{id,status,type,title,body}]"},
 		{field: "changes", form: "changes[{summary}]"},
@@ -1838,7 +1838,7 @@ func buildStructuredOutputCanonicalExample(fields []string) string {
 		case "remarks":
 			parts = append(parts, `,"remarks":[{"id":"remark-1","title":"Rollback plan","path":"internal/service.go","line":42,"side":"RIGHT"}]`)
 		case "review_responses":
-			parts = append(parts, `,"review_responses":[{"remark_id":"remark-1","thread_id":"thread-1","status":"resolved","summary":"Fixed"}]`)
+			parts = append(parts, `,"review_responses":[{"remark_id":"remark-1","thread_id":"thread-1","type":"inline","status":"resolved","summary":"Fixed"}]`)
 		case "questions":
 			parts = append(parts, `,"questions":[{"id":"question-1","title":"Need extra test?"}]`)
 		case "follow_up_actions":

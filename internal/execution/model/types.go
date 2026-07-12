@@ -76,6 +76,7 @@ type StructuredResponse struct {
 	ID       string `json:"id,omitempty"`
 	RemarkID string `json:"remark_id,omitempty"`
 	ThreadID string `json:"thread_id,omitempty"`
+	Type     string `json:"type,omitempty"`
 	Status   string `json:"status,omitempty"`
 	Summary  string `json:"summary,omitempty"`
 	Body     string `json:"body,omitempty"`

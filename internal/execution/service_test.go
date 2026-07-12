@@ -2149,6 +2149,365 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestPublishReviewResponsesSupportsCommentAndInlineRemarks(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+				{RemarkID: "remark-3", Type: "comment", Status: "fixed", Summary: "Ответ на общий комментарий."},
+				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
+				{RemarkID: "remark-2", Type: "inline", ThreadID: "thread-2", Status: "resolved", Summary: "Исправлено."},
+				{RemarkID: "local-1", Type: "local", Status: "fixed", Summary: "Локальная заметка."},
+			}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	err := builtinOperationExecutor{service: service}.publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses)
+	if err != nil {
+		t.Fatalf("publish review responses: %v", err)
+	}
+	if got := state.data["review_responses_summary"]; got != "review-responses-published=3 review-threads-resolved=2 review-responses-skipped=1" {
+		t.Fatalf("unexpected summary: %#v", got)
+	}
+	if len(calls) != 5 {
+		t.Fatalf("expected one comment, two replies and two resolutions, got %#v", calls)
+	}
+	if calls[0].Operation != "create" || calls[0].ThreadID != "" {
+		t.Fatalf("ordinary comment must use explicit create policy: %#v", calls[0])
+	}
+	if calls[1].Operation != "reply" || calls[1].ThreadID != "thread-1" || calls[2].Operation != "reply" || calls[2].ThreadID != "thread-2" {
+		t.Fatalf("inline responses must target their threads: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesRestoresKindFromCanonicalRemark(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{
+				ExternalID: "remark-3",
+				Type:       "comment",
+			}},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
+				RemarkID: "remark-3",
+				Status:   "fixed",
+				Summary:  "Ответ на общий комментарий.",
+			}}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
+		t.Fatalf("publish review responses: %v", err)
+	}
+	if len(calls) != 1 || calls[0].Operation != "create" || calls[0].ThreadID != "" {
+		t.Fatalf("canonical comment kind must select explicit create policy: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesCommentIgnoresThreadID(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
+				RemarkID: "remark-3",
+				Type:     "comment",
+				ThreadID: "stale-thread-id",
+				Status:   "fixed",
+				Summary:  "Ответ на общий комментарий.",
+			}}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
+		t.Fatalf("publish review responses: %v", err)
+	}
+	if len(calls) != 1 || calls[0].Operation != "create" || calls[0].ThreadID != "" || calls[0].ExternalID != "" {
+		t.Fatalf("comment response must use create regardless of thread_id: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesRestoresKindFromRemarkShape(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{
+				{ExternalID: "inline-remark", ReplyToID: "inline-thread"},
+				{ExternalID: "comment-remark", URL: "https://example.test/comment"},
+			},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+				{RemarkID: "inline-remark", Status: "resolved", Summary: "Исправлено."},
+				{RemarkID: "comment-remark", Status: "fixed", Summary: "Ответ дан."},
+			}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
+		t.Fatalf("publish review responses: %v", err)
+	}
+	if len(calls) != 3 || calls[0].Operation != "reply" || calls[0].ThreadID != "inline-thread" || calls[1].Operation != "create" || calls[1].ThreadID != "" || calls[2].Operation != "resolve" {
+		t.Fatalf("response kind must follow canonical remark shape: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesKeepsExplicitThreadKindWhenRemarkKindIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{
+				ExternalID: "legacy-remark",
+			}},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
+				RemarkID: "legacy-remark",
+				ThreadID: "thread-1",
+				Status:   "resolved",
+				Summary:  "Исправлено.",
+			}}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
+		t.Fatalf("publish review responses: %v", err)
+	}
+	if len(calls) != 2 || calls[0].Operation != "reply" || calls[0].ThreadID != "thread-1" || calls[1].Operation != "resolve" {
+		t.Fatalf("explicit thread_id must preserve inline response policy: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesRejectsUnclassifiedResponseWithoutExternalPublication(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+				{RemarkID: "local-1", Status: "fixed", Summary: "Локальная заметка."},
+				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
+			}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
+		t.Fatalf("unclassified response must produce a partial failure")
+	}
+	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+		t.Fatalf("unclassified response must not be published externally: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesRejectsResponseWithoutRemarkKind(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+				{RemarkID: "local-1", Status: "fixed", Summary: "Не публиковать без вида замечания."},
+				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
+			}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
+		t.Fatalf("response without canonical remark kind must produce a partial failure")
+	}
+	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+		t.Fatalf("unclassified response must not be published externally: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesDoesNotUseRemarkCategoryAsResponseKind(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{
+				ExternalID: "remark-3",
+				Type:       "comment",
+			}},
+			"structured_output": &model.StructuredOutput{Remarks: []model.StructuredRemark{{
+				ID:         "remark-3",
+				Type:       "correctness",
+				Status:     "resolved",
+				Answer:     "Ответ на общий комментарий.",
+				Resolution: "Исправлено.",
+			}}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
+		t.Fatalf("publish review responses: %v", err)
+	}
+	if len(calls) != 1 || calls[0].Operation != "create" || calls[0].ThreadID != "" {
+		t.Fatalf("canonical comment kind must override remark category: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesKeepsPartialDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+				{RemarkID: "remark-3", Type: "comment", Status: "fixed", Summary: "Ответ."},
+				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
+			}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		if req.Operation == "create" {
+			return integration.Response{}, errors.New("обычный комментарий недоступен")
+		}
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	err := builtinOperationExecutor{service: service}.publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses)
+	if err == nil || len(calls) != 3 {
+		t.Fatalf("partial publication must continue after one failure: err=%v calls=%#v", err, calls)
+	}
+	dataResult, ok := state.data["result"].(model.LaunchResult)
+	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "review-responses-published=1") || !strings.Contains(dataResult.Summary, "обычный комментарий недоступен") {
+		t.Fatalf("partial publication must preserve diagnostics and successful count: %#v", state.data)
+	}
+}
+
+func TestPublishReviewResponsesDoesNotResolveUnpublishedInlineResponse(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
+				RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено.",
+			}}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{}, errors.New("ответ не опубликован")
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
+		t.Fatalf("publish review responses must fail")
+	}
+	if len(calls) != 1 || calls[0].Operation != "reply" {
+		t.Fatalf("failed inline response must not trigger thread resolution: %#v", calls)
+	}
+}
+
+func TestPublishReviewResponsesRejectsUnknownTypeWithoutExternalPublication(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+				{RemarkID: "unknown-1", Type: "unexpected", Status: "fixed", Summary: "Не публиковать."},
+				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
+			}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil {
+		t.Fatalf("unknown response type must fail")
+	}
+	if len(calls) != 2 || calls[0].Operation != "reply" || calls[1].Operation != "resolve" {
+		t.Fatalf("unknown response type must not be published externally: %#v", calls)
+	}
+}
+
 func TestPublishReviewResponsesFailureFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
@@ -2203,7 +2562,7 @@ func TestPublishReviewResponsesFailureFillsOnlyActionData(t *testing.T) {
 		t.Fatalf("publish-review-responses failure must not write implicit state review remarks: %#v", state.reviewRemarks)
 	}
 	result := findOperationResult(state.tracker.snapshot(), OperationKindPublishReviewResponses)
-	if result == nil || result.Status != OperationStatusFailed || result.Failure == nil || result.Failure.Code != "review_responses_publish_failed" {
+	if result == nil || result.Status != OperationStatusFailed || result.Failure == nil || result.Failure.Code != "review_responses_partial_failure" {
 		t.Fatalf("publish-review-responses failure must keep diagnostics: %#v", result)
 	}
 }
@@ -4403,6 +4762,7 @@ func publishReviewResponsesActionOperation() methodology.ActionOperation {
 			"workplace":         mappingRef("data.workplace"),
 			"result":            mappingRef("data.result"),
 			"structured_output": mappingRef("data.structured_output"),
+			"review_remarks":    mappingRef("data.review_remarks"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"review_responses_summary": mappingRef("data.review_responses_summary"),
@@ -4667,6 +5027,7 @@ func publishReviewResponsesOperationSpec() model.OperationSpec {
 			"workplace":         {Ref: "data.workplace"},
 			"result":            {Ref: "data.result"},
 			"structured_output": {Ref: "data.structured_output"},
+			"review_remarks":    {Ref: "data.review_remarks"},
 		},
 		Out: model.OperationMap{
 			"review_responses_summary": {Ref: "data.review_responses_summary"},

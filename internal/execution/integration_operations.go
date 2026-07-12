@@ -623,30 +623,28 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Номер запроса на слияние не задан.", fmt.Errorf("pull request number is required"), "pull_request_number_required")
 	}
 
-	responses := reviewResponsesFromOutput(input.structuredOutput)
+	responses := reviewResponsesFromOutput(input.structuredOutput, input.reviewRemarks)
 	if len(responses) == 0 {
 		writePublishReviewResponsesData(state, operation, "", input.result)
 		state.tracker.skipIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary("", input.result, operation), "Структурированный вывод не содержит ответов на замечания.")
 		return nil
 	}
 
-	if err := validateReviewResponseThreadIDs(responses); err != nil {
-		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы не содержат идентификаторы цепочек обсуждения.", err, "review_response_thread_required")
-	}
-
-	count, err := e.publishReviewResponseComments(ctx, ref, responses)
-	if err != nil {
-		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не записаны.", err, "review_responses_publish_failed")
-	}
-
-	resolved, err := e.resolveReviewThreads(ctx, responses)
-	if err != nil {
-		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы записаны, но часть цепочек обсуждения не закрыта.", err, "review_thread_resolve_failed")
-	}
-
+	count, publishedResponses, publishFailures := e.publishReviewResponseComments(ctx, ref, responses)
+	resolved, resolveFailures := e.resolveReviewThreads(ctx, publishedResponses)
 	summary := fmt.Sprintf("review-responses-published=%d review-threads-resolved=%d", count, resolved)
+	if skipped := reviewResponseCountByType(responses, "local"); skipped > 0 {
+		summary += fmt.Sprintf(" review-responses-skipped=%d", skipped)
+	}
 	result := input.result
 	result.Summary = joinExecutionSummaries(result.Summary, summary)
+	if err := errors.Join(publishFailures, resolveFailures); err != nil {
+		result.Status = "failed"
+		result.Summary = joinExecutionSummaries(result.Summary, err.Error())
+		writePublishReviewResponsesFailureData(state, operation, result)
+		state.tracker.fail(name, "Ответы обработаны частично.", err, "review_responses_partial_failure", true, true)
+		return err
+	}
 	writePublishReviewResponsesData(state, operation, summary, result)
 	state.tracker.completeIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary(summary, result, operation), "Ответы на замечания записаны через контур интеграции.")
 	return nil
@@ -703,6 +701,7 @@ type publishReviewResponsesInput struct {
 	workplace        workplace
 	result           LaunchResult
 	structuredOutput *StructuredOutput
+	reviewRemarks    []integration.ReviewRemark
 }
 
 func publishReviewResponsesInputFromOperation(state *operationExecution, operation OperationSpec) publishReviewResponsesInput {
@@ -740,6 +739,9 @@ func publishReviewResponsesInputFromOperation(state *operationExecution, operati
 		if value, ok := structuredOutputValueFromCommitPushMapping(state, mapping); ok {
 			input.structuredOutput = value
 		}
+	}
+	if mapping, ok := operation.In["review_remarks"]; ok {
+		input.reviewRemarks, _ = operationMappingValue[[]integration.ReviewRemark](state, mapping)
 	}
 	return input
 }
@@ -902,19 +904,33 @@ func (e builtinOperationExecutor) publishReviewRemarkFallback(ctx context.Contex
 	return true, nil
 }
 
-func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, ref pullRequestRef, responses []StructuredResponse) (int, error) {
+func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, ref pullRequestRef, responses []StructuredResponse) (int, []StructuredResponse, error) {
 	executor, err := e.integrationExecutor()
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	count := 0
+	var published []StructuredResponse
+	var failures []error
 	for _, response := range responses {
+		typ := reviewResponseType(response)
+		if typ == "local" {
+			continue
+		}
+		if typ != "inline" && typ != "comment" {
+			failures = append(failures, fmt.Errorf("publish review response %s: unsupported type %q", reviewResponseTarget(response), response.Type))
+			continue
+		}
 		body := reviewResponseCommentBody(response)
 		if body == "" {
 			continue
 		}
 		threadID := strings.TrimSpace(response.ThreadID)
+		if typ == "inline" && threadID == "" {
+			failures = append(failures, fmt.Errorf("publish review response %s: thread_id is required for inline response", reviewResponseTarget(response)))
+			continue
+		}
 		request := integration.Request{
 			IntegrationType: integrationmodel.IntegrationTypeRepository,
 			Resource:        "comment",
@@ -926,22 +942,27 @@ func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Cont
 			Body:            body,
 			Text:            body,
 		}
-		if threadID != "" {
+		if typ == "inline" {
 			request.Operation = "reply"
 			request.ThreadID = threadID
 			request.ExternalID = threadID
 		}
 		_, err := executor.Execute(ctx, request)
 		if err != nil {
-			return count, err
+			failures = append(failures, fmt.Errorf("publish review response %s: %w", reviewResponseTarget(response), err))
+			continue
 		}
 		count++
+		published = append(published, response)
 	}
 
-	return count, nil
+	return count, published, errors.Join(failures...)
 }
 
 func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, responses []StructuredResponse) (int, error) {
+	if len(responses) == 0 {
+		return 0, nil
+	}
 	executor, err := e.integrationExecutor()
 	if err != nil {
 		return 0, err
@@ -949,7 +970,11 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 
 	resolved := 0
 	seen := map[string]struct{}{}
+	var failures []error
 	for _, response := range responses {
+		if reviewResponseType(response) != "inline" {
+			continue
+		}
 		operation := reviewResponseThreadOperation(response)
 		if operation == "" {
 			continue
@@ -971,12 +996,13 @@ func (e builtinOperationExecutor) resolveReviewThreads(ctx context.Context, resp
 			ThreadID:        threadID,
 		})
 		if err != nil {
-			return resolved, err
+			failures = append(failures, fmt.Errorf("resolve review response %s: %w", reviewResponseTarget(response), err))
+			continue
 		}
 		resolved++
 	}
 
-	return resolved, nil
+	return resolved, errors.Join(failures...)
 }
 
 func (e builtinOperationExecutor) updateReviewRemarkThreads(ctx context.Context, comments []reviewRemarkComment) (int, error) {
@@ -1470,23 +1496,65 @@ func reviewRemarkCommentTarget(comment reviewRemarkComment) string {
 	return fmt.Sprintf("%s:%d:%s", path, comment.Line, side)
 }
 
-func reviewResponsesFromOutput(output *StructuredOutput) []StructuredResponse {
+func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.ReviewRemark) []StructuredResponse {
 	if output == nil {
 		return nil
 	}
+	byID := make(map[string]integration.ReviewRemark, len(remarks))
+	for _, remark := range remarks {
+		if id := strings.TrimSpace(remark.ExternalID); id != "" {
+			byID[id] = remark
+		}
+	}
 	responses := append([]StructuredResponse(nil), output.ReviewResponses...)
+	for index := range responses {
+		enrichReviewResponse(&responses[index], byID)
+	}
 	for _, remark := range output.Remarks {
 		if strings.TrimSpace(remark.Answer) == "" && strings.TrimSpace(remark.Resolution) == "" {
 			continue
 		}
-		responses = append(responses, StructuredResponse{
+		response := StructuredResponse{
 			RemarkID: strings.TrimSpace(remark.ID),
 			Status:   firstNonEmptyTrimmed(remark.Status, "resolved"),
 			Summary:  strings.TrimSpace(remark.Resolution),
 			Body:     strings.TrimSpace(remark.Answer),
-		})
+		}
+		enrichReviewResponse(&response, byID)
+		responses = append(responses, response)
 	}
 	return responses
+}
+
+func enrichReviewResponse(response *StructuredResponse, remarks map[string]integration.ReviewRemark) {
+	if response == nil {
+		return
+	}
+	remark, ok := remarks[strings.TrimSpace(response.RemarkID)]
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(response.Type) == "" && strings.TrimSpace(response.ThreadID) == "" {
+		response.Type = reviewResponseTypeFromRemark(remark)
+	}
+	if strings.TrimSpace(response.ThreadID) == "" {
+		response.ThreadID = strings.TrimSpace(remark.ReplyToID)
+	}
+}
+
+func reviewResponseTypeFromRemark(remark integration.ReviewRemark) string {
+	typ := strings.ToLower(strings.TrimSpace(remark.Type))
+	switch typ {
+	case "inline", "comment", "local":
+		return typ
+	}
+	if strings.TrimSpace(remark.ReplyToID) != "" {
+		return "inline"
+	}
+	if strings.TrimSpace(remark.ExternalID) != "" || strings.TrimSpace(remark.URL) != "" {
+		return "comment"
+	}
+	return ""
 }
 
 func reviewResponseCommentBodies(responses []StructuredResponse) []string {
@@ -1528,7 +1596,7 @@ func reviewResponseThreadOperation(response StructuredResponse) string {
 
 func validateReviewResponseThreadIDs(responses []StructuredResponse) error {
 	for index, response := range responses {
-		if strings.TrimSpace(reviewResponseCommentBody(response)) == "" && !isResolvedReviewResponse(response) {
+		if reviewResponseType(response) != "inline" || (strings.TrimSpace(reviewResponseCommentBody(response)) == "" && !isResolvedReviewResponse(response)) {
 			continue
 		}
 		if strings.TrimSpace(response.ThreadID) == "" {
@@ -1536,6 +1604,31 @@ func validateReviewResponseThreadIDs(responses []StructuredResponse) error {
 		}
 	}
 	return nil
+}
+
+func reviewResponseType(response StructuredResponse) string {
+	typ := strings.ToLower(strings.TrimSpace(response.Type))
+	if typ == "" {
+		if strings.TrimSpace(response.ThreadID) != "" {
+			return "inline"
+		}
+		return "unknown"
+	}
+	return typ
+}
+
+func reviewResponseCountByType(responses []StructuredResponse, typ string) int {
+	count := 0
+	for _, response := range responses {
+		if reviewResponseType(response) == typ {
+			count++
+		}
+	}
+	return count
+}
+
+func reviewResponseTarget(response StructuredResponse) string {
+	return firstNonEmptyTrimmed(response.RemarkID, response.ID, "без-идентификатора")
 }
 
 func formatNamedLine(name string, value string) string {
