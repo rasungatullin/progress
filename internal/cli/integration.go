@@ -87,6 +87,7 @@ func newIntegrationCommand() *cobra.Command {
 
 	cmd.AddCommand(newIntegrationDispatcherCommand())
 	cmd.AddCommand(newIntegrationOperationsCommand())
+	cmd.AddCommand(newIntegrationIssueCommand())
 	cmd.AddCommand(newIntegrationPrivateCommand())
 	cmd.AddCommand(newIntegrationGitHubCommand())
 	cmd.AddCommand(newIntegrationBitbucketCommand())
@@ -94,6 +95,94 @@ func newIntegrationCommand() *cobra.Command {
 	cmd.AddCommand(newIntegrationTelegramCommand())
 	cmd.AddCommand(newIntegrationConfluenceCommand())
 	return cmd
+}
+
+// newIntegrationIssueCommand предоставляет типо-ориентированный контракт
+// issue. Старые команды по имени системы сохраняются на переходный период.
+func newIntegrationIssueCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "issue",
+		Short: "Операции с объектами типа issue",
+	}
+	cmd.AddCommand(newIntegrationIssueGetCommand())
+	cmd.AddCommand(newIntegrationIssueSearchCommand())
+	return cmd
+}
+
+func newIntegrationIssueGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{
+		Use:   "get",
+		Short: "Получение объекта issue по непрозрачному идентификатору",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("id") {
+				return fmt.Errorf("--id is required")
+			}
+			return executeTypeOrientedIssueCommand(cmd, flags, "get")
+		},
+	}
+	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий в формате owner/name")
+	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор объекта")
+	return cmd
+}
+
+func newIntegrationIssueSearchCommand() *cobra.Command {
+	flags := &integrationFlags{state: "open"}
+	cmd := &cobra.Command{
+		Use:   "search",
+		Short: "Поиск объектов типа issue",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return executeTypeOrientedIssueCommand(cmd, flags, "search")
+		},
+	}
+	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий в формате owner/name")
+	cmd.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
+	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
+	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
+	return cmd
+}
+
+func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags, operation string) error {
+	format, err := integrationOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
+	request := integration.Request{
+		IntegrationType: "tracker",
+		System:          flags.system,
+		SystemProvided:  cmd.Flags().Changed("system"),
+		Resource:        "issue",
+		ObjectType:      "issue",
+		Operation:       operation,
+		Repository:      flags.repo,
+		RepoProvided:    cmd.Flags().Changed("repo"),
+		ID:              strings.TrimSpace(flags.externalID),
+		ExternalID:      strings.TrimSpace(flags.externalID),
+		Query:           flags.query,
+		State:           flags.state,
+		Limit:           flags.limit,
+	}
+	if request.ID != "" {
+		request.Number, _ = strconv.Atoi(request.ID)
+	}
+	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
+	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
+		return printErr
+	}
+	return err
+}
+
+func printTypeOrientedIssueResponse(cmd *cobra.Command, response integration.Response) {
+	cmd.Printf("system=%s\nresource=issue\nobject=issue\noperation=%s\nstatus=%s\n", response.System, response.Operation, response.Status)
+	if response.Task != nil {
+		cmd.Printf("id=%s\n", firstNonEmpty(response.Task.ExternalID, strconv.Itoa(response.Task.Number)))
+		cmd.Printf("title=%s\nstate=%s\n", response.Task.Title, response.Task.State)
+	}
+	if response.Failure != nil {
+		cmd.Printf("failure=%s\nmessage=%s\n", response.Failure.Kind, response.Failure.Message)
+	}
 }
 
 func newIntegrationPrivateCommand() *cobra.Command {

@@ -244,6 +244,7 @@ func requestMap(req model.ProviderRequest) map[string]any {
 	request := map[string]any{}
 	putString(request, "system", req.System)
 	putString(request, "repository", req.Repository)
+	putString(request, "id", req.ID)
 	if req.Number > 0 {
 		request["number"] = req.Number
 	}

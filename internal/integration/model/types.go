@@ -34,28 +34,31 @@ type Request struct {
 	Operation       string
 	Repository      string
 	RepoProvided    bool
-	Number          int
-	ExternalID      string
-	Base            string
-	Head            string
-	Title           string
-	Body            string
-	Text            string
-	Draft           bool
-	Query           string
-	State           string
-	Scope           string
-	Limit           int
-	Path            string
-	Line            int
-	Side            string
-	ChannelID       string
-	ThreadID        string
-	MessageID       string
-	Reaction        string
-	Fields          []string
-	Labels          []string
-	ExcludeLabels   []string
+	// ID — непрозрачный идентификатор внешнего объекта. Number сохранён для
+	// совместимости со старыми адаптерами и командами.
+	ID            string
+	Number        int
+	ExternalID    string
+	Base          string
+	Head          string
+	Title         string
+	Body          string
+	Text          string
+	Draft         bool
+	Query         string
+	State         string
+	Scope         string
+	Limit         int
+	Path          string
+	Line          int
+	Side          string
+	ChannelID     string
+	ThreadID      string
+	MessageID     string
+	Reaction      string
+	Fields        []string
+	Labels        []string
+	ExcludeLabels []string
 }
 
 type ProviderRequest struct {
@@ -67,6 +70,7 @@ type ProviderRequest struct {
 	Operation       string
 	Repository      string
 	RepoProvided    bool
+	ID              string
 	Number          int
 	ExternalID      string
 	Base            string

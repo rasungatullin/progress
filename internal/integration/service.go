@@ -463,6 +463,7 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		Operation:       normalizeOperation(req.Operation),
 		Repository:      strings.TrimSpace(req.Repository),
 		RepoProvided:    req.RepoProvided,
+		ID:              strings.TrimSpace(req.ID),
 		Number:          req.Number,
 		ExternalID:      strings.TrimSpace(req.ExternalID),
 		Base:            strings.TrimSpace(req.Base),
