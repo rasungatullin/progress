@@ -133,6 +133,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	rawOutputPath := ""
 
 	plainRunnerOutput, rawStructuredOutput, structuredOutput, structuredOutputState, structuredOutputErr := parseStructuredOutput(runnerOutput)
+	maskedStructuredOutput := maskStructuredOutput(structuredOutput, allocation)
 	result := model.LaunchResult{
 		Status:              "failed",
 		Summary:             strings.TrimSpace(plainRunnerOutput),
@@ -142,7 +143,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		RunnerSessionID:     runnerSessionID,
 	}
 	if structuredOutputState == trailingStructuredBlockValid {
-		result.StructuredOutput = structuredOutput
+		result.StructuredOutput = maskedStructuredOutput
 	}
 	if err := validateStructuredOutputRequirement(in.Launch, rawStructuredOutput, structuredOutputState, structuredOutputErr); err != nil {
 		if structuredOutputState != trailingStructuredBlockValid {
@@ -160,7 +161,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 
 	gitSummary := "git=disabled"
 	if in.Launch.CommitPush {
-		result, err := s.commitAndPush(ctx, commitPushInputFromLaunch(in, allocation, workplace, structuredOutput))
+		result, err := s.commitAndPush(ctx, commitPushInputFromLaunch(in, allocation, workplace, maskedStructuredOutput))
 		if err != nil {
 			maskedRunnerOutput := maskLaunchPrivateText(runnerOutput, allocation)
 			rawOutputPath = persistRunnerOutput(workplace.Name, maskedRunnerOutput)
@@ -170,7 +171,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 				RawOutput:           maskedRunnerOutput,
 				RawOutputPath:       rawOutputPath,
 				RawStructuredOutput: maskLaunchPrivateText(rawStructuredOutput, allocation),
-				StructuredOutput:    structuredOutput,
+				StructuredOutput:    maskedStructuredOutput,
 				RunnerSessionID:     runnerSessionID,
 				RunRecordPath:       "",
 			}
@@ -199,12 +200,12 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	plainRunnerOutput = maskLaunchPrivateText(plainRunnerOutput, allocation)
 	rawStructuredOutput = maskLaunchPrivateText(rawStructuredOutput, allocation)
 	rawOutputPath = persistRunnerOutput(workplace.Name, runnerOutput)
-	result = model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, structuredOutput), RawOutput: runnerOutput, RawOutputPath: rawOutputPath, RawStructuredOutput: rawStructuredOutput}
+	result = model.LaunchResult{Status: "completed", Summary: buildLaunchSummary(summary, plainRunnerOutput, structuredOutputState, maskedStructuredOutput), RawOutput: runnerOutput, RawOutputPath: rawOutputPath, RawStructuredOutput: rawStructuredOutput}
 	result.RunnerSessionID = runnerSessionID
 	if structuredOutputState == trailingStructuredBlockValid {
-		result.StructuredOutput = structuredOutput
+		result.StructuredOutput = maskedStructuredOutput
 	}
-	result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, structuredOutputErr, nil)
+	result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, maskedStructuredOutput, structuredOutputErr, nil)
 
 	return result, nil
 }
@@ -604,6 +605,88 @@ func buildLaunchSummary(baseSummary, plainRunnerOutput string, state trailingStr
 
 func normalizeSummaryValue(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func maskStructuredOutput(output *model.StructuredOutput, allocation model.Allocation) *model.StructuredOutput {
+	if output == nil {
+		return nil
+	}
+
+	mask := func(value string) string { return maskLaunchPrivateText(value, allocation) }
+	masked := *output
+	masked.Summary = mask(output.Summary)
+	masked.CommitMessage = mask(output.CommitMessage)
+	masked.Remarks = append([]model.StructuredRemark(nil), output.Remarks...)
+	for index := range masked.Remarks {
+		remark := &masked.Remarks[index]
+		remark.ID = mask(remark.ID)
+		remark.Status = mask(remark.Status)
+		remark.Severity = mask(remark.Severity)
+		remark.Type = mask(remark.Type)
+		remark.Title = mask(remark.Title)
+		remark.Body = mask(remark.Body)
+		remark.Path = mask(remark.Path)
+		remark.Side = mask(remark.Side)
+		remark.Answer = mask(remark.Answer)
+		remark.Resolution = mask(remark.Resolution)
+	}
+	masked.ReviewResponses = append([]model.StructuredResponse(nil), output.ReviewResponses...)
+	for index := range masked.ReviewResponses {
+		response := &masked.ReviewResponses[index]
+		response.ID = mask(response.ID)
+		response.RemarkID = mask(response.RemarkID)
+		response.ThreadID = mask(response.ThreadID)
+		response.Status = mask(response.Status)
+		response.Summary = mask(response.Summary)
+		response.Body = mask(response.Body)
+	}
+	masked.Questions = append([]model.StructuredQuestion(nil), output.Questions...)
+	for index := range masked.Questions {
+		question := &masked.Questions[index]
+		question.ID = mask(question.ID)
+		question.Status = mask(question.Status)
+		question.Title = mask(question.Title)
+		question.Body = mask(question.Body)
+		question.Answer = mask(question.Answer)
+	}
+	masked.FollowUpActions = append([]model.StructuredAction(nil), output.FollowUpActions...)
+	for index := range masked.FollowUpActions {
+		action := &masked.FollowUpActions[index]
+		action.ID = mask(action.ID)
+		action.Status = mask(action.Status)
+		action.Type = mask(action.Type)
+		action.Title = mask(action.Title)
+		action.Body = mask(action.Body)
+	}
+	masked.Changes = append([]model.StructuredChange(nil), output.Changes...)
+	for index := range masked.Changes {
+		masked.Changes[index].Summary = mask(masked.Changes[index].Summary)
+	}
+	masked.Commands = append([]model.StructuredCommand(nil), output.Commands...)
+	for index := range masked.Commands {
+		command := &masked.Commands[index]
+		command.Name = mask(command.Name)
+		command.Args = append([]string(nil), command.Args...)
+		for argIndex := range command.Args {
+			command.Args[argIndex] = mask(command.Args[argIndex])
+		}
+		command.Title = mask(command.Title)
+		command.Body = mask(command.Body)
+	}
+	if output.Conclusion != nil {
+		conclusion := *output.Conclusion
+		conclusion.Status = mask(conclusion.Status)
+		conclusion.Summary = mask(conclusion.Summary)
+		conclusion.Body = mask(conclusion.Body)
+		masked.Conclusion = &conclusion
+	}
+	if output.Extensions != nil {
+		masked.Extensions = make(model.StructuredExtensions, len(output.Extensions))
+		for key, value := range output.Extensions {
+			masked.Extensions[mask(key)] = []byte(mask(string(value)))
+		}
+	}
+	return &masked
 }
 
 func validateLaunch(in model.Invocation, workplace model.Workplace) error {

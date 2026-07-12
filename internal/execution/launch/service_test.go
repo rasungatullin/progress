@@ -137,7 +137,7 @@ func TestLaunchMasksPrivateValueInFullRunnerOutput(t *testing.T) {
 			return strings.Join([]string{
 				"runner output: " + secret,
 				structuredOutputStart,
-				`{"summary":"completed"}`,
+				`{"summary":"` + secret + `","commit_message":"commit ` + secret + `","remarks":[{"body":"remark ` + secret + `"}],"extensions":{"raw":"` + secret + `"}}`,
 				structuredOutputEnd,
 			}, "\n"), nil
 		},
@@ -151,6 +151,9 @@ func TestLaunchMasksPrivateValueInFullRunnerOutput(t *testing.T) {
 
 	if strings.Contains(result.RawOutput, secret) {
 		t.Fatalf("launch result contains private value: %q", result.RawOutput)
+	}
+	if strings.Contains(result.Summary, secret) || result.StructuredOutput == nil || strings.Contains(result.StructuredOutput.Summary, secret) || strings.Contains(result.StructuredOutput.CommitMessage, secret) || strings.Contains(result.StructuredOutput.Remarks[0].Body, secret) || strings.Contains(string(result.StructuredOutput.Extensions["raw"]), secret) {
+		t.Fatalf("structured launch result contains private value: %#v", result)
 	}
 	rawOutput, err := os.ReadFile(result.RawOutputPath)
 	if err != nil {
