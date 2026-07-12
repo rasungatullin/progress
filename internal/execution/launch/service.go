@@ -683,10 +683,52 @@ func maskStructuredOutput(output *model.StructuredOutput, allocation model.Alloc
 	if output.Extensions != nil {
 		masked.Extensions = make(model.StructuredExtensions, len(output.Extensions))
 		for key, value := range output.Extensions {
-			masked.Extensions[mask(key)] = []byte(mask(string(value)))
+			maskedKey := mask(key)
+			maskedValueJSON := maskStructuredExtension(value, mask)
+			masked.Extensions[maskedKey] = maskedValueJSON
 		}
 	}
 	return &masked
+}
+
+func maskStructuredExtension(raw json.RawMessage, mask func(string) string) json.RawMessage {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return json.RawMessage(mask(string(raw)))
+	}
+	masked := maskStructuredJSONValue(value, mask)
+	encoded, err := json.Marshal(masked)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+func maskStructuredJSONValue(value any, mask func(string) string) any {
+	switch typed := value.(type) {
+	case string:
+		return mask(typed)
+	case json.Number:
+		masked := mask(typed.String())
+		if masked != typed.String() {
+			return masked
+		}
+		return typed
+	case []any:
+		for index := range typed {
+			typed[index] = maskStructuredJSONValue(typed[index], mask)
+		}
+	case map[string]any:
+		maskedObject := make(map[string]any, len(typed))
+		for key, item := range typed {
+			maskedKey := mask(key)
+			maskedObject[maskedKey] = maskStructuredJSONValue(item, mask)
+		}
+		return maskedObject
+	}
+	return value
 }
 
 func validateLaunch(in model.Invocation, workplace model.Workplace) error {

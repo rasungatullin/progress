@@ -216,6 +216,26 @@ func TestLaunchMasksJSONEscapedPrivateValueInFullRunnerOutput(t *testing.T) {
 	}
 }
 
+func TestMaskStructuredOutputKeepsExtensionsValidJSON(t *testing.T) {
+	t.Parallel()
+
+	allocation := validAllocation()
+	allocation.Git = &model.GitConfig{Push: &model.GitPushConfig{SSHIdentityPrivateValue: "123"}}
+	masked := maskStructuredOutput(&model.StructuredOutput{
+		Extensions: model.StructuredExtensions{
+			"data": json.RawMessage(`{"field":123}`),
+		},
+	}, allocation)
+
+	var decoded map[string]any
+	if err := json.Unmarshal(masked.Extensions["data"], &decoded); err != nil {
+		t.Fatalf("masked extension is invalid JSON: %v", err)
+	}
+	if decoded["field"] != "[private value masked]" {
+		t.Fatalf("unexpected masked extension: %s", masked.Extensions["data"])
+	}
+}
+
 func TestLaunchUpdatesExistingHistoryHandle(t *testing.T) {
 	t.Parallel()
 

@@ -88,22 +88,13 @@ func (s *Service) Snapshot(ctx context.Context, input SnapshotInput) (Snapshot, 
 		}
 	}
 	if snapshot.ExecutionResources != nil || snapshot.Integration != nil {
-		config := model.ResourcePrivateStoreConfig{}
-		storeHome, _ := resolveConfigHome(input.ConfigHome)
-		if snapshot.ExecutionResources != nil {
-			config = snapshot.ExecutionResources.Config.PrivateStore
-			storeHome = snapshot.ExecutionResources.ConfigHome
-		}
-		if !hasPrivateStoreConfig(config) && snapshot.Integration != nil {
-			config = snapshot.Integration.Config.PrivateStore
-			storeHome = snapshot.Integration.ConfigHome
-		}
-		if strings.TrimSpace(storeHome) == "" {
-			storeHome, _ = resolveConfigHome(input.ConfigHome)
-		}
+		config, storeHome, configErr := LoadPrivateStoreConfig(repoRoot, input.ConfigHome, s.readFile)
 		refs := privateValueReferences(snapshot.Integration, snapshot.ExecutionResources)
 		if len(refs) > 0 {
 			reader, _, err := secrets.NewStore(config, storeHome)
+			if configErr != nil {
+				err = configErr
+			}
 			for _, name := range refs {
 				available := false
 				if err == nil {

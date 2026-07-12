@@ -73,6 +73,19 @@ func TestMaskTextReplacesJSONEscapedPrivateValues(t *testing.T) {
 	}
 }
 
+func TestMaskTextReplacesJSONUnicodeEscapedPrivateValues(t *testing.T) {
+	t.Parallel()
+
+	value := "secret"
+	got := MaskText(`{"value":"\u0073\u0065\u0063\u0072\u0065\u0074"}`, value)
+	if strings.Contains(got, `\u0073\u0065\u0063\u0072\u0065\u0074`) || strings.Contains(got, value) {
+		t.Fatalf("masked text contains private value: %q", got)
+	}
+	if got != `{"value":"[private value masked]"}` {
+		t.Fatalf("unexpected masked JSON: %q", got)
+	}
+}
+
 func TestMaskErrorHidesPrivateValuesAndPreservesCause(t *testing.T) {
 	t.Parallel()
 

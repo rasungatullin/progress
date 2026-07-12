@@ -145,3 +145,41 @@ func TestRedactSnapshotMasksPrivateValuesInLayersAndFailures(t *testing.T) {
 		t.Fatalf("snapshot contains private value: %s", encoded)
 	}
 }
+
+func TestServiceSnapshotUsesCanonicalPrivateStoreForPartialContour(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".progress", "integration"), 0o755); err != nil {
+		t.Fatalf("mkdir integration: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".progress", "execution"), 0o755); err != nil {
+		t.Fatalf("mkdir execution: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".progress", "integration", "systems.json"), []byte(`{
+		"systems": {"github": {"type": "github", "token_private": "github-token"}}
+	}`), 0o600); err != nil {
+		t.Fatalf("write integration config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".progress", "execution", "resources.json"), []byte(`{
+		"private_store": {"type": "file", "path": "private.json"},
+		"defaults": {"model-binding": "default"},
+		"runners": ["codex"], "models": ["model"],
+		"bindings": {"default": {"runner": "codex", "model": "model"}}
+	}`), 0o600); err != nil {
+		t.Fatalf("write resource config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "private.json"), []byte(`{"github-token":"actual-token"}`), 0o600); err != nil {
+		t.Fatalf("write private store: %v", err)
+	}
+
+	snapshot, err := NewService(nil).Snapshot(context.Background(), SnapshotInput{
+		RepoRoot: root, ConfigHome: root, LoadIntegration: true,
+	})
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if len(snapshot.PrivateValues) != 1 || snapshot.PrivateValues[0].Name != "github-token" || !snapshot.PrivateValues[0].Available {
+		t.Fatalf("unexpected private value snapshot: %#v", snapshot.PrivateValues)
+	}
+}

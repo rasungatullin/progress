@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +42,8 @@ type Reader interface {
 
 const maskedValue = "[private value masked]"
 
+var unicodeEscapeSequence = regexp.MustCompile(`(?:\\u[0-9a-fA-F]{4})+`)
+
 // MaskText удаляет фактические приватные значения из произвольного текста.
 // Функция используется на границах сохранения и диагностики, где исходная
 // ошибка уже может содержать значение, полученное из хранилища.
@@ -57,6 +61,13 @@ func MaskText(text string, values ...string) string {
 			text = strings.ReplaceAll(text, string(encoded[1:len(encoded)-1]), maskedValue)
 		}
 		text = strings.ReplaceAll(text, value, maskedValue)
+		text = unicodeEscapeSequence.ReplaceAllStringFunc(text, func(encoded string) string {
+			decoded, err := strconv.Unquote(`"` + encoded + `"`)
+			if err == nil && decoded == value {
+				return maskedValue
+			}
+			return encoded
+		})
 	}
 	return text
 }
