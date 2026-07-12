@@ -357,6 +357,18 @@ func checksumSkill(root, path string) (string, error) {
 	if err := ensureExecutionPathInside(root, path); err != nil {
 		return "", err
 	}
+	evaluatedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("недоступен каталог навыков: %w", err)
+	}
+	evaluatedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("недоступен путь %s: %w", path, err)
+	}
+	if rel, err := filepath.Rel(evaluatedRoot, evaluatedPath); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("символическая ссылка выходит за каталог навыков")
+	}
+	path = evaluatedPath
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", fmt.Errorf("недоступен путь %s: %w", path, err)

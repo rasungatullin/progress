@@ -35,7 +35,7 @@
 methodology/
   catalog.json
   routes/task-processing.json
-  skills/release-checks.json
+  skills/.registry/release-checks.json
   skills/release-checks.md
   actions/start-implementation-pr.json
   instructions/start-implementation-pr-directive.json

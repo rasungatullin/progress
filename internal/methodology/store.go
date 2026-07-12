@@ -353,7 +353,7 @@ func readCatalogRegistries(root string, readFile ReadFileFunc, readDir ReadDirFu
 	found = found || ok
 	catalog.Operations = operations
 
-	skills, ok, err := readRegistryFiles[Skill](root, "skills", readFile, readDir, skillRegistryKey)
+	skills, ok, err := readRegistryFiles[Skill](root, filepath.Join("skills", ".registry"), readFile, readDir, skillRegistryKey)
 	if err != nil {
 		return Catalog{}, false, err
 	}
@@ -584,7 +584,7 @@ func writeCatalogFiles(path string, catalog Catalog, writeFile WriteFileFunc, mk
 		}
 	}
 	for _, skill := range catalog.Skills {
-		path, err := registryFilePath(root, "skills", skillRegistryKey(skill))
+		path, err := registryFilePath(root, filepath.Join("skills", ".registry"), skillRegistryKey(skill))
 		if err != nil {
 			return err
 		}
@@ -647,7 +647,7 @@ func writeCatalogElement(path string, element ElementUpsert, writeFile WriteFile
 		if err := validateCatalog(Catalog{Skills: []Skill{skill}}); err != nil {
 			return err
 		}
-		path, err := registryFilePath(root, "skills", skillRegistryKey(skill))
+		path, err := registryFilePath(root, filepath.Join("skills", ".registry"), skillRegistryKey(skill))
 		if err != nil {
 			return err
 		}
