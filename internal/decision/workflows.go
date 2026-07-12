@@ -2,12 +2,16 @@ package decision
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/rasungatullin/progress/internal/configuration"
 	"github.com/rasungatullin/progress/internal/execution"
 	"github.com/rasungatullin/progress/internal/integration"
 	"github.com/rasungatullin/progress/internal/methodology"
@@ -43,20 +47,21 @@ type workflowProcessingRouteConfig struct {
 }
 
 type workflowRouteCheckConfig struct {
-	Name            string   `json:"name"`
-	Title           string   `json:"title"`
-	Description     string   `json:"description"`
-	Action          string   `json:"action"`
-	Outcome         string   `json:"outcome"`
-	HasFeatures     []string `json:"has_features"`
-	MissingFeatures []string `json:"missing_features"`
-	HasLabels       []string `json:"has_labels"`
-	MissingLabels   []string `json:"missing_labels"`
-	ExpectedResult  string   `json:"expected_result"`
-	Constraints     []string `json:"constraints"`
-	ReasonCode      string   `json:"reason_code"`
-	ReasonMessage   string   `json:"reason_message"`
-	Source          string   `json:"-"`
+	Name            string               `json:"name"`
+	Title           string               `json:"title"`
+	Description     string               `json:"description"`
+	Action          string               `json:"action"`
+	Outcome         string               `json:"outcome"`
+	HasFeatures     []string             `json:"has_features"`
+	MissingFeatures []string             `json:"missing_features"`
+	HasLabels       []string             `json:"has_labels"`
+	MissingLabels   []string             `json:"missing_labels"`
+	ExpectedResult  string               `json:"expected_result"`
+	Constraints     []string             `json:"constraints"`
+	ReasonCode      string               `json:"reason_code"`
+	ReasonMessage   string               `json:"reason_message"`
+	Skills          []execution.SkillRef `json:"skills,omitempty"`
+	Source          string               `json:"-"`
 }
 
 type selectedWorkflowRoute struct {
@@ -145,6 +150,9 @@ func (s *Service) selectWorkflowRoute(ctx context.Context, task integration.Cano
 				firstNonEmpty(strings.TrimSpace(checkConfig.Name), fmt.Sprintf("check-%d", index+1)): firstNonEmpty(strings.TrimSpace(checkConfig.Source), strings.TrimSpace(processingRoute.Source)),
 			},
 		}
+		if len(selected.Skills) == 0 {
+			selected.Skills = append([]execution.SkillRef(nil), checkConfig.Skills...)
+		}
 		bestScore = score
 	}
 	if bestScore < 0 {
@@ -208,11 +216,16 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 	legacyChecks := make([]workflowRouteCheckConfig, 0, len(snapshot.Catalog.Routes))
 	legacyCheckRefs := workflowCheckReferencesFromMethodology(snapshot)
 	for _, route := range snapshot.Catalog.Routes {
+		routeSkills, err := executionSkillRefs(snapshot, repoRoot, route.Skills)
+		if err != nil {
+			return workflowConfigFile{}, err
+		}
 		if len(route.Checks) != 0 {
 			routeConfig := workflowProcessingRouteConfig{
 				Name:        route.Name,
 				Title:       route.Title,
 				Description: route.Description,
+				Skills:      routeSkills,
 				Checks:      workflowChecksFromMethodologyChecks(route.Checks, legacyCheckRefs, string(snapshot.Sources.Routes[route.Name])),
 				Source:      string(snapshot.Sources.Routes[route.Name]),
 			}
@@ -234,6 +247,7 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 			Constraints:     append([]string(nil), route.Constraints...),
 			ReasonCode:      route.ReasonCode,
 			ReasonMessage:   route.ReasonMessage,
+			Skills:          routeSkills,
 			Source:          string(snapshot.Sources.Routes[route.Name]),
 		}
 		if checkConfig.Name == "default" {
@@ -275,6 +289,111 @@ func (s *Service) loadWorkflowConfigFromMethodology(ctx context.Context, repoRoo
 	}
 
 	return config, nil
+}
+
+func executionSkillRefs(snapshot methodology.CatalogSnapshot, repoRoot string, names []string) ([]execution.SkillRef, error) {
+	_ = repoRoot
+	refs := make([]execution.SkillRef, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, rawName := range names {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, fmt.Errorf("имя навыка в маршруте обработки не задано")
+		}
+		if _, ok := seen[name]; ok {
+			return nil, fmt.Errorf("маршрут обработки содержит дублирующийся навык %q", name)
+		}
+		seen[name] = struct{}{}
+		var skill methodology.Skill
+		found := false
+		for _, candidate := range snapshot.Catalog.Skills {
+			if candidate.Name == name {
+				skill, found = candidate, true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("навык %q не найден в объединённом каталоге методик", name)
+		}
+		scope := snapshot.Sources.Skills[name]
+		root := filepath.Dir(snapshot.LocalCatalogPath)
+		if scope == configuration.ConfigFileSourceGlobal {
+			root = filepath.Dir(snapshot.GlobalCatalogPath)
+		}
+		path := filepath.Join(root, skill.Path)
+		checksum, err := checksumSkill(root, path)
+		if err != nil {
+			return nil, fmt.Errorf("проверка навыка %q: %w", name, err)
+		}
+		refs = append(refs, execution.SkillRef{Name: skill.Name, Purpose: skill.Purpose, Scope: string(scope), Path: skill.Path, Checksum: checksum})
+	}
+	return refs, nil
+}
+
+func checksumSkill(root, path string) (string, error) {
+	if err := ensureExecutionPathInside(root, path); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("недоступен путь %s: %w", path, err)
+	}
+	h := sha256.New()
+	if !info.IsDir() {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("символическая ссылка запрещена")
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return "", err
+		}
+		defer f.Close()
+		if _, err := io.Copy(h, f); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("sha256:%x", h.Sum(nil)), nil
+	}
+	var files []string
+	err = filepath.WalkDir(path, func(file string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("символическая ссылка запрещена: %s", file)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		files = append(files, file)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(files)
+	for _, file := range files {
+		rel, _ := filepath.Rel(path, file)
+		_, _ = io.WriteString(h, rel+"\x00")
+		f, err := os.Open(file)
+		if err != nil {
+			return "", err
+		}
+		if _, err := io.Copy(h, f); err != nil {
+			f.Close()
+			return "", err
+		}
+		f.Close()
+	}
+	return fmt.Sprintf("sha256:%x", h.Sum(nil)), nil
+}
+
+func ensureExecutionPathInside(root, path string) error {
+	root, path = filepath.Clean(root), filepath.Clean(path)
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("путь выходит за каталог навыков")
+	}
+	return nil
 }
 
 type workflowCheckReference struct {
