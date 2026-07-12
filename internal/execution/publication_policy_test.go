@@ -214,8 +214,8 @@ func TestReviewRemarkUsesMeaningfulTitleOnlyWithOptionalHeading(t *testing.T) {
 	state := &operationExecution{
 		action: model.Action{Name: ActionReviewPullRequest},
 		policies: []textPublicationPolicy{{
-			Targets:          []string{publicationTargetReviewRemark},
-			Steps:            []string{ActionReviewPullRequest, OperationKindPublishReviewRemarks},
+			Targets:         []string{publicationTargetReviewRemark},
+			Steps:           []string{ActionReviewPullRequest, OperationKindPublishReviewRemarks},
 			OptionalHeading: true,
 			MeaningfulTitle: true,
 		}},
@@ -317,6 +317,41 @@ func TestReviewResponsePolicySkipsStatusOnlyBody(t *testing.T) {
 	}
 }
 
+func TestPublicationCommentUsesMergeRequestCommentPolicyAsFallback(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{Name: ActionReviewPullRequest, Operations: []model.OperationSpec{{Name: OperationKindPublishReviewRemarks, Kind: OperationKindPublishReviewRemarks}}},
+		policies: []textPublicationPolicy{{
+			Targets:   []string{publicationTargetMergeRequestComment},
+			Steps:     []string{OperationKindPublishReviewRemarks},
+			NoHeading: true,
+		}},
+	}
+
+	body := publicationCommentBody(state, OperationKindPublishReviewRemarks, "## Служебный заголовок\n\nТекст комментария.")
+	if body != "Текст комментария." {
+		t.Fatalf("merge-request-comment policy must remove artificial heading, got %q", body)
+	}
+}
+
+func TestPublicationCommentKeepsReviewRemarkPolicyPriority(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{
+		action: model.Action{Name: ActionReviewPullRequest},
+		policies: []textPublicationPolicy{
+			{Targets: []string{publicationTargetMergeRequestComment}, Steps: []string{OperationKindPublishReviewRemarks}, NoHeading: true},
+			{Targets: []string{publicationTargetReviewRemark}, Steps: []string{OperationKindPublishReviewRemarks}, NoHeading: false},
+		},
+	}
+
+	body := publicationCommentBody(state, OperationKindPublishReviewRemarks, "## Заголовок\n\nТекст комментария.")
+	if !strings.HasPrefix(body, "## Заголовок") {
+		t.Fatalf("specific review-remark policy must take priority, got %q", body)
+	}
+}
+
 func TestPolicyForStatePublicationUsesOnlyCurrentOperation(t *testing.T) {
 	t.Parallel()
 
@@ -330,13 +365,13 @@ func TestPolicyForStatePublicationUsesOnlyCurrentOperation(t *testing.T) {
 		},
 		policies: []textPublicationPolicy{
 			{
-				Targets:  []string{publicationTargetReviewRemark},
-				Steps:    []string{"publish-review-remarks"},
+				Targets:   []string{publicationTargetReviewRemark},
+				Steps:     []string{"publish-review-remarks"},
 				NoHeading: false,
 			},
 			{
-				Targets:  []string{publicationTargetReviewRemark},
-				Steps:    []string{"publish-review-remarks-secondary"},
+				Targets:   []string{publicationTargetReviewRemark},
+				Steps:     []string{"publish-review-remarks-secondary"},
 				NoHeading: true,
 			},
 		},
@@ -459,16 +494,16 @@ func TestLoadTextPublicationPoliciesUsesActionCatalogRoot(t *testing.T) {
 		methodology: func(_ context.Context, request methodology.CatalogRequest) (methodology.CatalogSnapshot, error) {
 			loadedRoot = request.RepoRoot
 			return methodology.CatalogSnapshot{Catalog: methodology.Catalog{Entities: []methodology.Entity{{
-				Kind: publicationPolicyEntityKind,
-				Name: marker,
+				Kind:    publicationPolicyEntityKind,
+				Name:    marker,
 				Payload: []byte(`{"targets":["task-comment"],"steps":["review-pull-request"],"format":["short"]}`),
 			}}}}, nil
 		},
 	}
 	state := &operationExecution{
-		action:          model.Action{Name: ActionReviewPullRequest},
+		action:            model.Action{Name: ActionReviewPullRequest},
 		actionCatalogRoot: "/controller/repo",
-		workplace:        workplace{RepositoryRoot: "/worktree/repo"},
+		workplace:         workplace{RepositoryRoot: "/worktree/repo"},
 	}
 	policies := service.loadTextPublicationPolicies(context.Background(), state)
 	if loadedRoot != "/controller/repo" {

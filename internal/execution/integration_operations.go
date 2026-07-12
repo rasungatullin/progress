@@ -239,7 +239,7 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 	count := 0
 	var failures []error
 	for _, comment := range comments {
-		body := strings.TrimSpace(comment.Body)
+		body := publicationCommentBody(state, OperationKindPublishReviewRemarks, comment.Body)
 		if body == "" {
 			continue
 		}
@@ -281,6 +281,37 @@ func (e builtinOperationExecutor) publishPullRequestComments(ctx context.Context
 	}
 
 	return count, errors.Join(failures...)
+}
+
+// publicationCommentBody применяет политику обычного комментария запроса на
+// слияние, если более точная политика замечания ревизии не задана.
+func publicationCommentBody(state *operationExecution, operationName string, body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	if _, ok := policyForStatePublication(state, publicationTargetReviewRemark, operationName); ok {
+		return body
+	}
+	policy, ok := policyForStatePublication(state, publicationTargetMergeRequestComment, operationName)
+	if !ok {
+		return body
+	}
+	if policy.NoHeading {
+		body = stripPublicationHeading(body)
+	}
+	return strings.TrimSpace(body)
+}
+
+func stripPublicationHeading(body string) string {
+	lines := strings.Split(body, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+	if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "#") {
+		lines = lines[1:]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func (e builtinOperationExecutor) publishReviewResponseComments(ctx context.Context, state *operationExecution, operationName string, ref pullRequestRef, responses []StructuredResponse) (int, error) {
