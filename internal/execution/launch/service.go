@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -1337,11 +1338,14 @@ func runCodexRunner(ctx context.Context, spec model.LaunchSpec, prompt string) (
 }
 
 type runnerOutputWriter struct {
+	mu       sync.Mutex
 	buffer   bytes.Buffer
 	activity chan struct{}
 }
 
 func (w *runnerOutputWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	n, err := w.buffer.Write(p)
 	select {
 	case w.activity <- struct{}{}:
