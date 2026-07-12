@@ -24,7 +24,9 @@ type ghRunner interface {
 	RunPRList(context.Context, string, PRListRequest) (CommandResult, resolvedConfig, error)
 	RunPRCreate(context.Context, string, PRCreateRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreads(context.Context, string, int) (CommandResult, resolvedConfig, error)
+	RunPRReviews(context.Context, string, int) (CommandResult, resolvedConfig, error)
 	RunPRCommentCreate(context.Context, string, int, PRCommentCreateRequest) (CommandResult, resolvedConfig, error)
+	RunPRReviewSubmit(context.Context, string, int, int64) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadReply(context.Context, PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadResolve(context.Context, string) (CommandResult, resolvedConfig, error)
 	RunPRReviewThreadUnresolve(context.Context, string) (CommandResult, resolvedConfig, error)
@@ -147,6 +149,12 @@ type ghPRReviewCommentCreateResponse struct {
 	User      *ghIssueUser `json:"user"`
 	CreatedAt string       `json:"created_at"`
 	UpdatedAt string       `json:"updated_at"`
+	ReviewID  int64        `json:"pull_request_review_id"`
+}
+
+type ghPRReview struct {
+	ID    int64  `json:"id"`
+	State string `json:"state"`
 }
 
 type ghPRReviewThreadResolveResponse struct {
@@ -490,6 +498,11 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		if existing, config, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
 			return successfulPRCommentCreate(response, existing, config, repository, number)
 		}
+		pendingReviewID, err := s.findPendingPRReview(ctx, repository, number)
+		if err != nil {
+			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pending GitHub pull request review lookup failed before comment create")
+		}
+		commentRequest.ReviewID = pendingReviewID
 	}
 
 	result, config, err := s.runner.RunPRCommentCreate(ctx, repository, number, commentRequest)
@@ -514,6 +527,9 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub REST JSON response: %v", err), Result: result, Err: err}, "gh pull request inline comment create returned malformed JSON")
 		}
 		remark = reviewRemarkFromRESTComment(repository, number, raw)
+		if raw.ReviewID > 0 {
+			commentRequest.ReviewID = raw.ReviewID
+		}
 	}
 	if remark.ExternalID == "" && remark.URL == "" {
 		if existing, _, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
@@ -523,7 +539,43 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 		}
 	}
 
+	if commentRequest.ReviewID > 0 {
+		submitResult, _, submitErr := s.runner.RunPRReviewSubmit(ctx, repository, number, commentRequest.ReviewID)
+		if submitErr != nil {
+			return responseWithGitHubFailure(response, submitResult, submitErr, "GitHub pull request review submit failed after comment create")
+		}
+		if submitResult.ExitCode != 0 {
+			return responseWithGitHubExitFailure(response, submitResult, repository, number, "GitHub pull request review submit exited with a non-zero code")
+		}
+	}
+
 	return successfulPRCommentCreate(response, remark, config, repository, number)
+}
+
+func (s *Service) findPendingPRReview(ctx context.Context, repository string, number int) (int64, error) {
+	result, _, err := s.runner.RunPRReviews(ctx, repository, number)
+	if err != nil {
+		return 0, err
+	}
+	if result.ExitCode != 0 {
+		return 0, &Error{Code: ErrorCodeExternalFailure, Message: "GitHub pull request reviews lookup exited with a non-zero code", Result: result}
+	}
+	var reviews []ghPRReview
+	if err := json.Unmarshal([]byte(result.Stdout), &reviews); err != nil {
+		var pages [][]ghPRReview
+		if pageErr := json.Unmarshal([]byte(result.Stdout), &pages); pageErr != nil {
+			return 0, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub pull request reviews JSON response: %v", err), Result: result, Err: err}
+		}
+		for _, page := range pages {
+			reviews = append(reviews, page...)
+		}
+	}
+	for _, review := range reviews {
+		if review.ID > 0 && strings.EqualFold(strings.TrimSpace(review.State), "pending") {
+			return review.ID, nil
+		}
+	}
+	return 0, nil
 }
 
 func reviewRemarkFromRESTComment(repository string, number int, comment ghPRReviewCommentCreateResponse) model.ReviewRemark {

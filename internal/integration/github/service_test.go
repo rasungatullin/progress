@@ -1578,6 +1578,25 @@ func TestServicePRCommentCreateInline(t *testing.T) {
 	}
 }
 
+func TestServicePRCommentCreateReusesAndSubmitsPendingReview(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result:              CommandResult{ExitCode: 0, Stdout: `{"id":101,"node_id":"PRRC_comment-1","body":"Inline remark","html_url":"https://github.com/owner/name/pull/42#discussion_r101","path":"file.go","line":12,"side":"RIGHT","pull_request_review_id":77}`},
+		pendingReviewResult: CommandResult{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, System: "github", Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.prCommentRequest.ReviewID != 77 || stub.prSubmitCalls != 1 || response.Status != model.ResponseStatusOK {
+		t.Fatalf("pending review was not reused and submitted: request=%#v submits=%d response=%#v", stub.prCommentRequest, stub.prSubmitCalls, response)
+	}
+}
+
 func TestServicePRCommentCreateInlineAcceptsNumericRESTIdentifier(t *testing.T) {
 	t.Parallel()
 
@@ -1871,34 +1890,37 @@ func TestServicePRCommentReplySupportsReviewRemarkObject(t *testing.T) {
 }
 
 type stubRunner struct {
-	result            CommandResult
-	config            resolvedConfig
-	err               error
-	repo              string
-	repoCalls         int
-	issueCalls        int
-	issueListCalls    int
-	issueCommentCalls int
-	issueLabelCalls   int
-	prViewCalls       int
-	prListCalls       int
-	prReviewCalls     int
-	prCommentCalls    int
-	prReplyCalls      int
-	prResolveCalls    int
-	number            int
-	base              string
-	head              string
-	title             string
-	body              string
-	labels            []string
-	draft             bool
-	issueListRequest  IssueListRequest
-	prListRequest     PRListRequest
-	prCommentRequest  PRCommentCreateRequest
-	prReplyRequest    PRReviewThreadReplyRequest
-	threadID          string
-	reviewResult      CommandResult
+	result              CommandResult
+	config              resolvedConfig
+	err                 error
+	repo                string
+	repoCalls           int
+	issueCalls          int
+	issueListCalls      int
+	issueCommentCalls   int
+	issueLabelCalls     int
+	prViewCalls         int
+	prListCalls         int
+	prReviewCalls       int
+	prCommentCalls      int
+	prReplyCalls        int
+	prResolveCalls      int
+	prReviewsCalls      int
+	prSubmitCalls       int
+	number              int
+	base                string
+	head                string
+	title               string
+	body                string
+	labels              []string
+	draft               bool
+	issueListRequest    IssueListRequest
+	prListRequest       PRListRequest
+	prCommentRequest    PRCommentCreateRequest
+	prReplyRequest      PRReviewThreadReplyRequest
+	threadID            string
+	reviewResult        CommandResult
+	pendingReviewResult CommandResult
 }
 
 func (r *stubRunner) RunAuthStatus(context.Context) (CommandResult, resolvedConfig, error) {
@@ -1990,11 +2012,28 @@ func (r *stubRunner) RunPRReviewThreads(_ context.Context, repository string, nu
 	return r.result, r.config, r.err
 }
 
+func (r *stubRunner) RunPRReviews(_ context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	r.prReviewsCalls++
+	r.repo = repository
+	r.number = number
+	if r.pendingReviewResult.Stdout != "" || r.pendingReviewResult.Stderr != "" || r.pendingReviewResult.Command != "" || r.pendingReviewResult.ExitCode != 0 {
+		return r.pendingReviewResult, r.config, r.err
+	}
+	return CommandResult{ExitCode: 0, Stdout: "[]"}, r.config, r.err
+}
+
 func (r *stubRunner) RunPRCommentCreate(_ context.Context, repository string, number int, request PRCommentCreateRequest) (CommandResult, resolvedConfig, error) {
 	r.prCommentCalls++
 	r.repo = repository
 	r.number = number
 	r.prCommentRequest = request
+	return r.result, r.config, r.err
+}
+
+func (r *stubRunner) RunPRReviewSubmit(_ context.Context, repository string, number int, reviewID int64) (CommandResult, resolvedConfig, error) {
+	r.prSubmitCalls++
+	r.repo = repository
+	r.number = number
 	return r.result, r.config, r.err
 }
 

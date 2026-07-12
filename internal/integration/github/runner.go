@@ -478,6 +478,22 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + query, "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)})
 }
 
+func (r *Runner) RunPRReviews(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		return CommandResult{Command: defaultCommand, ExitCode: -1}, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return CommandResult{Command: config.Command, ExitCode: -1}, config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--paginate", "--slurp", fmt.Sprintf("repos/%s/pulls/%d/reviews", repository, number)})
+}
+
 func resolveRepository(repository string, fallback string) (string, error) {
 	return normalizeRepository(firstNonEmpty(repository, fallback))
 }
@@ -568,7 +584,11 @@ func (r *Runner) RunPRCommentCreate(ctx context.Context, repository string, numb
 		return headResult, config, &Error{Code: ErrorCodePartialPayload, Message: "GitHub pull request head SHA is missing", Result: headResult}
 	}
 	endpoint := fmt.Sprintf("repos/%s/pulls/%d/comments", repository, number)
-	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--method", "POST", endpoint, "-f", "body=" + request.Body, "-f", "commit_id=" + request.CommitID, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side})
+	args := []string{"api", "--method", "POST", endpoint, "-f", "body=" + request.Body, "-f", "commit_id=" + request.CommitID, "-f", "path=" + request.Path, "-F", "line=" + strconv.Itoa(request.Line), "-f", "side=" + request.Side}
+	if request.ReviewID > 0 {
+		args = append(args, "-F", "pull_request_review_id="+strconv.FormatInt(request.ReviewID, 10))
+	}
+	return r.runCommandWithResolvedConfig(ctx, config, args)
 }
 
 func (r *Runner) RunPRReviewThreadResolve(ctx context.Context, threadID string) (CommandResult, resolvedConfig, error) {
@@ -603,7 +623,7 @@ func (r *Runner) RunPRReviewThreadUnresolve(ctx context.Context, threadID string
 	if threadID == "" {
 		result := CommandResult{Command: defaultCommand, ExitCode: -1}
 		return result, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review thread id is required", Result: result}
-	}
+ 	}
 	config, err := r.loadConfig(ctx)
 	if err != nil {
 		return CommandResult{}, resolvedConfig{}, err
@@ -614,6 +634,25 @@ func (r *Runner) RunPRReviewThreadUnresolve(ctx context.Context, threadID string
   }
 }`
 	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + mutation, "-f", "threadId=" + threadID})
+}
+
+func (r *Runner) RunPRReviewSubmit(ctx context.Context, repository string, number int, reviewID int64) (CommandResult, resolvedConfig, error) {
+	if reviewID <= 0 {
+		return CommandResult{Command: defaultCommand, ExitCode: -1}, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: "GitHub pull request review id must be greater than zero"}
+	}
+	number, err := normalizePullRequestNumber(number)
+	if err != nil {
+		return CommandResult{Command: defaultCommand, ExitCode: -1}, resolvedConfig{}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	config, err := r.loadConfig(ctx)
+	if err != nil {
+		return CommandResult{}, resolvedConfig{}, err
+	}
+	repository, err = resolveRepository(repository, config.DefaultRepo)
+	if err != nil {
+		return CommandResult{Command: config.Command, ExitCode: -1}, config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}
+	}
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "--method", "POST", fmt.Sprintf("repos/%s/pulls/%d/reviews/%d/events", repository, number, reviewID), "-f", "event=COMMENT"})
 }
 
 func (r *Runner) RunPRReviewThreadReply(ctx context.Context, request PRReviewThreadReplyRequest) (CommandResult, resolvedConfig, error) {
@@ -681,6 +720,7 @@ type PRCommentCreateRequest struct {
 	Line     int
 	Side     string
 	CommitID string
+	ReviewID int64
 }
 
 type PRReviewThreadReplyRequest struct {
