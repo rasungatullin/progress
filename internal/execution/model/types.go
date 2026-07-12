@@ -298,6 +298,7 @@ type GitPushConfig struct {
 type RebaseInput struct {
 	Directory      string     `json:"directory,omitempty"`
 	BaseRef        string     `json:"base_ref,omitempty"`
+	HeadRef        string     `json:"head_ref,omitempty"`
 	Push           bool       `json:"push,omitempty"`
 	ForceWithLease bool       `json:"force_with_lease,omitempty"`
 	Git            *GitConfig `json:"-"`

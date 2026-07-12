@@ -2195,9 +2195,26 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 		return e.failRebase(state, operation, name, "Текущая ветка не определена.", "rebase_branch_failed", err)
 	}
 	branch = strings.TrimSpace(branch)
+	if input.HeadRef != "" && branch != strings.TrimSpace(input.HeadRef) {
+		return e.failRebase(state, operation, name, "Текущая ветка не совпадает с рабочей веткой.", "rebase_head_ref_mismatch", fmt.Errorf("current branch %q does not match workplace branch %q", branch, input.HeadRef))
+	}
+	if branch == normalizeRebaseRef(input.BaseRef) {
+		return e.failRebase(state, operation, name, "Перебазирование основной ветки запрещено.", "rebase_base_branch", fmt.Errorf("current branch %q is the rebase base branch", branch))
+	}
 
 	if _, err := gitOutput(ctx, input.Directory, "fetch", "origin", input.BaseRef); err != nil {
 		return e.failRebase(state, operation, name, "Получение базовой ссылки завершилось отказом.", "rebase_fetch_failed", err)
+	}
+	remoteOID := ""
+	if input.ForceWithLease {
+		remoteOID, err = gitOutput(ctx, input.Directory, "rev-parse", "--verify", "refs/remotes/origin/"+branch)
+		if err != nil || strings.TrimSpace(remoteOID) == "" {
+			if err == nil {
+				err = fmt.Errorf("remote branch origin/%s has no commit", branch)
+			}
+			return e.failRebase(state, operation, name, "Исходная вершина удалённой ветки не определена.", "rebase_remote_head_failed", err)
+		}
+		remoteOID = strings.TrimSpace(remoteOID)
 	}
 	if _, err := gitOutput(ctx, input.Directory, "rebase", "--", "FETCH_HEAD"); err != nil {
 		abortErr := error(nil)
@@ -2212,7 +2229,7 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	if input.Push {
 		pushArgs := []string{"push"}
 		if input.ForceWithLease {
-			pushArgs = append(pushArgs, "--force-with-lease")
+			pushArgs = append(pushArgs, "--force-with-lease=refs/heads/"+branch+":"+remoteOID)
 		}
 		pushArgs = append(pushArgs, "origin", "HEAD:"+branch)
 		if _, err := gitOutput(ctx, input.Directory, pushArgs...); err != nil {
@@ -2247,6 +2264,7 @@ func rebaseInputFromOperation(state *operationExecution, operation OperationSpec
 	input := model.RebaseInput{}
 	input.Directory, _ = operationMappingValue[string](state, operation.In["directory"])
 	input.BaseRef, _ = operationMappingValue[string](state, operation.In["base_ref"])
+	input.HeadRef, _ = operationMappingValue[string](state, operation.In["head_ref"])
 	input.Push, _ = operationMappingValue[bool](state, operation.In["push"])
 	input.ForceWithLease, _ = operationMappingValue[bool](state, operation.In["force_with_lease"])
 	if mapping, ok := operation.In["git"]; ok {
@@ -2263,9 +2281,16 @@ func rebaseInputSummary(input model.RebaseInput, operation OperationSpec) string
 	return operationIOSummary(operation.In, map[string]string{
 		"directory":        input.Directory,
 		"base_ref":         input.BaseRef,
+		"head_ref":         input.HeadRef,
 		"push":             fmt.Sprintf("%t", input.Push),
 		"force_with_lease": fmt.Sprintf("%t", input.ForceWithLease),
 	})
+}
+
+func normalizeRebaseRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	ref = strings.TrimPrefix(ref, "refs/heads/")
+	return strings.TrimPrefix(ref, "origin/")
 }
 
 func writeCommitPushData(state *operationExecution, operation OperationSpec, summary string) {
