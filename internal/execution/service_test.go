@@ -41,6 +41,35 @@ func TestPublishTaskCommentUsesTaskRepository(t *testing.T) {
 	}
 }
 
+func TestPublishPullRequestCommentsUsesProvidedOperationNameForPolicy(t *testing.T) {
+	t.Parallel()
+
+	integrations := &stubIntegrationExecutor{}
+	action := model.Action{Operations: []model.OperationSpec{{Name: "publish-review-remarks-custom", Kind: OperationKindPublishReviewRemarks}}}
+	state := &operationExecution{
+		action: action,
+		policies: []textPublicationPolicy{{
+			Targets:   []string{publicationTargetMergeRequestComment},
+			Steps:     []string{"publish-review-remarks-custom"},
+			NoHeading: true,
+		}},
+	}
+
+	executor := builtinOperationExecutor{service: &Service{integrations: integrations}}
+	count, err := executor.publishPullRequestComments(context.Background(), state, pullRequestRef{Repository: "owner/name", Number: 17}, []reviewRemarkComment{{
+		Body: "## Служебный заголовок\n\nТекст замечания.",
+	}}, "publish-review-remarks-custom")
+	if err != nil {
+		t.Fatalf("publish review remark: %v", err)
+	}
+	if count != 1 || len(integrations.calls) != 1 {
+		t.Fatalf("expected one published comment, count=%d calls=%#v", count, integrations.calls)
+	}
+	if integrations.calls[0].Body != "Текст замечания." {
+		t.Fatalf("policy must use provided operation name, got %q", integrations.calls[0].Body)
+	}
+}
+
 func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 	t.Parallel()
 

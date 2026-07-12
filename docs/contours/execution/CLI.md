@@ -112,7 +112,7 @@
 - `review-pull-request` - проверить открытый запрос на слияние и записать замечания ревизии;
 - `apply-review-comments` - получить замечания ревизии, исправить их, отправить ветку и записать ответы на замечания.
 
-Состав этих действий также задан в каталоге методик. Действие `start-implementation-pr` включает операции `commit-push` и `publish-merge-request`, действие `review-pull-request` включает операции `load-pull-request`, `load-review-remarks` и `publish-review-remarks`, действие `apply-review-comments` включает операции `load-pull-request`, `load-review-remarks`, `commit-push` и `publish-review-responses`.
+Состав этих действий также задан в каталоге методик. Действие `start-implementation-pr` включает операции `commit-push`, `publish-merge-request` и `publish-task-comment`, действие `review-pull-request` включает операции `load-pull-request`, `load-review-remarks` и `publish-review-remarks`, действие `apply-review-comments` включает операции `load-pull-request`, `load-review-remarks`, `commit-push` и `publish-review-responses`.
 
 ## 6. Выходной формат
 
