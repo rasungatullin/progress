@@ -28,9 +28,10 @@ func TestRebaseFetchesBaseRebasesAndUsesForceWithLeaseOnlyWhenAllowed(t *testing
 			return "", nil
 		}
 	}}
-	state := rebaseTestState(service, model.RebaseInput{Directory: "/tmp/work", BaseRef: "main", Push: true, ForceWithLease: true, Git: &model.GitConfig{Push: &model.GitPushConfig{AllowForceWithLease: true}}})
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "main", HeadRef: "feature", Push: true, ForceWithLease: true, Git: &model.GitConfig{Push: &model.GitPushConfig{AllowForceWithLease: true}}}
+	state := rebaseTestState(service, input)
 
-	if err := (builtinOperationExecutor{service: service}).rebase(context.Background(), state, rebaseTestOperation(model.RebaseInput{Directory: "/tmp/work", BaseRef: "main", Push: true, ForceWithLease: true, Git: &model.GitConfig{Push: &model.GitPushConfig{AllowForceWithLease: true}}}), "rebase"); err != nil {
+	if err := (builtinOperationExecutor{service: service}).rebase(context.Background(), state, rebaseTestOperation(input), "rebase"); err != nil {
 		t.Fatalf("rebase: %v", err)
 	}
 	joined := strings.Join(calls, "\n")
@@ -51,13 +52,54 @@ func TestRebaseRejectsDirtyWorktreeAndDoesNotFetch(t *testing.T) {
 		}
 		return "true", nil
 	}}
-	state := rebaseTestState(service, model.RebaseInput{Directory: "/tmp/work", BaseRef: "main"})
-	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), state, rebaseTestOperation(model.RebaseInput{Directory: "/tmp/work", BaseRef: "main"}), "rebase")
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "main", HeadRef: "feature"}
+	state := rebaseTestState(service, input)
+	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), state, rebaseTestOperation(input), "rebase")
 	if err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
 		t.Fatalf("expected dirty-worktree refusal, got %v", err)
 	}
 	if strings.Contains(strings.Join(calls, "\n"), "fetch") {
 		t.Fatalf("dirty worktree must not fetch: %v", calls)
+	}
+}
+
+func TestRebaseRejectsProtectedBranchWhenBaseRefIsSHA(t *testing.T) {
+	var calls []string
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		call := strings.Join(args, " ")
+		calls = append(calls, call)
+		switch call {
+		case "rev-parse --is-inside-work-tree":
+			return "true", nil
+		case "branch --show-current":
+			return "main", nil
+		default:
+			return "", nil
+		}
+	}}
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "0123456789abcdef0123456789abcdef01234567", HeadRef: "feature"}
+	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), rebaseTestState(service, input), rebaseTestOperation(input), "rebase")
+	if err == nil || !strings.Contains(err.Error(), "workplace branch") {
+		t.Fatalf("expected protected-branch refusal, got %v", err)
+	}
+	if strings.Contains(strings.Join(calls, "\n"), "fetch") {
+		t.Fatalf("protected branch must not fetch: %v", calls)
+	}
+}
+
+func TestRebaseRequiresHeadBranch(t *testing.T) {
+	var calls []string
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "true", nil
+	}}
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "main"}
+	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), rebaseTestState(service, input), rebaseTestOperation(input), "rebase")
+	if err == nil || !strings.Contains(err.Error(), "head ref is required") {
+		t.Fatalf("expected head-branch requirement, got %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("missing head branch must fail before Git access: %v", calls)
 	}
 }
 
@@ -79,8 +121,9 @@ func TestRebaseAbortsAfterConflict(t *testing.T) {
 			return "", nil
 		}
 	}}
-	state := rebaseTestState(service, model.RebaseInput{Directory: "/tmp/work", BaseRef: "main"})
-	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), state, rebaseTestOperation(model.RebaseInput{Directory: "/tmp/work", BaseRef: "main"}), "rebase")
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "main", HeadRef: "feature"}
+	state := rebaseTestState(service, input)
+	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), state, rebaseTestOperation(input), "rebase")
 	if err == nil || !strings.Contains(err.Error(), "conflict") {
 		t.Fatalf("expected conflict refusal, got %v", err)
 	}
@@ -103,8 +146,9 @@ func TestRebaseRejectsBaseBranch(t *testing.T) {
 			return "", nil
 		}
 	}}
-	state := rebaseTestState(service, model.RebaseInput{Directory: "/tmp/work", BaseRef: "main"})
-	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), state, rebaseTestOperation(model.RebaseInput{Directory: "/tmp/work", BaseRef: "main"}), "rebase")
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "main", HeadRef: "main"}
+	state := rebaseTestState(service, input)
+	err := (builtinOperationExecutor{service: service}).rebase(context.Background(), state, rebaseTestOperation(input), "rebase")
 	if err == nil || !strings.Contains(err.Error(), "base branch") {
 		t.Fatalf("expected base-branch refusal, got %v", err)
 	}

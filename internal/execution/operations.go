@@ -2166,6 +2166,10 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	if strings.HasPrefix(input.BaseRef, "-") {
 		return e.failRebase(state, operation, name, "Базовая ссылка имеет недопустимый вид.", "rebase_base_ref_invalid", fmt.Errorf("rebase base ref must not start with '-'"))
 	}
+	workplaceBranch := strings.TrimSpace(input.HeadRef)
+	if workplaceBranch == "" {
+		return e.failRebase(state, operation, name, "Рабочая ветка для перебазирования не задана.", "rebase_head_ref_required", fmt.Errorf("rebase head ref is required"))
+	}
 
 	gitOutput := e.service.runGitOutput
 	if gitOutput == nil {
@@ -2195,7 +2199,7 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 		return e.failRebase(state, operation, name, "Текущая ветка не определена.", "rebase_branch_failed", err)
 	}
 	branch = strings.TrimSpace(branch)
-	if input.HeadRef != "" && branch != strings.TrimSpace(input.HeadRef) {
+	if branch != workplaceBranch {
 		return e.failRebase(state, operation, name, "Текущая ветка не совпадает с рабочей веткой.", "rebase_head_ref_mismatch", fmt.Errorf("current branch %q does not match workplace branch %q", branch, input.HeadRef))
 	}
 	if branch == normalizeRebaseRef(input.BaseRef) {
