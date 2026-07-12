@@ -87,3 +87,30 @@ func TestIntegrationIssueCommandReportsMissingDefaultAndUnknownSystem(t *testing
 		})
 	}
 }
+
+func TestIntegrationTypeOrientedTreeExcludesDispatcherAndPrivate(t *testing.T) {
+	root := NewRootCommand()
+	integrationCommand, _, err := root.Find([]string{"integration"})
+	if err != nil {
+		t.Fatalf("find integration command: %v", err)
+	}
+	for _, name := range []string{"dispatcher", "dispatch", "private"} {
+		for _, child := range integrationCommand.Commands() {
+			if child.Name() == name {
+				t.Fatalf("obsolete integration command %q is still public", name)
+			}
+		}
+	}
+	for _, name := range []string{"issue", "repo", "messenger", "wiki"} {
+		found := false
+		for _, child := range integrationCommand.Commands() {
+			if child.Name() == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("type-oriented command %q is missing", name)
+		}
+	}
+}
