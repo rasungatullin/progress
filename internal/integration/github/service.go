@@ -551,6 +551,13 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodePartialPayload, Message: fmt.Sprintf("GitHub pull request review comment endpoint returned no stable identifier for %s#%d (operation=createReviewComment reference=%s response=%s)", repository, number, githubPullRequestReference(repository, number), safeGitHubResponseDiagnostic(result.Stdout)), Result: result}, "code=partial-payload operation=createReviewComment reference="+githubPullRequestReference(repository, number)+"; existing remarks were checked before retry")
 		}
 	}
+	if commentRequest.ReviewID == 0 {
+		pendingReviewID, err := s.findPendingPRReview(ctx, repository, number)
+		if err != nil {
+			return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pending GitHub pull request review lookup failed after comment create")
+		}
+		commentRequest.ReviewID = pendingReviewID
+	}
 
 	if commentRequest.ReviewID > 0 {
 		submitResult, _, submitErr := s.runner.RunPRReviewSubmit(ctx, repository, number, commentRequest.ReviewID)

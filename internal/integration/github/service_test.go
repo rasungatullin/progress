@@ -1697,6 +1697,32 @@ func TestServicePRCommentCreateInlineClassifiesPartialPayload(t *testing.T) {
 	}
 }
 
+func TestServicePRCommentCreateClosesPendingReviewAfterRecoveringExistingRemark(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{ExitCode: 0, Stdout: `{}`},
+		reviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`},
+			{ExitCode: 0, Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","path":"file.go","line":12,"comments":{"nodes":[{"id":"comment-1","body":"Inline remark","path":"file.go","line":12,"url":"https://github.com/owner/name/pull/42#discussion_r1"}]}}]}}}}}`},
+		},
+		pendingReviewResults: []CommandResult{
+			{ExitCode: 0, Stdout: `[]`},
+			{ExitCode: 0, Stdout: `[{"id":77,"state":"PENDING"}]`},
+		},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{IntegrationType: model.IntegrationTypeRepository, Resource: "comment", ObjectType: "comment", Operation: "create", Repository: "owner/name", RepoProvided: true, Number: 42, Body: "Inline remark", Path: "file.go", Line: 12, Side: "RIGHT"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if stub.prCommentCalls != 1 || stub.prReviewsCalls != 2 || stub.prSubmitCalls != 1 || response.Status != model.ResponseStatusOK {
+		t.Fatalf("recovered remark did not close pending review: comments=%d reviews=%d submits=%d response=%#v", stub.prCommentCalls, stub.prReviewsCalls, stub.prSubmitCalls, response)
+	}
+}
+
 func TestServicePRCommentsSupportsReviewRemarkObjectAlias(t *testing.T) {
 	t.Parallel()
 
@@ -1971,6 +1997,7 @@ type stubRunner struct {
 	prReplyRequest      PRReviewThreadReplyRequest
 	threadID            string
 	reviewResult        CommandResult
+	reviewResults       []CommandResult
 	pendingReviewResult CommandResult
 
 	pendingReviewResults []CommandResult
@@ -2059,6 +2086,11 @@ func (r *stubRunner) RunPRReviewThreads(_ context.Context, repository string, nu
 	r.prReviewCalls++
 	r.repo = repository
 	r.number = number
+	if len(r.reviewResults) > 0 {
+		result := r.reviewResults[0]
+		r.reviewResults = r.reviewResults[1:]
+		return result, r.config, r.err
+	}
 	if r.reviewResult.Stdout != "" || r.reviewResult.Stderr != "" || r.reviewResult.Command != "" || r.reviewResult.ExitCode != 0 {
 		return r.reviewResult, r.config, r.err
 	}
