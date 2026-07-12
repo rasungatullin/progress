@@ -325,9 +325,26 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 }
 
 func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool {
+	respondedRemarkIDs := map[string]struct{}{}
+	for _, remark := range remarks {
+		if strings.Contains(remark.Body, "## Ответ на замечание ревизии") {
+			if id := externalReviewRemarkID(remark.Body, "Замечание:"); id != "" {
+				respondedRemarkIDs[id] = struct{}{}
+			}
+		}
+	}
+
 	for _, remark := range remarks {
 		if strings.TrimSpace(remark.ReplyToID) == "" {
-			continue
+			if strings.Contains(remark.Body, "## Ответ на замечание ревизии") || strings.Contains(remark.Body, "## Заключение ревизии") {
+				continue
+			}
+			if id := externalReviewRemarkID(remark.Body, "Идентификатор:"); id != "" {
+				if _, ok := respondedRemarkIDs[id]; ok {
+					continue
+				}
+			}
+			return true
 		}
 		state := strings.ToLower(strings.TrimSpace(remark.State))
 		switch state {
@@ -338,6 +355,16 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark) bool
 		}
 	}
 	return false
+}
+
+func externalReviewRemarkID(body string, prefix string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
 }
 
 func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
