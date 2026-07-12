@@ -227,7 +227,7 @@ func TestReviewRemarkUsesMeaningfulTitleOnlyWithOptionalHeading(t *testing.T) {
 			ID:    "remark-2",
 			Title: "Проверить граничный кейс",
 			Body:  "Требуется дополнительный тест.",
-		}}},
+		}}}},
 	}
 
 	comments := reviewRemarkComments(state, OperationKindPublishReviewRemarks)
