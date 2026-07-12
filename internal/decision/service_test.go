@@ -1291,6 +1291,8 @@ func TestHasUnresolvedExternalReviewRemarksIgnoresResolvedGeneralRemarkByID(t *t
 		{name: "closed", state: "closed", body: "Замечание закрыто", want: false},
 		{name: "fixed", state: "fixed", body: "Замечание закрыто", want: false},
 		{name: "explicit closure", body: "Замечание закрыто: исправление подтверждено", want: false},
+		{name: "closure mention in open remark", body: "Замечание закрыто не было; требуется исправление", want: true},
+		{name: "negative closure statement", body: "Замечание закрыто: не было подтверждено", want: true},
 		{name: "open", state: "open", body: "Ожидается исправление", want: true},
 	}
 	for _, test := range tests {

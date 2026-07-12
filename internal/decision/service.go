@@ -235,7 +235,20 @@ func isResolvedExternalReviewRemark(body string) bool {
 		return true
 	}
 	normalizedBody := strings.ToLower(body)
-	return strings.Contains(normalizedBody, "замечание закрыто") || strings.Contains(normalizedBody, "remark closed")
+	for _, prefix := range []string{"замечание закрыто:", "remark closed:"} {
+		for _, line := range strings.Split(normalizedBody, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, prefix) {
+				continue
+			}
+			confirmation := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			if confirmation == "" || strings.HasPrefix(confirmation, "не ") || strings.HasPrefix(confirmation, "not ") {
+				continue
+			}
+			return true
+		}
+	}
+	return false
 }
 
 func isResolvedExternalReviewResponse(body string) bool {
