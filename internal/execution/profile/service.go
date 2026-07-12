@@ -56,6 +56,8 @@ func (s *Service) Resolve(ctx context.Context, in model.Invocation) (model.Profi
 		PromptAdditions:          resolvePromptAdditions(config.Defaults.PromptAdditions, entry.PromptAdditions),
 		StructuredOutput:         resolveBool(config.Defaults.StructuredOutput, entry.StructuredOutput),
 		StructuredOutputRequired: resolveBool(config.Defaults.StructuredOutputRequired, entry.StructuredOutputRequired),
+		Timeout:                  firstNonEmpty(entry.Timeout, config.Defaults.Timeout),
+		NoOutputTimeout:          firstNonEmpty(entry.NoOutputTimeout, config.Defaults.NoOutputTimeout),
 	}
 
 	fields, err := resolveStructuredOutputFields(config.Defaults.StructuredOutputFields, entry.StructuredOutputFields)

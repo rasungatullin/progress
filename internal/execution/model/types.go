@@ -15,6 +15,8 @@ type LaunchSpec struct {
 	StructuredOutputRequired bool             `json:"structured_output_required,omitempty"`
 	StructuredOutputFields   []string         `json:"structured_output_fields,omitempty"`
 	CommitPush               bool             `json:"commit_push,omitempty"`
+	Timeout                  string           `json:"timeout,omitempty"`
+	NoOutputTimeout          string           `json:"no_output_timeout,omitempty"`
 }
 
 type StructuredExtensions map[string]json.RawMessage
@@ -184,6 +186,8 @@ type Profile struct {
 	StructuredOutput         bool     `json:"structured_output,omitempty"`
 	StructuredOutputRequired bool     `json:"structured_output_required,omitempty"`
 	StructuredOutputFields   []string `json:"structured_output_fields,omitempty"`
+	Timeout                  string   `json:"timeout,omitempty"`
+	NoOutputTimeout          string   `json:"no_output_timeout,omitempty"`
 }
 
 type ProfileConfigFile struct {
@@ -199,6 +203,8 @@ type ProfileOptions struct {
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`
+	Timeout                  string    `json:"timeout"`
+	NoOutputTimeout          string    `json:"no-output-timeout"`
 }
 
 type ProfileConfig struct {
@@ -210,6 +216,8 @@ type ProfileConfig struct {
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`
+	Timeout                  string    `json:"timeout"`
+	NoOutputTimeout          string    `json:"no-output-timeout"`
 }
 
 type Allocation struct {

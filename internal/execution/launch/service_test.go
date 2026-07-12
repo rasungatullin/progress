@@ -81,6 +81,71 @@ func TestLaunchCommitPushDisabled(t *testing.T) {
 	}
 }
 
+func TestRunRunnerCommandStopsOnOverallTimeoutAndKeepsOutput(t *testing.T) {
+	t.Parallel()
+
+	output, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "printf partial; sleep 1"), model.LaunchSpec{
+		Timeout:         "50ms",
+		NoOutputTimeout: "1s",
+	})
+	if !errors.Is(err, errRunnerTimeout) {
+		t.Fatalf("expected overall timeout, got %v", err)
+	}
+	if output != "" {
+		t.Fatalf("timeout output must be returned through runner error, got %q", output)
+	}
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || runnerErr.output != "partial" {
+		t.Fatalf("partial output was not preserved: %#v", runnerErr)
+	}
+}
+
+func TestRunRunnerCommandStopsOnNoOutputTimeout(t *testing.T) {
+	t.Parallel()
+
+	_, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "printf initial; sleep 1"), model.LaunchSpec{
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	var runnerErr *runnerExecutionError
+	if !errors.As(err, &runnerErr) || runnerErr.output != "initial" {
+		t.Fatalf("partial output was not preserved: %#v", runnerErr)
+	}
+}
+
+func TestLaunchPersistsTimedOutRunnerOutputAndHistory(t *testing.T) {
+	t.Parallel()
+
+	workplace := validWorkplace(t)
+	service := &Service{
+		runRunner: func(context.Context, model.Invocation) (string, error) {
+			return "", &runnerExecutionError{err: errRunnerTimeout, output: "partial output"}
+		},
+	}
+
+	result, err := service.Launch(context.Background(), validInvocation(t, false), validProfile(), validAllocation(), workplace)
+	if !errors.Is(err, errRunnerTimeout) {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if result.Status != "timeout" || result.RawOutput != "partial output" {
+		t.Fatalf("unexpected timeout result: %#v", result)
+	}
+	if result.RawOutputPath == "" || result.RunRecordPath == "" {
+		t.Fatalf("timeout diagnostics must be persisted: %#v", result)
+	}
+	rawOutput, readErr := os.ReadFile(result.RawOutputPath)
+	if readErr != nil || string(rawOutput) != "partial output" {
+		t.Fatalf("unexpected persisted runner output: %q, %v", rawOutput, readErr)
+	}
+	runs, listErr := history.List(context.Background(), workplace.Name, history.ListFilter{Limit: 1})
+	if listErr != nil || len(runs) != 1 || runs[0].Status != "timeout" || runs[0].RunRecordPath != result.RunRecordPath {
+		t.Fatalf("timeout history was not finalized: %#v, %v", runs, listErr)
+	}
+}
+
 func TestLaunchUpdatesExistingHistoryHandle(t *testing.T) {
 	t.Parallel()
 
