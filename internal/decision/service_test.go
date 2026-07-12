@@ -1366,6 +1366,18 @@ func TestHasUnresolvedExternalReviewRemarksKeepsQuotedConclusionHeaderAsRemark(t
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksKeepsRemarkWithQuotedConclusionOnSeparateLine(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{
+		State: "conversation",
+		Body:  "## Замечание ревизии\n\nВ цитате:\n## Заключение ревизии\n\napprove\n\nИсправить обработку",
+	}}
+	if got := hasUnresolvedExternalReviewRemarks(remarks); !got {
+		t.Fatal("remark quoting the conclusion on a separate line must remain unresolved")
+	}
+}
+
 func TestBuildExecutionTaskPreservesIssueBodyLiteralStructuredInputBlock(t *testing.T) {
 	t.Parallel()
 
