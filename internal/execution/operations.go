@@ -1740,14 +1740,39 @@ func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkI
 	// замечание. Она сохраняет возможность безопасного разрешения ответа.
 	if externalID := strings.TrimSpace(remark.ExternalID); externalID != "" {
 		stableID := "remark-ref:" + externalID
-		if len(index.external[stableID]) > 0 {
-			if resolved, ok := index.resolve(externalID); ok && sameReviewRemark(resolved, remark) {
-				return externalID
+		if reviewRemarkResponseIDAvailable(stableID, remark, index) {
+			return stableID
+		}
+		if resolved, ok := index.resolve(externalID); ok && sameReviewRemark(resolved, remark) {
+			return externalID
+		}
+		for attempt := 1; ; attempt++ {
+			stableID := fmt.Sprintf("remark-ref:%s#%d", externalID, attempt)
+			if reviewRemarkResponseIDAvailable(stableID, remark, index) {
+				return stableID
 			}
 		}
-		return stableID
 	}
 	return ""
+}
+
+func reviewRemarkResponseIDAvailable(id string, remark integration.ReviewRemark, index reviewRemarkIndex) bool {
+	for _, candidate := range index.external[id] {
+		if !sameReviewRemark(candidate, remark) {
+			return false
+		}
+	}
+	for _, candidate := range index.project[id] {
+		if !sameReviewRemark(candidate, remark) {
+			return false
+		}
+	}
+	for _, candidate := range index.stableMatches(id) {
+		if !sameReviewRemark(candidate, remark) {
+			return false
+		}
+	}
+	return true
 }
 
 func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {

@@ -1678,7 +1678,7 @@ func (index reviewRemarkIndex) resolve(id string) (integration.ReviewRemark, boo
 	id = strings.TrimSpace(id)
 	externalMatches := index.external[id]
 	projectMatches := index.project[id]
-	stableMatches := index.stable[id]
+	stableMatches := index.stableMatches(id)
 	if len(stableMatches) == 1 && len(projectMatches) == 0 {
 		if len(externalMatches) == 0 || (len(externalMatches) == 1 && sameReviewRemark(stableMatches[0], externalMatches[0])) {
 			return stableMatches[0], true
@@ -1707,7 +1707,7 @@ func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
 	id = strings.TrimSpace(id)
 	externalMatches := index.external[id]
 	projectMatches := index.project[id]
-	stableMatches := index.stable[id]
+	stableMatches := index.stableMatches(id)
 	if len(stableMatches) > 1 {
 		return true
 	}
@@ -1718,6 +1718,26 @@ func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
 		return true
 	}
 	return len(externalMatches) == 1 && len(projectMatches) == 1 && !sameReviewRemark(externalMatches[0], projectMatches[0])
+}
+
+func (index reviewRemarkIndex) stableMatches(id string) []integration.ReviewRemark {
+	if matches := index.stable[id]; len(matches) > 0 {
+		return matches
+	}
+	if !strings.HasPrefix(id, "remark-ref:") {
+		return nil
+	}
+	base := strings.TrimPrefix(id, "remark-ref:")
+	separator := strings.LastIndexByte(base, '#')
+	if separator <= 0 {
+		return nil
+	}
+	for _, char := range base[separator+1:] {
+		if char < '0' || char > '9' {
+			return nil
+		}
+	}
+	return index.external[base[:separator]]
 }
 
 func sameReviewRemark(left, right integration.ReviewRemark) bool {
@@ -1813,10 +1833,19 @@ func validateReviewResponseTargets(responses []StructuredResponse, remarks []int
 			failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical alias is conflicting or ambiguous; external publication is not allowed", responseIndex, id))
 			continue
 		}
-		if _, ok := index.resolve(id); ok {
-			continue
+		remark, ok := index.resolve(id)
+		if !ok {
+			if matches := aliases[id]; len(matches) == 1 {
+				remark, ok = matches[0], true
+			}
 		}
-		if matches := aliases[id]; len(matches) == 1 {
+		if ok {
+			if reviewResponseType(response) == "local" {
+				continue
+			}
+			if reviewRemarkResponseType := reviewResponseTypeFromRemark(remark); reviewRemarkResponseType == "" {
+				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical remark has unknown response type; external publication is not allowed", responseIndex, id))
+			}
 			continue
 		}
 		reason := "unknown"

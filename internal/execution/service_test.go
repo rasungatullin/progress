@@ -2300,6 +2300,27 @@ func TestCanonicalReviewRemarksAvoidStableExternalIDCollision(t *testing.T) {
 	}
 }
 
+func TestCanonicalReviewRemarksAvoidSequentialStableExternalIDCollision(t *testing.T) {
+	t.Parallel()
+
+	canonical := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Первое замечание."},
+		{ExternalID: "remark-ref:comment-1", Body: "Второе замечание."},
+		{ExternalID: "remark-ref:remark-ref:comment-1", Body: "Третье замечание."},
+	}
+	remarks := canonicalReviewRemarks(canonical)
+	if len(remarks) != 3 || remarks[0].ID != "comment-1" || remarks[1].ID != "remark-ref:remark-ref:comment-1#1" || remarks[2].ID != "remark-ref:remark-ref:remark-ref:comment-1" {
+		t.Fatalf("canonical response identifiers must avoid sequential collisions: %#v", remarks)
+	}
+	index := newReviewRemarkIndex(canonical)
+	for i, remark := range remarks {
+		resolved, ok := index.resolve(remark.ID)
+		if !ok || !sameReviewRemark(resolved, canonical[i]) {
+			t.Fatalf("canonical response identifier must resolve to its remark: %#v", remark)
+		}
+	}
+}
+
 func TestReviewResponsesRejectStableExternalIDCollision(t *testing.T) {
 	t.Parallel()
 
@@ -2350,6 +2371,16 @@ func TestReviewResponsesRejectExplicitTypeForAmbiguousOrUnknownRemarkID(t *testi
 	err := validateReviewResponseTargets(responses, remarks, nil)
 	if err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "remark-unknown") {
 		t.Fatalf("explicit response types must not bypass target validation: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectExplicitTypeForUnknownCanonicalKind(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{ExternalID: "comment-1", Body: "Каноническое замечание без вида."}}
+	responses := []model.StructuredResponse{{RemarkID: "comment-1", Type: "comment", Status: "resolved", Summary: "Не публиковать."}}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil || !strings.Contains(err.Error(), "unknown response type") {
+		t.Fatalf("explicit type must not bypass unknown canonical kind: %v", err)
 	}
 }
 
@@ -2710,11 +2741,11 @@ func TestPublishReviewResponsesKeepsExplicitThreadKindWhenRemarkKindIsUnknown(t 
 		return integration.Response{Status: "ok"}, nil
 	}}}
 
-	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
-		t.Fatalf("publish review responses: %v", err)
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil || !strings.Contains(err.Error(), "unknown response type") {
+		t.Fatalf("unknown canonical response kind must fail diagnostically: %v", err)
 	}
-	if len(calls) != 2 || calls[0].Operation != "reply" || calls[0].ThreadID != "thread-1" || calls[1].Operation != "resolve" {
-		t.Fatalf("explicit thread_id must preserve inline response policy: %#v", calls)
+	if len(calls) != 0 {
+		t.Fatalf("unknown canonical response kind must not be published: %#v", calls)
 	}
 }
 
