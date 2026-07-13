@@ -2,7 +2,9 @@ package reactivity
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -14,6 +16,8 @@ import (
 const (
 	StopReasonNoNextOperation = "no-next-operation"
 	StopReasonSingleCycle     = "single-cycle"
+	StopReasonRepeatedState   = "repeated-state"
+	StopReasonMaxCycles       = "max-cycles"
 )
 
 type TaskProcessingInput struct {
@@ -70,28 +74,106 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 
 	result := TaskProcessingResult{TaskNumber: input.TaskNumber}
 	var knownMergeRequest *integration.MergeRequest
-	for index := 1; index <= maxCycles; index++ {
+	seenStates := make(map[string]int)
+	cyclesSinceProgress := 0
+	previousState := ""
+	for index := 1; ; index++ {
 		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index, knownMergeRequest)
 		result.Cycles = append(result.Cycles, cycle)
 		result.FinalIssue = cycle.Issue
 		if err != nil {
 			return result, err
 		}
-		if cycle.ExecutionResult != nil && cycle.ExecutionResult.MergeRequest != nil {
-			knownMergeRequest = integrationMergeRequestFromExecutionResult(cycle.ExecutionResult.MergeRequest)
-		}
 		if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil {
 			result.Completed = true
 			result.StopReason = StopReasonNoNextOperation
 			return result, nil
 		}
+		state := processingStateFingerprint(cycle)
+		if firstIndex, ok := seenStates[state]; ok {
+			result.StopReason = StopReasonRepeatedState
+			diagnostic := fmt.Sprintf("обнаружено повторяющееся состояние: первый цикл=%d, текущий цикл=%d, полезный прогресс=false, счётчик продолжения=%d", firstIndex, index, cyclesSinceProgress)
+			s.logger.Printf("Обработка задачи %d остановлена: предел повторяющегося состояния; %s", input.TaskNumber, diagnostic)
+			return result, fmt.Errorf("обработка задачи %d остановлена по пределу повторяющегося состояния: %s", input.TaskNumber, diagnostic)
+		}
+		seenStates[state] = index
+		progress := previousState != "" && previousState != state
+		if progress {
+			cyclesSinceProgress = 0
+		} else {
+			cyclesSinceProgress++
+		}
+		s.logger.Printf("Обработка задачи %d: цикл=%d полезный прогресс=%t счётчик продолжения=%d/%d", input.TaskNumber, index, progress, cyclesSinceProgress, maxCycles)
+		previousState = state
+		if cycle.ExecutionResult != nil && cycle.ExecutionResult.MergeRequest != nil {
+			knownMergeRequest = integrationMergeRequestFromExecutionResult(cycle.ExecutionResult.MergeRequest)
+		}
 		if input.Once {
 			result.StopReason = StopReasonSingleCycle
 			return result, nil
 		}
+		if cyclesSinceProgress >= maxCycles {
+			result.StopReason = StopReasonMaxCycles
+			diagnostic := fmt.Sprintf("аварийный предел всей обработки: %d циклов без изменения состояния, полезный прогресс=false", maxCycles)
+			s.logger.Printf("Обработка задачи %d остановлена: %s", input.TaskNumber, diagnostic)
+			return result, fmt.Errorf("обработка задачи %d превысила аварийный предел циклов: %d (%s)", input.TaskNumber, maxCycles, diagnostic)
+		}
 	}
+}
 
-	return result, fmt.Errorf("обработка задачи %d превысила лимит циклов: %d", input.TaskNumber, maxCycles)
+type processingState struct {
+	IssueLabels  []string                     `json:"issue_labels,omitempty"`
+	IssueState   string                       `json:"issue_state,omitempty"`
+	MergeRequest *processingMergeRequestState `json:"merge_request,omitempty"`
+	External     *processingExternalState     `json:"external,omitempty"`
+}
+
+type processingMergeRequestState struct {
+	Number  int
+	State   string
+	BaseRef string
+	HeadRef string
+}
+
+type processingExternalState struct {
+	HasUnresolvedReviewRemarks bool
+	HasMergeConflict           bool
+	ReviewRemarks              []processingRemarkState
+}
+
+type processingRemarkState struct {
+	ExternalID string
+	Type       string
+	State      string
+	Body       string
+	Path       string
+	Line       int
+	Side       string
+	ReplyToID  string
+}
+
+func processingStateFingerprint(cycle TaskProcessingCycle) string {
+	state := processingState{}
+	if cycle.Issue != nil {
+		state.IssueState = cycle.Issue.State
+		state.IssueLabels = append([]string(nil), cycle.Issue.Labels...)
+		sort.Strings(state.IssueLabels)
+	}
+	if cycle.MergeRequest != nil {
+		state.MergeRequest = &processingMergeRequestState{Number: cycle.MergeRequest.Number, State: cycle.MergeRequest.State, BaseRef: cycle.MergeRequest.BaseRef, HeadRef: cycle.MergeRequest.HeadRef}
+	}
+	if cycle.MergeRequestExternalState != nil {
+		external := cycle.MergeRequestExternalState
+		state.External = &processingExternalState{HasUnresolvedReviewRemarks: external.HasUnresolvedReviewRemarks, HasMergeConflict: external.HasMergeConflict}
+		for _, remark := range external.ReviewRemarks {
+			state.External.ReviewRemarks = append(state.External.ReviewRemarks, processingRemarkState{ExternalID: remark.ExternalID, Type: remark.Type, State: remark.State, Body: remark.Body, Path: remark.Path, Line: remark.Line, Side: remark.Side, ReplyToID: remark.ReplyToID})
+		}
+		sort.Slice(state.External.ReviewRemarks, func(i, j int) bool {
+			return fmt.Sprintf("%#v", state.External.ReviewRemarks[i]) < fmt.Sprintf("%#v", state.External.ReviewRemarks[j])
+		})
+	}
+	encoded, _ := json.Marshal(state)
+	return string(encoded)
 }
 
 func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (TaskProcessingResult, error) {

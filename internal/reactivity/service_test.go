@@ -3,6 +3,7 @@ package reactivity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -226,6 +227,60 @@ func TestServiceProcessTaskOnceStopsAfterFirstCycle(t *testing.T) {
 	}
 	if got := strings.Join(integrations.labels, "|"); got != "add:Ожидает экспертизы" {
 		t.Fatalf("unexpected label operations: %s", got)
+	}
+}
+
+func TestServiceProcessTaskDoesNotStopAfterTwentyProgressingCycles(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.searchReturnsEmpty = true
+	decisions := &processingDecisionStub{}
+	executions := &processingExecutionStub{}
+	for index := 1; index <= 25; index++ {
+		decisions.results = append(decisions.results, processingConsideration(execution.ActionReviewPullRequest))
+		executions.results = append(executions.results, execution.ExecutionResult{
+			Status:       "completed",
+			MergeRequest: &execution.MergeRequest{Repository: "owner/name", Number: 184, BaseRef: "main", HeadRef: fmt.Sprintf("revision-%d", index)},
+			Launch:       &execution.LaunchResult{Status: "completed", StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "ok"}}},
+		})
+	}
+	decisions.results = append(decisions.results, decision.ConsiderationResult{Status: decision.ConsiderationStatusCompleted})
+
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = decisions
+	service.execution = executions
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, MaxCycles: 2})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if !result.Completed || len(result.Cycles) != 26 {
+		t.Fatalf("expected completed processing after progressing cycles: %#v", result)
+	}
+}
+
+func TestServiceProcessTaskStopsOnRepeatedState(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	decisions := &processingDecisionStub{results: []decision.ConsiderationResult{
+		processingConsideration(execution.ActionStartImplementationPR),
+		processingConsideration(execution.ActionStartImplementationPR),
+		processingConsideration(execution.ActionStartImplementationPR),
+	}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = decisions
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, MaxCycles: 5})
+	if err == nil || result.StopReason != StopReasonRepeatedState {
+		t.Fatalf("expected repeated-state stop, result=%#v err=%v", result, err)
+	}
+	if len(result.Cycles) != 2 {
+		t.Fatalf("expected stop on second cycle, got %d cycles", len(result.Cycles))
 	}
 }
 

@@ -78,7 +78,7 @@ func newReactivityProcessCommand() *cobra.Command {
 	cmd.Flags().IntVar(&flags.task, "task", 0, "Номер задачи для обработки")
 	cmd.Flags().StringVar(&flags.route, "route", "", "Имя маршрута обработки")
 	cmd.Flags().BoolVar(&flags.once, "once", false, "Выполнить только один цикл обработки")
-	cmd.Flags().IntVar(&flags.maxCycles, "max-cycles", 0, "Максимальное число циклов обработки")
+	cmd.Flags().IntVar(&flags.maxCycles, "max-cycles", 0, "Аварийный предел циклов обработки без полезного прогресса")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
 }
