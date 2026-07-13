@@ -1573,6 +1573,16 @@ func (w *runnerOutputWriter) runnerEventSnapshot() (string, time.Time) {
 	return w.lastRunnerEvent, w.runnerEventAt
 }
 
+func (w *runnerOutputWriter) activitySnapshot() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	activityAt := w.lastOutputAt
+	if w.runnerEventAt.After(activityAt) {
+		activityAt = w.runnerEventAt
+	}
+	return activityAt
+}
+
 func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSpec) (string, error) {
 	timeout, err := runnerDuration(spec.Timeout, defaultRunnerTimeout)
 	if err != nil {
@@ -1628,24 +1638,28 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			}
 			return output, nil
 		case <-writer.activity:
-			_, lastOutputAt := writer.snapshot()
-			if !startedOutput && !lastOutputAt.IsZero() {
+			lastActivityAt := writer.activitySnapshot()
+			if !startedOutput && !lastActivityAt.IsZero() {
 				startedOutput = true
 			}
+			_, lastOutputAt := writer.snapshot()
 			_, structuredEventAt := writer.structuredSnapshot()
-			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, startedAt)
+			_, runnerEventAt := writer.runnerEventSnapshot()
+			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, runnerEventAt, startedAt)
 			resetRunnerWatchdogRemaining(watchdog, policy.remaining)
 		case <-watchdog.C:
-			_, lastOutputAt := writer.snapshot()
-			startedOutput = startedOutput || !lastOutputAt.IsZero()
+			lastActivityAt := writer.activitySnapshot()
+			startedOutput = startedOutput || !lastActivityAt.IsZero()
 			if !startedOutput {
 				cancel()
 				<-done
 				output, lastOutputAt := writer.snapshot()
 				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout)
 			}
+			_, lastOutputAt := writer.snapshot()
 			_, structuredEventAt := writer.structuredSnapshot()
-			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, startedAt)
+			_, runnerEventAt := writer.runnerEventSnapshot()
+			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, runnerEventAt, startedAt)
 			if policy.remaining > 0 {
 				watchdog.Reset(policy.remaining)
 				continue
@@ -1721,8 +1735,11 @@ type runnerWatchdogState struct {
 	structured bool
 }
 
-func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration, lastOutputAt, structuredEventAt, startedAt time.Time) runnerWatchdogState {
+func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration, lastOutputAt, structuredEventAt, runnerEventAt, startedAt time.Time) runnerWatchdogState {
 	activityAt := lastOutputAt
+	if runnerEventAt.After(activityAt) {
+		activityAt = runnerEventAt
+	}
 	if activityAt.IsZero() {
 		activityAt = startedAt
 	}
