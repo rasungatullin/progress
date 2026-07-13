@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1751,10 +1752,8 @@ func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkI
 		if resolved, ok := index.resolve(externalID); ok && sameReviewRemark(resolved, remark) {
 			return externalID
 		}
-		// Повторяющийся внешний идентификатор не может быть разрешён через
-		// суффикс: stableMatches всё равно возвращает весь неоднозначный
-		// набор. Ограничиваем подбор и оставляем пустой идентификатор для
-		// последующего диагностируемого отказа публикации.
+		// При повторяющемся внешнем идентификаторе выдаём суффиксированную
+		// ссылку, которая регистрируется как отдельный устойчивый идентификатор.
 		maxAttempts := len(index.external[externalID]) + 1
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			stableID := fmt.Sprintf("remark-ref:%s#%d", externalID, attempt)
@@ -1769,7 +1768,18 @@ func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkI
 func reviewRemarkResponseIDAvailable(id string, remark integration.ReviewRemark, index reviewRemarkIndex) bool {
 	if strings.HasPrefix(id, "remark-ref:") && strings.Contains(id, "#") {
 		base := strings.TrimPrefix(id, "remark-ref:")
-		if separator := strings.LastIndexByte(base, '#'); separator > 0 && len(index.external[base[:separator]]) != 1 {
+		if separator := strings.LastIndexByte(base, '#'); separator > 0 {
+			if _, err := strconv.Atoi(base[separator+1:]); err != nil || len(base[separator+1:]) == 0 {
+				return false
+			}
+			baseExternalID := base[:separator]
+			if len(index.external[baseExternalID]) == 0 {
+				return false
+			}
+		}
+	}
+	for _, entry := range index.responseIDs {
+		if entry.id == id && !sameReviewRemark(entry.remark, remark) {
 			return false
 		}
 	}

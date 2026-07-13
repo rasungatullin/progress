@@ -1777,7 +1777,7 @@ func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map
 			conflicts[id] = true
 			continue
 		}
-		canonical, ok := index.resolve(externalID)
+		canonical, ok := resolveReviewRemarkTarget(index, externalID)
 		if !ok {
 			continue
 		}
@@ -1796,6 +1796,13 @@ func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map
 		delete(aliases, id)
 	}
 	return aliases, conflicts
+}
+
+func resolveReviewRemarkTarget(index reviewRemarkIndex, id string) (integration.ReviewRemark, bool) {
+	if index.hasAmbiguous(id) {
+		return integration.ReviewRemark{}, false
+	}
+	return index.resolve(id)
 }
 
 func enrichReviewResponse(response *StructuredResponse, aliases map[string][]integration.ReviewRemark, index reviewRemarkIndex) {
@@ -1837,9 +1844,6 @@ func validateReviewResponseTargets(responses []StructuredResponse, remarks []int
 	aliases, aliasConflicts := reviewRemarkAliases(output, index)
 	var failures []error
 	for responseIndex, response := range responses {
-		if reviewResponseType(response) == "local" {
-			continue
-		}
 		id := strings.TrimSpace(response.RemarkID)
 		if aliasConflicts[id] {
 			failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical alias is conflicting or ambiguous; external publication is not allowed", responseIndex, id))
@@ -1856,9 +1860,6 @@ func validateReviewResponseTargets(responses []StructuredResponse, remarks []int
 			}
 		}
 		if ok {
-			if reviewResponseType(response) == "local" {
-				continue
-			}
 			if reviewRemarkResponseType := reviewResponseTypeFromRemark(remark); reviewRemarkResponseType == "" {
 				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical remark has unknown response type; external publication is not allowed", responseIndex, id))
 			}

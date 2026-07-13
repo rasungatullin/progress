@@ -2161,7 +2161,7 @@ func TestPublishReviewResponsesSupportsCommentAndInlineRemarks(t *testing.T) {
 		data: map[string]any{
 			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
 			"result":         model.LaunchResult{Status: "completed"},
-			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-3", Type: "comment", URL: "https://example.test/comment"}, {ExternalID: "remark-1", ReplyToID: "thread-1"}, {ExternalID: "remark-2", ReplyToID: "thread-2"}},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-3", Type: "comment", URL: "https://example.test/comment"}, {ExternalID: "remark-1", ReplyToID: "thread-1"}, {ExternalID: "remark-2", ReplyToID: "thread-2"}, {ExternalID: "local-1", Type: "local"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
 				{RemarkID: "remark-3", Type: "comment", Status: "fixed", Summary: "Ответ на общий комментарий."},
 				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
@@ -2328,8 +2328,29 @@ func TestCanonicalReviewRemarksRejectRepeatedExternalID(t *testing.T) {
 		{ExternalID: "comment-1", Body: "Первое замечание."},
 		{ExternalID: "comment-1", Body: "Второе замечание."},
 	})
-	if len(remarks) != 2 || remarks[0].ID != "" || remarks[1].ID != "" {
-		t.Fatalf("repeated external identifiers must produce an unresolvable response target: %#v", remarks)
+	if len(remarks) != 2 || remarks[0].ID != "remark-ref:comment-1#1" || remarks[1].ID != "remark-ref:comment-1#2" {
+		t.Fatalf("repeated external identifiers must produce unique stable response targets: %#v", remarks)
+	}
+	index := newReviewRemarkIndex([]integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Первое замечание."},
+		{ExternalID: "comment-1", Body: "Второе замечание."},
+	})
+	for i, remark := range remarks {
+		resolved, ok := index.resolve(remark.ID)
+		if !ok || !sameReviewRemark(resolved, index.responseIDs[i].remark) {
+			t.Fatalf("stable response identifier must resolve to its remark: %#v", remark)
+		}
+	}
+}
+
+func TestReviewResponsesRejectUnknownLocalTarget(t *testing.T) {
+	t.Parallel()
+
+	responses := []model.StructuredResponse{{
+		RemarkID: "local-unknown", Type: "local", Status: "fixed", Summary: "Не публиковать.",
+	}}
+	if err := validateReviewResponseTargets(responses, nil, nil); err == nil || !strings.Contains(err.Error(), "canonical remark is unknown") {
+		t.Fatalf("unknown local target must be rejected diagnostically: %v", err)
 	}
 }
 
