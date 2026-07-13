@@ -1488,6 +1488,7 @@ type runnerOutputWriter struct {
 	runnerEvents        bool
 	runnerPending       []byte
 	lastRunnerEvent     string
+	lastRunnerEventAt   time.Time
 	runnerEventAt       time.Time
 }
 
@@ -1523,7 +1524,10 @@ func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
 		var event struct {
 			Type string `json:"type"`
 			Part struct {
-				Type string `json:"type"`
+				Type  string `json:"type"`
+				State struct {
+					Status string `json:"status"`
+				} `json:"state"`
 			} `json:"part"`
 		}
 		if json.Unmarshal(line, &event) != nil || strings.TrimSpace(event.Type) == "" {
@@ -1534,7 +1538,10 @@ func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
 			name += "/" + event.Part.Type
 		}
 		w.lastRunnerEvent = name
-		w.runnerEventAt = w.lastOutputAt
+		w.lastRunnerEventAt = w.lastOutputAt
+		if event.Type == "tool_use" && event.Part.Type == "tool" && event.Part.State.Status == "completed" {
+			w.runnerEventAt = w.lastOutputAt
+		}
 	}
 }
 
@@ -1580,7 +1587,13 @@ func (w *runnerOutputWriter) structuredSnapshot() (string, time.Time) {
 func (w *runnerOutputWriter) runnerEventSnapshot() (string, time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.lastRunnerEvent, w.runnerEventAt
+	return w.lastRunnerEvent, w.lastRunnerEventAt
+}
+
+func (w *runnerOutputWriter) completedToolUseSnapshot() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.runnerEventAt
 }
 
 func (w *runnerOutputWriter) activitySnapshot() time.Time {
@@ -1654,7 +1667,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			}
 			_, lastOutputAt := writer.snapshot()
 			_, structuredEventAt := writer.structuredSnapshot()
-			_, runnerEventAt := writer.runnerEventSnapshot()
+			runnerEventAt := writer.completedToolUseSnapshot()
 			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, runnerEventAt, startedAt)
 			resetRunnerWatchdogRemaining(watchdog, policy.remaining)
 		case <-watchdog.C:
@@ -1668,7 +1681,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			}
 			_, lastOutputAt := writer.snapshot()
 			_, structuredEventAt := writer.structuredSnapshot()
-			_, runnerEventAt := writer.runnerEventSnapshot()
+			runnerEventAt := writer.completedToolUseSnapshot()
 			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, runnerEventAt, startedAt)
 			if policy.remaining > 0 {
 				watchdog.Reset(policy.remaining)
@@ -1761,8 +1774,12 @@ func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration
 	}
 	deadline := activityAt.Add(noOutputTimeout)
 	state := runnerWatchdogState{timeout: noOutputTimeout}
-	if !structuredEventAt.IsZero() {
-		structuredDeadline := structuredEventAt.Add(structuredOutputTimeout)
+	structuredAt := structuredEventAt
+	if runnerEventAt.After(structuredAt) {
+		structuredAt = runnerEventAt
+	}
+	if !structuredAt.IsZero() {
+		structuredDeadline := structuredAt.Add(structuredOutputTimeout)
 		if !structuredDeadline.Before(deadline) {
 			deadline = structuredDeadline
 			state.timeout = structuredOutputTimeout

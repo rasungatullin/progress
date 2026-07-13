@@ -381,6 +381,54 @@ func TestRunOpenCodeRunnerReportsInstrumentalEventOnNoOutputTimeout(t *testing.T
 	}
 }
 
+func TestRunOpenCodeRunnerAllowsPauseAfterCompletedToolUse(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerOpenCode,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "1s",
+		NoOutputTimeout:         "50ms",
+		StructuredOutputTimeout: "300ms",
+	}
+	cmd := exec.Command(opencodePath, "run", "--format", "json", "--dir", spec.Directory, "--model", spec.Model, "tool-pause")
+	output, err := runRunnerCommand(context.Background(), cmd, spec)
+	if err != nil {
+		t.Fatalf("completed tool_use pause must be allowed: %v", err)
+	}
+	if !strings.Contains(output, "Продолжение после результата инструмента.") {
+		t.Fatalf("output after completed tool_use was lost: %q", output)
+	}
+}
+
+func TestRunOpenCodeRunnerStopsAfterCompletedToolUseDeadline(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerOpenCode,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "1s",
+		NoOutputTimeout:         "50ms",
+		StructuredOutputTimeout: "200ms",
+	}
+	cmd := exec.Command(opencodePath, "run", "--format", "json", "--dir", spec.Directory, "--model", spec.Model, "tool-stale")
+	_, err = runRunnerCommand(context.Background(), cmd, spec)
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	for _, expected := range []string{"last structured event=tool_use/tool", "rule=200ms после структурированного события"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
 func TestRunRunnerCommandReportsStructuredOutputInsideOpenCodeEvent(t *testing.T) {
 	t.Parallel()
 
