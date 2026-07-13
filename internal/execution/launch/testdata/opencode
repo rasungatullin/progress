@@ -7,7 +7,7 @@ fi
 mode=""
 for arg in "$@"; do
 	case "$arg" in
-		stream|structured|resume|event-timeout|tool-pause|tool-then-stale|tool-stale|silent) mode="$arg" ;;
+		stream|structured|resume|event-timeout|tool-pause|tool-then-stale|tool-stale|tool-partial|silent) mode="$arg" ;;
 	esac
 done
 
@@ -74,6 +74,12 @@ tool-then-stale)
 tool-stale)
 	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-tool-stale","part":{"id":"part-start","sessionID":"session-tool-stale","messageID":"message-tool-stale","type":"step-start"}}'
 	printf '%s\n' '{"type":"tool_use","timestamp":1783929600050,"sessionID":"session-tool-stale","part":{"id":"part-tool","sessionID":"session-tool-stale","messageID":"message-tool-stale","type":"tool","state":{"status":"completed"}}}'
+	sleep .4
+	;;
+tool-partial)
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-tool-partial","part":{"id":"part-start","type":"step-start"}}'
+	printf '%s\n' '{"type":"tool_use","timestamp":1783929600050,"sessionID":"session-tool-partial","part":{"id":"part-tool","type":"tool","state":{"status":"completed"}}}'
+	printf '%s' '{"type":"text","sessionID":"session-tool-partial","part":{"type":"text","text":"неполный фрагмент"}'
 	sleep .4
 	;;
 silent)

@@ -1517,6 +1517,9 @@ func (w *runnerOutputWriter) Write(p []byte) (int, error) {
 }
 
 func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
+	if len(p) > 0 && !w.runnerEventAt.IsZero() {
+		w.runnerEventAt = time.Time{}
+	}
 	w.runnerPending = append(w.runnerPending, p...)
 	for {
 		lineEnd := bytes.IndexByte(w.runnerPending, '\n')
@@ -1544,7 +1547,7 @@ func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
 		w.lastRunnerEvent = name
 		w.lastRunnerEventAt = w.lastOutputAt
 		w.runnerEventAt = time.Time{}
-		if event.Type == "tool_use" && event.Part.Type == "tool" && event.Part.State.Status == "completed" {
+		if event.Type == "tool_use" && event.Part.Type == "tool" && event.Part.State.Status == "completed" && len(w.runnerPending) == 0 {
 			w.runnerEventAt = w.lastOutputAt
 		}
 	}
@@ -1785,14 +1788,11 @@ func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration
 	if runnerEventAt.After(structuredAt) {
 		structuredAt = runnerEventAt
 	}
-	if !structuredAt.IsZero() {
+	if !structuredAt.IsZero() && structuredAt.Equal(activityAt) {
 		structuredDeadline := structuredAt.Add(structuredOutputTimeout)
-		if !runnerEventAt.IsZero() || structuredOutputTimeout == noOutputTimeout ||
-			(structuredDeadline.After(time.Now()) && !structuredDeadline.Before(deadline)) {
-			deadline = structuredDeadline
-			state.timeout = structuredOutputTimeout
-			state.structured = true
-		}
+		deadline = structuredDeadline
+		state.timeout = structuredOutputTimeout
+		state.structured = true
 	}
 	state.remaining = time.Until(deadline)
 	return state
