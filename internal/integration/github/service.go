@@ -116,9 +116,18 @@ type ghPRReviewThreadsResponse struct {
 				ReviewThreads struct {
 					Nodes []ghPRReviewThread `json:"nodes"`
 				} `json:"reviewThreads"`
+				TimelineItems struct {
+					Nodes []ghPRTimelineItem `json:"nodes"`
+				} `json:"timelineItems"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
 	} `json:"data"`
+}
+
+type ghPRTimelineItem struct {
+	Typename   string `json:"__typename"`
+	DatabaseID int64  `json:"databaseId"`
+	ID         string `json:"id"`
 }
 
 type ghPRReviewThread struct {
@@ -477,6 +486,9 @@ func (s *Service) executePRComments(ctx context.Context, response model.Response
 		response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarkFromIssueComment(repository, number, item))
 	}
 	response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarksFromThreads(repository, number, threadNodes)...)
+	if rawThreads.Data.Repository.PullRequest != nil {
+		assignGitHubReviewRemarkOrder(response.ReviewRemarks, rawThreads.Data.Repository.PullRequest.TimelineItems.Nodes)
+	}
 	response.Metadata = map[string]string{
 		"repository": repository,
 		"number":     strconv.Itoa(number),
@@ -1897,7 +1909,6 @@ func reviewRemarkFromIssueComment(repository string, number int, raw ghIssueComm
 		URL:                url,
 		CreatedAt:          strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:          strings.TrimSpace(raw.UpdatedAt),
-		Order:              int64(raw.ID),
 	}
 }
 
@@ -1947,7 +1958,6 @@ func reviewRemarksFromThreads(repository string, number int, threads []ghPRRevie
 				URL:                strings.TrimSpace(comment.URL),
 				CreatedAt:          strings.TrimSpace(comment.CreatedAt),
 				UpdatedAt:          strings.TrimSpace(comment.UpdatedAt),
-				Order:              comment.DatabaseID,
 			})
 		}
 	}
@@ -1972,7 +1982,29 @@ func reviewRemarkFromThreadReply(threadID string, comment ghPRReviewComment) mod
 		URL:        strings.TrimSpace(comment.URL),
 		CreatedAt:  strings.TrimSpace(comment.CreatedAt),
 		UpdatedAt:  strings.TrimSpace(comment.UpdatedAt),
-		Order:      comment.DatabaseID,
+	}
+}
+
+func assignGitHubReviewRemarkOrder(remarks []model.ReviewRemark, timeline []ghPRTimelineItem) {
+	orders := make(map[string]int64, len(timeline))
+	for index, item := range timeline {
+		order := int64(index + 1)
+		if item.Typename == "IssueComment" && item.DatabaseID != 0 {
+			orders[strconv.FormatInt(item.DatabaseID, 10)] = order
+		}
+		if item.Typename == "PullRequestReviewThread" && strings.TrimSpace(item.ID) != "" {
+			orders[strings.TrimSpace(item.ID)] = order
+		}
+	}
+	for index := range remarks {
+		key := remarks[index].ExternalID
+		if remarks[index].Type == "inline" {
+			// Review comments are nested in a thread; the timeline orders the thread.
+			key = remarks[index].ReplyToID
+		}
+		if order, ok := orders[key]; ok {
+			remarks[index].Order = order
+		}
 	}
 }
 

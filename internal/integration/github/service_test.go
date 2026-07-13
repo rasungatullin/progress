@@ -131,6 +131,22 @@ func TestReviewRemarksFromThreadsKeepsUnresolvedOutdatedThreadsBlocking(t *testi
 	}
 }
 
+func TestAssignGitHubReviewRemarkOrderUsesTimelineOrder(t *testing.T) {
+	t.Parallel()
+
+	remarks := []model.ReviewRemark{
+		{ExternalID: "100", Type: "comment"},
+		{ExternalID: "review-comment", Type: "inline", ReplyToID: "thread-old"},
+	}
+	assignGitHubReviewRemarkOrder(remarks, []ghPRTimelineItem{
+		{Typename: "PullRequestReviewThread", ID: "thread-old"},
+		{Typename: "IssueComment", DatabaseID: 100},
+	})
+	if remarks[0].Order != 2 || remarks[1].Order != 1 {
+		t.Fatalf("unexpected common timeline order: %#v", remarks)
+	}
+}
+
 func TestServiceAuthStatusMapsGenericRunnerError(t *testing.T) {
 	t.Parallel()
 

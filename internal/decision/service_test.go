@@ -1412,6 +1412,18 @@ func TestHasUnresolvedExternalReviewRemarksDoesNotTrustForeignApprovedConclusion
 	}
 }
 
+func TestHasUnresolvedExternalReviewRemarksAllowsUnknownBitbucketConclusionWithoutBoundary(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{State: "resolved", Body: "## Замечание ревизии\n\nИдентификатор: old\n\nСостояние: resolved\n\nСтарое замечание"},
+		{Body: "## Заключение ревизии\n\napprove", Author: integration.User{Login: "bitbucket-app"}},
+	}
+	if hasUnresolvedExternalReviewRemarks(remarks, "", "bitbucket") {
+		t.Fatal("approved Bitbucket conclusion without an exposed login must not block resolved remarks")
+	}
+}
+
 func TestHasUnresolvedExternalReviewRemarksDoesNotTreatUnstructuredResolvedCommentAsConfirmation(t *testing.T) {
 	t.Parallel()
 

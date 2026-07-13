@@ -188,7 +188,7 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		return nil, fmt.Errorf("определить служебную идентичность %s: служебная учётная запись не аутентифицирована", system)
 	}
 	ownAuthorLogin = strings.TrimSpace(authResponse.AuthStatus.Login)
-	if ownAuthorLogin == "" {
+	if ownAuthorLogin == "" && system != "bitbucket" {
 		return nil, fmt.Errorf("определить служебную идентичность %s: логин служебной учётной записи не получен", system)
 	}
 	response, err := s.integration.Execute(ctx, integration.Request{
@@ -209,7 +209,7 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		return nil, err
 	}
 	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
-	state.HasUnresolvedReviewRemarks = hasUnresolvedExternalReviewRemarks(response.ReviewRemarks, ownAuthorLogin)
+	state.HasUnresolvedReviewRemarks = hasUnresolvedExternalReviewRemarks(response.ReviewRemarks, ownAuthorLogin, system)
 	if !state.HasMergeConflict && !state.HasUnresolvedReviewRemarks {
 		return nil, nil
 	}
@@ -218,8 +218,12 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 
 func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark, ownAuthorLogins ...string) bool {
 	ownAuthorLogin := ""
+	allowUnknownOwnConclusion := false
 	if len(ownAuthorLogins) > 0 {
 		ownAuthorLogin = strings.TrimSpace(ownAuthorLogins[0])
+	}
+	if len(ownAuthorLogins) > 1 {
+		allowUnknownOwnConclusion = strings.EqualFold(strings.TrimSpace(ownAuthorLogins[1]), "bitbucket")
 	}
 	remarks = orderReviewRemarksByCreatedAt(remarks)
 	respondedRemarkIDs := map[string]struct{}{}
@@ -240,7 +244,13 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark, ownA
 		if isExternalReviewConclusion(remark.Body) {
 			if isApprovedExternalReviewConclusion(remark.Body) {
 				if !isOwnExternalReviewConclusion(remark, ownAuthorLogin) {
-					return true
+					// Bitbucket Server может подтвердить токен, но не раскрыть
+					// логин служебной учётной записи. Такое заключение не должно
+					// блокировать обработку, однако без автора оно не образует
+					// временную границу: прежние замечания остаются видимыми.
+					if ownAuthorLogin != "" || !allowUnknownOwnConclusion {
+						return true
+					}
 				}
 				continue
 			}
