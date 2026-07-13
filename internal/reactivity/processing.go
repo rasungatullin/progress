@@ -368,7 +368,7 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		return nil, fmt.Errorf("определить служебную идентичность %s: служебная учётная запись не аутентифицирована", system)
 	}
 	ownAuthorLogin = strings.TrimSpace(authResponse.AuthStatus.Login)
-	if ownAuthorLogin == "" {
+	if ownAuthorLogin == "" && system != "bitbucket" {
 		return nil, fmt.Errorf("определить служебную идентичность %s: логин служебной учётной записи не получен", system)
 	}
 	response, err := s.integration.Execute(ctx, integration.Request{

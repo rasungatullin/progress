@@ -486,7 +486,6 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
         nodes {
           __typename
           ... on IssueComment { databaseId }
-          ... on PullRequestReviewThread { id }
         }
         pageInfo { hasNextPage endCursor }
       }

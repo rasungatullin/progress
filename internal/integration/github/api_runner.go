@@ -566,7 +566,7 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 	if err != nil {
 		return apiErrorResult("pr review threads", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	query := `query($owner: String!, $name: String!, $number: Int!, $threadsAfter: String, $timelineAfter: String) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100, after: $threadsAfter) { nodes { id isResolved isOutdated path line comments(first: 100) { nodes { id databaseId body url path line author { login url } createdAt updatedAt } } } pageInfo { hasNextPage endCursor } } timelineItems(first: 100, after: $timelineAfter) { nodes { __typename ... on IssueComment { databaseId } ... on PullRequestReviewThread { id } } pageInfo { hasNextPage endCursor } } } } }`
+	query := `query($owner: String!, $name: String!, $number: Int!, $threadsAfter: String, $timelineAfter: String) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100, after: $threadsAfter) { nodes { id isResolved isOutdated path line comments(first: 100) { nodes { id databaseId body url path line author { login url } createdAt updatedAt } } } pageInfo { hasNextPage endCursor } } timelineItems(first: 100, after: $timelineAfter) { nodes { __typename ... on IssueComment { databaseId } } pageInfo { hasNextPage endCursor } } } } }`
 	var combined ghPRReviewThreadsResponse
 	var threadsAfter, timelineAfter *string
 	var threadsDone, timelineDone bool
