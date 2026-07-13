@@ -7,7 +7,7 @@ fi
 mode=""
 for arg in "$@"; do
 	case "$arg" in
-	stream|structured|resume|event-timeout|silent) mode="$arg" ;;
+		stream|structured|resume|event-timeout|tool-pause|tool-then-stale|tool-stale|tool-partial|silent) mode="$arg" ;;
 	esac
 done
 
@@ -57,6 +57,30 @@ resume)
 event-timeout)
 	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-timeout","part":{"id":"part-start","sessionID":"session-timeout","messageID":"message-timeout","type":"step-start"}}' >&2
 	sleep 1
+	;;
+tool-pause)
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-tool-pause","part":{"id":"part-start","sessionID":"session-tool-pause","messageID":"message-tool-pause","type":"step-start"}}'
+	printf '%s\n' '{"type":"tool_use","timestamp":1783929600050,"sessionID":"session-tool-pause","part":{"id":"part-tool","sessionID":"session-tool-pause","messageID":"message-tool-pause","type":"tool","state":{"status":"completed"}}}'
+	sleep .12
+	printf '%s\n' '{"type":"text","timestamp":1783929600200,"sessionID":"session-tool-pause","part":{"id":"part-text","sessionID":"session-tool-pause","messageID":"message-tool-pause","type":"text","text":"Продолжение после результата инструмента."}}'
+	printf '%s\n' '{"type":"step_finish","timestamp":1783929600250,"sessionID":"session-tool-pause","part":{"id":"part-finish","sessionID":"session-tool-pause","messageID":"message-tool-pause","type":"step-finish","reason":"stop"}}'
+	;;
+tool-then-stale)
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-tool-then-stale","part":{"id":"part-start","sessionID":"session-tool-then-stale","messageID":"message-tool-then-stale","type":"step-start"}}'
+	printf '%s\n' '{"type":"tool_use","timestamp":1783929600050,"sessionID":"session-tool-then-stale","part":{"id":"part-tool","sessionID":"session-tool-then-stale","messageID":"message-tool-then-stale","type":"tool","state":{"status":"completed"}}}'
+	printf '%s\n' '{"type":"text","timestamp":1783929600100,"sessionID":"session-tool-then-stale","part":{"id":"part-text","sessionID":"session-tool-then-stale","messageID":"message-tool-then-stale","type":"text","text":"Инструментальный результат принят."}}'
+	sleep .4
+	;;
+tool-stale)
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-tool-stale","part":{"id":"part-start","sessionID":"session-tool-stale","messageID":"message-tool-stale","type":"step-start"}}'
+	printf '%s\n' '{"type":"tool_use","timestamp":1783929600050,"sessionID":"session-tool-stale","part":{"id":"part-tool","sessionID":"session-tool-stale","messageID":"message-tool-stale","type":"tool","state":{"status":"completed"}}}'
+	sleep .4
+	;;
+tool-partial)
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-tool-partial","part":{"id":"part-start","type":"step-start"}}'
+	printf '%s\n' '{"type":"tool_use","timestamp":1783929600050,"sessionID":"session-tool-partial","part":{"id":"part-tool","type":"tool","state":{"status":"completed"}}}'
+	printf '%s' '{"type":"text","sessionID":"session-tool-partial","part":{"type":"text","text":"неполный фрагмент"}'
+	sleep .4
 	;;
 silent)
 	sleep 1

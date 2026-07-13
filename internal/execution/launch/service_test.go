@@ -381,11 +381,236 @@ func TestRunOpenCodeRunnerReportsInstrumentalEventOnNoOutputTimeout(t *testing.T
 	}
 }
 
+func TestRunOpenCodeRunnerAllowsPauseAfterCompletedToolUse(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerOpenCode,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "1s",
+		NoOutputTimeout:         "50ms",
+		StructuredOutputTimeout: "300ms",
+	}
+	cmd := exec.Command(opencodePath, "run", "--format", "json", "--dir", spec.Directory, "--model", spec.Model, "tool-pause")
+	output, err := runRunnerCommand(context.Background(), cmd, spec)
+	if err != nil {
+		t.Fatalf("completed tool_use pause must be allowed: %v", err)
+	}
+	if !strings.Contains(output, "Продолжение после результата инструмента.") {
+		t.Fatalf("output after completed tool_use was lost: %q", output)
+	}
+}
+
+func TestRunOpenCodeRunnerResetsCompletedToolUseTimeoutAfterNextEvent(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerOpenCode,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "1s",
+		NoOutputTimeout:         "50ms",
+		StructuredOutputTimeout: "300ms",
+	}
+	startedAt := time.Now()
+	cmd := exec.Command(opencodePath, "run", "--format", "json", "--dir", spec.Directory, "--model", spec.Model, "tool-then-stale")
+	_, err = runRunnerCommand(context.Background(), cmd, spec)
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 200*time.Millisecond {
+		t.Fatalf("next event kept the completed tool_use timeout active: %s", elapsed)
+	}
+	for _, expected := range []string{"last structured event=text/text", "base timeout=50ms", "applied timeout=50ms", "rule=50ms после последнего фрагмента"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
+func TestRunOpenCodeRunnerStopsAfterCompletedToolUseDeadline(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerOpenCode,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "1s",
+		NoOutputTimeout:         "50ms",
+		StructuredOutputTimeout: "200ms",
+	}
+	cmd := exec.Command(opencodePath, "run", "--format", "json", "--dir", spec.Directory, "--model", spec.Model, "tool-stale")
+	_, err = runRunnerCommand(context.Background(), cmd, spec)
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	for _, expected := range []string{"last structured event=tool_use/tool", "base timeout=50ms", "applied timeout=200ms", "rule=200ms после структурированного события"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
+func TestRunOpenCodeRunnerUsesShorterCompletedToolUseTimeout(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerOpenCode,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "1s",
+		NoOutputTimeout:         "200ms",
+		StructuredOutputTimeout: "50ms",
+	}
+	cmd := exec.Command(opencodePath, "run", "--format", "json", "--dir", spec.Directory, "--model", spec.Model, "tool-stale")
+	_, err = runRunnerCommand(context.Background(), cmd, spec)
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	for _, expected := range []string{"last structured event=tool_use/tool", "base timeout=200ms", "applied timeout=50ms", "rule=50ms после структурированного события"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
+func TestRunOpenCodeRunnerUsesBaseTimeoutAfterPartialFragment(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerOpenCode,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "1s",
+		NoOutputTimeout:         "50ms",
+		StructuredOutputTimeout: "300ms",
+	}
+	startedAt := time.Now()
+	cmd := exec.Command(opencodePath, "run", "--format", "json", "--dir", spec.Directory, "--model", spec.Model, "tool-partial")
+	_, err = runRunnerCommand(context.Background(), cmd, spec)
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 200*time.Millisecond {
+		t.Fatalf("partial fragment kept the completed tool_use timeout active: %s", elapsed)
+	}
+	for _, expected := range []string{"last structured event=tool_use/tool", "base timeout=50ms", "applied timeout=50ms", "rule=50ms после последнего фрагмента"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
+func TestRunnerWatchdogPolicyUsesBaseTimeoutForStructuredEventWithTrailingFragment(t *testing.T) {
+	writer := &runnerOutputWriter{
+		activity:         make(chan struct{}, 1),
+		structuredEvents: true,
+	}
+	_, err := writer.Write([]byte("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\"}}\nостаток"))
+	if err != nil {
+		t.Fatalf("write runner output: %v", err)
+	}
+	state := writer.stateSnapshot()
+	policy := runnerWatchdogPolicy(time.Second, 10*time.Second, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, time.Now())
+	if policy.structured {
+		t.Fatal("trailing fragment must return watchdog to the base timeout")
+	}
+	if policy.timeout != time.Second {
+		t.Fatalf("expected base timeout, got %s", policy.timeout)
+	}
+}
+
+func TestRunnerWatchdogPolicyUsesBaseTimeoutAfterUnstructuredLineInSameWrite(t *testing.T) {
+	writer := &runnerOutputWriter{
+		activity:     make(chan struct{}, 1),
+		runnerEvents: true,
+	}
+	_, err := writer.Write([]byte("{\"type\":\"tool_use\",\"part\":{\"type\":\"tool\",\"state\":{\"status\":\"completed\"}}}\nнеструктурированный результат\n"))
+	if err != nil {
+		t.Fatalf("write runner output: %v", err)
+	}
+	state := writer.stateSnapshot()
+	policy := runnerWatchdogPolicy(time.Second, 10*time.Second, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, time.Now())
+	if policy.structured {
+		t.Fatal("unstructured line after tool_use must return watchdog to the base timeout")
+	}
+	if policy.timeout != time.Second {
+		t.Fatalf("expected base timeout, got %s", policy.timeout)
+	}
+}
+
+func TestRunnerWatchdogPolicyUsesBaseTimeoutAfterCodexUnstructuredLineInSameWrite(t *testing.T) {
+	writer := &runnerOutputWriter{
+		activity:         make(chan struct{}, 1),
+		structuredEvents: true,
+	}
+	_, err := writer.Write([]byte("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\"}}\nнеструктурированный результат\n"))
+	if err != nil {
+		t.Fatalf("write runner output: %v", err)
+	}
+	state := writer.stateSnapshot()
+	policy := runnerWatchdogPolicy(time.Second, 10*time.Second, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, time.Now())
+	if policy.structured {
+		t.Fatal("unstructured line after codex event must return watchdog to the base timeout")
+	}
+	if policy.timeout != time.Second {
+		t.Fatalf("expected base timeout, got %s", policy.timeout)
+	}
+}
+
+func TestRunnerWatchdogStopsUnderWriterLock(t *testing.T) {
+	writer := &runnerOutputWriter{activity: make(chan struct{}, 1)}
+	writer.lastOutputAt = time.Now().Add(-time.Second)
+
+	writeStarted := make(chan struct{})
+	writeDone := make(chan struct{})
+	cancelCalled := make(chan struct{})
+
+	_, policy, stopped, hasOutput := writer.stopIfNoOutputTimeout(func() {
+		close(cancelCalled)
+		go func() {
+			close(writeStarted)
+			_, _ = writer.Write([]byte("новый фрагмент"))
+			close(writeDone)
+		}()
+		<-writeStarted
+		select {
+		case <-writeDone:
+			t.Fatal("Write completed before cancellation released the writer lock")
+		default:
+		}
+	}, true, time.Second, time.Second, time.Second, time.Now())
+	if !stopped || !hasOutput || policy.remaining > 0 {
+		t.Fatalf("expected an expired watchdog policy: stopped=%t hasOutput=%t policy=%+v", stopped, hasOutput, policy)
+	}
+	select {
+	case <-cancelCalled:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation callback was not called")
+	}
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("pending output was not released after cancellation decision")
+	}
+}
+
 func TestRunRunnerCommandReportsStructuredOutputInsideOpenCodeEvent(t *testing.T) {
 	t.Parallel()
 
 	output := `{"type":"text","sessionID":"session-structured","part":{"type":"text","text":"Выполнение завершено.\n<progress-structured-output>\n{\"summary\":\"Проверка завершена.\"}\n</progress-structured-output>"}}`
-	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second)
+	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second, time.Second)
 	if !strings.Contains(err.Error(), "structured output=present") {
 		t.Fatalf("timeout diagnostics must detect structured output inside opencode event: %v", err)
 	}
@@ -434,7 +659,7 @@ func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	if !errors.As(err, &runnerErr) || runnerErr.output != "first" || runnerErr.lastOutputAt.IsZero() {
 		t.Fatalf("missing last-output diagnostics: %#v", runnerErr)
 	}
-	for _, expected := range []string{"last fragment at=", "last structured event=отсутствует at=отсутствует", "structured output=absent", "rule=200ms после последнего фрагмента"} {
+	for _, expected := range []string{"last fragment at=", "last structured event=отсутствует at=отсутствует", "structured output=absent", "base timeout=200ms", "applied timeout=200ms", "rule=200ms после последнего фрагмента"} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
 		}
@@ -445,7 +670,7 @@ func TestRunRunnerCommandNoOutputTimeoutReportsStructuredOutputState(t *testing.
 	t.Parallel()
 
 	output := "partial\n" + structuredOutputStart + "\n{\"summary\":\"Done.\"}\n" + structuredOutputEnd
-	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second)
+	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second, time.Second)
 	if !strings.Contains(err.Error(), "structured output=present") {
 		t.Fatalf("timeout diagnostics must report present structured output: %v", err)
 	}
@@ -537,7 +762,7 @@ func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
 	if !errors.As(err, &runnerErr) || !strings.Contains(runnerErr.output, `"thread_id":"thread-test"`) || runnerErr.lastOutputAt.IsZero() {
 		t.Fatalf("codex events were not preserved before Wait: %#v", runnerErr)
 	}
-	for _, expected := range []string{"last structured event=item.completed/agent_message", "idle=", "rule=300ms после структурированного события"} {
+	for _, expected := range []string{"last structured event=item.completed/agent_message", "idle=", "base timeout=300ms", "applied timeout=300ms", "rule=300ms после структурированного события"} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
 		}

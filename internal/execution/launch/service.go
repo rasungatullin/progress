@@ -59,6 +59,8 @@ type runnerExecutionError struct {
 	structuredEventAt     time.Time
 	structuredOutputState string
 	idleDuration          time.Duration
+	baseTimeout           time.Duration
+	appliedTimeout        time.Duration
 	timeoutRule           string
 }
 
@@ -74,12 +76,14 @@ func (e *runnerExecutionError) Error() string {
 			outputState = structuredOutputState(e.output)
 		}
 		diagnostic = fmt.Sprintf(
-			"\nlast fragment at=%s last structured event=%s at=%s structured output=%s idle=%s rule=%s",
+			"\nlast fragment at=%s last structured event=%s at=%s structured output=%s idle=%s base timeout=%s applied timeout=%s rule=%s",
 			formatRunnerTime(e.lastOutputAt),
 			lastEvent,
 			formatRunnerTime(e.structuredEventAt),
 			outputState,
 			e.idleDuration.Round(time.Millisecond),
+			e.baseTimeout,
+			e.appliedTimeout,
 			e.timeoutRule,
 		)
 	}
@@ -1477,16 +1481,26 @@ func runCodexRunnerCommand(ctx context.Context, spec model.LaunchSpec, cmd *exec
 }
 
 type runnerOutputWriter struct {
-	mu                  sync.Mutex
-	buffer              bytes.Buffer
-	activity            chan struct{}
+	mu                    sync.Mutex
+	buffer                bytes.Buffer
+	activity              chan struct{}
+	lastOutputAt          time.Time
+	structuredEvents      bool
+	structuredPending     []byte
+	lastStructuredEvent   string
+	structuredEventAt     time.Time
+	lastStructuredEventAt time.Time
+	runnerEvents          bool
+	runnerPending         []byte
+	lastRunnerEvent       string
+	lastRunnerEventAt     time.Time
+	runnerEventAt         time.Time
+}
+
+type runnerOutputSnapshot struct {
 	lastOutputAt        time.Time
-	structuredEvents    bool
-	structuredPending   []byte
 	lastStructuredEvent string
 	structuredEventAt   time.Time
-	runnerEvents        bool
-	runnerPending       []byte
 	lastRunnerEvent     string
 	runnerEventAt       time.Time
 }
@@ -1512,18 +1526,27 @@ func (w *runnerOutputWriter) Write(p []byte) (int, error) {
 }
 
 func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
+	if len(p) > 0 && !w.runnerEventAt.IsZero() {
+		w.runnerEventAt = time.Time{}
+	}
 	w.runnerPending = append(w.runnerPending, p...)
 	for {
 		lineEnd := bytes.IndexByte(w.runnerPending, '\n')
 		if lineEnd < 0 {
 			return
 		}
+		if !w.runnerEventAt.IsZero() {
+			w.runnerEventAt = time.Time{}
+		}
 		line := bytes.TrimSpace(w.runnerPending[:lineEnd])
 		w.runnerPending = w.runnerPending[lineEnd+1:]
 		var event struct {
 			Type string `json:"type"`
 			Part struct {
-				Type string `json:"type"`
+				Type  string `json:"type"`
+				State struct {
+					Status string `json:"status"`
+				} `json:"state"`
 			} `json:"part"`
 		}
 		if json.Unmarshal(line, &event) != nil || strings.TrimSpace(event.Type) == "" {
@@ -1534,16 +1557,23 @@ func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
 			name += "/" + event.Part.Type
 		}
 		w.lastRunnerEvent = name
-		w.runnerEventAt = w.lastOutputAt
+		w.lastRunnerEventAt = w.lastOutputAt
+		w.runnerEventAt = time.Time{}
+		if event.Type == "tool_use" && event.Part.Type == "tool" && event.Part.State.Status == "completed" && len(w.runnerPending) == 0 {
+			w.runnerEventAt = w.lastOutputAt
+		}
 	}
 }
 
 func (w *runnerOutputWriter) recordStructuredEvents(p []byte) {
+	if len(p) > 0 && !w.structuredEventAt.IsZero() {
+		w.structuredEventAt = time.Time{}
+	}
 	w.structuredPending = append(w.structuredPending, p...)
 	for {
 		lineEnd := bytes.IndexByte(w.structuredPending, '\n')
 		if lineEnd < 0 {
-			return
+			break
 		}
 		line := w.structuredPending[:lineEnd]
 		w.structuredPending = w.structuredPending[lineEnd+1:]
@@ -1554,6 +1584,7 @@ func (w *runnerOutputWriter) recordStructuredEvents(p []byte) {
 			} `json:"item"`
 		}
 		if json.Unmarshal(bytes.TrimSpace(line), &event) != nil || strings.TrimSpace(event.Type) == "" {
+			w.structuredEventAt = time.Time{}
 			continue
 		}
 		name := event.Type
@@ -1562,7 +1593,59 @@ func (w *runnerOutputWriter) recordStructuredEvents(p []byte) {
 		}
 		w.lastStructuredEvent = name
 		w.structuredEventAt = w.lastOutputAt
+		w.lastStructuredEventAt = w.lastOutputAt
 	}
+	if len(w.structuredPending) > 0 {
+		w.structuredEventAt = time.Time{}
+	}
+}
+
+func (w *runnerOutputWriter) stateSnapshot() runnerOutputSnapshot {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return runnerOutputSnapshot{
+		lastOutputAt:        w.lastOutputAt,
+		lastStructuredEvent: w.lastStructuredEvent,
+		structuredEventAt:   w.structuredEventAt,
+		lastRunnerEvent:     w.lastRunnerEvent,
+		runnerEventAt:       w.runnerEventAt,
+	}
+}
+
+// stopIfNoOutputTimeout выполняет последнюю проверку и начало остановки под
+// одной блокировкой с Write. Поэтому новый фрагмент не может попасть между
+// снимком состояния и вызовом cancel.
+func (w *runnerOutputWriter) stopIfNoOutputTimeout(
+	cancel func(),
+	startedOutput bool,
+	startupTimeout, noOutputTimeout, structuredOutputTimeout time.Duration,
+	startedAt time.Time,
+) (runnerOutputSnapshot, runnerWatchdogState, bool, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	state := runnerOutputSnapshot{
+		lastOutputAt:        w.lastOutputAt,
+		lastStructuredEvent: w.lastStructuredEvent,
+		structuredEventAt:   w.structuredEventAt,
+		lastRunnerEvent:     w.lastRunnerEvent,
+		runnerEventAt:       w.runnerEventAt,
+	}
+	lastActivityAt := state.lastOutputAt
+	if state.runnerEventAt.After(lastActivityAt) {
+		lastActivityAt = state.runnerEventAt
+	}
+	startedOutput = startedOutput || !lastActivityAt.IsZero()
+	watchdogTimeout := noOutputTimeout
+	if !startedOutput {
+		watchdogTimeout = startupTimeout
+	}
+	policy := runnerWatchdogPolicy(watchdogTimeout, structuredOutputTimeout, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, startedAt)
+	if policy.remaining > 0 {
+		return state, policy, false, startedOutput
+	}
+	cancel()
+	return state, policy, true, startedOutput
 }
 
 func (w *runnerOutputWriter) snapshot() (string, time.Time) {
@@ -1574,13 +1657,19 @@ func (w *runnerOutputWriter) snapshot() (string, time.Time) {
 func (w *runnerOutputWriter) structuredSnapshot() (string, time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.lastStructuredEvent, w.structuredEventAt
+	return w.lastStructuredEvent, w.lastStructuredEventAt
 }
 
 func (w *runnerOutputWriter) runnerEventSnapshot() (string, time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.lastRunnerEvent, w.runnerEventAt
+	return w.lastRunnerEvent, w.lastRunnerEventAt
+}
+
+func (w *runnerOutputWriter) completedToolUseSnapshot() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.runnerEventAt
 }
 
 func (w *runnerOutputWriter) activitySnapshot() time.Time {
@@ -1648,36 +1737,31 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			}
 			return output, nil
 		case <-writer.activity:
-			lastActivityAt := writer.activitySnapshot()
+			state := writer.stateSnapshot()
+			lastActivityAt := state.lastOutputAt
+			if state.runnerEventAt.After(lastActivityAt) {
+				lastActivityAt = state.runnerEventAt
+			}
 			if !startedOutput && !lastActivityAt.IsZero() {
 				startedOutput = true
 			}
-			_, lastOutputAt := writer.snapshot()
-			_, structuredEventAt := writer.structuredSnapshot()
-			_, runnerEventAt := writer.runnerEventSnapshot()
-			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, runnerEventAt, startedAt)
+			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, startedAt)
 			resetRunnerWatchdogRemaining(watchdog, policy.remaining)
 		case <-watchdog.C:
-			lastActivityAt := writer.activitySnapshot()
-			startedOutput = startedOutput || !lastActivityAt.IsZero()
-			if !startedOutput {
-				cancel()
-				<-done
-				output, lastOutputAt := writer.snapshot()
-				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout)
-			}
-			_, lastOutputAt := writer.snapshot()
-			_, structuredEventAt := writer.structuredSnapshot()
-			_, runnerEventAt := writer.runnerEventSnapshot()
-			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, runnerEventAt, startedAt)
-			if policy.remaining > 0 {
-				watchdog.Reset(policy.remaining)
+			_, policy, stopped, hasOutput := writer.stopIfNoOutputTimeout(cancel, startedOutput, startupTimeout, noOutputTimeout, structuredOutputTimeout, startedAt)
+			startedOutput = hasOutput
+			if !stopped {
+				resetRunnerWatchdogRemaining(watchdog, policy.remaining)
 				continue
 			}
-			cancel()
+			if !startedOutput {
+				<-done
+				output, lastOutputAt := writer.snapshot()
+				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout, noOutputTimeout)
+			}
 			<-done
 			output, lastOutputAt := writer.snapshot()
-			return "", newNoOutputTimeoutError(output, lastOutputAt, writer, policy.timeout, policy.structured)
+			return "", newNoOutputTimeoutError(output, lastOutputAt, writer, policy.timeout, noOutputTimeout, policy.structured)
 		case <-ctx.Done():
 			<-done
 			output, lastOutputAt := writer.snapshot()
@@ -1689,7 +1773,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	}
 }
 
-func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout time.Duration, structuredRule ...bool) *runnerExecutionError {
+func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout, baseTimeout time.Duration, structuredRule ...bool) *runnerExecutionError {
 	lastEvent, eventAt := writer.structuredSnapshot()
 	if lastEvent == "" {
 		lastEvent, eventAt = writer.runnerEventSnapshot()
@@ -1710,6 +1794,8 @@ func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runn
 		structuredEventAt:     eventAt,
 		structuredOutputState: structuredOutputState(output),
 		idleDuration:          idleDuration,
+		baseTimeout:           baseTimeout,
+		appliedTimeout:        timeout,
 		timeoutRule:           runnerTimeoutRule(lastEvent, lastOutputAt, timeout, len(structuredRule) > 0 && structuredRule[0]),
 	}
 }
@@ -1761,13 +1847,15 @@ func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration
 	}
 	deadline := activityAt.Add(noOutputTimeout)
 	state := runnerWatchdogState{timeout: noOutputTimeout}
-	if !structuredEventAt.IsZero() {
-		structuredDeadline := structuredEventAt.Add(structuredOutputTimeout)
-		if !structuredDeadline.Before(deadline) {
-			deadline = structuredDeadline
-			state.timeout = structuredOutputTimeout
-			state.structured = true
-		}
+	structuredAt := structuredEventAt
+	if runnerEventAt.After(structuredAt) {
+		structuredAt = runnerEventAt
+	}
+	if !structuredAt.IsZero() && structuredAt.Equal(activityAt) {
+		structuredDeadline := structuredAt.Add(structuredOutputTimeout)
+		deadline = structuredDeadline
+		state.timeout = structuredOutputTimeout
+		state.structured = true
 	}
 	state.remaining = time.Until(deadline)
 	return state
