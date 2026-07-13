@@ -1688,7 +1688,15 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 			state.tracker.fail(name, "Исполнительная директива не согласована со схемой структурированного вывода.", fmt.Errorf("previous review remarks require structured output field %q", "remarks"), "review_remarks_field_not_allowed", false, true)
 			return fmt.Errorf("previous review remarks require structured output field %q", "remarks")
 		}
-		payload, err := json.Marshal(canonicalReviewRemarks(reviewRemarks))
+		canonicalRemarks := canonicalReviewRemarks(reviewRemarks)
+		for index, remark := range canonicalRemarks {
+			if strings.TrimSpace(remark.ID) == "" {
+				err := fmt.Errorf("review remark %d has no uniquely resolvable response identifier", index)
+				state.tracker.fail(name, "Замечания ревизии не включены в исполнительную директиву.", err, "review_remarks_identifier_unavailable", false, true)
+				return err
+			}
+		}
+		payload, err := json.Marshal(canonicalRemarks)
 		if err != nil {
 			state.tracker.fail(name, "Замечания ревизии не включены в исполнительную директиву.", err, "review_remarks_not_encoded", false, true)
 			return err
@@ -1709,8 +1717,11 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.StructuredRemark {
 	index := newReviewRemarkIndex(reviewRemarks)
 	remarks := make([]model.StructuredRemark, 0, len(reviewRemarks))
-	for _, remark := range reviewRemarks {
-		id := reviewRemarkResponseID(remark, index)
+	for remarkIndex, remark := range reviewRemarks {
+		id := ""
+		if remarkIndex < len(index.responseIDs) {
+			id = index.responseIDs[remarkIndex].id
+		}
 		remarks = append(remarks, model.StructuredRemark{
 			ID:         id,
 			ExternalID: strings.TrimSpace(remark.ExternalID),
@@ -1730,11 +1741,6 @@ func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.St
 // вернуть в review_responses.remark_id. Проектное имя используется только
 // когда индекс однозначно разрешает его в это же каноническое замечание.
 func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkIndex) string {
-	for _, entry := range index.responseIDs {
-		if sameReviewRemark(entry.remark, remark) {
-			return entry.id
-		}
-	}
 	projectID := reviewRemarkProjectID(remark.Body)
 	if projectID != "" && !index.hasAmbiguous(projectID) {
 		if resolved, ok := index.resolve(projectID); ok && sameReviewRemark(resolved, remark) {
@@ -1754,7 +1760,9 @@ func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkI
 		}
 		// При повторяющемся внешнем идентификаторе выдаём суффиксированную
 		// ссылку, которая регистрируется как отдельный устойчивый идентификатор.
-		maxAttempts := len(index.external[externalID]) + 1
+		// Кандидаты могут конфликтовать с любым каноническим замечанием,
+		// а не только с повтором этого external_id.
+		maxAttempts := index.remarkCount + 1
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			stableID := fmt.Sprintf("remark-ref:%s#%d", externalID, attempt)
 			if reviewRemarkResponseIDAvailable(stableID, remark, index) {
@@ -1779,7 +1787,7 @@ func reviewRemarkResponseIDAvailable(id string, remark integration.ReviewRemark,
 		}
 	}
 	for _, entry := range index.responseIDs {
-		if entry.id == id && !sameReviewRemark(entry.remark, remark) {
+		if entry.id == id {
 			return false
 		}
 	}

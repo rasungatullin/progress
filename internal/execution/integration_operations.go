@@ -1654,6 +1654,7 @@ type reviewRemarkIndex struct {
 	stable         map[string][]integration.ReviewRemark
 	stableReserved map[string][]integration.ReviewRemark
 	responseIDs    []reviewRemarkResponseIDEntry
+	remarkCount    int
 }
 
 type reviewRemarkResponseIDEntry struct {
@@ -1667,6 +1668,7 @@ func newReviewRemarkIndex(remarks []integration.ReviewRemark) reviewRemarkIndex 
 		project:        make(map[string][]integration.ReviewRemark),
 		stable:         make(map[string][]integration.ReviewRemark),
 		stableReserved: make(map[string][]integration.ReviewRemark),
+		remarkCount:    len(remarks),
 	}
 	for _, remark := range remarks {
 		if id := strings.TrimSpace(remark.ExternalID); id != "" {

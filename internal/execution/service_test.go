@@ -2343,6 +2343,19 @@ func TestCanonicalReviewRemarksRejectRepeatedExternalID(t *testing.T) {
 	}
 }
 
+func TestCanonicalReviewRemarksRejectDuplicateRemarksWithoutSharedResponseID(t *testing.T) {
+	t.Parallel()
+
+	canonical := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Одинаковое замечание."},
+		{ExternalID: "comment-1", Body: "Одинаковое замечание."},
+	}
+	remarks := canonicalReviewRemarks(canonical)
+	if len(remarks) != 2 || remarks[0].ID == "" || remarks[0].ID == remarks[1].ID {
+		t.Fatalf("duplicate canonical remarks must receive distinct response identifiers: %#v", remarks)
+	}
+}
+
 func TestReviewResponsesRejectUnknownLocalTarget(t *testing.T) {
 	t.Parallel()
 
