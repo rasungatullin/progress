@@ -1600,9 +1600,22 @@ func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.R
 		return nil
 	}
 	byID := make(map[string]integration.ReviewRemark, len(remarks))
+	projectIDs := make(map[string][]integration.ReviewRemark)
 	for _, remark := range remarks {
 		if id := strings.TrimSpace(remark.ExternalID); id != "" {
 			byID[id] = remark
+		}
+		if id := reviewRemarkProjectID(remark.Body); id != "" {
+			projectIDs[id] = append(projectIDs[id], remark)
+		}
+	}
+	for id, matches := range projectIDs {
+		if len(matches) == 1 {
+			if _, exists := byID[id]; !exists {
+				byID[id] = matches[0]
+			}
+		} else {
+			delete(byID, id)
 		}
 	}
 	for _, remark := range output.Remarks {
@@ -1633,6 +1646,30 @@ func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.R
 		responses = append(responses, response)
 	}
 	return responses
+}
+
+func reviewRemarkProjectID(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Идентификатор:") {
+			continue
+		}
+		id := strings.TrimSpace(strings.TrimPrefix(line, "Идентификатор:"))
+		if !strings.HasPrefix(id, "remark-") || len(id) == len("remark-") {
+			continue
+		}
+		valid := true
+		for _, char := range id[len("remark-"):] {
+			if char < '0' || char > '9' {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			return id
+		}
+	}
+	return ""
 }
 
 func enrichReviewResponse(response *StructuredResponse, remarks map[string]integration.ReviewRemark) {
@@ -1743,7 +1780,7 @@ func validateReviewResponses(responses []StructuredResponse) error {
 		switch typ {
 		case "inline":
 			if strings.TrimSpace(response.ThreadID) == "" && (strings.TrimSpace(reviewResponseCommentBody(response)) != "" || isResolvedReviewResponse(response)) {
-				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): thread_id is required; canonical external_id is missing or unknown", index, strings.TrimSpace(response.RemarkID)))
+				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): thread_id is required; canonical external_id is missing, unknown, or ambiguous", index, strings.TrimSpace(response.RemarkID)))
 			}
 			if strings.HasPrefix(strings.TrimSpace(response.ThreadID), "PRRC_") {
 				failures = append(failures, fmt.Errorf("review response %d (remark_id %q): thread_id %q is a review comment identifier; PullRequestReviewThread identifier is required", index, strings.TrimSpace(response.RemarkID), strings.TrimSpace(response.ThreadID)))

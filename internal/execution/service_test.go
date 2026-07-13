@@ -2202,8 +2202,9 @@ func TestPublishReviewResponsesRestoresKindFromCanonicalRemark(t *testing.T) {
 			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
 			"result":     model.LaunchResult{Status: "completed"},
 			"review_remarks": []integration.ReviewRemark{{
-				ExternalID: "remark-3",
-				Type:       "comment",
+				ExternalID: "comment-3",
+				Body:       "Идентификатор: remark-3\nОбщий комментарий.",
+				URL:        "https://example.test/comment",
 			}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-3",
@@ -2224,6 +2225,42 @@ func TestPublishReviewResponsesRestoresKindFromCanonicalRemark(t *testing.T) {
 	}
 	if len(calls) != 1 || calls[0].Operation != "create" || calls[0].ThreadID != "" {
 		t.Fatalf("canonical comment kind must select explicit create policy: %#v", calls)
+	}
+}
+
+func TestReviewResponsesResolveProjectRemarkID(t *testing.T) {
+	t.Parallel()
+
+	responses := reviewResponsesFromOutput(&model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+		{RemarkID: "remark-4", Status: "resolved", Summary: "Исправлено."},
+		{RemarkID: "remark-5", Status: "resolved", Summary: "Исправлено."},
+	}}, []integration.ReviewRemark{
+		{ExternalID: "comment-4", Body: "Идентификатор: remark-4\nОбщий комментарий.", URL: "https://example.test/comment"},
+		{ExternalID: "comment-5", Body: "Идентификатор: remark-5\nПострочное замечание.", ReplyToID: "thread-5"},
+	})
+
+	if len(responses) != 2 || responses[0].Type != "comment" || responses[0].ThreadID != "" || responses[1].Type != "inline" || responses[1].ThreadID != "thread-5" {
+		t.Fatalf("project identifiers must restore canonical response kinds: %#v", responses)
+	}
+	if err := validateReviewResponses(responses); err != nil {
+		t.Fatalf("resolved project identifiers must validate: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectAmbiguousOrUnknownProjectRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание.", URL: "https://example.test/2"},
+	}
+	responses := reviewResponsesFromOutput(&model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+		{RemarkID: "remark-4", Status: "resolved", Summary: "Не публиковать."},
+		{RemarkID: "remark-unknown", Status: "resolved", Summary: "Не публиковать."},
+	}}, remarks)
+
+	if err := validateReviewResponses(responses); err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "remark-unknown") {
+		t.Fatalf("ambiguous and unknown project identifiers must be rejected diagnostically: %v", err)
 	}
 }
 

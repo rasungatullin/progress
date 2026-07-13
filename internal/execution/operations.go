@@ -1692,7 +1692,7 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 			state.tracker.fail(name, "Замечания ревизии не включены в исполнительную директиву.", err, "review_remarks_not_encoded", false, true)
 			return err
 		}
-		prompt = joinExecutionSummaries(prompt, "Use the canonical review remarks below as execution context. Return new findings with a new id. When a finding continues or reopens an existing remark, preserve its external_id and thread_id in that remarks element. Do not return review_responses unless that field is explicitly allowed by the structured output schema. When review_responses is allowed, preserve ExternalID, ReplyToID and Type as remark_id, thread_id and type. For type inline, provide thread_id; for type comment, publish a new related comment; for type local, do not publish an external response.", string(payload))
+		prompt = joinExecutionSummaries(prompt, "Используй канонические замечания ревизии ниже как контекст исполнения. Для каждого ответа в review_responses.remark_id возвращай устойчивый идентификатор из поля id. Для нового замечания возвращай новый id. Если замечание продолжает или повторно открывает существующее, сохраняй его external_id и thread_id в элементе remarks. Не возвращай review_responses, если это поле явно не разрешено схемой структурированного вывода. Для inline указывай thread_id; для comment публикуется новый связанный общий комментарий; для local внешний ответ не публикуется.", string(payload))
 	}
 	writeOperationData(state, operation.Out, "prompt", prompt)
 	state.tracker.completeIO(name, operationIOSummary(operation.In, map[string]string{
@@ -1708,7 +1708,9 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.StructuredRemark {
 	remarks := make([]model.StructuredRemark, 0, len(reviewRemarks))
 	for _, remark := range reviewRemarks {
+		projectID := firstNonEmptyTrimmed(reviewRemarkProjectID(remark.Body), remark.ExternalID)
 		remarks = append(remarks, model.StructuredRemark{
+			ID:         projectID,
 			ExternalID: strings.TrimSpace(remark.ExternalID),
 			ThreadID:   strings.TrimSpace(remark.ReplyToID),
 			Status:     strings.TrimSpace(remark.State),
