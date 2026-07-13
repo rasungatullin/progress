@@ -655,10 +655,10 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 		state.tracker.skipIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary("", input.result, operation), "Структурированный вывод не содержит ответов на замечания.")
 		return nil
 	}
-	if err := validateReviewResponseTargets(responses, input.reviewRemarks, input.structuredOutput); err != nil {
+	if err := validateReviewResponses(responses); err != nil {
 		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не прошли предварительную проверку.", err, "review_responses_invalid")
 	}
-	if err := validateReviewResponses(responses); err != nil {
+	if err := validateReviewResponseTargets(responses, input.reviewRemarks, input.structuredOutput); err != nil {
 		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не прошли предварительную проверку.", err, "review_responses_invalid")
 	}
 
@@ -1727,9 +1727,6 @@ func enrichReviewResponse(response *StructuredResponse, aliases map[string]integ
 }
 
 func validateReviewResponseTargets(responses []StructuredResponse, remarks []integration.ReviewRemark, output *StructuredOutput) error {
-	if len(remarks) == 0 {
-		return nil
-	}
 	index := newReviewRemarkIndex(remarks)
 	aliases := make(map[string]integration.ReviewRemark)
 	if output != nil {

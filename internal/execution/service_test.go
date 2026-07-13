@@ -2089,10 +2089,11 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 					Number:     17,
 				}},
 			}},
-			"profile":    model.Profile{Name: "coder"},
-			"allocation": model.Allocation{Model: "gpt-5"},
-			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
-			"result":     model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"profile":        model.Profile{Name: "coder"},
+			"allocation":     model.Allocation{Model: "gpt-5"},
+			"workplace":      model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":         model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-1", ReplyToID: "thread-1"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
 				ThreadID: "thread-1",
@@ -2158,8 +2159,9 @@ func TestPublishReviewResponsesSupportsCommentAndInlineRemarks(t *testing.T) {
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
 		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-			"result":     model.LaunchResult{Status: "completed"},
+			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":         model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-3", Type: "comment", URL: "https://example.test/comment"}, {ExternalID: "remark-1", ReplyToID: "thread-1"}, {ExternalID: "remark-2", ReplyToID: "thread-2"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
 				{RemarkID: "remark-3", Type: "comment", Status: "fixed", Summary: "Ответ на общий комментарий."},
 				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
@@ -2279,6 +2281,36 @@ func TestReviewResponsesRejectExplicitTypeForAmbiguousOrUnknownRemarkID(t *testi
 	err := validateReviewResponseTargets(responses, remarks, nil)
 	if err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "remark-unknown") {
 		t.Fatalf("explicit response types must not bypass target validation: %v", err)
+	}
+}
+
+func TestPublishReviewResponsesRejectsUnknownTargetWithEmptyCanonicalRemarks(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+				{RemarkID: "remark-unknown-comment", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+				{RemarkID: "remark-unknown-inline", Type: "inline", ThreadID: "thread-unknown", Status: "resolved", Summary: "Не публиковать."},
+			}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses)
+	if err == nil || !strings.Contains(err.Error(), "canonical remark is unknown") {
+		t.Fatalf("unknown targets must fail with a diagnostic: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("unknown targets must not be published externally: %#v", calls)
 	}
 }
 
@@ -2452,8 +2484,9 @@ func TestPublishReviewResponsesCommentIgnoresThreadID(t *testing.T) {
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
 		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-			"result":     model.LaunchResult{Status: "completed"},
+			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":         model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-3", Type: "comment", URL: "https://example.test/comment"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-3",
 				Type:     "comment",
@@ -2645,8 +2678,9 @@ func TestPublishReviewResponsesKeepsPartialDiagnostics(t *testing.T) {
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
 		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-			"result":     model.LaunchResult{Status: "completed"},
+			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":         model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-3", Type: "comment", URL: "https://example.test/comment"}, {ExternalID: "remark-1", ReplyToID: "thread-1"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
 				{RemarkID: "remark-3", Type: "comment", Status: "fixed", Summary: "Ответ."},
 				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
@@ -2679,8 +2713,9 @@ func TestPublishReviewResponsesDoesNotResolveUnpublishedInlineResponse(t *testin
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
 		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-			"result":     model.LaunchResult{Status: "completed"},
+			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":         model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-1", ReplyToID: "thread-1"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено.",
 			}}},
@@ -2746,10 +2781,11 @@ func TestPublishReviewResponsesFailureFillsOnlyActionData(t *testing.T) {
 					}},
 				},
 			},
-			"profile":    model.Profile{Name: "coder"},
-			"allocation": model.Allocation{Model: "gpt-5"},
-			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
-			"result":     model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"profile":        model.Profile{Name: "coder"},
+			"allocation":     model.Allocation{Model: "gpt-5"},
+			"workplace":      model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":         model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-1", ReplyToID: "thread-1"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
 				ThreadID: "thread-1",
