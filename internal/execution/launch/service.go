@@ -51,14 +51,15 @@ var (
 )
 
 type runnerExecutionError struct {
-	err                 error
-	output              string
-	stopReason          string
-	lastOutputAt        time.Time
-	lastStructuredEvent string
-	structuredEventAt   time.Time
-	idleDuration        time.Duration
-	timeoutRule         string
+	err                   error
+	output                string
+	stopReason            string
+	lastOutputAt          time.Time
+	lastStructuredEvent   string
+	structuredEventAt     time.Time
+	structuredOutputState string
+	idleDuration          time.Duration
+	timeoutRule           string
 }
 
 func (e *runnerExecutionError) Error() string {
@@ -68,11 +69,30 @@ func (e *runnerExecutionError) Error() string {
 		if lastEvent == "" {
 			lastEvent = "отсутствует"
 		}
-		diagnostic = fmt.Sprintf("\nlast structured event=%s idle=%s rule=%s", lastEvent, e.idleDuration.Round(time.Millisecond), e.timeoutRule)
+		outputState := e.structuredOutputState
+		if outputState == "" {
+			outputState = structuredOutputState(e.output)
+		}
+		diagnostic = fmt.Sprintf(
+			"\nlast fragment at=%s last structured event=%s at=%s structured output=%s idle=%s rule=%s",
+			formatRunnerTime(e.lastOutputAt),
+			lastEvent,
+			formatRunnerTime(e.structuredEventAt),
+			outputState,
+			e.idleDuration.Round(time.Millisecond),
+			e.timeoutRule,
+		)
 	}
 	return fmt.Sprintf("%s%s\n%s", e.err, diagnostic, strings.TrimSpace(e.output))
 }
 func (e *runnerExecutionError) Unwrap() error { return e.err }
+
+func formatRunnerTime(value time.Time) string {
+	if value.IsZero() {
+		return "отсутствует"
+	}
+	return value.Format(time.RFC3339Nano)
+}
 
 type trailingStructuredBlockState int
 
@@ -1399,6 +1419,9 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if runner == RunnerOpenCode {
+		cmd.Args = insertOpenCodeJSONFlag(cmd.Args)
+	}
 	metadata := runnerMetadata{}
 	opencodeTitle := ""
 	if runner == RunnerOpenCode && in.Launch.Resume == nil {
@@ -1411,8 +1434,15 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if runner == RunnerOpenCode {
+		var sessionID string
+		output, sessionID = normalizeOpenCodeJSONOutput(string(output))
+		metadata.RunnerSessionID = sessionID
+	}
 	if opencodeTitle != "" {
-		metadata.RunnerSessionID = lookupOpenCodeSessionID(ctx, opencodeTitle)
+		if strings.TrimSpace(metadata.RunnerSessionID) == "" {
+			metadata.RunnerSessionID = lookupOpenCodeSessionID(ctx, opencodeTitle)
+		}
 	}
 	if strings.TrimSpace(metadata.RunnerSessionID) == "" && in.Launch.Resume != nil {
 		metadata.RunnerSessionID = strings.TrimSpace(in.Launch.Resume.RunnerSessionID)
@@ -1455,6 +1485,10 @@ type runnerOutputWriter struct {
 	structuredPending   []byte
 	lastStructuredEvent string
 	structuredEventAt   time.Time
+	runnerEvents        bool
+	runnerPending       []byte
+	lastRunnerEvent     string
+	runnerEventAt       time.Time
 }
 
 func (w *runnerOutputWriter) Write(p []byte) (int, error) {
@@ -1466,12 +1500,42 @@ func (w *runnerOutputWriter) Write(p []byte) (int, error) {
 		if w.structuredEvents {
 			w.recordStructuredEvents(p)
 		}
+		if w.runnerEvents {
+			w.recordRunnerEvents(p)
+		}
 	}
 	select {
 	case w.activity <- struct{}{}:
 	default:
 	}
 	return n, err
+}
+
+func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
+	w.runnerPending = append(w.runnerPending, p...)
+	for {
+		lineEnd := bytes.IndexByte(w.runnerPending, '\n')
+		if lineEnd < 0 {
+			return
+		}
+		line := bytes.TrimSpace(w.runnerPending[:lineEnd])
+		w.runnerPending = w.runnerPending[lineEnd+1:]
+		var event struct {
+			Type string `json:"type"`
+			Part struct {
+				Type string `json:"type"`
+			} `json:"part"`
+		}
+		if json.Unmarshal(line, &event) != nil || strings.TrimSpace(event.Type) == "" {
+			continue
+		}
+		name := event.Type
+		if strings.TrimSpace(event.Part.Type) != "" {
+			name += "/" + event.Part.Type
+		}
+		w.lastRunnerEvent = name
+		w.runnerEventAt = w.lastOutputAt
+	}
 }
 
 func (w *runnerOutputWriter) recordStructuredEvents(p []byte) {
@@ -1513,6 +1577,22 @@ func (w *runnerOutputWriter) structuredSnapshot() (string, time.Time) {
 	return w.lastStructuredEvent, w.structuredEventAt
 }
 
+func (w *runnerOutputWriter) runnerEventSnapshot() (string, time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastRunnerEvent, w.runnerEventAt
+}
+
+func (w *runnerOutputWriter) activitySnapshot() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	activityAt := w.lastOutputAt
+	if w.runnerEventAt.After(activityAt) {
+		activityAt = w.runnerEventAt
+	}
+	return activityAt
+}
+
 func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSpec) (string, error) {
 	timeout, err := runnerDuration(spec.Timeout, defaultRunnerTimeout)
 	if err != nil {
@@ -1537,7 +1617,11 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	cmd.Env = sanitizedEnv()
 	configureRunnerProcess(cmd)
 	cmd.Cancel = func() error { return terminateRunnerProcess(cmd) }
-	writer := &runnerOutputWriter{activity: make(chan struct{}, 1), structuredEvents: spec.Runner == RunnerCodex}
+	writer := &runnerOutputWriter{
+		activity:         make(chan struct{}, 1),
+		structuredEvents: spec.Runner == RunnerCodex,
+		runnerEvents:     spec.Runner == RunnerOpenCode,
+	}
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 	if err := cmd.Start(); err != nil {
@@ -1564,24 +1648,28 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			}
 			return output, nil
 		case <-writer.activity:
-			_, lastOutputAt := writer.snapshot()
-			if !startedOutput && !lastOutputAt.IsZero() {
+			lastActivityAt := writer.activitySnapshot()
+			if !startedOutput && !lastActivityAt.IsZero() {
 				startedOutput = true
 			}
+			_, lastOutputAt := writer.snapshot()
 			_, structuredEventAt := writer.structuredSnapshot()
-			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, startedAt)
+			_, runnerEventAt := writer.runnerEventSnapshot()
+			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, runnerEventAt, startedAt)
 			resetRunnerWatchdogRemaining(watchdog, policy.remaining)
 		case <-watchdog.C:
-			_, lastOutputAt := writer.snapshot()
-			startedOutput = startedOutput || !lastOutputAt.IsZero()
+			lastActivityAt := writer.activitySnapshot()
+			startedOutput = startedOutput || !lastActivityAt.IsZero()
 			if !startedOutput {
 				cancel()
 				<-done
 				output, lastOutputAt := writer.snapshot()
 				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout)
 			}
+			_, lastOutputAt := writer.snapshot()
 			_, structuredEventAt := writer.structuredSnapshot()
-			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, startedAt)
+			_, runnerEventAt := writer.runnerEventSnapshot()
+			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, lastOutputAt, structuredEventAt, runnerEventAt, startedAt)
 			if policy.remaining > 0 {
 				watchdog.Reset(policy.remaining)
 				continue
@@ -1603,6 +1691,9 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 
 func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout time.Duration, structuredRule ...bool) *runnerExecutionError {
 	lastEvent, eventAt := writer.structuredSnapshot()
+	if lastEvent == "" {
+		lastEvent, eventAt = writer.runnerEventSnapshot()
+	}
 	if eventAt.IsZero() {
 		lastEvent = ""
 	}
@@ -1611,18 +1702,41 @@ func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runn
 		idleDuration = time.Since(lastOutputAt)
 	}
 	return &runnerExecutionError{
-		err:                 errRunnerNoOutputTimeout,
-		output:              output,
-		stopReason:          "no-output-timeout",
-		lastOutputAt:        lastOutputAt,
-		lastStructuredEvent: lastEvent,
-		idleDuration:        idleDuration,
-		timeoutRule:         runnerTimeoutRule(lastEvent, timeout, len(structuredRule) > 0 && structuredRule[0]),
+		err:                   errRunnerNoOutputTimeout,
+		output:                output,
+		stopReason:            "no-output-timeout",
+		lastOutputAt:          lastOutputAt,
+		lastStructuredEvent:   lastEvent,
+		structuredEventAt:     eventAt,
+		structuredOutputState: structuredOutputState(output),
+		idleDuration:          idleDuration,
+		timeoutRule:           runnerTimeoutRule(lastEvent, lastOutputAt, timeout, len(structuredRule) > 0 && structuredRule[0]),
 	}
 }
 
-func runnerTimeoutRule(lastEvent string, timeout time.Duration, structured bool) string {
+func structuredOutputState(output string) string {
+	_, _, _, state, _ := parseStructuredOutput(output)
+	if state == trailingStructuredBlockAbsent {
+		normalized, _ := normalizeOpenCodeJSONOutput(output)
+		if normalized != output {
+			_, _, _, state, _ = parseStructuredOutput(normalized)
+		}
+	}
+	switch state {
+	case trailingStructuredBlockValid:
+		return "present"
+	case trailingStructuredBlockInvalid:
+		return "invalid"
+	default:
+		return "absent"
+	}
+}
+
+func runnerTimeoutRule(lastEvent string, lastOutputAt time.Time, timeout time.Duration, structured bool) string {
 	if lastEvent == "" {
+		if !lastOutputAt.IsZero() {
+			return fmt.Sprintf("%s после последнего фрагмента", timeout)
+		}
 		return fmt.Sprintf("%s без принятого события", timeout)
 	}
 	if structured {
@@ -1637,8 +1751,11 @@ type runnerWatchdogState struct {
 	structured bool
 }
 
-func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration, lastOutputAt, structuredEventAt, startedAt time.Time) runnerWatchdogState {
+func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration, lastOutputAt, structuredEventAt, runnerEventAt, startedAt time.Time) runnerWatchdogState {
 	activityAt := lastOutputAt
+	if runnerEventAt.After(activityAt) {
+		activityAt = runnerEventAt
+	}
 	if activityAt.IsZero() {
 		activityAt = startedAt
 	}
@@ -1716,6 +1833,73 @@ func insertCodexJSONFlag(args []string) []string {
 	withJSON = append(withJSON, args[0], args[1], "--json")
 	withJSON = append(withJSON, args[2:]...)
 	return withJSON
+}
+
+func insertOpenCodeJSONFlag(args []string) []string {
+	if len(args) < 2 || args[1] != "run" {
+		return args
+	}
+	for index := 2; index < len(args); index++ {
+		if args[index] == "--format" {
+			withJSON := append([]string(nil), args...)
+			if index+1 < len(withJSON) {
+				withJSON[index+1] = "json"
+				return withJSON
+			}
+			return append(withJSON, "json")
+		}
+		if strings.HasPrefix(args[index], "--format=") {
+			withJSON := append([]string(nil), args...)
+			withJSON[index] = "--format=json"
+			return withJSON
+		}
+	}
+	withJSON := make([]string, 0, len(args)+2)
+	withJSON = append(withJSON, args[:2]...)
+	withJSON = append(withJSON, "--format", "json")
+	return append(withJSON, args[2:]...)
+}
+
+func normalizeOpenCodeJSONOutput(output string) (string, string) {
+	var sessionID string
+	plainLines := make([]string, 0)
+	sawEvent := false
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		rawLine := scanner.Text()
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+
+		var event struct {
+			Type      string `json:"type"`
+			SessionID string `json:"sessionID"`
+			Part      struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"part"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil || strings.TrimSpace(event.Type) == "" {
+			plainLines = append(plainLines, rawLine)
+			continue
+		}
+		sawEvent = true
+		if strings.TrimSpace(sessionID) == "" {
+			sessionID = strings.TrimSpace(event.SessionID)
+		}
+		if event.Type == "text" && event.Part.Type == "text" && strings.TrimSpace(event.Part.Text) != "" {
+			plainLines = append(plainLines, event.Part.Text)
+		}
+	}
+	if len(plainLines) == 0 {
+		if sawEvent {
+			return "", sessionID
+		}
+		return strings.TrimSpace(output), sessionID
+	}
+	return strings.TrimSpace(strings.Join(plainLines, "\n")), sessionID
 }
 
 func normalizeCodexJSONOutput(output string) (string, string) {

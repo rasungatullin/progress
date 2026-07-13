@@ -193,6 +193,233 @@ func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
 	}
 }
 
+func TestRunOpenCodeCommandKeepsStreamingOutputActive(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+
+	startedAt := time.Now()
+	output, err := runRunnerCommand(context.Background(), exec.Command(opencodePath, "run", "--format", "json", "--dir", t.TempDir(), "--model", "openai/gpt-5.4", "stream"), model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Timeout:         "1s",
+		NoOutputTimeout: "250ms",
+	})
+	if err != nil {
+		t.Fatalf("opencode streaming output must keep runner active: %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed < 250*time.Millisecond {
+		t.Fatalf("opencode stand-in did not keep the process running after the first event: %s", elapsed)
+	}
+	eventTypes := make([]string, 0)
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		var event struct {
+			Type      string `json:"type"`
+			SessionID string `json:"sessionID"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode opencode event: %v", err)
+		}
+		if event.SessionID != "session-stream" {
+			t.Fatalf("unexpected opencode session id: %#v", event)
+		}
+		eventTypes = append(eventTypes, event.Type)
+	}
+	if want := []string{"step_start", "text", "text", "text", "text", "step_finish"}; !reflect.DeepEqual(eventTypes, want) {
+		t.Fatalf("unexpected opencode event stream: got %v want %v", eventTypes, want)
+	}
+}
+
+func TestRunOpenCodeRunnerKeepsStreamingOutputActive(t *testing.T) {
+	binDir := t.TempDir()
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	if err := os.Symlink(opencodePath, filepath.Join(binDir, RunnerOpenCode)); err != nil {
+		t.Fatalf("install opencode stand-in: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, err := runRunner(context.Background(), model.Invocation{Launch: model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Directory:       t.TempDir(),
+		Model:           "openai/gpt-5.4",
+		Prompt:          "stream",
+		Timeout:         "1s",
+		NoOutputTimeout: "250ms",
+	}})
+	if err != nil {
+		t.Fatalf("opencode runner streaming output must keep runner active: %v", err)
+	}
+	plain, metadata := stripTrailingRunnerMetadata(output)
+	if plain != "1\n2\n3\n4" {
+		t.Fatalf("unexpected normalized opencode output: %q", plain)
+	}
+	if metadata == nil || metadata.RunnerSessionID != "session-stream" {
+		t.Fatalf("opencode session id must be kept in runner metadata: %#v", metadata)
+	}
+}
+
+func TestRunOpenCodeRunnerNormalizesStructuredJSONOutput(t *testing.T) {
+	binDir := t.TempDir()
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	if err := os.Symlink(opencodePath, filepath.Join(binDir, RunnerOpenCode)); err != nil {
+		t.Fatalf("install opencode stand-in: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, err := runRunner(context.Background(), model.Invocation{Launch: model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Directory:       t.TempDir(),
+		Model:           "openai/gpt-5.4",
+		Prompt:          "structured",
+		Timeout:         "1s",
+		NoOutputTimeout: "250ms",
+	}})
+	if err != nil {
+		t.Fatalf("run opencode structured output: %v", err)
+	}
+
+	plainWithBlock, metadata := stripTrailingRunnerMetadata(output)
+	plain, raw, structured, err := ParseOutput(plainWithBlock)
+	if err != nil {
+		t.Fatalf("parse normalized opencode structured output: %v", err)
+	}
+	if plain != "Выполнение завершено." || !strings.Contains(raw, `"summary":"Проверка завершена."`) {
+		t.Fatalf("unexpected normalized opencode output: plain=%q raw=%q", plain, raw)
+	}
+	if structured == nil || structured.Summary != "Проверка завершена." {
+		t.Fatalf("unexpected structured output: %#v", structured)
+	}
+	if metadata == nil || metadata.RunnerSessionID != "session-structured" {
+		t.Fatalf("opencode session id must be kept in runner metadata: %#v", metadata)
+	}
+}
+
+func TestRunOpenCodeRunnerResumeUsesJSONOutputAndSession(t *testing.T) {
+	binDir := t.TempDir()
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	if err := os.Symlink(opencodePath, filepath.Join(binDir, RunnerOpenCode)); err != nil {
+		t.Fatalf("install opencode stand-in: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, err := runRunner(context.Background(), model.Invocation{Launch: model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Directory:       t.TempDir(),
+		Model:           "openai/gpt-5.4",
+		Prompt:          "resume",
+		Timeout:         "1s",
+		NoOutputTimeout: "100ms",
+		Resume:          &model.ResumeSpec{ParentRunID: 42, RunnerSessionID: "session-resume", MessageSource: "message"},
+	}})
+	if err != nil {
+		t.Fatalf("resume opencode runner: %v", err)
+	}
+
+	plain, metadata := stripTrailingRunnerMetadata(output)
+	if plain != "Продолжение завершено." {
+		t.Fatalf("unexpected normalized resume output: %q", plain)
+	}
+	if metadata == nil || metadata.RunnerSessionID != "session-resume" {
+		t.Fatalf("resume session id must be kept in runner metadata: %#v", metadata)
+	}
+}
+
+func TestRunOpenCodeRunnerStopsSilentProcess(t *testing.T) {
+	binDir := t.TempDir()
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	if err := os.Symlink(opencodePath, filepath.Join(binDir, RunnerOpenCode)); err != nil {
+		t.Fatalf("install opencode stand-in: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	startedAt := time.Now()
+	_, err = runRunner(context.Background(), model.Invocation{Launch: model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Directory:       t.TempDir(),
+		Model:           "openai/gpt-5.4",
+		Prompt:          "silent",
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	}})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout for silent opencode process, got %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 500*time.Millisecond {
+		t.Fatalf("silent opencode process was allowed to run until overall timeout: %s", elapsed)
+	}
+}
+
+func TestRunOpenCodeRunnerReportsInstrumentalEventOnNoOutputTimeout(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	_, err = runRunnerCommand(context.Background(), exec.Command(opencodePath, "run", "--format", "json", "--dir", t.TempDir(), "--model", "openai/gpt-5.4", "event-timeout"), model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	for _, expected := range []string{"last structured event=step_start/step-start", "rule=50ms после последнего фрагмента"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
+func TestRunRunnerCommandReportsStructuredOutputInsideOpenCodeEvent(t *testing.T) {
+	t.Parallel()
+
+	output := `{"type":"text","sessionID":"session-structured","part":{"type":"text","text":"Выполнение завершено.\n<progress-structured-output>\n{\"summary\":\"Проверка завершена.\"}\n</progress-structured-output>"}}`
+	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second)
+	if !strings.Contains(err.Error(), "structured output=present") {
+		t.Fatalf("timeout diagnostics must detect structured output inside opencode event: %v", err)
+	}
+}
+
+func TestRunOpenCodeRunnerReportsInstrumentalEventThroughRunnerPath(t *testing.T) {
+	binDir := t.TempDir()
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	if err := os.Symlink(opencodePath, filepath.Join(binDir, RunnerOpenCode)); err != nil {
+		t.Fatalf("install opencode stand-in: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err = runRunner(context.Background(), model.Invocation{Launch: model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Directory:       t.TempDir(),
+		Model:           "openai/gpt-5.4",
+		Prompt:          "event-timeout",
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	}})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout through runRunner, got %v", err)
+	}
+	for _, expected := range []string{"last structured event=step_start/step-start", "structured output=absent", "rule=50ms после последнего фрагмента"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("runRunner diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
 func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	t.Parallel()
 
@@ -206,6 +433,21 @@ func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	var runnerErr *runnerExecutionError
 	if !errors.As(err, &runnerErr) || runnerErr.output != "first" || runnerErr.lastOutputAt.IsZero() {
 		t.Fatalf("missing last-output diagnostics: %#v", runnerErr)
+	}
+	for _, expected := range []string{"last fragment at=", "last structured event=отсутствует at=отсутствует", "structured output=absent", "rule=200ms после последнего фрагмента"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
+func TestRunRunnerCommandNoOutputTimeoutReportsStructuredOutputState(t *testing.T) {
+	t.Parallel()
+
+	output := "partial\n" + structuredOutputStart + "\n{\"summary\":\"Done.\"}\n" + structuredOutputEnd
+	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second)
+	if !strings.Contains(err.Error(), "structured output=present") {
+		t.Fatalf("timeout diagnostics must report present structured output: %v", err)
 	}
 }
 
