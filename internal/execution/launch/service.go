@@ -1786,7 +1786,7 @@ func runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout time.Duration
 	}
 	if !structuredAt.IsZero() {
 		structuredDeadline := structuredAt.Add(structuredOutputTimeout)
-		if !structuredDeadline.Before(deadline) {
+		if !runnerEventAt.IsZero() || !structuredDeadline.Before(deadline) {
 			deadline = structuredDeadline
 			state.timeout = structuredOutputTimeout
 			state.structured = true
