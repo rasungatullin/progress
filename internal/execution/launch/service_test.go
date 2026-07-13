@@ -1702,6 +1702,7 @@ func TestPushWithRetryRepeatsNetworkFailureWithoutCreatingCommit(t *testing.T) {
 	t.Parallel()
 
 	pushes := 0
+	var retryArgs []string
 	service := &Service{
 		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
 			switch strings.Join(args, " ") {
@@ -1710,6 +1711,10 @@ func TestPushWithRetryRepeatsNetworkFailureWithoutCreatingCommit(t *testing.T) {
 				if pushes == 1 {
 					return "", errors.New("exit status 128\nConnection closed by remote host")
 				}
+				return "", nil
+			case "push abc123:refs/heads/feature/test":
+				pushes++
+				retryArgs = append([]string(nil), args...)
 				return "", nil
 			case "rev-parse HEAD":
 				return "abc123\n", nil
@@ -1727,6 +1732,9 @@ func TestPushWithRetryRepeatsNetworkFailureWithoutCreatingCommit(t *testing.T) {
 	}
 	if pushes != 2 {
 		t.Fatalf("expected two push attempts, got %d", pushes)
+	}
+	if !reflect.DeepEqual(retryArgs, []string{"push", "abc123:refs/heads/feature/test"}) {
+		t.Fatalf("retry must push the expected head: %#v", retryArgs)
 	}
 }
 
@@ -1749,6 +1757,28 @@ func TestPushWithRetryRecognizesAuthorizationFailure(t *testing.T) {
 	}
 	if pushes != 1 {
 		t.Fatalf("authorization failure must not repeat, got %d attempts", pushes)
+	}
+}
+
+func TestPushWithRetryRecognizesAccessDeniedFailure(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		if strings.Join(args, " ") == "push" {
+			pushes++
+			return "", errors.New("remote: Permission to OWNER/REPO.git denied to USER\nremote: error: 403")
+		}
+		return "", fmt.Errorf("unexpected git command: %v", args)
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "access-denied" || failure.attempts != 1 {
+		t.Fatalf("unexpected push failure: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("access-denied failure must not repeat, got %d attempts", pushes)
 	}
 }
 
@@ -1885,6 +1915,9 @@ func TestPushWithRetryPreservesRetryDiagnostic(t *testing.T) {
 			if pushes == 1 {
 				return "", errors.New("connection closed by remote host")
 			}
+			return "", nil
+		case "push abc123:refs/heads/feature/test":
+			pushes++
 			return "", nil
 		case "rev-parse HEAD":
 			return "abc123\n", nil

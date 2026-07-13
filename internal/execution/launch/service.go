@@ -1132,9 +1132,20 @@ func (s *Service) pushWithRetryDiagnostic(ctx context.Context, dir, gitRoot, bra
 			if err := waitGitPushRetry(ctx, retryDelay); err != nil {
 				return &gitPushFailure{attempts: attempt, classification: "interrupted", lastError: err}
 			}
+			args = gitPushRetryArgs(args, expectedHead, branch)
 		}
 	}
 	return &gitPushFailure{attempts: maxAttempts, classification: "network", lastError: lastErr}
+}
+
+func gitPushRetryArgs(args []string, expectedHead, branch string) []string {
+	refspec := expectedHead + ":refs/heads/" + branch
+	result := append([]string(nil), args...)
+	if len(result) >= 4 && result[0] == "push" && result[1] == "-u" {
+		result[len(result)-1] = refspec
+		return result
+	}
+	return append(result, refspec)
 }
 
 func setGitPushDiagnostic(target *string, attempts int, classification string, lastErr error) {
@@ -1176,6 +1187,8 @@ func classifyGitPushError(err error) string {
 		return "non-fast-forward"
 	case strings.Contains(message, "connection closed"), strings.Contains(message, "connection reset"), strings.Contains(message, "timed out"), strings.Contains(message, "could not resolve host"), strings.Contains(message, "network is unreachable"), strings.Contains(message, "broken pipe"):
 		return "network"
+	case strings.Contains(message, "permission to "), strings.Contains(message, " returned error: 403"), strings.Contains(message, "403 forbidden"):
+		return "access-denied"
 	case strings.Contains(message, "permission denied"), strings.Contains(message, "could not read from remote repository"), strings.Contains(message, "authentication failed"), strings.Contains(message, "access denied"):
 		return "authorization"
 	case strings.Contains(message, "rejected"), strings.Contains(message, "updates were rejected"):
