@@ -465,13 +465,14 @@ type ExecutionResult struct {
 }
 
 type MergeRequest struct {
-	System     string `json:"system,omitempty"`
-	Repository string `json:"repository,omitempty"`
-	Number     int    `json:"number,omitempty"`
-	Title      string `json:"title,omitempty"`
-	Body       string `json:"body,omitempty"`
-	State      string `json:"state,omitempty"`
-	BaseRef    string `json:"base_ref,omitempty"`
-	HeadRef    string `json:"head_ref,omitempty"`
-	URL        string `json:"url,omitempty"`
+	System       string `json:"system,omitempty"`
+	Repository   string `json:"repository,omitempty"`
+	Number       int    `json:"number,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Body         string `json:"body,omitempty"`
+	State        string `json:"state,omitempty"`
+	BaseRef      string `json:"base_ref,omitempty"`
+	HeadRef      string `json:"head_ref,omitempty"`
+	HeadRevision string `json:"head_revision,omitempty"`
+	URL          string `json:"url,omitempty"`
 }

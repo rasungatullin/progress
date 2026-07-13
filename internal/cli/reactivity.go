@@ -10,11 +10,12 @@ import (
 )
 
 type reactivityFlags struct {
-	task      int
-	route     string
-	action    string
-	once      bool
-	maxCycles int
+	task           int
+	route          string
+	action         string
+	once           bool
+	maxCycles      int
+	maxTotalCycles int
 }
 
 type reactivityCommandService interface {
@@ -61,10 +62,11 @@ func newReactivityProcessCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newReactivityService(cmd)
 			result, err := service.ProcessTask(cmd.Context(), reactivity.TaskProcessingInput{
-				TaskNumber: flags.task,
-				Route:      flags.route,
-				Once:       flags.once,
-				MaxCycles:  flags.maxCycles,
+				TaskNumber:     flags.task,
+				Route:          flags.route,
+				Once:           flags.once,
+				MaxCycles:      flags.maxCycles,
+				MaxTotalCycles: flags.maxTotalCycles,
 			})
 			if err != nil {
 				printReactivityResultOnError(cmd, result)
@@ -78,7 +80,8 @@ func newReactivityProcessCommand() *cobra.Command {
 	cmd.Flags().IntVar(&flags.task, "task", 0, "Номер задачи для обработки")
 	cmd.Flags().StringVar(&flags.route, "route", "", "Имя маршрута обработки")
 	cmd.Flags().BoolVar(&flags.once, "once", false, "Выполнить только один цикл обработки")
-	cmd.Flags().IntVar(&flags.maxCycles, "max-cycles", 0, "Максимальное число циклов обработки")
+	cmd.Flags().IntVar(&flags.maxCycles, "max-cycles", 0, "Предел циклов обработки без полезного прогресса")
+	cmd.Flags().IntVar(&flags.maxTotalCycles, "max-total-cycles", 0, "Аварийный предел всех циклов обработки")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
 }

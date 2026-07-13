@@ -578,7 +578,7 @@ func TestRunnerRunPRViewBuildsJSONCommand(t *testing.T) {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"}
+		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,headRefOid,url,createdAt,updatedAt"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}
@@ -619,7 +619,7 @@ func TestRunnerRunPRViewUsesConfiguredDefaultRepository(t *testing.T) {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"}
+		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,headRefOid,url,createdAt,updatedAt"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}
@@ -649,7 +649,7 @@ func TestRunnerRunPRListBuildsCommand(t *testing.T) {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"pr", "list", "--repo", "owner/name", "--state", "closed", "--limit", "5", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt", "--search", "label:bug reviewed-by:@me"}
+		expected := []string{"pr", "list", "--repo", "owner/name", "--state", "closed", "--limit", "5", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,reviewDecision,baseRefName,headRefName,headRefOid,url,createdAt,updatedAt", "--search", "label:bug reviewed-by:@me"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}
@@ -679,7 +679,7 @@ func TestRunnerRunPRListCanUseCurrentRepository(t *testing.T) {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"pr", "list", "--state", "closed", "--limit", "30", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"}
+		expected := []string{"pr", "list", "--state", "closed", "--limit", "30", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,reviewDecision,baseRefName,headRefName,headRefOid,url,createdAt,updatedAt"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}

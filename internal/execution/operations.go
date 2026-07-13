@@ -727,15 +727,19 @@ func mergeRequestFromExecutionData(state *operationExecution) *model.MergeReques
 	if state == nil {
 		return nil
 	}
-	value, ok := state.data["merge_request"].(integration.MergeRequest)
-	if !ok || value.Number <= 0 {
-		return nil
+	for _, key := range []string{"merge_request", "pull_request"} {
+		value, ok := state.data[key].(integration.MergeRequest)
+		if !ok || value.Number <= 0 {
+			continue
+		}
+		return &model.MergeRequest{
+			System: value.System, Repository: value.Repository, Number: value.Number,
+			Title: value.Title, Body: value.Body, State: value.State,
+			BaseRef: value.BaseRef, HeadRef: value.HeadRef, URL: value.URL,
+			HeadRevision: value.HeadRevision,
+		}
 	}
-	return &model.MergeRequest{
-		System: value.System, Repository: value.Repository, Number: value.Number,
-		Title: value.Title, Body: value.Body, State: value.State,
-		BaseRef: value.BaseRef, HeadRef: value.HeadRef, URL: value.URL,
-	}
+	return nil
 }
 
 func profileFromExecutionData(state *operationExecution) profile {

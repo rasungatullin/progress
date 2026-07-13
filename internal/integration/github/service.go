@@ -100,6 +100,7 @@ type ghPRView struct {
 	ReviewDecision string         `json:"reviewDecision"`
 	BaseRefName    string         `json:"baseRefName"`
 	HeadRefName    string         `json:"headRefName"`
+	HeadRefOID     string         `json:"headRefOid"`
 	URL            string         `json:"url"`
 	CreatedAt      string         `json:"createdAt"`
 	UpdatedAt      string         `json:"updatedAt"`
@@ -1662,6 +1663,7 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 		ReviewDecision: strings.TrimSpace(raw.ReviewDecision),
 		BaseRef:        strings.TrimSpace(raw.BaseRefName),
 		HeadRef:        strings.TrimSpace(raw.HeadRefName),
+		HeadRevision:   strings.TrimSpace(raw.HeadRefOID),
 		Labels:         normalizeTrackerLabels(raw.Labels),
 		URL:            strings.TrimSpace(raw.URL),
 		CreatedAt:      strings.TrimSpace(raw.CreatedAt),
@@ -1799,6 +1801,7 @@ func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {
 		ReviewDecision: strings.TrimSpace(raw.ReviewDecision),
 		BaseRef:        strings.TrimSpace(raw.BaseRefName),
 		HeadRef:        strings.TrimSpace(raw.HeadRefName),
+		HeadRevision:   strings.TrimSpace(raw.HeadRefOID),
 		URL:            strings.TrimSpace(raw.URL),
 		CreatedAt:      strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:      strings.TrimSpace(raw.UpdatedAt),
@@ -2322,7 +2325,7 @@ func prGetErrorStatus(config resolvedConfig, result CommandResult, repository st
 	if number > 0 {
 		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("number=%d", number))
 	}
-	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s pr view %d --repo %s --json number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt", status.Command, number, repository))
+	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s pr view %d --repo %s --json number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,headRefOid,url,createdAt,updatedAt", status.Command, number, repository))
 	return status
 }
 
