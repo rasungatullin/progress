@@ -1078,12 +1078,12 @@ func (s *Service) pushWithRetryDiagnostic(ctx context.Context, dir, gitRoot, bra
 	}
 	expectedHead, originalRemoteHead, initialHeadsErr := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
 	if initialHeadsErr != nil {
-		return &gitPushFailure{attempts: 0, classification: "uncertain", lastError: fmt.Errorf("verify push heads: %w", initialHeadsErr)}
+		return &gitPushFailure{attempts: 0, classification: classifyGitPushError(initialHeadsErr), lastError: fmt.Errorf("verify push heads: %w", initialHeadsErr)}
 	}
-	if expectedHead == "" {
+	if !isGitPushSHA(expectedHead) {
 		return &gitPushFailure{attempts: 0, classification: "uncertain", lastError: errors.New("expected local HEAD is empty")}
 	}
-	args = gitPushRetryArgs(args, expectedHead, branch)
+	args = gitPushRetryArgs(args, expectedHead, branch, remote)
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
@@ -1136,13 +1136,13 @@ func (s *Service) pushWithRetryDiagnostic(ctx context.Context, dir, gitRoot, bra
 			if err := waitGitPushRetry(ctx, retryDelay); err != nil {
 				return &gitPushFailure{attempts: attempt, classification: "interrupted", lastError: err}
 			}
-			args = gitPushRetryArgs(args, expectedHead, branch)
+			args = gitPushRetryArgs(args, expectedHead, branch, remote)
 		}
 	}
 	return &gitPushFailure{attempts: maxAttempts, classification: "network", lastError: lastErr}
 }
 
-func gitPushRetryArgs(args []string, expectedHead, branch string) []string {
+func gitPushRetryArgs(args []string, expectedHead, branch, remote string) []string {
 	refspec := expectedHead + ":refs/heads/" + branch
 	result := append([]string(nil), args...)
 	if len(result) >= 4 && result[0] == "push" && result[1] == "-u" {
@@ -1151,12 +1151,12 @@ func gitPushRetryArgs(args []string, expectedHead, branch string) []string {
 	}
 	if len(result) >= 1 && result[0] == "push" {
 		if len(result) == 1 {
-			return append(result, refspec)
+			return append(result, remote, refspec)
 		}
 		result[len(result)-1] = refspec
 		return result
 	}
-	return append(result, refspec)
+	return append(append(result, remote), refspec)
 }
 
 func setGitPushDiagnostic(target *string, attempts int, classification string, lastErr error) {
@@ -1214,9 +1214,13 @@ func (s *Service) gitPushHeads(ctx context.Context, dir, branch string, env []st
 	if err != nil {
 		return "", "", fmt.Errorf("read local head: %w", err)
 	}
+	local = strings.TrimSpace(local)
+	if !isGitPushSHA(local) {
+		return "", "", fmt.Errorf("invalid local head %q", local)
+	}
 	remoteOutput, err := s.runGitOutputWithEnv(ctx, dir, env, "ls-remote", remote, "refs/heads/"+branch)
 	if err != nil {
-		return strings.TrimSpace(local), "", fmt.Errorf("read remote head: %w", err)
+		return local, "", fmt.Errorf("read remote head: %w", err)
 	}
 	ref := "refs/heads/" + branch
 	for _, line := range strings.Split(remoteOutput, "\n") {
@@ -1225,11 +1229,11 @@ func (s *Service) gitPushHeads(ctx context.Context, dir, branch string, env []st
 			continue
 		}
 		if !isGitPushSHA(fields[0]) {
-			return strings.TrimSpace(local), "", fmt.Errorf("invalid remote head %q", fields[0])
+			return local, "", fmt.Errorf("invalid remote head %q", fields[0])
 		}
-		return strings.TrimSpace(local), fields[0], nil
+		return local, fields[0], nil
 	}
-	return strings.TrimSpace(local), "", nil
+	return local, "", nil
 }
 
 func isGitPushSHA(value string) bool {
