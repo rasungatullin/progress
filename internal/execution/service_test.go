@@ -2321,6 +2321,18 @@ func TestCanonicalReviewRemarksAvoidSequentialStableExternalIDCollision(t *testi
 	}
 }
 
+func TestCanonicalReviewRemarksRejectRepeatedExternalID(t *testing.T) {
+	t.Parallel()
+
+	remarks := canonicalReviewRemarks([]integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Первое замечание."},
+		{ExternalID: "comment-1", Body: "Второе замечание."},
+	})
+	if len(remarks) != 2 || remarks[0].ID != "" || remarks[1].ID != "" {
+		t.Fatalf("repeated external identifiers must produce an unresolvable response target: %#v", remarks)
+	}
+}
+
 func TestReviewResponsesRejectStableExternalIDCollision(t *testing.T) {
 	t.Parallel()
 

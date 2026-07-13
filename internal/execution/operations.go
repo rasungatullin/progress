@@ -1746,7 +1746,12 @@ func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkI
 		if resolved, ok := index.resolve(externalID); ok && sameReviewRemark(resolved, remark) {
 			return externalID
 		}
-		for attempt := 1; ; attempt++ {
+		// Повторяющийся внешний идентификатор не может быть разрешён через
+		// суффикс: stableMatches всё равно возвращает весь неоднозначный
+		// набор. Ограничиваем подбор и оставляем пустой идентификатор для
+		// последующего диагностируемого отказа публикации.
+		maxAttempts := len(index.external[externalID]) + 1
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			stableID := fmt.Sprintf("remark-ref:%s#%d", externalID, attempt)
 			if reviewRemarkResponseIDAvailable(stableID, remark, index) {
 				return stableID
