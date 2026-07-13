@@ -361,8 +361,14 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		system = "github"
 	}
 	authResponse, authErr := s.integration.Execute(ctx, integration.Request{System: system, Resource: "auth", Operation: "status"})
+	providerType := ""
+	if authResponse.AuthStatus != nil {
+		// AuthStatus.System — канонический тип фактического провайдера,
+		// а не имя настроенной системы.
+		providerType = strings.ToLower(strings.TrimSpace(authResponse.AuthStatus.System))
+	}
 	if authErr != nil {
-		if system == "bitbucket" {
+		if providerType == "bitbucket" {
 			// Bitbucket Cloud допускает токены репозитория без пользовательского
 			// контекста. Это не должно блокировать ранее работавшую загрузку
 			// замечаний; без логина заключение не считается собственным.
@@ -371,13 +377,13 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 			return nil, fmt.Errorf("определить служебную идентичность %s: %w", system, authErr)
 		}
 	}
-	if system != "bitbucket" && (authResponse.AuthStatus == nil || !authResponse.AuthStatus.Authenticated) {
+	if providerType != "bitbucket" && (authResponse.AuthStatus == nil || !authResponse.AuthStatus.Authenticated) {
 		return nil, fmt.Errorf("определить служебную идентичность %s: служебная учётная запись не аутентифицирована", system)
 	}
 	if authResponse.AuthStatus != nil {
 		ownAuthorLogin = strings.TrimSpace(authResponse.AuthStatus.Login)
 	}
-	if ownAuthorLogin == "" && system != "bitbucket" {
+	if ownAuthorLogin == "" && providerType == "github" {
 		return nil, fmt.Errorf("определить служебную идентичность %s: логин служебной учётной записи не получен", system)
 	}
 	response, err := s.integration.Execute(ctx, integration.Request{
