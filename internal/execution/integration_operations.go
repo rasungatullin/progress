@@ -1297,6 +1297,7 @@ func mergeRequestFromIntegrationResponse(response integration.Response) (integra
 			State:          response.PullRequest.State,
 			BaseRef:        response.PullRequest.BaseRef,
 			HeadRef:        response.PullRequest.HeadRef,
+			HeadRevision:   response.PullRequest.HeadRevision,
 			ReviewDecision: response.PullRequest.ReviewDecision,
 			URL:            response.PullRequest.URL,
 			CreatedAt:      response.PullRequest.CreatedAt,

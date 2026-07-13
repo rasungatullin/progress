@@ -513,6 +513,7 @@ type TrackerPullRequest struct {
 	ReviewDecision string
 	BaseRef        string
 	HeadRef        string
+	HeadRevision   string
 	Labels         []string
 	URL            string
 	CreatedAt      string

@@ -735,6 +735,7 @@ func mergeRequestFromExecutionData(state *operationExecution) *model.MergeReques
 		System: value.System, Repository: value.Repository, Number: value.Number,
 		Title: value.Title, Body: value.Body, State: value.State,
 		BaseRef: value.BaseRef, HeadRef: value.HeadRef, URL: value.URL,
+		HeadRevision: value.HeadRevision,
 	}
 }
 

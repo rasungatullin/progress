@@ -18,6 +18,7 @@ const (
 	StopReasonSingleCycle     = "single-cycle"
 	StopReasonRepeatedState   = "repeated-state"
 	StopReasonMaxCycles       = "max-cycles"
+	StopReasonMaxTotalCycles  = "max-total-cycles"
 )
 
 type TaskProcessingInput struct {
@@ -113,8 +114,14 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 			result.StopReason = StopReasonSingleCycle
 			return result, nil
 		}
-		if index >= maxTotalProcessingCycles {
+		if cyclesSinceProgress >= maxCycles {
 			result.StopReason = StopReasonMaxCycles
+			diagnostic := fmt.Sprintf("предел циклов без полезного прогресса: %d, полезный прогресс=%t, счётчик продолжения=%d/%d", maxCycles, progress, cyclesSinceProgress, maxCycles)
+			s.logger.Printf("Обработка задачи %d остановлена: %s", input.TaskNumber, diagnostic)
+			return result, fmt.Errorf("обработка задачи %d превысила предел циклов без полезного прогресса: %d (%s)", input.TaskNumber, maxCycles, diagnostic)
+		}
+		if index >= maxTotalProcessingCycles {
+			result.StopReason = StopReasonMaxTotalCycles
 			diagnostic := fmt.Sprintf("аварийный предел всей обработки: %d циклов, полезный прогресс=%t, счётчик продолжения=%d/%d", maxTotalProcessingCycles, progress, cyclesSinceProgress, maxCycles)
 			s.logger.Printf("Обработка задачи %d остановлена: %s", input.TaskNumber, diagnostic)
 			return result, fmt.Errorf("обработка задачи %d превысила аварийный предел циклов: %d (%s)", input.TaskNumber, maxTotalProcessingCycles, diagnostic)

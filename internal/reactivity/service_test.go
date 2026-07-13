@@ -241,7 +241,7 @@ func TestServiceProcessTaskDoesNotStopAfterTwentyProgressingCycles(t *testing.T)
 		decisions.results = append(decisions.results, processingConsideration(execution.ActionReviewPullRequest))
 		executions.results = append(executions.results, execution.ExecutionResult{
 			Status:       "completed",
-			MergeRequest: &execution.MergeRequest{Repository: "owner/name", Number: 184, BaseRef: "main", HeadRef: fmt.Sprintf("revision-%d", index)},
+			MergeRequest: &execution.MergeRequest{Repository: "owner/name", Number: 184, BaseRef: "main", HeadRef: "feature/task-123", HeadRevision: fmt.Sprintf("revision-%d", index)},
 			Launch:       &execution.LaunchResult{Status: "completed", StructuredOutput: &execution.StructuredOutput{Conclusion: &execution.StructuredConclusion{Status: "ok"}}},
 		})
 	}
