@@ -546,6 +546,27 @@ func TestServiceProcessTaskOrdersInlineRemarkBeforeEqualTimeApprovedConclusion(t
 	}
 }
 
+func TestServiceProcessTaskOrdersEqualTimeRemarksByExternalID(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+	integrations.reviewRemarks = []integration.ReviewRemark{
+		{ExternalID: "comment-2", ReplyToID: "thread-2", Author: integration.User{Login: "progress"}, Body: "## Заключение ревизии\n\napprove\n\nПроверка завершена", Type: "comment", CreatedAt: "2026-07-13T12:00:00Z"},
+		{ExternalID: "comment-1", ReplyToID: "thread-1", State: "unresolved", Type: "inline", Body: "Старое замечание", CreatedAt: "2026-07-13T12:00:00Z"},
+	}
+	service := NewService(nil)
+	service.integration = integrations
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123})
+	if err != nil {
+		t.Fatalf("process task: %v", err)
+	}
+	if !result.Completed || len(result.Cycles) != 1 {
+		t.Fatalf("expected processing to complete after ordered approved conclusion, got %#v", result)
+	}
+}
+
 func TestServiceProcessTaskStopsOnRepeatedState(t *testing.T) {
 	t.Parallel()
 

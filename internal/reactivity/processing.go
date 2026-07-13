@@ -136,11 +136,35 @@ func orderReviewRemarksByCreatedAt(remarks []integration.ReviewRemark) []integra
 			return true
 		}
 		if left.Equal(right) {
+			if leftKey, leftOK := reviewRemarkOrderKey(ordered[i]); leftOK {
+				if rightKey, rightOK := reviewRemarkOrderKey(ordered[j]); rightOK && leftKey != rightKey {
+					return leftKey < rightKey
+				}
+			}
 			return isInlineReviewRemark(ordered[i]) && !isInlineReviewRemark(ordered[j])
 		}
 		return left.Before(right)
 	})
 	return ordered
+}
+
+func reviewRemarkOrderKey(remark integration.ReviewRemark) (int, bool) {
+	for _, value := range []string{remark.ExternalID, remark.URL} {
+		value = strings.TrimSpace(value)
+		for end := len(value) - 1; end >= 0; end-- {
+			if value[end] < '0' || value[end] > '9' {
+				if end == len(value)-1 {
+					break
+				}
+				key, err := strconv.Atoi(value[end+1:])
+				if err == nil {
+					return key, true
+				}
+				break
+			}
+		}
+	}
+	return 0, false
 }
 
 func isInlineReviewRemark(remark integration.ReviewRemark) bool {

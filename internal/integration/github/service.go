@@ -1792,6 +1792,7 @@ func githubAuthLogin(command string, outputs ...string) string {
 		return ""
 	}
 	firstLogin := ""
+	loginCount := 0
 	currentLogin := ""
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
@@ -1805,12 +1806,16 @@ func githubAuthLogin(command string, outputs ...string) string {
 			if firstLogin == "" {
 				firstLogin = login
 			}
+			loginCount++
 			currentLogin = login
 			continue
 		}
 		if currentLogin != "" && strings.EqualFold(strings.TrimSpace(line), "Active account: true") {
 			return currentLogin
 		}
+	}
+	if loginCount > 1 {
+		return ""
 	}
 	return firstLogin
 }

@@ -57,6 +57,15 @@ func TestGitHubAuthLoginSelectsActiveCLIAccount(t *testing.T) {
 	}
 }
 
+func TestGitHubAuthLoginRejectsAmbiguousCLIAccounts(t *testing.T) {
+	t.Parallel()
+
+	output := "✓ Logged in to github.com account first (keyring)\n✓ Logged in to github.com account second (keyring)\n"
+	if got := githubAuthLogin("gh", output); got != "" {
+		t.Fatalf("githubAuthLogin() = %q, want empty login for ambiguous accounts", got)
+	}
+}
+
 func TestServiceAuthStatusMapsAuthRequired(t *testing.T) {
 	t.Parallel()
 
