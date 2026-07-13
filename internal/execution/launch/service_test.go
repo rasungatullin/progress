@@ -239,6 +239,26 @@ func TestRunOpenCodeRunnerKeepsStreamingOutputActive(t *testing.T) {
 	}
 }
 
+func TestRunOpenCodeRunnerReportsInstrumentalEventOnNoOutputTimeout(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	_, err = runRunnerCommand(context.Background(), exec.Command(opencodePath, "run", "--dir", t.TempDir(), "--model", "openai/gpt-5.4", "event-timeout"), model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Timeout:         "1s",
+		NoOutputTimeout: "50ms",
+	})
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	for _, expected := range []string{"last structured event=tool_use/shell", "rule=50ms после последнего фрагмента"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
 func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	t.Parallel()
 

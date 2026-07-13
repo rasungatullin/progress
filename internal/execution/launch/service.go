@@ -1475,6 +1475,10 @@ type runnerOutputWriter struct {
 	structuredPending   []byte
 	lastStructuredEvent string
 	structuredEventAt   time.Time
+	runnerEvents        bool
+	runnerPending       []byte
+	lastRunnerEvent     string
+	runnerEventAt       time.Time
 }
 
 func (w *runnerOutputWriter) Write(p []byte) (int, error) {
@@ -1486,12 +1490,42 @@ func (w *runnerOutputWriter) Write(p []byte) (int, error) {
 		if w.structuredEvents {
 			w.recordStructuredEvents(p)
 		}
+		if w.runnerEvents {
+			w.recordRunnerEvents(p)
+		}
 	}
 	select {
 	case w.activity <- struct{}{}:
 	default:
 	}
 	return n, err
+}
+
+func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
+	w.runnerPending = append(w.runnerPending, p...)
+	for {
+		lineEnd := bytes.IndexByte(w.runnerPending, '\n')
+		if lineEnd < 0 {
+			return
+		}
+		line := bytes.TrimSpace(w.runnerPending[:lineEnd])
+		w.runnerPending = w.runnerPending[lineEnd+1:]
+		var event struct {
+			Type string `json:"type"`
+			Part struct {
+				Type string `json:"type"`
+			} `json:"part"`
+		}
+		if json.Unmarshal(line, &event) != nil || strings.TrimSpace(event.Type) == "" {
+			continue
+		}
+		name := event.Type
+		if strings.TrimSpace(event.Part.Type) != "" {
+			name += "/" + event.Part.Type
+		}
+		w.lastRunnerEvent = name
+		w.runnerEventAt = w.lastOutputAt
+	}
 }
 
 func (w *runnerOutputWriter) recordStructuredEvents(p []byte) {
@@ -1533,6 +1567,12 @@ func (w *runnerOutputWriter) structuredSnapshot() (string, time.Time) {
 	return w.lastStructuredEvent, w.structuredEventAt
 }
 
+func (w *runnerOutputWriter) runnerEventSnapshot() (string, time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastRunnerEvent, w.runnerEventAt
+}
+
 func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSpec) (string, error) {
 	timeout, err := runnerDuration(spec.Timeout, defaultRunnerTimeout)
 	if err != nil {
@@ -1557,7 +1597,11 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	cmd.Env = sanitizedEnv()
 	configureRunnerProcess(cmd)
 	cmd.Cancel = func() error { return terminateRunnerProcess(cmd) }
-	writer := &runnerOutputWriter{activity: make(chan struct{}, 1), structuredEvents: spec.Runner == RunnerCodex}
+	writer := &runnerOutputWriter{
+		activity:         make(chan struct{}, 1),
+		structuredEvents: spec.Runner == RunnerCodex,
+		runnerEvents:     spec.Runner == RunnerOpenCode,
+	}
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 	if err := cmd.Start(); err != nil {
@@ -1623,6 +1667,9 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 
 func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout time.Duration, structuredRule ...bool) *runnerExecutionError {
 	lastEvent, eventAt := writer.structuredSnapshot()
+	if lastEvent == "" {
+		lastEvent, eventAt = writer.runnerEventSnapshot()
+	}
 	if eventAt.IsZero() {
 		lastEvent = ""
 	}

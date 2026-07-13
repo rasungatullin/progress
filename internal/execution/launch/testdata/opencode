@@ -12,6 +12,10 @@ stream)
 		sleep .05
 	done
 	;;
+event-timeout)
+	printf '%s\n' '{"type":"tool_use","part":{"type":"shell"}}' >&2
+	sleep 1
+	;;
 silent)
 	sleep 1
 	;;
