@@ -26,6 +26,8 @@ type TaskProcessingInput struct {
 	Route      string
 	Once       bool
 	MaxCycles  int
+	// MaxTotalCycles задаёт общий предел обработки, включая результативные циклы.
+	MaxTotalCycles int
 }
 
 type TaskActionInput struct {
@@ -71,6 +73,10 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 	maxCycles := input.MaxCycles
 	if maxCycles <= 0 {
 		maxCycles = defaultMaxProcessingCycles
+	}
+	maxTotalCycles := input.MaxTotalCycles
+	if maxTotalCycles <= 0 {
+		maxTotalCycles = maxTotalProcessingCycles
 	}
 
 	result := TaskProcessingResult{TaskNumber: input.TaskNumber}
@@ -120,11 +126,11 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 			s.logger.Printf("Обработка задачи %d остановлена: %s", input.TaskNumber, diagnostic)
 			return result, fmt.Errorf("обработка задачи %d превысила предел циклов без полезного прогресса: %d (%s)", input.TaskNumber, maxCycles, diagnostic)
 		}
-		if index >= maxTotalProcessingCycles {
+		if index >= maxTotalCycles {
 			result.StopReason = StopReasonMaxTotalCycles
-			diagnostic := fmt.Sprintf("аварийный предел всей обработки: %d циклов, полезный прогресс=%t, счётчик продолжения=%d/%d", maxTotalProcessingCycles, progress, cyclesSinceProgress, maxCycles)
+			diagnostic := fmt.Sprintf("аварийный предел всей обработки: %d циклов, полезный прогресс=%t, счётчик продолжения=%d/%d", maxTotalCycles, progress, cyclesSinceProgress, maxCycles)
 			s.logger.Printf("Обработка задачи %d остановлена: %s", input.TaskNumber, diagnostic)
-			return result, fmt.Errorf("обработка задачи %d превысила аварийный предел циклов: %d (%s)", input.TaskNumber, maxTotalProcessingCycles, diagnostic)
+			return result, fmt.Errorf("обработка задачи %d превысила аварийный предел циклов: %d (%s)", input.TaskNumber, maxTotalCycles, diagnostic)
 		}
 	}
 }

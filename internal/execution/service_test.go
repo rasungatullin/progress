@@ -17,6 +17,22 @@ import (
 	"github.com/rasungatullin/progress/internal/methodology"
 )
 
+func TestMergeRequestFromExecutionDataUsesPullRequestWhenMergeRequestIsAbsent(t *testing.T) {
+	state := &operationExecution{data: map[string]any{
+		"pull_request": integration.MergeRequest{
+			Repository:   "owner/name",
+			Number:       252,
+			HeadRef:      "feature/task-255",
+			HeadRevision: "revision-2",
+		},
+	}}
+
+	result := mergeRequestFromExecutionData(state)
+	if result == nil || result.Number != 252 || result.HeadRevision != "revision-2" {
+		t.Fatalf("expected pull request data in execution result, got %#v", result)
+	}
+}
+
 func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 	t.Parallel()
 

@@ -86,11 +86,14 @@
 - `Требует доработки` — ставится по итогам ревизии с замечаниями;
 - `Экспертиза пройдена` — ставится по итогам положительной ревизии.
 
+Для защиты от зацикливания `--max-cycles` задаёт предел циклов без полезного прогресса. Параметр `--max-total-cycles` задаёт отдельный аварийный предел всей обработки, включая результативные циклы; нулевое значение каждого параметра выбирает значение по умолчанию.
+
 CLI:
 
 ```bash
 progress reactivity process --task 123
 progress reactivity process --task 123 --route pull-request-review --once
+progress reactivity process --task 123 --max-cycles 20 --max-total-cycles 1000
 progress reactivity action --task 123 --action review-pull-request
 ```
 
