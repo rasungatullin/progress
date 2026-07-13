@@ -653,8 +653,12 @@ func validateGitConfig(config *model.GitConfig) error {
 			return fmt.Errorf("git.push.max-attempts must not be negative")
 		}
 		if value := strings.TrimSpace(push.RetryDelay); value != "" {
-			if _, err := time.ParseDuration(value); err != nil {
+			parsed, err := time.ParseDuration(value)
+			if err != nil {
 				return fmt.Errorf("git.push.retry-delay must be a duration: %w", err)
+			}
+			if parsed < 0 {
+				return fmt.Errorf("git.push.retry-delay must not be negative")
 			}
 		}
 	}

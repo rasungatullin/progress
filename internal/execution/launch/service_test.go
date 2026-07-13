@@ -835,6 +835,10 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 				return "[feature/test abc123] Ship release notes\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "", nil
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
 			case "push -u origin feature/test":
 				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
 			default:
@@ -860,6 +864,8 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"status", "--porcelain", "-z", "-uall"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
+		{"rev-parse", "HEAD"},
+		{"ls-remote", "origin", "refs/heads/feature/test"},
 		{"push", "-u", "origin", "feature/test"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {

@@ -1037,15 +1037,36 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 		pushArgs = append(pushArgs, "-u", "origin", branch)
 	}
 
-	if err := s.pushWithRetry(ctx, input.Directory, gitRoot, branch, pushArgs, pushEnv, input.Git); err != nil {
+	remote := s.gitPushRemote(ctx, gitRoot, branch, upstream, pushArgs)
+	if err := s.pushWithRetry(ctx, input.Directory, gitRoot, branch, pushArgs, pushEnv, input.Git, remote); err != nil {
 		return gitResult{}, err
 	}
 
 	return gitResult{status: "committed+pushed", branch: branch}, nil
 }
 
-func (s *Service) pushWithRetry(ctx context.Context, dir, gitRoot, branch string, args, env []string, config *model.GitConfig) error {
+func (s *Service) gitPushRemote(ctx context.Context, dir, branch, upstream string, args []string) string {
+	if len(args) >= 3 && args[0] == "push" && args[1] == "-u" && strings.TrimSpace(args[2]) != "" {
+		return strings.TrimSpace(args[2])
+	}
+	for _, key := range []string{"branch." + branch + ".pushRemote", "remote.pushDefault"} {
+		if value, err := s.runGitOutput(ctx, dir, "config", "--get", key); err == nil && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	if remote := strings.SplitN(upstream, "/", 2)[0]; strings.TrimSpace(remote) != "" {
+		return strings.TrimSpace(remote)
+	}
+	return "origin"
+}
+
+func (s *Service) pushWithRetry(ctx context.Context, dir, gitRoot, branch string, args, env []string, config *model.GitConfig, remoteName ...string) error {
 	maxAttempts, retryDelay := gitPushRetrySettings(config)
+	remote := "origin"
+	if len(remoteName) > 0 && strings.TrimSpace(remoteName[0]) != "" {
+		remote = strings.TrimSpace(remoteName[0])
+	}
+	expectedHead, originalRemoteHead, _ := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if _, err := s.runGitOutputWithEnv(ctx, dir, env, args...); err == nil {
@@ -1057,12 +1078,15 @@ func (s *Service) pushWithRetry(ctx context.Context, dir, gitRoot, branch string
 				return &gitPushFailure{attempts: attempt, classification: classification, lastError: err}
 			}
 
-			localHead, remoteHead, verifyErr := s.gitPushHeads(ctx, gitRoot, branch)
+			localHead, remoteHead, verifyErr := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
 			if verifyErr == nil {
-				if remoteHead == localHead && localHead != "" {
+				if expectedHead != "" && remoteHead == expectedHead {
 					return nil
 				}
-				if remoteHead != "" && remoteHead != localHead {
+				if expectedHead != "" && localHead != expectedHead {
+					return &gitPushFailure{attempts: attempt, classification: "uncertain", lastError: fmt.Errorf("local HEAD changed from %s to %s", expectedHead, localHead)}
+				}
+				if originalRemoteHead != "" && remoteHead != "" && remoteHead != originalRemoteHead {
 					return &gitPushFailure{attempts: attempt, classification: "history-conflict", lastError: fmt.Errorf("remote branch %s points to %s, local head is %s", branch, remoteHead, localHead)}
 				}
 			} else if classification != "network" {
@@ -1110,27 +1134,27 @@ func classifyGitPushError(err error) string {
 	switch {
 	case strings.Contains(message, "non-fast-forward"), strings.Contains(message, "fetch first"):
 		return "non-fast-forward"
+	case strings.Contains(message, "connection closed"), strings.Contains(message, "connection reset"), strings.Contains(message, "timed out"), strings.Contains(message, "could not resolve host"), strings.Contains(message, "network is unreachable"), strings.Contains(message, "broken pipe"):
+		return "network"
 	case strings.Contains(message, "permission denied"), strings.Contains(message, "could not read from remote repository"), strings.Contains(message, "authentication failed"), strings.Contains(message, "access denied"):
 		return "authorization"
 	case strings.Contains(message, "rejected"), strings.Contains(message, "updates were rejected"):
 		return "history-conflict"
-	case strings.Contains(message, "connection closed"), strings.Contains(message, "connection reset"), strings.Contains(message, "timed out"), strings.Contains(message, "could not resolve host"), strings.Contains(message, "network is unreachable"), strings.Contains(message, "broken pipe"):
-		return "network"
 	default:
 		return "uncertain"
 	}
 }
 
-func (s *Service) gitPushHeads(ctx context.Context, dir, branch string) (string, string, error) {
-	local, err := s.runGitOutput(ctx, dir, "rev-parse", "HEAD")
+func (s *Service) gitPushHeads(ctx context.Context, dir, branch string, env []string, remote string) (string, string, error) {
+	local, err := s.runGitOutputWithEnv(ctx, dir, env, "rev-parse", "HEAD")
 	if err != nil {
 		return "", "", fmt.Errorf("read local head: %w", err)
 	}
-	remote, err := s.runGitOutput(ctx, dir, "ls-remote", "origin", "refs/heads/"+branch)
+	remoteOutput, err := s.runGitOutputWithEnv(ctx, dir, env, "ls-remote", remote, "refs/heads/"+branch)
 	if err != nil {
 		return strings.TrimSpace(local), "", fmt.Errorf("read remote head: %w", err)
 	}
-	fields := strings.Fields(remote)
+	fields := strings.Fields(remoteOutput)
 	if len(fields) == 0 {
 		return strings.TrimSpace(local), "", nil
 	}
