@@ -1535,6 +1535,9 @@ func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
 		if lineEnd < 0 {
 			return
 		}
+		if !w.runnerEventAt.IsZero() {
+			w.runnerEventAt = time.Time{}
+		}
 		line := bytes.TrimSpace(w.runnerPending[:lineEnd])
 		w.runnerPending = w.runnerPending[lineEnd+1:]
 		var event struct {

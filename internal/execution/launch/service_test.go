@@ -531,6 +531,25 @@ func TestRunnerWatchdogPolicyUsesBaseTimeoutForStructuredEventWithTrailingFragme
 	}
 }
 
+func TestRunnerWatchdogPolicyUsesBaseTimeoutAfterUnstructuredLineInSameWrite(t *testing.T) {
+	writer := &runnerOutputWriter{
+		activity:     make(chan struct{}, 1),
+		runnerEvents: true,
+	}
+	_, err := writer.Write([]byte("{\"type\":\"tool_use\",\"part\":{\"type\":\"tool\",\"state\":{\"status\":\"completed\"}}}\nнеструктурированный результат\n"))
+	if err != nil {
+		t.Fatalf("write runner output: %v", err)
+	}
+	state := writer.stateSnapshot()
+	policy := runnerWatchdogPolicy(time.Second, 10*time.Second, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, time.Now())
+	if policy.structured {
+		t.Fatal("unstructured line after tool_use must return watchdog to the base timeout")
+	}
+	if policy.timeout != time.Second {
+		t.Fatalf("expected base timeout, got %s", policy.timeout)
+	}
+}
+
 func TestRunRunnerCommandReportsStructuredOutputInsideOpenCodeEvent(t *testing.T) {
 	t.Parallel()
 
