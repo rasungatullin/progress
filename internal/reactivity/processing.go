@@ -141,6 +141,7 @@ func processingStateSignature(cycle TaskProcessingCycle) string {
 		sort.Strings(remarks)
 		state.ReviewRemarks = remarks
 	}
+	sort.Strings(state.IssueLabels)
 	encoded, _ := json.Marshal(state)
 	return string(encoded)
 }
@@ -159,9 +160,18 @@ func processingRemarkSignature(remark integration.ReviewRemark) string {
 		}
 	}
 
+	identity := strings.TrimSpace(remark.ExternalID)
+	if identity == "" {
+		// Некоторые провайдеры не возвращают стабильный идентификатор общего
+		// комментария. Текст нужен только как запасной различитель: иначе два
+		// разных замечания без идентификаторов становятся одним состоянием и
+		// защитный предел может подавить новую обратную связь.
+		identity = strings.TrimSpace(remark.Body)
+	}
+
 	return strings.Join([]string{
 		strings.TrimSpace(remark.System),
-		strings.TrimSpace(remark.ExternalID),
+		identity,
 		strings.TrimSpace(remark.ReplyToID),
 		strings.TrimSpace(remark.Type),
 		state,

@@ -700,6 +700,23 @@ func TestProcessingStateSignatureIgnoresReviewHistory(t *testing.T) {
 	}
 }
 
+func TestProcessingStateSignatureDistinguishesAnonymousRemarks(t *testing.T) {
+	t.Parallel()
+
+	first := TaskProcessingCycle{Issue: &integration.TrackerIssue{}, MergeRequestExternalState: &decision.MergeRequestExternalState{
+		HasUnresolvedReviewRemarks: true,
+		ReviewRemarks:              []integration.ReviewRemark{{ReplyToID: "thread-1", State: "unresolved", Body: "Первое замечание"}},
+	}}
+	second := TaskProcessingCycle{Issue: &integration.TrackerIssue{}, MergeRequestExternalState: &decision.MergeRequestExternalState{
+		HasUnresolvedReviewRemarks: true,
+		ReviewRemarks:              []integration.ReviewRemark{{ReplyToID: "thread-1", State: "unresolved", Body: "Второе замечание"}},
+	}}
+
+	if processingStateSignature(first) == processingStateSignature(second) {
+		t.Fatal("different remarks without external identifiers must produce different processing states")
+	}
+}
+
 func TestServiceProcessTaskReworksForRemarkQuotingConclusionHeader(t *testing.T) {
 	t.Parallel()
 
