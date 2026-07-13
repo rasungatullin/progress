@@ -1791,6 +1791,8 @@ func githubAuthLogin(command string, outputs ...string) string {
 		}
 		return ""
 	}
+	firstLogin := ""
+	currentLogin := ""
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		line = strings.TrimSpace(strings.TrimPrefix(line, "✓"))
@@ -1800,10 +1802,17 @@ func githubAuthLogin(command string, outputs ...string) string {
 			if end := strings.IndexByte(login, ' '); end >= 0 {
 				login = login[:end]
 			}
-			return login
+			if firstLogin == "" {
+				firstLogin = login
+			}
+			currentLogin = login
+			continue
+		}
+		if currentLogin != "" && strings.EqualFold(strings.TrimSpace(line), "Active account: true") {
+			return currentLogin
 		}
 	}
-	return ""
+	return firstLogin
 }
 
 func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {

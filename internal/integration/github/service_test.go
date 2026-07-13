@@ -48,6 +48,15 @@ func TestGitHubAuthLoginParsesCLIStatusMarker(t *testing.T) {
 	}
 }
 
+func TestGitHubAuthLoginSelectsActiveCLIAccount(t *testing.T) {
+	t.Parallel()
+
+	output := "✓ Logged in to github.com account inactive (keyring)\n  Active account: false\n✓ Logged in to github.com account progress (keyring)\n  Active account: true\n"
+	if got := githubAuthLogin("gh", output); got != "progress" {
+		t.Fatalf("githubAuthLogin() = %q, want active account %q", got, "progress")
+	}
+}
+
 func TestServiceAuthStatusMapsAuthRequired(t *testing.T) {
 	t.Parallel()
 

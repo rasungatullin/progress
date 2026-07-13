@@ -135,9 +135,16 @@ func orderReviewRemarksByCreatedAt(remarks []integration.ReviewRemark) []integra
 		if rightErr != nil {
 			return true
 		}
+		if left.Equal(right) {
+			return isInlineReviewRemark(ordered[i]) && !isInlineReviewRemark(ordered[j])
+		}
 		return left.Before(right)
 	})
 	return ordered
+}
+
+func isInlineReviewRemark(remark integration.ReviewRemark) bool {
+	return strings.EqualFold(strings.TrimSpace(remark.Type), "inline") || remark.Path != "" || remark.Line != 0
 }
 
 func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (TaskProcessingResult, error) {
@@ -348,7 +355,11 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		HasMergeConflict: mergeRequestHasConflict(mergeRequest),
 	}
 	ownAuthorLogin := ""
-	authResponse, authErr := s.integration.Execute(ctx, integration.Request{System: "github", Resource: "auth", Operation: "status"})
+	system := strings.TrimSpace(mergeRequest.System)
+	if system == "" {
+		system = "github"
+	}
+	authResponse, authErr := s.integration.Execute(ctx, integration.Request{System: system, Resource: "auth", Operation: "status"})
 	if authErr != nil {
 		return nil, fmt.Errorf("определить служебную идентичность GitHub: %w", authErr)
 	}
@@ -361,6 +372,8 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 	}
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType:    integrationTypeRepository,
+		System:             system,
+		SystemProvided:     true,
 		Resource:           "review-remark",
 		ObjectType:         "review-remark",
 		Operation:          "list",
