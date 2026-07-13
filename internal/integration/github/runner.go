@@ -102,6 +102,35 @@ type Runner struct {
 	systemConfig    *integrationmodel.IntegrationSystemConfig
 }
 
+func githubReviewThreadsQuery(includeThreads, includeTimeline bool) string {
+	query := `query($owner: String!, $name: String!, $number: Int!, $threadsAfter: String, $timelineAfter: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {`
+	if includeThreads {
+		query += `
+      reviewThreads(first: 100, after: $threadsAfter) {
+        nodes {
+          id isResolved isOutdated path line
+          comments(first: 100) {
+            nodes { id databaseId body url path line author { login url } createdAt updatedAt }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }`
+	}
+	if includeTimeline {
+		query += `
+      timelineItems(first: 100, after: $timelineAfter) {
+        nodes { __typename ... on IssueComment { databaseId } }
+        pageInfo { hasNextPage endCursor }
+      }`
+	}
+	return query + `
+    }
+  }
+}`
+}
+
 func NewRunner() *Runner {
 	return &Runner{
 		resolveRepoRoot: resolveRepoRoot,
@@ -453,50 +482,13 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
 		}
 	}
 
-	query := `query($owner: String!, $name: String!, $number: Int!, $threadsAfter: String, $timelineAfter: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $threadsAfter) {
-        nodes {
-          id
-          isResolved
-          isOutdated
-          path
-          line
-          comments(first: 100) {
-            nodes {
-              id
-              databaseId
-              body
-              url
-              path
-              line
-              author {
-                login
-                url
-              }
-              createdAt
-              updatedAt
-            }
-          }
-        }
-        pageInfo { hasNextPage endCursor }
-      }
-      timelineItems(first: 100, after: $timelineAfter) {
-        nodes {
-          __typename
-          ... on IssueComment { databaseId }
-        }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  }
-}`
 	var combined ghPRReviewThreadsResponse
+	var query string
 	var threadsAfter, timelineAfter *string
 	var threadsDone, timelineDone bool
 	var result CommandResult
 	for {
+		query = githubReviewThreadsQuery(!threadsDone, !timelineDone)
 		variables := []string{"-f", "query=" + query, "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)}
 		if !threadsDone && threadsAfter != nil {
 			variables = append(variables, "-f", "threadsAfter="+*threadsAfter)
@@ -540,12 +532,6 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
 		if !timelineDone && strings.TrimSpace(timelineInfo.EndCursor) != "" {
 			cursor := timelineInfo.EndCursor
 			timelineAfter = &cursor
-		}
-		if threadsDone {
-			threadsAfter = nil
-		}
-		if timelineDone {
-			timelineAfter = nil
 		}
 		if threadsDone && timelineDone {
 			break
