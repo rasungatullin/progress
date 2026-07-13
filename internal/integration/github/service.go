@@ -114,7 +114,8 @@ type ghPRReviewThreadsResponse struct {
 		Repository struct {
 			PullRequest *struct {
 				ReviewThreads struct {
-					Nodes []ghPRReviewThread `json:"nodes"`
+					Nodes    []ghPRReviewThread `json:"nodes"`
+					PageInfo ghPageInfo         `json:"pageInfo"`
 				} `json:"reviewThreads"`
 				TimelineItems struct {
 					Nodes    []ghPRTimelineItem `json:"nodes"`

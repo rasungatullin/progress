@@ -409,7 +409,7 @@ func hasUnresolvedExternalReviewRemarks(remarks []integration.ReviewRemark, ownA
 	respondedRemarkIDs := map[string]struct{}{}
 	start := 0
 	for index, remark := range remarks {
-		if isOwnExternalReviewConclusion(remark, ownAuthorLogin) && isApprovedExternalReviewConclusion(remark.Body) {
+		if isApprovedExternalReviewConclusion(remark.Body) && (isOwnExternalReviewConclusion(remark, ownAuthorLogin) || (allowUnknownOwnConclusion && isExternalReviewConclusion(remark.Body))) {
 			start = index + 1
 		}
 	}

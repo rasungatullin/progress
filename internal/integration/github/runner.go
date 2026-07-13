@@ -453,10 +453,10 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
 		}
 	}
 
-	query := `query($owner: String!, $name: String!, $number: Int!) {
+	query := `query($owner: String!, $name: String!, $number: Int!, $threadsAfter: String, $timelineAfter: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $threadsAfter) {
         nodes {
           id
           isResolved
@@ -480,11 +480,74 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
             }
           }
         }
+        pageInfo { hasNextPage endCursor }
+      }
+      timelineItems(first: 100, after: $timelineAfter) {
+        nodes {
+          __typename
+          ... on IssueComment { databaseId }
+          ... on PullRequestReviewThread { id }
+        }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
 }`
-	return r.runCommandWithResolvedConfig(ctx, config, []string{"api", "graphql", "-f", "query=" + query, "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)})
+	var combined ghPRReviewThreadsResponse
+	var threadsAfter, timelineAfter *string
+	var threadsDone, timelineDone bool
+	var result CommandResult
+	for {
+		variables := []string{"-f", "query=" + query, "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)}
+		if threadsAfter != nil {
+			variables = append(variables, "-f", "threadsAfter="+*threadsAfter)
+		}
+		if timelineAfter != nil {
+			variables = append(variables, "-f", "timelineAfter="+*timelineAfter)
+		}
+		result, config, err = r.runCommandWithResolvedConfig(ctx, config, append([]string{"api", "graphql"}, variables...))
+		if err != nil {
+			return result, config, err
+		}
+		var page ghPRReviewThreadsResponse
+		if err := json.Unmarshal([]byte(result.Stdout), &page); err != nil {
+			return result, config, err
+		}
+		if page.Data.Repository.PullRequest == nil {
+			combined = page
+			break
+		}
+		if combined.Data.Repository.PullRequest == nil {
+			combined = page
+		} else {
+			if !threadsDone {
+				combined.Data.Repository.PullRequest.ReviewThreads.Nodes = append(combined.Data.Repository.PullRequest.ReviewThreads.Nodes, page.Data.Repository.PullRequest.ReviewThreads.Nodes...)
+			}
+			if !timelineDone {
+				combined.Data.Repository.PullRequest.TimelineItems.Nodes = append(combined.Data.Repository.PullRequest.TimelineItems.Nodes, page.Data.Repository.PullRequest.TimelineItems.Nodes...)
+			}
+		}
+		threadsInfo := page.Data.Repository.PullRequest.ReviewThreads.PageInfo
+		timelineInfo := page.Data.Repository.PullRequest.TimelineItems.PageInfo
+		threadsDone = !threadsInfo.HasNextPage || strings.TrimSpace(threadsInfo.EndCursor) == ""
+		timelineDone = !timelineInfo.HasNextPage || strings.TrimSpace(timelineInfo.EndCursor) == ""
+		threadsAfter = nil
+		timelineAfter = nil
+		if threadsInfo.HasNextPage && strings.TrimSpace(threadsInfo.EndCursor) != "" {
+			cursor := threadsInfo.EndCursor
+			threadsAfter = &cursor
+		}
+		if timelineInfo.HasNextPage && strings.TrimSpace(timelineInfo.EndCursor) != "" {
+			cursor := timelineInfo.EndCursor
+			timelineAfter = &cursor
+		}
+		if threadsAfter == nil && timelineAfter == nil {
+			break
+		}
+	}
+	encoded, _ := json.Marshal(combined)
+	result.Stdout = string(encoded)
+	return result, config, nil
 }
 
 func (r *Runner) RunPRReviews(ctx context.Context, repository string, number int) (CommandResult, resolvedConfig, error) {

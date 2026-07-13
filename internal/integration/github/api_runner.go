@@ -566,14 +566,15 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 	if err != nil {
 		return apiErrorResult("pr review threads", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	query := `query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id isResolved isOutdated path line comments(first: 100) { nodes { id databaseId body url path line author { login url } createdAt updatedAt } } } } timelineItems(first: 100, after: $after) { nodes { __typename ... on IssueComment { databaseId } ... on PullRequestReviewThread { id } } pageInfo { hasNextPage endCursor } } } } }`
+	query := `query($owner: String!, $name: String!, $number: Int!, $threadsAfter: String, $timelineAfter: String) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100, after: $threadsAfter) { nodes { id isResolved isOutdated path line comments(first: 100) { nodes { id databaseId body url path line author { login url } createdAt updatedAt } } } pageInfo { hasNextPage endCursor } } timelineItems(first: 100, after: $timelineAfter) { nodes { __typename ... on IssueComment { databaseId } ... on PullRequestReviewThread { id } } pageInfo { hasNextPage endCursor } } } } }`
 	var combined ghPRReviewThreadsResponse
-	var after *string
+	var threadsAfter, timelineAfter *string
+	var threadsDone, timelineDone bool
 	var result CommandResult
 	for {
 		var raw json.RawMessage
 		var err error
-		result, err = r.graphql(ctx, config, query, map[string]any{"owner": owner, "name": name, "number": number, "after": after}, &raw)
+		result, err = r.graphql(ctx, config, query, map[string]any{"owner": owner, "name": name, "number": number, "threadsAfter": threadsAfter, "timelineAfter": timelineAfter}, &raw)
 		if err != nil {
 			return result, apiResolvedConfig(config), err
 		}
@@ -588,14 +589,30 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 		if combined.Data.Repository.PullRequest == nil {
 			combined = page
 		} else {
-			combined.Data.Repository.PullRequest.TimelineItems.Nodes = append(combined.Data.Repository.PullRequest.TimelineItems.Nodes, page.Data.Repository.PullRequest.TimelineItems.Nodes...)
+			if !threadsDone {
+				combined.Data.Repository.PullRequest.ReviewThreads.Nodes = append(combined.Data.Repository.PullRequest.ReviewThreads.Nodes, page.Data.Repository.PullRequest.ReviewThreads.Nodes...)
+			}
+			if !timelineDone {
+				combined.Data.Repository.PullRequest.TimelineItems.Nodes = append(combined.Data.Repository.PullRequest.TimelineItems.Nodes, page.Data.Repository.PullRequest.TimelineItems.Nodes...)
+			}
 		}
+		threadsInfo := page.Data.Repository.PullRequest.ReviewThreads.PageInfo
 		pageInfo := page.Data.Repository.PullRequest.TimelineItems.PageInfo
-		if !pageInfo.HasNextPage || strings.TrimSpace(pageInfo.EndCursor) == "" {
+		threadsDone = !threadsInfo.HasNextPage || strings.TrimSpace(threadsInfo.EndCursor) == ""
+		timelineDone = !pageInfo.HasNextPage || strings.TrimSpace(pageInfo.EndCursor) == ""
+		threadsAfter = nil
+		timelineAfter = nil
+		if !threadsDone {
+			cursor := threadsInfo.EndCursor
+			threadsAfter = &cursor
+		}
+		if !timelineDone {
+			cursor := pageInfo.EndCursor
+			timelineAfter = &cursor
+		}
+		if threadsDone && timelineDone {
 			break
 		}
-		cursor := pageInfo.EndCursor
-		after = &cursor
 	}
 	result.Stdout = mustJSON(combined)
 	return result, apiResolvedConfig(config), nil
