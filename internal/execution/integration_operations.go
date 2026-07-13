@@ -1603,20 +1603,10 @@ func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.R
 		return nil
 	}
 	index := newReviewRemarkIndex(remarks)
-	byID := make(map[string]integration.ReviewRemark, len(remarks)+len(output.Remarks))
-	for _, remark := range output.Remarks {
-		id := strings.TrimSpace(remark.ID)
-		externalID := strings.TrimSpace(remark.ExternalID)
-		if id == "" || externalID == "" {
-			continue
-		}
-		if canonical, ok := index.resolve(externalID); ok {
-			byID[id] = canonical
-		}
-	}
+	aliases, _ := reviewRemarkAliases(output, index)
 	responses := append([]StructuredResponse(nil), output.ReviewResponses...)
 	for responseIndex := range responses {
-		enrichReviewResponse(&responses[responseIndex], byID, index)
+		enrichReviewResponse(&responses[responseIndex], aliases, index)
 	}
 	for _, remark := range output.Remarks {
 		if strings.TrimSpace(remark.Answer) == "" && strings.TrimSpace(remark.Resolution) == "" {
@@ -1628,7 +1618,7 @@ func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.R
 			Summary:  strings.TrimSpace(remark.Resolution),
 			Body:     strings.TrimSpace(remark.Answer),
 		}
-		enrichReviewResponse(&response, byID, index)
+		enrichReviewResponse(&response, aliases, index)
 		responses = append(responses, response)
 	}
 	return responses
@@ -1695,13 +1685,46 @@ func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
 	return len(index.external[id]) > 1 || len(index.project[id]) > 1
 }
 
-func enrichReviewResponse(response *StructuredResponse, aliases map[string]integration.ReviewRemark, index reviewRemarkIndex) {
+func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map[string][]integration.ReviewRemark, map[string]bool) {
+	aliases := make(map[string][]integration.ReviewRemark)
+	conflicts := make(map[string]bool)
+	if output == nil {
+		return aliases, conflicts
+	}
+	for _, remark := range output.Remarks {
+		id := strings.TrimSpace(remark.ID)
+		externalID := strings.TrimSpace(remark.ExternalID)
+		if id == "" || externalID == "" {
+			continue
+		}
+		matches := index.external[externalID]
+		if len(matches) != 1 {
+			continue
+		}
+		aliases[id] = append(aliases[id], matches[0])
+	}
+	for id, matches := range aliases {
+		if len(matches) > 1 {
+			conflicts[id] = true
+			continue
+		}
+		if canonical, ok := index.resolve(id); ok && strings.TrimSpace(canonical.ExternalID) != strings.TrimSpace(matches[0].ExternalID) {
+			conflicts[id] = true
+		}
+	}
+	return aliases, conflicts
+}
+
+func enrichReviewResponse(response *StructuredResponse, aliases map[string][]integration.ReviewRemark, index reviewRemarkIndex) {
 	if response == nil {
 		return
 	}
-	remark, ok := aliases[strings.TrimSpace(response.RemarkID)]
+	remark, ok := index.resolve(response.RemarkID)
 	if !ok {
-		remark, ok = index.resolve(response.RemarkID)
+		matches := aliases[strings.TrimSpace(response.RemarkID)]
+		if len(matches) == 1 {
+			remark, ok = matches[0], true
+		}
 	}
 	if !ok {
 		return
@@ -1728,29 +1751,24 @@ func enrichReviewResponse(response *StructuredResponse, aliases map[string]integ
 
 func validateReviewResponseTargets(responses []StructuredResponse, remarks []integration.ReviewRemark, output *StructuredOutput) error {
 	index := newReviewRemarkIndex(remarks)
-	aliases := make(map[string]integration.ReviewRemark)
-	if output != nil {
-		for _, remark := range output.Remarks {
-			id := strings.TrimSpace(remark.ID)
-			externalID := strings.TrimSpace(remark.ExternalID)
-			if id == "" || externalID == "" {
-				continue
-			}
-			if canonical, ok := index.resolve(externalID); ok {
-				aliases[id] = canonical
-			}
-		}
-	}
+	aliases, aliasConflicts := reviewRemarkAliases(output, index)
 	var failures []error
 	for responseIndex, response := range responses {
 		if reviewResponseType(response) == "local" {
 			continue
 		}
 		id := strings.TrimSpace(response.RemarkID)
-		if _, ok := aliases[id]; ok {
+		if _, ok := index.external[id]; ok && len(index.external[id]) == 1 {
+			continue
+		}
+		if aliasConflicts[id] {
+			failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical alias is conflicting or ambiguous; external publication is not allowed", responseIndex, id))
 			continue
 		}
 		if _, ok := index.resolve(id); ok {
+			continue
+		}
+		if matches := aliases[id]; len(matches) == 1 {
 			continue
 		}
 		reason := "unknown"
