@@ -4,16 +4,58 @@ if [ "${1:-}" != "run" ]; then
 	exit 3
 fi
 
-case "${8:-${6:-}}" in
+mode=""
+for arg in "$@"; do
+	case "$arg" in
+	stream|structured|resume|event-timeout|silent) mode="$arg" ;;
+	esac
+done
+
+json=false
+previous=""
+resume_session=""
+for arg in "$@"; do
+	if [ "$previous" = "--format" ] && [ "$arg" = "json" ]; then
+		json=true
+	fi
+	if [ "$previous" = "--session" ]; then
+		resume_session="$arg"
+	fi
+	previous="$arg"
+done
+
+if [ "$json" != true ]; then
+	printf 'expected --format json\n' >&2
+	exit 5
+fi
+
+case "$mode" in
 stream)
-	printf 'tool call\n' >&2
-	for value in 1 2 3 4 5 6; do
-		printf '%s\n' "$value"
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-stream","part":{"id":"part-start","sessionID":"session-stream","messageID":"message-stream","type":"step-start"}}'
+	sleep .05
+	for value in 1 2 3 4; do
+		printf '{"type":"text","timestamp":1783929600000,"sessionID":"session-stream","part":{"id":"part-text-%s","sessionID":"session-stream","messageID":"message-stream","type":"text","text":"%s"}}\n' "$value" "$value"
 		sleep .05
 	done
+	printf '%s\n' '{"type":"step_finish","timestamp":1783929600000,"sessionID":"session-stream","part":{"id":"part-finish","sessionID":"session-stream","messageID":"message-stream","type":"step-finish","reason":"stop"}}'
+	sleep .05
+	;;
+structured)
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-structured","part":{"id":"part-start","sessionID":"session-structured","messageID":"message-structured","type":"step-start"}}'
+	printf '%s\n' '{"type":"text","timestamp":1783929600050,"sessionID":"session-structured","part":{"id":"part-text","sessionID":"session-structured","messageID":"message-structured","type":"text","text":"Выполнение завершено.\n<progress-structured-output>\n{\"summary\":\"Проверка завершена.\"}\n</progress-structured-output>"}}'
+	printf '%s\n' '{"type":"step_finish","timestamp":1783929600100,"sessionID":"session-structured","part":{"id":"part-finish","sessionID":"session-structured","messageID":"message-structured","type":"step-finish","reason":"stop"}}'
+	;;
+resume)
+	if [ "$resume_session" != "session-resume" ]; then
+		printf 'expected resume session\n' >&2
+		exit 6
+	fi
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-resume","part":{"id":"part-start","sessionID":"session-resume","messageID":"message-resume","type":"step-start"}}'
+	printf '%s\n' '{"type":"text","timestamp":1783929600050,"sessionID":"session-resume","part":{"id":"part-text","sessionID":"session-resume","messageID":"message-resume","type":"text","text":"Продолжение завершено."}}'
+	printf '%s\n' '{"type":"step_finish","timestamp":1783929600100,"sessionID":"session-resume","part":{"id":"part-finish","sessionID":"session-resume","messageID":"message-resume","type":"step-finish","reason":"stop"}}'
 	;;
 event-timeout)
-	printf '%s\n' '{"type":"tool_use","part":{"type":"shell"}}' >&2
+	printf '%s\n' '{"type":"step_start","timestamp":1783929600000,"sessionID":"session-timeout","part":{"id":"part-start","sessionID":"session-timeout","messageID":"message-timeout","type":"step-start"}}' >&2
 	sleep 1
 	;;
 silent)

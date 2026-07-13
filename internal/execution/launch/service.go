@@ -1419,6 +1419,9 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if runner == RunnerOpenCode {
+		cmd.Args = insertOpenCodeJSONFlag(cmd.Args)
+	}
 	metadata := runnerMetadata{}
 	opencodeTitle := ""
 	if runner == RunnerOpenCode && in.Launch.Resume == nil {
@@ -1431,8 +1434,15 @@ func runRunner(ctx context.Context, in model.Invocation) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if runner == RunnerOpenCode {
+		var sessionID string
+		output, sessionID = normalizeOpenCodeJSONOutput(string(output))
+		metadata.RunnerSessionID = sessionID
+	}
 	if opencodeTitle != "" {
-		metadata.RunnerSessionID = lookupOpenCodeSessionID(ctx, opencodeTitle)
+		if strings.TrimSpace(metadata.RunnerSessionID) == "" {
+			metadata.RunnerSessionID = lookupOpenCodeSessionID(ctx, opencodeTitle)
+		}
 	}
 	if strings.TrimSpace(metadata.RunnerSessionID) == "" && in.Launch.Resume != nil {
 		metadata.RunnerSessionID = strings.TrimSpace(in.Launch.Resume.RunnerSessionID)
@@ -1817,6 +1827,73 @@ func insertCodexJSONFlag(args []string) []string {
 	withJSON = append(withJSON, args[0], args[1], "--json")
 	withJSON = append(withJSON, args[2:]...)
 	return withJSON
+}
+
+func insertOpenCodeJSONFlag(args []string) []string {
+	if len(args) < 2 || args[1] != "run" {
+		return args
+	}
+	for index := 2; index < len(args); index++ {
+		if args[index] == "--format" {
+			withJSON := append([]string(nil), args...)
+			if index+1 < len(withJSON) {
+				withJSON[index+1] = "json"
+				return withJSON
+			}
+			return append(withJSON, "json")
+		}
+		if strings.HasPrefix(args[index], "--format=") {
+			withJSON := append([]string(nil), args...)
+			withJSON[index] = "--format=json"
+			return withJSON
+		}
+	}
+	withJSON := make([]string, 0, len(args)+2)
+	withJSON = append(withJSON, args[:2]...)
+	withJSON = append(withJSON, "--format", "json")
+	return append(withJSON, args[2:]...)
+}
+
+func normalizeOpenCodeJSONOutput(output string) (string, string) {
+	var sessionID string
+	plainLines := make([]string, 0)
+	sawEvent := false
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		rawLine := scanner.Text()
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+
+		var event struct {
+			Type      string `json:"type"`
+			SessionID string `json:"sessionID"`
+			Part      struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"part"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil || strings.TrimSpace(event.Type) == "" {
+			plainLines = append(plainLines, rawLine)
+			continue
+		}
+		sawEvent = true
+		if strings.TrimSpace(sessionID) == "" {
+			sessionID = strings.TrimSpace(event.SessionID)
+		}
+		if event.Type == "text" && event.Part.Type == "text" && strings.TrimSpace(event.Part.Text) != "" {
+			plainLines = append(plainLines, event.Part.Text)
+		}
+	}
+	if len(plainLines) == 0 {
+		if sawEvent {
+			return "", sessionID
+		}
+		return strings.TrimSpace(output), sessionID
+	}
+	return strings.TrimSpace(strings.Join(plainLines, "\n")), sessionID
 }
 
 func normalizeCodexJSONOutput(output string) (string, string) {
