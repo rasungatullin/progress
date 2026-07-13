@@ -193,6 +193,22 @@ func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
 	}
 }
 
+func TestRunOpenCodeCommandKeepsStreamingOutputActive(t *testing.T) {
+	t.Parallel()
+
+	output, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "for value in 1 2 3 4 5 6; do printf '%s\\n' \"$value\"; sleep .05; done"), model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Timeout:         "1s",
+		NoOutputTimeout: "100ms",
+	})
+	if err != nil {
+		t.Fatalf("opencode streaming output must keep runner active: %v", err)
+	}
+	if output != "1\n2\n3\n4\n5\n6\n" {
+		t.Fatalf("unexpected streaming output: %q", output)
+	}
+}
+
 func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	t.Parallel()
 
@@ -206,6 +222,11 @@ func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	var runnerErr *runnerExecutionError
 	if !errors.As(err, &runnerErr) || runnerErr.output != "first" || runnerErr.lastOutputAt.IsZero() {
 		t.Fatalf("missing last-output diagnostics: %#v", runnerErr)
+	}
+	for _, expected := range []string{"last fragment at=", "last structured event=отсутствует at=отсутствует", "structured output=absent", "rule=200ms после последнего фрагмента"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
 	}
 }
 

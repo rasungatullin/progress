@@ -68,11 +68,25 @@ func (e *runnerExecutionError) Error() string {
 		if lastEvent == "" {
 			lastEvent = "отсутствует"
 		}
-		diagnostic = fmt.Sprintf("\nlast structured event=%s idle=%s rule=%s", lastEvent, e.idleDuration.Round(time.Millisecond), e.timeoutRule)
+		diagnostic = fmt.Sprintf(
+			"\nlast fragment at=%s last structured event=%s at=%s structured output=absent idle=%s rule=%s",
+			formatRunnerTime(e.lastOutputAt),
+			lastEvent,
+			formatRunnerTime(e.structuredEventAt),
+			e.idleDuration.Round(time.Millisecond),
+			e.timeoutRule,
+		)
 	}
 	return fmt.Sprintf("%s%s\n%s", e.err, diagnostic, strings.TrimSpace(e.output))
 }
 func (e *runnerExecutionError) Unwrap() error { return e.err }
+
+func formatRunnerTime(value time.Time) string {
+	if value.IsZero() {
+		return "отсутствует"
+	}
+	return value.Format(time.RFC3339Nano)
+}
 
 type trailingStructuredBlockState int
 
@@ -1616,13 +1630,17 @@ func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runn
 		stopReason:          "no-output-timeout",
 		lastOutputAt:        lastOutputAt,
 		lastStructuredEvent: lastEvent,
+		structuredEventAt:   eventAt,
 		idleDuration:        idleDuration,
-		timeoutRule:         runnerTimeoutRule(lastEvent, timeout, len(structuredRule) > 0 && structuredRule[0]),
+		timeoutRule:         runnerTimeoutRule(lastEvent, lastOutputAt, timeout, len(structuredRule) > 0 && structuredRule[0]),
 	}
 }
 
-func runnerTimeoutRule(lastEvent string, timeout time.Duration, structured bool) string {
+func runnerTimeoutRule(lastEvent string, lastOutputAt time.Time, timeout time.Duration, structured bool) string {
 	if lastEvent == "" {
+		if !lastOutputAt.IsZero() {
+			return fmt.Sprintf("%s после последнего фрагмента", timeout)
+		}
 		return fmt.Sprintf("%s без принятого события", timeout)
 	}
 	if structured {
