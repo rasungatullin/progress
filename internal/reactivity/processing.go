@@ -385,6 +385,20 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 
 	mergeRequest := knownMergeRequest
 	if mergeRequest != nil {
+		refreshResponse, refreshErr := s.integration.Execute(ctx, integration.Request{
+			IntegrationType:    integrationTypeRepository,
+			Resource:           "merge-request",
+			ObjectType:         "merge-request",
+			Operation:          "get",
+			Repository:         mergeRequest.Repository,
+			RepoProvided:       strings.TrimSpace(mergeRequest.Repository) != "",
+			MergeRequestNumber: mergeRequest.Number,
+		})
+		if refreshErr == nil {
+			if refreshed, ok := integrationMergeRequestFromResponse(refreshResponse); ok {
+				return response.Issue, &refreshed, nil, nil, nil
+			}
+		}
 		copyOfMergeRequest := *mergeRequest
 		return response.Issue, &copyOfMergeRequest, nil, nil, nil
 	}
@@ -396,6 +410,24 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 		s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%d ошибка=%v", taskNumber, err)
 	}
 	return response.Issue, mergeRequest, nil, err, nil
+}
+
+func integrationMergeRequestFromResponse(response integration.Response) (integration.MergeRequest, bool) {
+	if response.MergeRequest != nil {
+		return *response.MergeRequest, true
+	}
+	if response.PullRequest != nil {
+		return integration.MergeRequest{
+			System: response.PullRequest.System, Repository: response.PullRequest.Repository,
+			Number: response.PullRequest.Number, Title: response.PullRequest.Title,
+			Body: response.PullRequest.Body, State: response.PullRequest.State,
+			BaseRef: response.PullRequest.BaseRef, HeadRef: response.PullRequest.HeadRef,
+			HeadRevision: response.PullRequest.HeadRevision, ReviewDecision: response.PullRequest.ReviewDecision,
+			URL: response.PullRequest.URL, CreatedAt: response.PullRequest.CreatedAt,
+			UpdatedAt: response.PullRequest.UpdatedAt,
+		}, true
+	}
+	return integration.MergeRequest{}, false
 }
 
 func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*decision.MergeRequestExternalState, error) {
