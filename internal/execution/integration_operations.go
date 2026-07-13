@@ -1671,18 +1671,37 @@ func newReviewRemarkIndex(remarks []integration.ReviewRemark) reviewRemarkIndex 
 
 func (index reviewRemarkIndex) resolve(id string) (integration.ReviewRemark, bool) {
 	id = strings.TrimSpace(id)
-	if matches := index.external[id]; len(matches) == 1 {
-		return matches[0], true
+	externalMatches := index.external[id]
+	projectMatches := index.project[id]
+	if len(externalMatches) == 1 {
+		if len(projectMatches) == 0 || sameReviewRemark(externalMatches[0], projectMatches[0]) {
+			return externalMatches[0], true
+		}
+		return integration.ReviewRemark{}, false
 	}
-	if matches := index.project[id]; len(matches) == 1 {
-		return matches[0], true
+	if len(externalMatches) == 0 && len(projectMatches) == 1 {
+		return projectMatches[0], true
 	}
 	return integration.ReviewRemark{}, false
 }
 
 func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
 	id = strings.TrimSpace(id)
-	return len(index.external[id]) > 1 || len(index.project[id]) > 1
+	externalMatches := index.external[id]
+	projectMatches := index.project[id]
+	if len(externalMatches) > 1 || len(projectMatches) > 1 {
+		return true
+	}
+	return len(externalMatches) == 1 && len(projectMatches) == 1 && !sameReviewRemark(externalMatches[0], projectMatches[0])
+}
+
+func sameReviewRemark(left, right integration.ReviewRemark) bool {
+	return strings.TrimSpace(left.ExternalID) == strings.TrimSpace(right.ExternalID) &&
+		strings.TrimSpace(left.ReplyToID) == strings.TrimSpace(right.ReplyToID) &&
+		strings.TrimSpace(left.Body) == strings.TrimSpace(right.Body) &&
+		strings.TrimSpace(left.Path) == strings.TrimSpace(right.Path) &&
+		left.Line == right.Line &&
+		strings.TrimSpace(left.Side) == strings.TrimSpace(right.Side)
 }
 
 func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map[string][]integration.ReviewRemark, map[string]bool) {
@@ -1765,9 +1784,6 @@ func validateReviewResponseTargets(responses []StructuredResponse, remarks []int
 			continue
 		}
 		id := strings.TrimSpace(response.RemarkID)
-		if _, ok := index.external[id]; ok && len(index.external[id]) == 1 {
-			continue
-		}
 		if aliasConflicts[id] {
 			failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical alias is conflicting or ambiguous; external publication is not allowed", responseIndex, id))
 			continue

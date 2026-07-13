@@ -2361,7 +2361,7 @@ func TestPublishReviewResponsesRejectsUnknownTargetWithEmptyCanonicalRemarks(t *
 	}
 }
 
-func TestReviewResponsesPreferExactExternalIDOverAmbiguousProjectID(t *testing.T) {
+func TestReviewResponsesRejectExternalProjectIDCollision(t *testing.T) {
 	t.Parallel()
 
 	remarks := []integration.ReviewRemark{
@@ -2373,11 +2373,11 @@ func TestReviewResponsesPreferExactExternalIDOverAmbiguousProjectID(t *testing.T
 		RemarkID: "remark-4", Status: "resolved", Summary: "Исправлено."},
 	}}, remarks)
 
-	if len(responses) != 1 || responses[0].Type != "comment" {
-		t.Fatalf("exact external identifier must remain resolvable: %#v", responses)
+	if len(responses) != 1 || responses[0].Type != "" {
+		t.Fatalf("colliding identifier must not restore a response kind: %#v", responses)
 	}
-	if err := validateReviewResponseTargets(responses, remarks, nil); err != nil {
-		t.Fatalf("exact external identifier must not be rejected by project ambiguity: %v", err)
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("external/project identifier collision must be rejected diagnostically: %v", err)
 	}
 }
 
