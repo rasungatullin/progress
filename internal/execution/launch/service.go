@@ -1077,6 +1077,13 @@ func (s *Service) pushWithRetryDiagnostic(ctx context.Context, dir, gitRoot, bra
 		remote = strings.TrimSpace(remoteName[0])
 	}
 	expectedHead, originalRemoteHead, initialHeadsErr := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
+	if initialHeadsErr != nil {
+		return &gitPushFailure{attempts: 0, classification: "uncertain", lastError: fmt.Errorf("verify push heads: %w", initialHeadsErr)}
+	}
+	if expectedHead == "" {
+		return &gitPushFailure{attempts: 0, classification: "uncertain", lastError: errors.New("expected local HEAD is empty")}
+	}
+	args = gitPushRetryArgs(args, expectedHead, branch)
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
@@ -1093,9 +1100,6 @@ func (s *Service) pushWithRetryDiagnostic(ctx context.Context, dir, gitRoot, bra
 			}
 			if (originalRemoteHead != "" && remoteHead != originalRemoteHead) || (originalRemoteHead == "" && remoteHead != "") {
 				return &gitPushFailure{attempts: attempt - 1, classification: "history-conflict", lastError: fmt.Errorf("remote branch %s changed from %s to %s", branch, originalRemoteHead, remoteHead)}
-			}
-			if initialHeadsErr != nil {
-				return &gitPushFailure{attempts: attempt - 1, classification: "uncertain", lastError: fmt.Errorf("verify initial remote head: %w", initialHeadsErr)}
 			}
 		}
 		if _, err := s.runGitOutputWithEnv(ctx, dir, env, args...); err == nil {
@@ -1142,6 +1146,13 @@ func gitPushRetryArgs(args []string, expectedHead, branch string) []string {
 	refspec := expectedHead + ":refs/heads/" + branch
 	result := append([]string(nil), args...)
 	if len(result) >= 4 && result[0] == "push" && result[1] == "-u" {
+		result[len(result)-1] = refspec
+		return result
+	}
+	if len(result) >= 1 && result[0] == "push" {
+		if len(result) == 1 {
+			return append(result, refspec)
+		}
 		result[len(result)-1] = refspec
 		return result
 	}
@@ -1207,11 +1218,31 @@ func (s *Service) gitPushHeads(ctx context.Context, dir, branch string, env []st
 	if err != nil {
 		return strings.TrimSpace(local), "", fmt.Errorf("read remote head: %w", err)
 	}
-	fields := strings.Fields(remoteOutput)
-	if len(fields) == 0 {
-		return strings.TrimSpace(local), "", nil
+	ref := "refs/heads/" + branch
+	for _, line := range strings.Split(remoteOutput, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[1] != ref {
+			continue
+		}
+		if !isGitPushSHA(fields[0]) {
+			return strings.TrimSpace(local), "", fmt.Errorf("invalid remote head %q", fields[0])
+		}
+		return strings.TrimSpace(local), fields[0], nil
 	}
-	return strings.TrimSpace(local), fields[0], nil
+	return strings.TrimSpace(local), "", nil
+}
+
+func isGitPushSHA(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 6 || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func commitPushInputFromLaunch(in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) model.CommitPushInput {
