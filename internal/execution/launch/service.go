@@ -1047,8 +1047,22 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 	if err := s.pushWithRetryDiagnostic(ctx, input.Directory, gitRoot, branch, pushArgs, pushEnv, input.Git, &pushDiagnostic, remote); err != nil {
 		return gitResult{}, err
 	}
+	if pushUsesUpstreamSetup(pushArgs) {
+		if _, err := s.runGitOutputWithEnv(ctx, input.Directory, pushEnv, "branch", "--set-upstream-to="+remote+"/"+branch, branch); err != nil {
+			return gitResult{}, fmt.Errorf("set git upstream failed: %w", err)
+		}
+	}
 
 	return gitResult{status: "committed+pushed", branch: branch, pushDiagnostic: pushDiagnostic}, nil
+}
+
+func pushUsesUpstreamSetup(args []string) bool {
+	for _, arg := range args {
+		if arg == "-u" || arg == "--set-upstream" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) gitPushRemote(ctx context.Context, dir, branch, upstream string, args []string) string {
@@ -1193,14 +1207,17 @@ func waitGitPushRetry(ctx context.Context, delay time.Duration) error {
 
 func classifyGitPushError(err error) string {
 	message := strings.ToLower(err.Error())
+	network := strings.Contains(message, "connection closed") || strings.Contains(message, "connection reset") || strings.Contains(message, "timed out") || strings.Contains(message, "could not resolve host") || strings.Contains(message, "network is unreachable") || strings.Contains(message, "broken pipe")
 	switch {
 	case strings.Contains(message, "non-fast-forward"), strings.Contains(message, "fetch first"):
 		return "non-fast-forward"
-	case strings.Contains(message, "connection closed"), strings.Contains(message, "connection reset"), strings.Contains(message, "timed out"), strings.Contains(message, "could not resolve host"), strings.Contains(message, "network is unreachable"), strings.Contains(message, "broken pipe"):
-		return "network"
-	case strings.Contains(message, "permission to "), strings.Contains(message, " returned error: 403"), strings.Contains(message, "403 forbidden"):
+	case strings.Contains(message, "permission to "), strings.Contains(message, " returned error: 403"), strings.Contains(message, "403 forbidden"), strings.Contains(message, "protected branch"), strings.Contains(message, "hook declined"), strings.Contains(message, "pre-receive hook"):
 		return "access-denied"
-	case strings.Contains(message, "permission denied"), strings.Contains(message, "could not read from remote repository"), strings.Contains(message, "authentication failed"), strings.Contains(message, "access denied"):
+	case strings.Contains(message, "permission denied"), strings.Contains(message, "authentication failed"), strings.Contains(message, "access denied"):
+		return "authorization"
+	case network:
+		return "network"
+	case strings.Contains(message, "could not read from remote repository"):
 		return "authorization"
 	case strings.Contains(message, "rejected"), strings.Contains(message, "updates were rejected"):
 		return "history-conflict"

@@ -841,6 +841,8 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 				return "", nil
 			case "push -u origin abc123:refs/heads/feature/test":
 				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
+			case "branch --set-upstream-to=origin/feature/test feature/test":
+				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
 			}
@@ -867,6 +869,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"rev-parse", "HEAD"},
 		{"ls-remote", "origin", "refs/heads/feature/test"},
 		{"push", "-u", "origin", "abc123:refs/heads/feature/test"},
+		{"branch", "--set-upstream-to=origin/feature/test", "feature/test"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -1049,6 +1052,8 @@ func TestLaunchCommitPushRebindsMismatchedUpstream(t *testing.T) {
 			return "", nil
 		case "push -u origin abc123:refs/heads/feature/test":
 			pushArgs = append([]string(nil), args...)
+			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
+		case "branch --set-upstream-to=origin/feature/test feature/test":
 			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
 		default:
 			return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1820,6 +1825,33 @@ func TestPushWithRetryRecognizesAccessDeniedFailure(t *testing.T) {
 	}
 	if pushes != 1 {
 		t.Fatalf("access-denied failure must not repeat, got %d attempts", pushes)
+	}
+}
+
+func TestClassifyGitPushErrorPrioritizesExplicitAccessOverNetwork(t *testing.T) {
+	t.Parallel()
+
+	if got := classifyGitPushError(errors.New("Permission denied (publickey)\nConnection closed by remote host")); got != "authorization" {
+		t.Fatalf("explicit authorization failure must not be retried as network: %q", got)
+	}
+	if got := classifyGitPushError(errors.New("remote: Permission to OWNER/REPO.git denied to USER\nConnection closed by remote host")); got != "access-denied" {
+		t.Fatalf("explicit access denial must not be retried as network: %q", got)
+	}
+}
+
+func TestClassifyGitPushErrorDistinguishesServerAccessRejection(t *testing.T) {
+	t.Parallel()
+
+	for _, message := range []string{
+		"remote rejected: protected branch hook declined",
+		"remote: pre-receive hook declined",
+	} {
+		if got := classifyGitPushError(errors.New(message)); got != "access-denied" {
+			t.Fatalf("server access rejection %q classified as %q", message, got)
+		}
+	}
+	if got := classifyGitPushError(errors.New("remote rejected")); got != "history-conflict" {
+		t.Fatalf("generic rejection classified as %q", got)
 	}
 }
 
