@@ -392,6 +392,7 @@ type MergeRequest struct {
 	Attributes     map[string]string
 	BaseRef        string
 	HeadRef        string
+	HeadRevision   string
 	Author         User
 	ReviewDecision string
 	URL            string

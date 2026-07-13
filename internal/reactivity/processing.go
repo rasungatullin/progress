@@ -76,7 +76,7 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 	var knownMergeRequest *integration.MergeRequest
 	seenStates := make(map[string]int)
 	cyclesSinceProgress := 0
-	previousState := ""
+	previousProgressState := ""
 	for index := 1; ; index++ {
 		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index, knownMergeRequest)
 		result.Cycles = append(result.Cycles, cycle)
@@ -97,14 +97,15 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 			return result, fmt.Errorf("обработка задачи %d остановлена по пределу повторяющегося состояния: %s", input.TaskNumber, diagnostic)
 		}
 		seenStates[state] = index
-		progress := previousState != "" && previousState != state
+		progressState := processingProgressFingerprint(cycle)
+		progress := previousProgressState != "" && previousProgressState != progressState
 		if progress {
 			cyclesSinceProgress = 0
 		} else {
 			cyclesSinceProgress++
 		}
 		s.logger.Printf("Обработка задачи %d: цикл=%d полезный прогресс=%t счётчик продолжения=%d/%d", input.TaskNumber, index, progress, cyclesSinceProgress, maxCycles)
-		previousState = state
+		previousProgressState = progressState
 		if cycle.ExecutionResult != nil && cycle.ExecutionResult.MergeRequest != nil {
 			knownMergeRequest = integrationMergeRequestFromExecutionResult(cycle.ExecutionResult.MergeRequest)
 		}
@@ -112,16 +113,17 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 			result.StopReason = StopReasonSingleCycle
 			return result, nil
 		}
-		if cyclesSinceProgress >= maxCycles {
+		if index >= maxTotalProcessingCycles {
 			result.StopReason = StopReasonMaxCycles
-			diagnostic := fmt.Sprintf("аварийный предел всей обработки: %d циклов без изменения состояния, полезный прогресс=false", maxCycles)
+			diagnostic := fmt.Sprintf("аварийный предел всей обработки: %d циклов, полезный прогресс=%t, счётчик продолжения=%d/%d", maxTotalProcessingCycles, progress, cyclesSinceProgress, maxCycles)
 			s.logger.Printf("Обработка задачи %d остановлена: %s", input.TaskNumber, diagnostic)
-			return result, fmt.Errorf("обработка задачи %d превысила аварийный предел циклов: %d (%s)", input.TaskNumber, maxCycles, diagnostic)
+			return result, fmt.Errorf("обработка задачи %d превысила аварийный предел циклов: %d (%s)", input.TaskNumber, maxTotalProcessingCycles, diagnostic)
 		}
 	}
 }
 
 type processingState struct {
+	Action       string                       `json:"action,omitempty"`
 	IssueLabels  []string                     `json:"issue_labels,omitempty"`
 	IssueState   string                       `json:"issue_state,omitempty"`
 	MergeRequest *processingMergeRequestState `json:"merge_request,omitempty"`
@@ -129,10 +131,12 @@ type processingState struct {
 }
 
 type processingMergeRequestState struct {
-	Number  int
-	State   string
-	BaseRef string
-	HeadRef string
+	Number       int
+	State        string
+	BaseRef      string
+	HeadRef      string
+	HeadRevision string
+	Attributes   map[string]string
 }
 
 type processingExternalState struct {
@@ -154,13 +158,14 @@ type processingRemarkState struct {
 
 func processingStateFingerprint(cycle TaskProcessingCycle) string {
 	state := processingState{}
+	state.Action = cycle.Action
 	if cycle.Issue != nil {
 		state.IssueState = cycle.Issue.State
 		state.IssueLabels = append([]string(nil), cycle.Issue.Labels...)
 		sort.Strings(state.IssueLabels)
 	}
 	if cycle.MergeRequest != nil {
-		state.MergeRequest = &processingMergeRequestState{Number: cycle.MergeRequest.Number, State: cycle.MergeRequest.State, BaseRef: cycle.MergeRequest.BaseRef, HeadRef: cycle.MergeRequest.HeadRef}
+		state.MergeRequest = &processingMergeRequestState{Number: cycle.MergeRequest.Number, State: cycle.MergeRequest.State, BaseRef: cycle.MergeRequest.BaseRef, HeadRef: cycle.MergeRequest.HeadRef, HeadRevision: cycle.MergeRequest.HeadRevision, Attributes: cycle.MergeRequest.Attributes}
 	}
 	if cycle.MergeRequestExternalState != nil {
 		external := cycle.MergeRequestExternalState
@@ -174,6 +179,10 @@ func processingStateFingerprint(cycle TaskProcessingCycle) string {
 	}
 	encoded, _ := json.Marshal(state)
 	return string(encoded)
+}
+
+func processingProgressFingerprint(cycle TaskProcessingCycle) string {
+	return processingStateFingerprint(cycle)
 }
 
 func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (TaskProcessingResult, error) {
@@ -331,6 +340,7 @@ func integrationMergeRequestFromExecutionResult(value *execution.MergeRequest) *
 		System: value.System, Repository: value.Repository, Number: value.Number,
 		Title: value.Title, Body: value.Body, State: value.State,
 		BaseRef: value.BaseRef, HeadRef: value.HeadRef, URL: value.URL,
+		HeadRevision: value.HeadRevision,
 	}
 }
 

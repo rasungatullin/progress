@@ -367,7 +367,7 @@ func (r *Runner) RunPRView(ctx context.Context, repository string, number int) (
 		}
 	}
 
-	return r.runCommandWithResolvedConfig(ctx, config, []string{"pr", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"})
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"pr", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,headRefOid,url,createdAt,updatedAt"})
 }
 
 func (r *Runner) RunPRList(ctx context.Context, repository string, request PRListRequest) (CommandResult, resolvedConfig, error) {
@@ -403,7 +403,7 @@ func (r *Runner) RunPRList(ctx context.Context, repository string, request PRLis
 	if repository != "" {
 		args = append(args, "--repo", repository)
 	}
-	args = append(args, "--state", request.State, "--limit", strconv.Itoa(request.Limit), "--json", "number,title,body,state,mergeable,mergeStateStatus,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt")
+	args = append(args, "--state", request.State, "--limit", strconv.Itoa(request.Limit), "--json", "number,title,body,state,mergeable,mergeStateStatus,author,reviewDecision,baseRefName,headRefName,headRefOid,url,createdAt,updatedAt")
 	search := request.Query
 	switch request.Scope {
 	case "authored":

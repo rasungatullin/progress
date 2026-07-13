@@ -100,6 +100,7 @@ const (
 	LabelReviewPassed   = "Экспертиза пройдена"
 
 	defaultMaxProcessingCycles = 20
+	maxTotalProcessingCycles   = 1000
 
 	integrationTypeTracker    = integrationmodel.IntegrationTypeTracker
 	integrationTypeRepository = integrationmodel.IntegrationTypeRepository
