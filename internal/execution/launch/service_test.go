@@ -1779,6 +1779,132 @@ func TestPushWithRetryAcceptsRemoteHeadAfterUncertainPush(t *testing.T) {
 	}
 }
 
+func TestPushWithRetryDoesNotPushChangedLocalHead(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	revReads := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push":
+			pushes++
+			return "", errors.New("connection closed by remote host")
+		case "rev-parse HEAD":
+			revReads++
+			if revReads >= 3 {
+				return "def456\n", nil
+			}
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}})
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "uncertain" {
+		t.Fatalf("changed local head must stop retry: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("changed local head must not be pushed: %d", pushes)
+	}
+}
+
+func TestPushWithRetryDoesNotRetryWhenRemoteHeadCannotBeVerified(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push":
+			pushes++
+			return "", errors.New("connection closed by remote host")
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			if pushes > 0 {
+				return "", errors.New("connection reset by remote host")
+			}
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}})
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "uncertain" || failure.attempts != 1 {
+		t.Fatalf("unverified remote result must stop retry: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("unverified remote result must not be pushed again: %d", pushes)
+	}
+}
+
+func TestPushWithRetryTreatsNewRemoteBranchAsConflict(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push":
+			pushes++
+			return "", errors.New("connection closed by remote host")
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			if pushes > 0 {
+				return "def456\trefs/heads/feature/test\n", nil
+			}
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}})
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "history-conflict" {
+		t.Fatalf("new remote branch must stop retry: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("new remote branch must not be pushed again: %d", pushes)
+	}
+}
+
+func TestPushWithRetryPreservesRetryDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push":
+			pushes++
+			if pushes == 1 {
+				return "", errors.New("connection closed by remote host")
+			}
+			return "", nil
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	var diagnostic string
+	err := service.pushWithRetryDiagnostic(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}}, &diagnostic)
+	if err != nil {
+		t.Fatalf("push with retry: %v", err)
+	}
+	if !strings.Contains(diagnostic, "attempts=2") || !strings.Contains(diagnostic, "classification=network") || !strings.Contains(diagnostic, "connection closed") {
+		t.Fatalf("retry diagnostic was not preserved: %q", diagnostic)
+	}
+}
+
 func TestLaunchCommitPushAppliesGitOverrideToCommitAndPush(t *testing.T) {
 	t.Parallel()
 
