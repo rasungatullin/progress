@@ -525,7 +525,7 @@ func TestServiceProcessTaskOrdersRemarksByCreatedAtBeforeApprovedConclusion(t *t
 	}
 }
 
-func TestServiceProcessTaskOrdersInlineRemarkBeforeEqualTimeApprovedConclusion(t *testing.T) {
+func TestServiceProcessTaskTreatsEqualTimeRemarkAsPotentiallyNew(t *testing.T) {
 	t.Parallel()
 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
@@ -538,15 +538,12 @@ func TestServiceProcessTaskOrdersInlineRemarkBeforeEqualTimeApprovedConclusion(t
 	service.execution = &processingExecutionStub{}
 
 	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123})
-	if err != nil {
-		t.Fatalf("process task: %v", err)
-	}
-	if !result.Completed || len(result.Cycles) != 1 {
-		t.Fatalf("expected processing to complete after equal-time ordered approved conclusion, got %#v", result)
+	if err == nil || !strings.Contains(err.Error(), "повторяющееся состояние") {
+		t.Fatalf("expected conservative repeated-state stop, got result=%#v err=%v", result, err)
 	}
 }
 
-func TestServiceProcessTaskOrdersEqualTimeRemarksByExternalID(t *testing.T) {
+func TestServiceProcessTaskDoesNotCompareEqualTimeRemarkIDs(t *testing.T) {
 	t.Parallel()
 
 	integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
@@ -559,11 +556,8 @@ func TestServiceProcessTaskOrdersEqualTimeRemarksByExternalID(t *testing.T) {
 	service.execution = &processingExecutionStub{}
 
 	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123})
-	if err != nil {
-		t.Fatalf("process task: %v", err)
-	}
-	if !result.Completed || len(result.Cycles) != 1 {
-		t.Fatalf("expected processing to complete after ordered approved conclusion, got %#v", result)
+	if err == nil || !strings.Contains(err.Error(), "повторяющееся состояние") {
+		t.Fatalf("expected conservative repeated-state stop, got result=%#v err=%v", result, err)
 	}
 }
 

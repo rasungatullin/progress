@@ -136,39 +136,13 @@ func orderReviewRemarksByCreatedAt(remarks []integration.ReviewRemark) []integra
 			return true
 		}
 		if left.Equal(right) {
-			if leftKey, leftOK := reviewRemarkOrderKey(ordered[i]); leftOK {
-				if rightKey, rightOK := reviewRemarkOrderKey(ordered[j]); rightOK && leftKey != rightKey {
-					return leftKey < rightKey
-				}
-			}
-			return isInlineReviewRemark(ordered[i]) && !isInlineReviewRemark(ordered[j])
+			// GitHub не задаёт общий порядок замечаний с одинаковой
+			// секундной меткой времени. Не скрываем потенциально новое.
+			return false
 		}
 		return left.Before(right)
 	})
 	return ordered
-}
-
-func reviewRemarkOrderKey(remark integration.ReviewRemark) (int, bool) {
-	for _, value := range []string{remark.ExternalID, remark.URL} {
-		value = strings.TrimSpace(value)
-		for end := len(value) - 1; end >= 0; end-- {
-			if value[end] < '0' || value[end] > '9' {
-				if end == len(value)-1 {
-					break
-				}
-				key, err := strconv.Atoi(value[end+1:])
-				if err == nil {
-					return key, true
-				}
-				break
-			}
-		}
-	}
-	return 0, false
-}
-
-func isInlineReviewRemark(remark integration.ReviewRemark) bool {
-	return strings.EqualFold(strings.TrimSpace(remark.Type), "inline") || remark.Path != "" || remark.Line != 0
 }
 
 func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (TaskProcessingResult, error) {
@@ -385,14 +359,14 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 	}
 	authResponse, authErr := s.integration.Execute(ctx, integration.Request{System: system, Resource: "auth", Operation: "status"})
 	if authErr != nil {
-		return nil, fmt.Errorf("определить служебную идентичность GitHub: %w", authErr)
+		return nil, fmt.Errorf("определить служебную идентичность %s: %w", system, authErr)
 	}
 	if authResponse.AuthStatus == nil || !authResponse.AuthStatus.Authenticated {
-		return nil, fmt.Errorf("определить служебную идентичность GitHub: служебная учётная запись не аутентифицирована")
+		return nil, fmt.Errorf("определить служебную идентичность %s: служебная учётная запись не аутентифицирована", system)
 	}
 	ownAuthorLogin = strings.TrimSpace(authResponse.AuthStatus.Login)
 	if ownAuthorLogin == "" {
-		return nil, fmt.Errorf("определить служебную идентичность GitHub: логин служебной учётной записи не получен")
+		return nil, fmt.Errorf("определить служебную идентичность %s: логин служебной учётной записи не получен", system)
 	}
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType:    integrationTypeRepository,

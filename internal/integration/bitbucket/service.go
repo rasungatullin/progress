@@ -302,6 +302,7 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 	var raw apiUserResponse
 	_ = json.Unmarshal(body, &raw)
 	auth.Authenticated = true
+	auth.Login = strings.TrimSpace(firstNonEmpty(s.config.Username, raw.Nickname, raw.UUID))
 	auth.Message = strings.TrimSpace(firstNonEmpty(raw.DisplayName, raw.Nickname, raw.UUID, "Bitbucket authorization is available"))
 	response.AuthStatus = auth
 	response.Status = model.ResponseStatusOK
@@ -330,6 +331,7 @@ func (s *Service) executeServerAuthStatus(ctx context.Context, response model.Re
 	}
 
 	auth.Authenticated = true
+	auth.Login = strings.TrimSpace(s.config.Username)
 	auth.Message = "Bitbucket Server authorization is available"
 	response.AuthStatus = auth
 	response.Status = model.ResponseStatusOK
