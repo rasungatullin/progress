@@ -870,10 +870,10 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"status", "--porcelain", "-z", "-uall"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
+		{"rev-parse", "--verify", "--quiet", "refs/remotes/origin/feature/test"},
 		{"rev-parse", "HEAD"},
 		{"ls-remote", "origin", "refs/heads/feature/test"},
 		{"push", "-u", "origin", "abc123:refs/heads/feature/test"},
-		{"rev-parse", "--verify", "--quiet", "refs/remotes/origin/feature/test"},
 		{"update-ref", "refs/remotes/origin/feature/test", "abc123", ""},
 		{"branch", "--set-upstream-to=origin/feature/test", "feature/test"},
 	}
@@ -1892,8 +1892,16 @@ func TestClassifyGitPushErrorDistinguishesServerAccessRejection(t *testing.T) {
 func TestClassifyGitPushErrorRecognizesConnectionRefused(t *testing.T) {
 	t.Parallel()
 
-	if got := classifyGitPushError(errors.New("ssh: connect to host github.com port 22: Connection refused")); got != "network" {
-		t.Fatalf("connection refusal classified as %q", got)
+	for _, message := range []string{
+		"ssh: connect to host github.com port 22: Connection refused",
+		"Connection was reset by peer",
+		"No route to host",
+		"remote end hung up unexpectedly",
+		"unexpected disconnect while reading sideband packet",
+	} {
+		if got := classifyGitPushError(errors.New(message)); got != "network" {
+			t.Fatalf("network error %q classified as %q", message, got)
+		}
 	}
 }
 

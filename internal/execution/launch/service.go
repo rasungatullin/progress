@@ -187,7 +187,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			partialOutput = runnerErr.output
 		}
 		rawOutputPath := persistRunnerOutput(workplace.Name, partialOutput)
-		if errors.Is(err, errRunnerTimeout) {
+		if errors.Is(err, errRunnerTimeout) || errors.Is(err, context.DeadlineExceeded) {
 			status = "timeout"
 		} else if errors.Is(err, errRunnerNoOutputTimeout) {
 			status = "runner-stalled"
@@ -749,6 +749,8 @@ func (e *gitPushFailure) Error() string {
 
 func (e *gitPushFailure) Unwrap() error { return e.lastError }
 
+func (e *gitPushFailure) Retryable() bool { return e.classification == "network" }
+
 type runRecord struct {
 	CreatedAt           string                  `json:"created_at"`
 	Invocation          model.Invocation        `json:"invocation"`
@@ -1055,13 +1057,17 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 	}
 
 	remote := s.gitPushRemote(ctx, gitRoot, branch, upstream, pushArgs)
+	trackingHead := ""
+	if pushUsesUpstreamSetup(pushArgs) {
+		trackingHead = s.gitRemoteTrackingHead(ctx, input.Directory, pushEnv, remote, branch)
+	}
 	var pushDiagnostic string
 	expectedHead, err := s.pushWithRetryDiagnosticExpected(ctx, input.Directory, gitRoot, branch, pushArgs, pushEnv, input.Git, &pushDiagnostic, remote)
 	if err != nil {
 		return gitResult{}, err
 	}
 	if pushUsesUpstreamSetup(pushArgs) {
-		if err := s.updateGitRemoteTrackingRef(ctx, input.Directory, pushEnv, remote, branch, expectedHead); err != nil {
+		if err := s.updateGitRemoteTrackingRef(ctx, input.Directory, pushEnv, remote, branch, expectedHead, trackingHead); err != nil {
 			return gitResult{}, fmt.Errorf("update git remote-tracking ref failed: %w", err)
 		}
 		if _, err := s.runGitOutputWithEnv(ctx, input.Directory, pushEnv, "branch", "--set-upstream-to="+remote+"/"+branch, branch); err != nil {
@@ -1072,19 +1078,39 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 	return gitResult{status: "committed+pushed", branch: branch, pushDiagnostic: pushDiagnostic}, nil
 }
 
-func (s *Service) updateGitRemoteTrackingRef(ctx context.Context, dir string, env []string, remote, branch, expectedHead string) error {
+func (s *Service) updateGitRemoteTrackingRef(ctx context.Context, dir string, env []string, remote, branch, expectedHead string, originalHead ...string) error {
 	ref := "refs/remotes/" + remote + "/" + branch
-	oldHead, err := s.runGitOutputWithEnv(ctx, dir, env, "rev-parse", "--verify", "--quiet", ref)
-	if err != nil {
-		oldHead = ""
+	oldHead := ""
+	if len(originalHead) > 0 {
+		oldHead = originalHead[0]
 	} else {
-		oldHead = strings.TrimSpace(oldHead)
-		if oldHead != "" && !isGitPushSHA(oldHead) {
-			return fmt.Errorf("invalid current remote-tracking head %q", oldHead)
-		}
+		oldHead = s.gitRemoteTrackingHead(ctx, dir, env, remote, branch)
 	}
-	_, err = s.runGitOutputWithEnv(ctx, dir, env, "update-ref", ref, expectedHead, oldHead)
+	_, err := s.runGitOutputWithEnv(ctx, dir, env, "update-ref", ref, expectedHead, oldHead)
+	if err == nil {
+		return nil
+	}
+	current := s.gitRemoteTrackingHead(ctx, dir, env, remote, branch)
+	if current != "" && current != expectedHead {
+		return nil
+	}
+	if current == expectedHead {
+		return nil
+	}
 	return err
+}
+
+func (s *Service) gitRemoteTrackingHead(ctx context.Context, dir string, env []string, remote, branch string) string {
+	ref := "refs/remotes/" + remote + "/" + branch
+	value, err := s.runGitOutputWithEnv(ctx, dir, env, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil {
+		return ""
+	}
+	value = strings.TrimSpace(value)
+	if !isGitPushSHA(value) {
+		return ""
+	}
+	return value
 }
 
 func pushUsesUpstreamSetup(args []string) bool {
@@ -1128,6 +1154,9 @@ func (s *Service) pushWithRetryDiagnosticExpected(ctx context.Context, dir, gitR
 	}
 	expectedHead, originalRemoteHead, initialHeadsErr := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
 	if initialHeadsErr != nil {
+		if ctxErr := pushContextError(ctx); ctxErr != nil {
+			return "", &gitPushFailure{attempts: 0, classification: "interrupted", lastError: ctxErr}
+		}
 		return "", &gitPushFailure{attempts: 0, classification: classifyGitPushError(initialHeadsErr), lastError: fmt.Errorf("verify push heads: %w", initialHeadsErr)}
 	}
 	if !isGitPushSHA(expectedHead) {
@@ -1137,6 +1166,9 @@ func (s *Service) pushWithRetryDiagnosticExpected(ctx context.Context, dir, gitR
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
+			if ctxErr := pushContextError(ctx); ctxErr != nil {
+				return "", &gitPushFailure{attempts: attempt - 1, classification: "interrupted", lastError: ctxErr}
+			}
 			localHead, remoteHead, verifyErr := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
 			if verifyErr != nil {
 				return "", &gitPushFailure{attempts: attempt - 1, classification: "uncertain", lastError: fmt.Errorf("verify before retry: %w", verifyErr)}
@@ -1159,6 +1191,9 @@ func (s *Service) pushWithRetryDiagnosticExpected(ctx context.Context, dir, gitR
 			return expectedHead, nil
 		} else {
 			lastErr = err
+			if ctxErr := pushContextError(ctx); ctxErr != nil {
+				return "", &gitPushFailure{attempts: attempt, classification: "interrupted", lastError: ctxErr}
+			}
 			classification := classifyGitPushError(err)
 			if classification == "authorization" || classification == "access-denied" || classification == "non-fast-forward" || classification == "history-conflict" {
 				return "", &gitPushFailure{attempts: attempt, classification: classification, lastError: err}
@@ -1177,6 +1212,9 @@ func (s *Service) pushWithRetryDiagnosticExpected(ctx context.Context, dir, gitR
 					return "", &gitPushFailure{attempts: attempt, classification: "history-conflict", lastError: fmt.Errorf("remote branch %s changed from %s to %s", branch, originalRemoteHead, remoteHead)}
 				}
 			} else {
+				if ctxErr := pushContextError(ctx); ctxErr != nil {
+					return "", &gitPushFailure{attempts: attempt, classification: "interrupted", lastError: ctxErr}
+				}
 				return "", &gitPushFailure{attempts: attempt, classification: "uncertain", lastError: fmt.Errorf("%w; verify remote head: %v", err, verifyErr)}
 			}
 
@@ -1241,9 +1279,16 @@ func waitGitPushRetry(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+func pushContextError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func classifyGitPushError(err error) string {
 	message := strings.ToLower(err.Error())
-	network := strings.Contains(message, "connection closed") || strings.Contains(message, "connection reset") || strings.Contains(message, "connection refused") || strings.Contains(message, "timed out") || strings.Contains(message, "could not resolve host") || strings.Contains(message, "network is unreachable") || strings.Contains(message, "broken pipe")
+	network := strings.Contains(message, "connection closed") || strings.Contains(message, "connection reset") || strings.Contains(message, "connection refused") || strings.Contains(message, "connection was reset") || strings.Contains(message, "timed out") || strings.Contains(message, "could not resolve host") || strings.Contains(message, "network is unreachable") || strings.Contains(message, "no route to host") || strings.Contains(message, "broken pipe") || strings.Contains(message, "remote end hung up unexpectedly") || strings.Contains(message, "unexpected disconnect while reading sideband packet")
 	switch {
 	case strings.Contains(message, "non-fast-forward"), strings.Contains(message, "fetch first"):
 		return "non-fast-forward"
@@ -1908,6 +1953,9 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 		case err := <-done:
 			output, lastOutputAt := writer.snapshot()
 			if err != nil {
+				if errors.Is(parent.Err(), context.DeadlineExceeded) {
+					return "", &runnerExecutionError{err: context.DeadlineExceeded, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
+				}
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					return "", &runnerExecutionError{err: errRunnerTimeout, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
 				}
@@ -1951,8 +1999,11 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 		case <-ctx.Done():
 			<-done
 			output, lastOutputAt := writer.snapshot()
-			if errors.Is(parent.Err(), context.Canceled) || errors.Is(parent.Err(), context.DeadlineExceeded) {
-				return "", &runnerExecutionError{err: ctx.Err(), output: output, stopReason: "interrupted", lastOutputAt: lastOutputAt}
+			if errors.Is(parent.Err(), context.DeadlineExceeded) {
+				return "", &runnerExecutionError{err: context.DeadlineExceeded, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
+			}
+			if errors.Is(parent.Err(), context.Canceled) {
+				return "", &runnerExecutionError{err: context.Canceled, output: output, stopReason: "interrupted", lastOutputAt: lastOutputAt}
 			}
 			return "", &runnerExecutionError{err: errRunnerTimeout, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
 		}
