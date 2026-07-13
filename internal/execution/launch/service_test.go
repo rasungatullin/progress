@@ -512,6 +512,25 @@ func TestRunOpenCodeRunnerUsesBaseTimeoutAfterPartialFragment(t *testing.T) {
 	}
 }
 
+func TestRunnerWatchdogPolicyUsesBaseTimeoutForStructuredEventWithTrailingFragment(t *testing.T) {
+	writer := &runnerOutputWriter{
+		activity:         make(chan struct{}, 1),
+		structuredEvents: true,
+	}
+	_, err := writer.Write([]byte("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\"}}\nостаток"))
+	if err != nil {
+		t.Fatalf("write runner output: %v", err)
+	}
+	state := writer.stateSnapshot()
+	policy := runnerWatchdogPolicy(time.Second, 10*time.Second, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, time.Now())
+	if policy.structured {
+		t.Fatal("trailing fragment must return watchdog to the base timeout")
+	}
+	if policy.timeout != time.Second {
+		t.Fatalf("expected base timeout, got %s", policy.timeout)
+	}
+}
+
 func TestRunRunnerCommandReportsStructuredOutputInsideOpenCodeEvent(t *testing.T) {
 	t.Parallel()
 
