@@ -1729,6 +1729,11 @@ func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.St
 // вернуть в review_responses.remark_id. Проектное имя используется только
 // когда индекс однозначно разрешает его в это же каноническое замечание.
 func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkIndex) string {
+	for _, entry := range index.responseIDs {
+		if sameReviewRemark(entry.remark, remark) {
+			return entry.id
+		}
+	}
 	projectID := reviewRemarkProjectID(remark.Body)
 	if projectID != "" && !index.hasAmbiguous(projectID) {
 		if resolved, ok := index.resolve(projectID); ok && sameReviewRemark(resolved, remark) {
@@ -1778,7 +1783,11 @@ func reviewRemarkResponseIDAvailable(id string, remark integration.ReviewRemark,
 			return false
 		}
 	}
-	for _, candidate := range index.stableMatches(id) {
+	stableMatches := index.stableMatches(id)
+	if len(stableMatches) == 0 {
+		stableMatches = index.stableReserved[id]
+	}
+	for _, candidate := range stableMatches {
 		if !sameReviewRemark(candidate, remark) {
 			return false
 		}

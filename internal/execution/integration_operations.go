@@ -1649,16 +1649,24 @@ func reviewRemarkProjectID(body string) string {
 }
 
 type reviewRemarkIndex struct {
-	external map[string][]integration.ReviewRemark
-	project  map[string][]integration.ReviewRemark
-	stable   map[string][]integration.ReviewRemark
+	external       map[string][]integration.ReviewRemark
+	project        map[string][]integration.ReviewRemark
+	stable         map[string][]integration.ReviewRemark
+	stableReserved map[string][]integration.ReviewRemark
+	responseIDs    []reviewRemarkResponseIDEntry
+}
+
+type reviewRemarkResponseIDEntry struct {
+	remark integration.ReviewRemark
+	id     string
 }
 
 func newReviewRemarkIndex(remarks []integration.ReviewRemark) reviewRemarkIndex {
 	index := reviewRemarkIndex{
-		external: make(map[string][]integration.ReviewRemark),
-		project:  make(map[string][]integration.ReviewRemark),
-		stable:   make(map[string][]integration.ReviewRemark),
+		external:       make(map[string][]integration.ReviewRemark),
+		project:        make(map[string][]integration.ReviewRemark),
+		stable:         make(map[string][]integration.ReviewRemark),
+		stableReserved: make(map[string][]integration.ReviewRemark),
 	}
 	for _, remark := range remarks {
 		if id := strings.TrimSpace(remark.ExternalID); id != "" {
@@ -1668,20 +1676,22 @@ func newReviewRemarkIndex(remarks []integration.ReviewRemark) reviewRemarkIndex 
 			index.project[id] = append(index.project[id], remark)
 		}
 		if id := strings.TrimSpace(remark.ExternalID); id != "" {
-			index.stable["remark-ref:"+id] = append(index.stable["remark-ref:"+id], remark)
+			index.stableReserved["remark-ref:"+id] = append(index.stableReserved["remark-ref:"+id], remark)
 		}
 	}
-	// Зарегистрировать только те суффиксированные устойчивые идентификаторы,
+	// Сначала используем базовые ссылки как рабочие резервирования для
+	// выбора идентификаторов, затем оставляем только те устойчивые ссылки,
 	// которые действительно выдаёт canonicalReviewRemarks.
+	index.stable = index.stableReserved
+	issuedStable := make(map[string][]integration.ReviewRemark)
 	for _, remark := range remarks {
 		id := reviewRemarkResponseID(remark, index)
-		if strings.HasPrefix(id, "remark-ref:") {
-			matches := index.stable[id]
-			if len(matches) == 0 {
-				index.stable[id] = []integration.ReviewRemark{remark}
-			}
+		index.responseIDs = append(index.responseIDs, reviewRemarkResponseIDEntry{remark: remark, id: id})
+		if id != "" && strings.HasPrefix(id, "remark-ref:") {
+			issuedStable[id] = append(issuedStable[id], remark)
 		}
 	}
+	index.stable = issuedStable
 	return index
 }
 
@@ -1719,6 +1729,9 @@ func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
 	externalMatches := index.external[id]
 	projectMatches := index.project[id]
 	stableMatches := index.stableMatches(id)
+	if len(stableMatches) == 0 {
+		stableMatches = index.stableReserved[id]
+	}
 	if len(stableMatches) > 1 {
 		return true
 	}
@@ -1826,6 +1839,10 @@ func validateReviewResponseTargets(responses []StructuredResponse, remarks []int
 		id := strings.TrimSpace(response.RemarkID)
 		if aliasConflicts[id] {
 			failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical alias is conflicting or ambiguous; external publication is not allowed", responseIndex, id))
+			continue
+		}
+		if index.hasAmbiguous(id) {
+			failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical remark is ambiguous; external publication is not allowed", responseIndex, id))
 			continue
 		}
 		remark, ok := index.resolve(id)

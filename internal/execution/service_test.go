@@ -2364,6 +2364,26 @@ func TestReviewResponsesRejectNeverIssuedStableRemarkID(t *testing.T) {
 	}
 }
 
+func TestReviewResponsesRejectNeverIssuedBaseStableRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{
+		ExternalID: "comment-1",
+		Body:       "Идентификатор: remark-4\nПострочное замечание.",
+		ReplyToID:  "thread-4",
+	}}
+	responses := []model.StructuredResponse{{
+		RemarkID: "remark-ref:comment-1",
+		Type:     "inline",
+		ThreadID: "thread-4",
+		Status:   "resolved",
+		Summary:  "Не публиковать.",
+	}}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil {
+		t.Fatal("base stable identifier not issued by canonical remarks must be rejected")
+	}
+}
+
 func TestReviewResponsesRejectAliasForAmbiguousAliasTarget(t *testing.T) {
 	t.Parallel()
 
