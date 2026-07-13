@@ -103,7 +103,14 @@ type Runner struct {
 }
 
 func githubReviewThreadsQuery(includeThreads, includeTimeline bool) string {
-	query := `query($owner: String!, $name: String!, $number: Int!, $threadsAfter: String, $timelineAfter: String) {
+	variables := "$owner: String!, $name: String!, $number: Int!"
+	if includeThreads {
+		variables += ", $threadsAfter: String"
+	}
+	if includeTimeline {
+		variables += ", $timelineAfter: String"
+	}
+	query := "query(" + variables + `) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {`
 	if includeThreads {

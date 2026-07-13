@@ -30,6 +30,23 @@ func TestRunnerRunAuthStatusReturnsNotInstalled(t *testing.T) {
 	assertGitHubErrorCode(t, err, ErrorCodeNotInstalled)
 }
 
+func TestGitHubReviewThreadsQueryDeclaresOnlyUsedCursors(t *testing.T) {
+	t.Parallel()
+
+	query := githubReviewThreadsQuery(false, true)
+	if strings.Contains(query, "$threadsAfter") {
+		t.Fatalf("query without review threads must not declare threadsAfter: %s", query)
+	}
+	if !strings.Contains(query, "$timelineAfter") {
+		t.Fatalf("query with timeline must declare timelineAfter: %s", query)
+	}
+
+	query = githubReviewThreadsQuery(true, false)
+	if strings.Contains(query, "$timelineAfter") {
+		t.Fatalf("query without timeline must not declare timelineAfter: %s", query)
+	}
+}
+
 func TestRunnerRunAuthStatusSuccess(t *testing.T) {
 	t.Parallel()
 
