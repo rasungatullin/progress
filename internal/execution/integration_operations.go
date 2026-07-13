@@ -1679,8 +1679,17 @@ func (index reviewRemarkIndex) resolve(id string) (integration.ReviewRemark, boo
 	externalMatches := index.external[id]
 	projectMatches := index.project[id]
 	stableMatches := index.stable[id]
-	if len(stableMatches) == 1 && len(externalMatches) == 0 && len(projectMatches) == 0 {
-		return stableMatches[0], true
+	if len(stableMatches) == 1 && len(projectMatches) == 0 {
+		if len(externalMatches) == 0 || (len(externalMatches) == 1 && sameReviewRemark(stableMatches[0], externalMatches[0])) {
+			return stableMatches[0], true
+		}
+		return integration.ReviewRemark{}, false
+	}
+	if len(stableMatches) > 1 {
+		return integration.ReviewRemark{}, false
+	}
+	if len(stableMatches) == 1 && len(projectMatches) > 0 {
+		return integration.ReviewRemark{}, false
 	}
 	if len(externalMatches) == 1 {
 		if len(projectMatches) == 0 || sameReviewRemark(externalMatches[0], projectMatches[0]) {
@@ -1703,6 +1712,9 @@ func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
 		return true
 	}
 	if len(externalMatches) > 1 || len(projectMatches) > 1 {
+		return true
+	}
+	if len(stableMatches) == 1 && len(externalMatches) == 1 && !sameReviewRemark(stableMatches[0], externalMatches[0]) {
 		return true
 	}
 	return len(externalMatches) == 1 && len(projectMatches) == 1 && !sameReviewRemark(externalMatches[0], projectMatches[0])

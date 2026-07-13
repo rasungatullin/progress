@@ -1739,7 +1739,13 @@ func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkI
 	// При коллизии проектных имён передаём отдельную ссылку на внешнее
 	// замечание. Она сохраняет возможность безопасного разрешения ответа.
 	if externalID := strings.TrimSpace(remark.ExternalID); externalID != "" {
-		return "remark-ref:" + externalID
+		stableID := "remark-ref:" + externalID
+		if len(index.external[stableID]) > 0 {
+			if resolved, ok := index.resolve(externalID); ok && sameReviewRemark(resolved, remark) {
+				return externalID
+			}
+		}
+		return stableID
 	}
 	return ""
 }

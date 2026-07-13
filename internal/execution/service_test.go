@@ -2281,6 +2281,43 @@ func TestCanonicalReviewRemarksAvoidExternalProjectIDCollision(t *testing.T) {
 	}
 }
 
+func TestCanonicalReviewRemarksAvoidStableExternalIDCollision(t *testing.T) {
+	t.Parallel()
+
+	canonical := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Обычное замечание без проектного идентификатора."},
+		{ExternalID: "remark-ref:comment-1", Body: "Другое замечание без проектного идентификатора."},
+	}
+	remarks := canonicalReviewRemarks(canonical)
+	if len(remarks) != 2 || remarks[0].ID != "comment-1" || remarks[1].ID != "remark-ref:remark-ref:comment-1" {
+		t.Fatalf("canonical response identifiers must avoid stable/external collisions: %#v", remarks)
+	}
+	for i, remark := range remarks {
+		resolved, ok := newReviewRemarkIndex(canonical).resolve(remark.ID)
+		if !ok || !sameReviewRemark(resolved, canonical[i]) {
+			t.Fatalf("canonical response identifier must resolve to its remark: %#v", remark)
+		}
+	}
+}
+
+func TestReviewResponsesRejectStableExternalIDCollision(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Первое замечание."},
+		{ExternalID: "remark-ref:comment-1", Body: "Второе замечание."},
+	}
+	responses := []model.StructuredResponse{{
+		RemarkID: "remark-ref:comment-1",
+		Type:     "comment",
+		Status:   "resolved",
+		Summary:  "Не публиковать.",
+	}}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("stable/external identifier collision must be rejected diagnostically: %v", err)
+	}
+}
+
 func TestReviewResponsesRejectAmbiguousOrUnknownProjectRemarkID(t *testing.T) {
 	t.Parallel()
 
