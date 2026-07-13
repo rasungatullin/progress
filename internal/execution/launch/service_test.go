@@ -212,6 +212,33 @@ func TestRunOpenCodeCommandKeepsStreamingOutputActive(t *testing.T) {
 	}
 }
 
+func TestRunOpenCodeRunnerKeepsStreamingOutputActive(t *testing.T) {
+	binDir := t.TempDir()
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	if err := os.Symlink(opencodePath, filepath.Join(binDir, RunnerOpenCode)); err != nil {
+		t.Fatalf("install opencode stand-in: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, err := runRunner(context.Background(), model.Invocation{Launch: model.LaunchSpec{
+		Runner:          RunnerOpenCode,
+		Directory:       t.TempDir(),
+		Model:           "openai/gpt-5.4",
+		Prompt:          "stream",
+		Timeout:         "1s",
+		NoOutputTimeout: "100ms",
+	}})
+	if err != nil {
+		t.Fatalf("opencode runner streaming output must keep runner active: %v", err)
+	}
+	if !strings.Contains(output, "1\n2\n3\n4\n5\n6\n") {
+		t.Fatalf("unexpected opencode runner output: %q", output)
+	}
+}
+
 func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	t.Parallel()
 
@@ -230,6 +257,16 @@ func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
 		}
+	}
+}
+
+func TestRunRunnerCommandNoOutputTimeoutReportsStructuredOutputState(t *testing.T) {
+	t.Parallel()
+
+	output := "partial\n" + structuredOutputStart + "\n{\"summary\":\"Done.\"}\n" + structuredOutputEnd
+	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second)
+	if !strings.Contains(err.Error(), "structured output=present") {
+		t.Fatalf("timeout diagnostics must report present structured output: %v", err)
 	}
 }
 

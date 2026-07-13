@@ -51,14 +51,15 @@ var (
 )
 
 type runnerExecutionError struct {
-	err                 error
-	output              string
-	stopReason          string
-	lastOutputAt        time.Time
-	lastStructuredEvent string
-	structuredEventAt   time.Time
-	idleDuration        time.Duration
-	timeoutRule         string
+	err                   error
+	output                string
+	stopReason            string
+	lastOutputAt          time.Time
+	lastStructuredEvent   string
+	structuredEventAt     time.Time
+	structuredOutputState string
+	idleDuration          time.Duration
+	timeoutRule           string
 }
 
 func (e *runnerExecutionError) Error() string {
@@ -68,11 +69,16 @@ func (e *runnerExecutionError) Error() string {
 		if lastEvent == "" {
 			lastEvent = "отсутствует"
 		}
+		outputState := e.structuredOutputState
+		if outputState == "" {
+			outputState = structuredOutputState(e.output)
+		}
 		diagnostic = fmt.Sprintf(
-			"\nlast fragment at=%s last structured event=%s at=%s structured output=absent idle=%s rule=%s",
+			"\nlast fragment at=%s last structured event=%s at=%s structured output=%s idle=%s rule=%s",
 			formatRunnerTime(e.lastOutputAt),
 			lastEvent,
 			formatRunnerTime(e.structuredEventAt),
+			outputState,
 			e.idleDuration.Round(time.Millisecond),
 			e.timeoutRule,
 		)
@@ -1625,14 +1631,27 @@ func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runn
 		idleDuration = time.Since(lastOutputAt)
 	}
 	return &runnerExecutionError{
-		err:                 errRunnerNoOutputTimeout,
-		output:              output,
-		stopReason:          "no-output-timeout",
-		lastOutputAt:        lastOutputAt,
-		lastStructuredEvent: lastEvent,
-		structuredEventAt:   eventAt,
-		idleDuration:        idleDuration,
-		timeoutRule:         runnerTimeoutRule(lastEvent, lastOutputAt, timeout, len(structuredRule) > 0 && structuredRule[0]),
+		err:                   errRunnerNoOutputTimeout,
+		output:                output,
+		stopReason:            "no-output-timeout",
+		lastOutputAt:          lastOutputAt,
+		lastStructuredEvent:   lastEvent,
+		structuredEventAt:     eventAt,
+		structuredOutputState: structuredOutputState(output),
+		idleDuration:          idleDuration,
+		timeoutRule:           runnerTimeoutRule(lastEvent, lastOutputAt, timeout, len(structuredRule) > 0 && structuredRule[0]),
+	}
+}
+
+func structuredOutputState(output string) string {
+	_, _, _, state, _ := parseStructuredOutput(output)
+	switch state {
+	case trailingStructuredBlockValid:
+		return "present"
+	case trailingStructuredBlockInvalid:
+		return "invalid"
+	default:
+		return "absent"
 	}
 }
 
