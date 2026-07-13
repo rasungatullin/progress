@@ -119,7 +119,7 @@ func githubReviewThreadsQuery(includeThreads, includeTimeline bool) string {
         nodes {
           id isResolved isOutdated path line
           comments(first: 100) {
-            nodes { id databaseId body url path line author { login url } createdAt updatedAt }
+            nodes { id databaseId body url path line author { login url } createdAt updatedAt pullRequestReview { databaseId } }
           }
         }
         pageInfo { hasNextPage endCursor }
@@ -128,7 +128,11 @@ func githubReviewThreadsQuery(includeThreads, includeTimeline bool) string {
 	if includeTimeline {
 		query += `
       timelineItems(first: 100, after: $timelineAfter) {
-        nodes { __typename ... on IssueComment { databaseId } }
+        nodes {
+          __typename
+          ... on IssueComment { databaseId }
+          ... on PullRequestReview { databaseId }
+        }
         pageInfo { hasNextPage endCursor }
       }`
 	}

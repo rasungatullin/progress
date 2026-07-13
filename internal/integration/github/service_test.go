@@ -159,6 +159,19 @@ func TestAssignGitHubReviewRemarkOrderUsesTimelineOrder(t *testing.T) {
 	}
 }
 
+func TestAssignGitHubReviewRemarkOrderUsesReviewOrderForInlineRemark(t *testing.T) {
+	t.Parallel()
+
+	remarks := []model.ReviewRemark{{ExternalID: "comment-1", Type: "inline", ReplyToID: "thread-1"}}
+	assignGitHubReviewRemarkOrder(remarks, []ghPRTimelineItem{
+		{Typename: "IssueComment", DatabaseID: 100},
+		{Typename: "PullRequestReview", DatabaseID: 77},
+	}, map[string]int64{"comment-1": 77})
+	if remarks[0].Order != 2 {
+		t.Fatalf("unexpected review timeline order: %#v", remarks)
+	}
+}
+
 func TestServiceAuthStatusMapsGenericRunnerError(t *testing.T) {
 	t.Parallel()
 

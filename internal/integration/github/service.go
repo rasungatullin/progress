@@ -151,15 +151,18 @@ type ghPRReviewComments struct {
 }
 
 type ghPRReviewComment struct {
-	ID         string       `json:"id"`
-	DatabaseID int64        `json:"databaseId"`
-	Body       string       `json:"body"`
-	URL        string       `json:"url"`
-	Path       string       `json:"path"`
-	Line       int          `json:"line"`
-	Author     *ghIssueUser `json:"author"`
-	CreatedAt  string       `json:"createdAt"`
-	UpdatedAt  string       `json:"updatedAt"`
+	ID                string `json:"id"`
+	DatabaseID        int64  `json:"databaseId"`
+	PullRequestReview struct {
+		DatabaseID int64 `json:"databaseId"`
+	} `json:"pullRequestReview"`
+	Body      string       `json:"body"`
+	URL       string       `json:"url"`
+	Path      string       `json:"path"`
+	Line      int          `json:"line"`
+	Author    *ghIssueUser `json:"author"`
+	CreatedAt string       `json:"createdAt"`
+	UpdatedAt string       `json:"updatedAt"`
 }
 
 type ghPRReviewCommentCreateResponse struct {
@@ -494,7 +497,7 @@ func (s *Service) executePRComments(ctx context.Context, response model.Response
 	}
 	response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarksFromThreads(repository, number, threadNodes)...)
 	if rawThreads.Data.Repository.PullRequest != nil {
-		assignGitHubReviewRemarkOrder(response.ReviewRemarks, rawThreads.Data.Repository.PullRequest.TimelineItems.Nodes)
+		assignGitHubReviewRemarkOrder(response.ReviewRemarks, rawThreads.Data.Repository.PullRequest.TimelineItems.Nodes, reviewRemarkReviewIDs(threadNodes))
 	}
 	response.Metadata = map[string]string{
 		"repository": repository,
@@ -1994,7 +1997,7 @@ func reviewRemarkFromThreadReply(threadID string, comment ghPRReviewComment) mod
 	}
 }
 
-func assignGitHubReviewRemarkOrder(remarks []model.ReviewRemark, timeline []ghPRTimelineItem) {
+func assignGitHubReviewRemarkOrder(remarks []model.ReviewRemark, timeline []ghPRTimelineItem, reviewIDs ...map[string]int64) {
 	orders := make(map[string]int64, len(timeline))
 	for index, item := range timeline {
 		order := int64(index + 1)
@@ -2004,17 +2007,39 @@ func assignGitHubReviewRemarkOrder(remarks []model.ReviewRemark, timeline []ghPR
 		if item.Typename == "PullRequestReviewThread" && strings.TrimSpace(item.ID) != "" {
 			orders[strings.TrimSpace(item.ID)] = order
 		}
+		if item.Typename == "PullRequestReview" && item.DatabaseID != 0 {
+			orders["review:"+strconv.FormatInt(item.DatabaseID, 10)] = order
+		}
+	}
+	commentReviewIDs := map[string]int64{}
+	if len(reviewIDs) > 0 {
+		commentReviewIDs = reviewIDs[0]
 	}
 	for index := range remarks {
 		key := remarks[index].ExternalID
 		if remarks[index].Type == "inline" {
 			// Review comments are nested in a thread; the timeline orders the thread.
 			key = remarks[index].ReplyToID
+			if reviewID := commentReviewIDs[remarks[index].ExternalID]; reviewID != 0 {
+				key = "review:" + strconv.FormatInt(reviewID, 10)
+			}
 		}
 		if order, ok := orders[key]; ok {
 			remarks[index].Order = order
 		}
 	}
+}
+
+func reviewRemarkReviewIDs(threads []ghPRReviewThread) map[string]int64 {
+	ids := make(map[string]int64)
+	for _, thread := range threads {
+		for _, comment := range thread.Comments.Nodes {
+			if comment.PullRequestReview.DatabaseID != 0 && strings.TrimSpace(comment.ID) != "" {
+				ids[strings.TrimSpace(comment.ID)] = comment.PullRequestReview.DatabaseID
+			}
+		}
+	}
+	return ids
 }
 
 func responseWithGitHubFailure(response model.Response, result CommandResult, err error, diagnostic string) (model.Response, error) {

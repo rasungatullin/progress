@@ -114,6 +114,7 @@ func processingStateSignature(cycle TaskProcessingCycle) string {
 		HasUnresolvedRemarks bool
 		ReviewPassed         bool
 		ReviewPassedKnown    bool
+		ReviewRemarks        []string
 	}{
 		Action:               cycle.Action,
 		IssueLabels:          append([]string(nil), cycle.Issue.Labels...),
@@ -129,6 +130,20 @@ func processingStateSignature(cycle TaskProcessingCycle) string {
 	if cycle.ReviewPassed != nil {
 		state.ReviewPassedKnown = true
 		state.ReviewPassed = *cycle.ReviewPassed
+	}
+	if cycle.MergeRequestExternalState != nil {
+		remarks := make([]string, 0, len(cycle.MergeRequestExternalState.ReviewRemarks))
+		for _, remark := range cycle.MergeRequestExternalState.ReviewRemarks {
+			remarks = append(remarks, strings.Join([]string{
+				strings.TrimSpace(remark.System),
+				strings.TrimSpace(remark.ExternalID),
+				strings.TrimSpace(remark.ReplyToID),
+				strings.TrimSpace(remark.State),
+				strings.TrimSpace(remark.Body),
+			}, "\x00"))
+		}
+		sort.Strings(remarks)
+		state.ReviewRemarks = remarks
 	}
 	encoded, _ := json.Marshal(state)
 	return string(encoded)
