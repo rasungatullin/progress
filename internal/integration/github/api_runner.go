@@ -574,7 +574,14 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 	for {
 		var raw json.RawMessage
 		var err error
-		result, err = r.graphql(ctx, config, query, map[string]any{"owner": owner, "name": name, "number": number, "threadsAfter": threadsAfter, "timelineAfter": timelineAfter}, &raw)
+		variables := map[string]any{"owner": owner, "name": name, "number": number}
+		if !threadsDone {
+			variables["threadsAfter"] = threadsAfter
+		}
+		if !timelineDone {
+			variables["timelineAfter"] = timelineAfter
+		}
+		result, err = r.graphql(ctx, config, query, variables, &raw)
 		if err != nil {
 			return result, apiResolvedConfig(config), err
 		}
@@ -603,13 +610,19 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 		// Сохраняем последний курсор завершённого соединения. Иначе следующий
 		// запрос при продолжающейся пагинации второго соединения снова читает
 		// первую страницу первого соединения.
-		if strings.TrimSpace(threadsInfo.EndCursor) != "" {
+		if !threadsDone && strings.TrimSpace(threadsInfo.EndCursor) != "" {
 			cursor := threadsInfo.EndCursor
 			threadsAfter = &cursor
 		}
-		if strings.TrimSpace(pageInfo.EndCursor) != "" {
+		if !timelineDone && strings.TrimSpace(pageInfo.EndCursor) != "" {
 			cursor := pageInfo.EndCursor
 			timelineAfter = &cursor
+		}
+		if threadsDone {
+			threadsAfter = nil
+		}
+		if timelineDone {
+			timelineAfter = nil
 		}
 		if threadsDone && timelineDone {
 			break

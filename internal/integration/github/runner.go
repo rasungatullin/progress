@@ -498,10 +498,10 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
 	var result CommandResult
 	for {
 		variables := []string{"-f", "query=" + query, "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)}
-		if threadsAfter != nil {
+		if !threadsDone && threadsAfter != nil {
 			variables = append(variables, "-f", "threadsAfter="+*threadsAfter)
 		}
-		if timelineAfter != nil {
+		if !timelineDone && timelineAfter != nil {
 			variables = append(variables, "-f", "timelineAfter="+*timelineAfter)
 		}
 		result, config, err = r.runCommandWithResolvedConfig(ctx, config, append([]string{"api", "graphql"}, variables...))
@@ -533,15 +533,21 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
 		// Сохраняем последний курсор завершённого соединения. Иначе следующий
 		// запрос при продолжающейся пагинации второго соединения снова читает
 		// первую страницу первого соединения.
-		if strings.TrimSpace(threadsInfo.EndCursor) != "" {
+		if !threadsDone && strings.TrimSpace(threadsInfo.EndCursor) != "" {
 			cursor := threadsInfo.EndCursor
 			threadsAfter = &cursor
 		}
-		if strings.TrimSpace(timelineInfo.EndCursor) != "" {
+		if !timelineDone && strings.TrimSpace(timelineInfo.EndCursor) != "" {
 			cursor := timelineInfo.EndCursor
 			timelineAfter = &cursor
 		}
-		if threadsAfter == nil && timelineAfter == nil {
+		if threadsDone {
+			threadsAfter = nil
+		}
+		if timelineDone {
+			timelineAfter = nil
+		}
+		if threadsDone && timelineDone {
 			break
 		}
 	}
