@@ -837,11 +837,13 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 				return "", nil
 			case "rev-parse HEAD":
 				return "abc123\n", nil
+			case "rev-parse --verify --quiet refs/remotes/origin/feature/test":
+				return "", errors.New("missing remote-tracking ref")
 			case "ls-remote origin refs/heads/feature/test":
 				return "", nil
 			case "push -u origin abc123:refs/heads/feature/test":
 				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
-			case "update-ref refs/remotes/origin/feature/test abc123":
+			case "update-ref refs/remotes/origin/feature/test abc123 ":
 				return "", nil
 			case "branch --set-upstream-to=origin/feature/test feature/test":
 				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
@@ -871,7 +873,8 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"rev-parse", "HEAD"},
 		{"ls-remote", "origin", "refs/heads/feature/test"},
 		{"push", "-u", "origin", "abc123:refs/heads/feature/test"},
-		{"update-ref", "refs/remotes/origin/feature/test", "abc123"},
+		{"rev-parse", "--verify", "--quiet", "refs/remotes/origin/feature/test"},
+		{"update-ref", "refs/remotes/origin/feature/test", "abc123", ""},
 		{"branch", "--set-upstream-to=origin/feature/test", "feature/test"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
@@ -1051,12 +1054,14 @@ func TestLaunchCommitPushRebindsMismatchedUpstream(t *testing.T) {
 			return "origin/main\n", nil
 		case "rev-parse HEAD":
 			return "abc123\n", nil
+		case "rev-parse --verify --quiet refs/remotes/origin/feature/test":
+			return "", errors.New("missing remote-tracking ref")
 		case "ls-remote origin refs/heads/feature/test":
 			return "", nil
 		case "push -u origin abc123:refs/heads/feature/test":
 			pushArgs = append([]string(nil), args...)
 			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
-		case "update-ref refs/remotes/origin/feature/test abc123":
+		case "update-ref refs/remotes/origin/feature/test abc123 ":
 			return "", nil
 		case "branch --set-upstream-to=origin/feature/test feature/test":
 			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
@@ -1774,6 +1779,30 @@ func TestPushWithRetryRepeatsNetworkFailureWithoutCreatingCommit(t *testing.T) {
 	}
 	if !reflect.DeepEqual(retryArgs, []string{"push", "origin", "abc123:refs/heads/feature/test"}) {
 		t.Fatalf("retry must push the expected head: %#v", retryArgs)
+	}
+}
+
+func TestUpdateGitRemoteTrackingRefUsesCompareAndSwap(t *testing.T) {
+	t.Parallel()
+
+	var updateArgs []string
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse --verify --quiet refs/remotes/origin/feature/test":
+			return "def456\n", nil
+		case "update-ref refs/remotes/origin/feature/test abc123 def456":
+			updateArgs = append([]string(nil), args...)
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	if err := service.updateGitRemoteTrackingRef(context.Background(), "/repo", nil, "origin", "feature/test", "abc123"); err != nil {
+		t.Fatalf("update remote-tracking ref: %v", err)
+	}
+	if !reflect.DeepEqual(updateArgs, []string{"update-ref", "refs/remotes/origin/feature/test", "abc123", "def456"}) {
+		t.Fatalf("update-ref must use the observed old head: %#v", updateArgs)
 	}
 }
 

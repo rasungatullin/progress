@@ -242,8 +242,12 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 	if in.Launch.CommitPush {
 		result, err := s.commitAndPush(launchCtx, commitPushInputFromLaunch(in, allocation, workplace, structuredOutput))
 		if err != nil {
+			status := "failed"
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = "timeout"
+			}
 			launchResult := model.LaunchResult{
-				Status:              "failed",
+				Status:              status,
 				Summary:             strings.TrimSpace(plainRunnerOutput),
 				RawOutput:           runnerOutput,
 				RawOutputPath:       rawOutputPath,
@@ -1057,7 +1061,7 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 		return gitResult{}, err
 	}
 	if pushUsesUpstreamSetup(pushArgs) {
-		if _, err := s.runGitOutputWithEnv(ctx, input.Directory, pushEnv, "update-ref", "refs/remotes/"+remote+"/"+branch, expectedHead); err != nil {
+		if err := s.updateGitRemoteTrackingRef(ctx, input.Directory, pushEnv, remote, branch, expectedHead); err != nil {
 			return gitResult{}, fmt.Errorf("update git remote-tracking ref failed: %w", err)
 		}
 		if _, err := s.runGitOutputWithEnv(ctx, input.Directory, pushEnv, "branch", "--set-upstream-to="+remote+"/"+branch, branch); err != nil {
@@ -1066,6 +1070,21 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 	}
 
 	return gitResult{status: "committed+pushed", branch: branch, pushDiagnostic: pushDiagnostic}, nil
+}
+
+func (s *Service) updateGitRemoteTrackingRef(ctx context.Context, dir string, env []string, remote, branch, expectedHead string) error {
+	ref := "refs/remotes/" + remote + "/" + branch
+	oldHead, err := s.runGitOutputWithEnv(ctx, dir, env, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil {
+		oldHead = ""
+	} else {
+		oldHead = strings.TrimSpace(oldHead)
+		if oldHead != "" && !isGitPushSHA(oldHead) {
+			return fmt.Errorf("invalid current remote-tracking head %q", oldHead)
+		}
+	}
+	_, err = s.runGitOutputWithEnv(ctx, dir, env, "update-ref", ref, expectedHead, oldHead)
+	return err
 }
 
 func pushUsesUpstreamSetup(args []string) bool {
@@ -1892,7 +1911,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					return "", &runnerExecutionError{err: errRunnerTimeout, output: output, stopReason: "timeout", lastOutputAt: lastOutputAt}
 				}
-				if errors.Is(parent.Err(), context.Canceled) || errors.Is(parent.Err(), context.DeadlineExceeded) {
+				if errors.Is(parent.Err(), context.Canceled) {
 					return "", &runnerExecutionError{err: ctx.Err(), output: output, stopReason: "interrupted", lastOutputAt: lastOutputAt}
 				}
 				return "", &runnerExecutionError{err: fmt.Errorf("launch runner failed: %w", err), output: output, stopReason: "process-failed", lastOutputAt: lastOutputAt}
