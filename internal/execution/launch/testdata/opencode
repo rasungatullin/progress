@@ -1,0 +1,21 @@
+#!/bin/sh
+
+if [ "${1:-}" != "run" ]; then
+	exit 3
+fi
+
+case "${6:-}" in
+stream)
+	printf 'tool call\n' >&2
+	for value in 1 2 3 4 5 6; do
+		printf '%s\n' "$value"
+		sleep .05
+	done
+	;;
+silent)
+	sleep 1
+	;;
+*)
+	exit 4
+	;;
+esac

@@ -194,9 +194,12 @@ func TestRunRunnerCommandKeepsStreamingOutputActive(t *testing.T) {
 }
 
 func TestRunOpenCodeCommandKeepsStreamingOutputActive(t *testing.T) {
-	t.Parallel()
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
 
-	output, err := runRunnerCommand(context.Background(), exec.Command("sh", "-c", "for value in 1 2 3 4 5 6; do printf '%s\\n' \"$value\"; sleep .05; done"), model.LaunchSpec{
+	output, err := runRunnerCommand(context.Background(), exec.Command(opencodePath, "run", "--dir", t.TempDir(), "--model", "openai/gpt-5.4", "stream"), model.LaunchSpec{
 		Runner:          RunnerOpenCode,
 		Timeout:         "1s",
 		NoOutputTimeout: "100ms",
@@ -204,7 +207,7 @@ func TestRunOpenCodeCommandKeepsStreamingOutputActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opencode streaming output must keep runner active: %v", err)
 	}
-	if output != "1\n2\n3\n4\n5\n6\n" {
+	if output != "tool call\n1\n2\n3\n4\n5\n6\n" {
 		t.Fatalf("unexpected streaming output: %q", output)
 	}
 }
