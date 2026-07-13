@@ -1709,22 +1709,7 @@ func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.St
 	index := newReviewRemarkIndex(reviewRemarks)
 	remarks := make([]model.StructuredRemark, 0, len(reviewRemarks))
 	for _, remark := range reviewRemarks {
-		projectID := reviewRemarkProjectID(remark.Body)
-		externalID := strings.TrimSpace(remark.ExternalID)
-		id := externalID
-		if projectID != "" && !index.hasAmbiguous(projectID) {
-			id = projectID
-		} else if id != "" {
-			// При конфликте проектного идентификатора возвращается отдельное
-			// устойчивое имя, разрешаемое через ExternalID замечания.
-			id = "remark-ref:" + id
-		}
-		// Проверяем также внешний идентификатор, когда проектный идентификатор
-		// отсутствует: он может совпасть с проектным идентификатором другого
-		// замечания и стать неразрешимым.
-		if projectID == "" && id != "" && index.hasAmbiguous(id) {
-			id = "remark-ref:" + id
-		}
+		id := reviewRemarkResponseID(remark, index)
 		remarks = append(remarks, model.StructuredRemark{
 			ID:         id,
 			ExternalID: strings.TrimSpace(remark.ExternalID),
@@ -1738,6 +1723,25 @@ func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.St
 		})
 	}
 	return remarks
+}
+
+// reviewRemarkResponseID выбирает идентификатор, который исполнитель должен
+// вернуть в review_responses.remark_id. Проектное имя используется только
+// когда индекс однозначно разрешает его в это же каноническое замечание.
+func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkIndex) string {
+	projectID := reviewRemarkProjectID(remark.Body)
+	if projectID != "" && !index.hasAmbiguous(projectID) {
+		if resolved, ok := index.resolve(projectID); ok && sameReviewRemark(resolved, remark) {
+			return projectID
+		}
+	}
+
+	// При коллизии проектных имён передаём отдельную ссылку на внешнее
+	// замечание. Она сохраняет возможность безопасного разрешения ответа.
+	if externalID := strings.TrimSpace(remark.ExternalID); externalID != "" {
+		return "remark-ref:" + externalID
+	}
+	return ""
 }
 
 func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
