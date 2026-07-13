@@ -1584,6 +1584,7 @@ func (w *runnerOutputWriter) recordStructuredEvents(p []byte) {
 			} `json:"item"`
 		}
 		if json.Unmarshal(bytes.TrimSpace(line), &event) != nil || strings.TrimSpace(event.Type) == "" {
+			w.structuredEventAt = time.Time{}
 			continue
 		}
 		name := event.Type
