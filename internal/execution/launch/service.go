@@ -1611,6 +1611,42 @@ func (w *runnerOutputWriter) stateSnapshot() runnerOutputSnapshot {
 	}
 }
 
+// stopIfNoOutputTimeout выполняет последнюю проверку и начало остановки под
+// одной блокировкой с Write. Поэтому новый фрагмент не может попасть между
+// снимком состояния и вызовом cancel.
+func (w *runnerOutputWriter) stopIfNoOutputTimeout(
+	cancel func(),
+	startedOutput bool,
+	startupTimeout, noOutputTimeout, structuredOutputTimeout time.Duration,
+	startedAt time.Time,
+) (runnerOutputSnapshot, runnerWatchdogState, bool, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	state := runnerOutputSnapshot{
+		lastOutputAt:        w.lastOutputAt,
+		lastStructuredEvent: w.lastStructuredEvent,
+		structuredEventAt:   w.structuredEventAt,
+		lastRunnerEvent:     w.lastRunnerEvent,
+		runnerEventAt:       w.runnerEventAt,
+	}
+	lastActivityAt := state.lastOutputAt
+	if state.runnerEventAt.After(lastActivityAt) {
+		lastActivityAt = state.runnerEventAt
+	}
+	startedOutput = startedOutput || !lastActivityAt.IsZero()
+	watchdogTimeout := noOutputTimeout
+	if !startedOutput {
+		watchdogTimeout = startupTimeout
+	}
+	policy := runnerWatchdogPolicy(watchdogTimeout, structuredOutputTimeout, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, startedAt)
+	if policy.remaining > 0 {
+		return state, policy, false, startedOutput
+	}
+	cancel()
+	return state, policy, true, startedOutput
+}
+
 func (w *runnerOutputWriter) snapshot() (string, time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -1711,29 +1747,17 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, startedAt)
 			resetRunnerWatchdogRemaining(watchdog, policy.remaining)
 		case <-watchdog.C:
-			state := writer.stateSnapshot()
-			lastActivityAt := state.lastOutputAt
-			if state.runnerEventAt.After(lastActivityAt) {
-				lastActivityAt = state.runnerEventAt
+			_, policy, stopped, hasOutput := writer.stopIfNoOutputTimeout(cancel, startedOutput, startupTimeout, noOutputTimeout, structuredOutputTimeout, startedAt)
+			startedOutput = hasOutput
+			if !stopped {
+				resetRunnerWatchdogRemaining(watchdog, policy.remaining)
+				continue
 			}
-			startedOutput = startedOutput || !lastActivityAt.IsZero()
 			if !startedOutput {
-				cancel()
 				<-done
 				output, lastOutputAt := writer.snapshot()
 				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout, noOutputTimeout)
 			}
-			policy := runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, state.lastOutputAt, state.structuredEventAt, state.runnerEventAt, startedAt)
-			latest := writer.stateSnapshot()
-			if latest != state {
-				policy = runnerWatchdogPolicy(noOutputTimeout, structuredOutputTimeout, latest.lastOutputAt, latest.structuredEventAt, latest.runnerEventAt, startedAt)
-				state = latest
-			}
-			if policy.remaining > 0 {
-				watchdog.Reset(policy.remaining)
-				continue
-			}
-			cancel()
 			<-done
 			output, lastOutputAt := writer.snapshot()
 			return "", newNoOutputTimeoutError(output, lastOutputAt, writer, policy.timeout, noOutputTimeout, policy.structured)

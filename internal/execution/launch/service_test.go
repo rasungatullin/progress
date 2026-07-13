@@ -550,6 +550,43 @@ func TestRunnerWatchdogPolicyUsesBaseTimeoutAfterUnstructuredLineInSameWrite(t *
 	}
 }
 
+func TestRunnerWatchdogStopsUnderWriterLock(t *testing.T) {
+	writer := &runnerOutputWriter{activity: make(chan struct{}, 1)}
+	writer.lastOutputAt = time.Now().Add(-time.Second)
+
+	writeStarted := make(chan struct{})
+	writeDone := make(chan struct{})
+	cancelCalled := make(chan struct{})
+
+	_, policy, stopped, hasOutput := writer.stopIfNoOutputTimeout(func() {
+		close(cancelCalled)
+		go func() {
+			close(writeStarted)
+			_, _ = writer.Write([]byte("новый фрагмент"))
+			close(writeDone)
+		}()
+		<-writeStarted
+		select {
+		case <-writeDone:
+			t.Fatal("Write completed before cancellation released the writer lock")
+		default:
+		}
+	}, true, time.Second, time.Second, time.Second, time.Now())
+	if !stopped || !hasOutput || policy.remaining > 0 {
+		t.Fatalf("expected an expired watchdog policy: stopped=%t hasOutput=%t policy=%+v", stopped, hasOutput, policy)
+	}
+	select {
+	case <-cancelCalled:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation callback was not called")
+	}
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("pending output was not released after cancellation decision")
+	}
+}
+
 func TestRunRunnerCommandReportsStructuredOutputInsideOpenCodeEvent(t *testing.T) {
 	t.Parallel()
 
