@@ -404,6 +404,35 @@ func TestRunOpenCodeRunnerAllowsPauseAfterCompletedToolUse(t *testing.T) {
 	}
 }
 
+func TestRunOpenCodeRunnerResetsCompletedToolUseTimeoutAfterNextEvent(t *testing.T) {
+	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
+	if err != nil {
+		t.Fatalf("resolve opencode stand-in: %v", err)
+	}
+	spec := model.LaunchSpec{
+		Directory:               t.TempDir(),
+		Runner:                  RunnerOpenCode,
+		Model:                   "openai/gpt-5.4",
+		Timeout:                 "1s",
+		NoOutputTimeout:         "50ms",
+		StructuredOutputTimeout: "300ms",
+	}
+	startedAt := time.Now()
+	cmd := exec.Command(opencodePath, "run", "--format", "json", "--dir", spec.Directory, "--model", spec.Model, "tool-then-stale")
+	_, err = runRunnerCommand(context.Background(), cmd, spec)
+	if !errors.Is(err, errRunnerNoOutputTimeout) {
+		t.Fatalf("expected no-output timeout, got %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 200*time.Millisecond {
+		t.Fatalf("next event kept the completed tool_use timeout active: %s", elapsed)
+	}
+	for _, expected := range []string{"last structured event=text/text", "base timeout=50ms", "applied timeout=50ms", "rule=50ms после последнего фрагмента"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
+		}
+	}
+}
+
 func TestRunOpenCodeRunnerStopsAfterCompletedToolUseDeadline(t *testing.T) {
 	opencodePath, err := filepath.Abs(filepath.Join("testdata", RunnerOpenCode))
 	if err != nil {

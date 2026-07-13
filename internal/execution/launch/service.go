@@ -1543,6 +1543,7 @@ func (w *runnerOutputWriter) recordRunnerEvents(p []byte) {
 		}
 		w.lastRunnerEvent = name
 		w.lastRunnerEventAt = w.lastOutputAt
+		w.runnerEventAt = time.Time{}
 		if event.Type == "tool_use" && event.Part.Type == "tool" && event.Part.State.Status == "completed" {
 			w.runnerEventAt = w.lastOutputAt
 		}
