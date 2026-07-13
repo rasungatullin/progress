@@ -600,13 +600,14 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 		pageInfo := page.Data.Repository.PullRequest.TimelineItems.PageInfo
 		threadsDone = !threadsInfo.HasNextPage || strings.TrimSpace(threadsInfo.EndCursor) == ""
 		timelineDone = !pageInfo.HasNextPage || strings.TrimSpace(pageInfo.EndCursor) == ""
-		threadsAfter = nil
-		timelineAfter = nil
-		if !threadsDone {
+		// Сохраняем последний курсор завершённого соединения. Иначе следующий
+		// запрос при продолжающейся пагинации второго соединения снова читает
+		// первую страницу первого соединения.
+		if strings.TrimSpace(threadsInfo.EndCursor) != "" {
 			cursor := threadsInfo.EndCursor
 			threadsAfter = &cursor
 		}
-		if !timelineDone {
+		if strings.TrimSpace(pageInfo.EndCursor) != "" {
 			cursor := pageInfo.EndCursor
 			timelineAfter = &cursor
 		}

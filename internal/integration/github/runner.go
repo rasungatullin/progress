@@ -530,13 +530,14 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
 		timelineInfo := page.Data.Repository.PullRequest.TimelineItems.PageInfo
 		threadsDone = !threadsInfo.HasNextPage || strings.TrimSpace(threadsInfo.EndCursor) == ""
 		timelineDone = !timelineInfo.HasNextPage || strings.TrimSpace(timelineInfo.EndCursor) == ""
-		threadsAfter = nil
-		timelineAfter = nil
-		if threadsInfo.HasNextPage && strings.TrimSpace(threadsInfo.EndCursor) != "" {
+		// Сохраняем последний курсор завершённого соединения. Иначе следующий
+		// запрос при продолжающейся пагинации второго соединения снова читает
+		// первую страницу первого соединения.
+		if strings.TrimSpace(threadsInfo.EndCursor) != "" {
 			cursor := threadsInfo.EndCursor
 			threadsAfter = &cursor
 		}
-		if timelineInfo.HasNextPage && strings.TrimSpace(timelineInfo.EndCursor) != "" {
+		if strings.TrimSpace(timelineInfo.EndCursor) != "" {
 			cursor := timelineInfo.EndCursor
 			timelineAfter = &cursor
 		}

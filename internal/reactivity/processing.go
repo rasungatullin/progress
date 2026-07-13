@@ -106,19 +106,29 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 
 func processingStateSignature(cycle TaskProcessingCycle) string {
 	state := struct {
-		IssueLabels   []string
-		MergeRequest  *integration.MergeRequest
-		ExternalState *decision.MergeRequestExternalState
-		Consideration *decision.ConsiderationResult
-		Action        string
-		ReviewPassed  *bool
+		IssueLabels          []string
+		Action               string
+		ConsiderationStatus  decision.ConsiderationStatus
+		ExecutionAction      string
+		HasMergeConflict     bool
+		HasUnresolvedRemarks bool
+		ReviewPassed         bool
+		ReviewPassedKnown    bool
 	}{
-		IssueLabels:   cycle.Issue.Labels,
-		MergeRequest:  cycle.MergeRequest,
-		ExternalState: cycle.MergeRequestExternalState,
-		Consideration: cycle.Consideration,
-		Action:        cycle.Action,
-		ReviewPassed:  cycle.ReviewPassed,
+		Action:               cycle.Action,
+		IssueLabels:          append([]string(nil), cycle.Issue.Labels...),
+		HasMergeConflict:     cycle.MergeRequestExternalState != nil && cycle.MergeRequestExternalState.HasMergeConflict,
+		HasUnresolvedRemarks: cycle.MergeRequestExternalState != nil && cycle.MergeRequestExternalState.HasUnresolvedReviewRemarks,
+	}
+	if cycle.Consideration != nil {
+		state.ConsiderationStatus = cycle.Consideration.Status
+		if cycle.Consideration.ExecutionPlan != nil {
+			state.ExecutionAction = cycle.Consideration.ExecutionPlan.Action
+		}
+	}
+	if cycle.ReviewPassed != nil {
+		state.ReviewPassedKnown = true
+		state.ReviewPassed = *cycle.ReviewPassed
 	}
 	encoded, _ := json.Marshal(state)
 	return string(encoded)
