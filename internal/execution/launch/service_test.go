@@ -203,7 +203,7 @@ func TestRunOpenCodeCommandKeepsStreamingOutputActive(t *testing.T) {
 	output, err := runRunnerCommand(context.Background(), exec.Command(opencodePath, "run", "--format", "json", "--dir", t.TempDir(), "--model", "openai/gpt-5.4", "stream"), model.LaunchSpec{
 		Runner:          RunnerOpenCode,
 		Timeout:         "1s",
-		NoOutputTimeout: "100ms",
+		NoOutputTimeout: "250ms",
 	})
 	if err != nil {
 		t.Fatalf("opencode streaming output must keep runner active: %v", err)
@@ -247,7 +247,7 @@ func TestRunOpenCodeRunnerKeepsStreamingOutputActive(t *testing.T) {
 		Model:           "openai/gpt-5.4",
 		Prompt:          "stream",
 		Timeout:         "1s",
-		NoOutputTimeout: "100ms",
+		NoOutputTimeout: "250ms",
 	}})
 	if err != nil {
 		t.Fatalf("opencode runner streaming output must keep runner active: %v", err)
@@ -278,7 +278,7 @@ func TestRunOpenCodeRunnerNormalizesStructuredJSONOutput(t *testing.T) {
 		Model:           "openai/gpt-5.4",
 		Prompt:          "structured",
 		Timeout:         "1s",
-		NoOutputTimeout: "100ms",
+		NoOutputTimeout: "250ms",
 	}})
 	if err != nil {
 		t.Fatalf("run opencode structured output: %v", err)
@@ -378,6 +378,16 @@ func TestRunOpenCodeRunnerReportsInstrumentalEventOnNoOutputTimeout(t *testing.T
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
 		}
+	}
+}
+
+func TestRunRunnerCommandReportsStructuredOutputInsideOpenCodeEvent(t *testing.T) {
+	t.Parallel()
+
+	output := `{"type":"text","sessionID":"session-structured","part":{"type":"text","text":"Выполнение завершено.\n<progress-structured-output>\n{\"summary\":\"Проверка завершена.\"}\n</progress-structured-output>"}}`
+	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second)
+	if !strings.Contains(err.Error(), "structured output=present") {
+		t.Fatalf("timeout diagnostics must detect structured output inside opencode event: %v", err)
 	}
 }
 

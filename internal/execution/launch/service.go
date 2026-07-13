@@ -1716,6 +1716,12 @@ func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runn
 
 func structuredOutputState(output string) string {
 	_, _, _, state, _ := parseStructuredOutput(output)
+	if state == trailingStructuredBlockAbsent {
+		normalized, _ := normalizeOpenCodeJSONOutput(output)
+		if normalized != output {
+			_, _, _, state, _ = parseStructuredOutput(normalized)
+		}
+	}
 	switch state {
 	case trailingStructuredBlockValid:
 		return "present"
