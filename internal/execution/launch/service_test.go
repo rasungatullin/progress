@@ -1850,8 +1850,91 @@ func TestClassifyGitPushErrorDistinguishesServerAccessRejection(t *testing.T) {
 			t.Fatalf("server access rejection %q classified as %q", message, got)
 		}
 	}
-	if got := classifyGitPushError(errors.New("remote rejected")); got != "history-conflict" {
+	if got := classifyGitPushError(errors.New("remote rejected")); got != "uncertain" {
 		t.Fatalf("generic rejection classified as %q", got)
+	}
+}
+
+func TestClassifyGitPushErrorRecognizesConnectionRefused(t *testing.T) {
+	t.Parallel()
+
+	if got := classifyGitPushError(errors.New("ssh: connect to host github.com port 22: Connection refused")); got != "network" {
+		t.Fatalf("connection refusal classified as %q", got)
+	}
+}
+
+func TestPushWithRetryRejectsInvalidInitialHeadWithoutPush(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse HEAD":
+			return "not-a-sha\n", nil
+		case "push origin not-a-sha:refs/heads/feature/test":
+			pushes++
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.attempts != 0 || failure.classification != "uncertain" {
+		t.Fatalf("invalid initial head must fail before push: %v", err)
+	}
+	if pushes != 0 {
+		t.Fatalf("invalid initial head must not be pushed: %d", pushes)
+	}
+}
+
+func TestPushWithRetryStopsWhenInitialHeadCannotBeRead(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse HEAD":
+			return "", errors.New("rev-parse failed")
+		case "push origin abc123:refs/heads/feature/test":
+			pushes++
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.attempts != 0 {
+		t.Fatalf("initial head error must fail before push: %v", err)
+	}
+	if pushes != 0 {
+		t.Fatalf("initial head error must not be pushed: %d", pushes)
+	}
+}
+
+func TestGitPushHeadsIgnoresOutputBeforeExactBranchReference(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			return "WARNING: host key\nnot-a-sha refs/heads/other\nabc123\trefs/heads/feature/test\n", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	localHead, remoteHead, err := service.gitPushHeads(context.Background(), "/repo", "feature/test", nil, "origin")
+	if err != nil {
+		t.Fatalf("read push heads: %v", err)
+	}
+	if localHead != "abc123" || remoteHead != "abc123" {
+		t.Fatalf("unexpected push heads: local=%q remote=%q", localHead, remoteHead)
 	}
 }
 

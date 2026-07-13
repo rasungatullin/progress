@@ -295,6 +295,22 @@ type GitPushConfig struct {
 	AllowForceWithLease     bool   `json:"allow-force-with-lease,omitempty"`
 	MaxAttempts             int    `json:"max-attempts,omitempty"`
 	RetryDelay              string `json:"retry-delay,omitempty"`
+	MaxAttemptsSet          bool   `json:"-"`
+}
+
+func (c *GitPushConfig) UnmarshalJSON(data []byte) error {
+	type gitPushConfig GitPushConfig
+	var decoded gitPushConfig
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*c = GitPushConfig(decoded)
+	_, c.MaxAttemptsSet = fields["max-attempts"]
+	return nil
 }
 
 type RebaseInput struct {

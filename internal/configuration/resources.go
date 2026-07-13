@@ -649,8 +649,8 @@ func validateGitConfig(config *model.GitConfig) error {
 		return fmt.Errorf("git.push must define only one of ssh-identity-file and ssh-identity-private")
 	}
 	if push := config.Push; push != nil {
-		if push.MaxAttempts < 0 {
-			return fmt.Errorf("git.push.max-attempts must not be negative")
+		if push.MaxAttempts < 0 || (push.MaxAttempts == 0 && push.MaxAttemptsSet) {
+			return fmt.Errorf("git.push.max-attempts must be greater than zero")
 		}
 		if value := strings.TrimSpace(push.RetryDelay); value != "" {
 			parsed, err := time.ParseDuration(value)

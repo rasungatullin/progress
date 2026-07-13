@@ -1207,7 +1207,7 @@ func waitGitPushRetry(ctx context.Context, delay time.Duration) error {
 
 func classifyGitPushError(err error) string {
 	message := strings.ToLower(err.Error())
-	network := strings.Contains(message, "connection closed") || strings.Contains(message, "connection reset") || strings.Contains(message, "timed out") || strings.Contains(message, "could not resolve host") || strings.Contains(message, "network is unreachable") || strings.Contains(message, "broken pipe")
+	network := strings.Contains(message, "connection closed") || strings.Contains(message, "connection reset") || strings.Contains(message, "connection refused") || strings.Contains(message, "timed out") || strings.Contains(message, "could not resolve host") || strings.Contains(message, "network is unreachable") || strings.Contains(message, "broken pipe")
 	switch {
 	case strings.Contains(message, "non-fast-forward"), strings.Contains(message, "fetch first"):
 		return "non-fast-forward"
@@ -1217,10 +1217,8 @@ func classifyGitPushError(err error) string {
 		return "authorization"
 	case network:
 		return "network"
-	case strings.Contains(message, "could not read from remote repository"):
+	case strings.Contains(message, "could not read from remote repository") && !network:
 		return "authorization"
-	case strings.Contains(message, "rejected"), strings.Contains(message, "updates were rejected"):
-		return "history-conflict"
 	default:
 		return "uncertain"
 	}
