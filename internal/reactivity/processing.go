@@ -134,19 +134,38 @@ func processingStateSignature(cycle TaskProcessingCycle) string {
 	if cycle.MergeRequestExternalState != nil {
 		remarks := make([]string, 0, len(cycle.MergeRequestExternalState.ReviewRemarks))
 		for _, remark := range cycle.MergeRequestExternalState.ReviewRemarks {
-			remarks = append(remarks, strings.Join([]string{
-				strings.TrimSpace(remark.System),
-				strings.TrimSpace(remark.ExternalID),
-				strings.TrimSpace(remark.ReplyToID),
-				strings.TrimSpace(remark.State),
-				strings.TrimSpace(remark.Body),
-			}, "\x00"))
+			if signature := processingRemarkSignature(remark); signature != "" {
+				remarks = append(remarks, signature)
+			}
 		}
 		sort.Strings(remarks)
 		state.ReviewRemarks = remarks
 	}
 	encoded, _ := json.Marshal(state)
 	return string(encoded)
+}
+
+func processingRemarkSignature(remark integration.ReviewRemark) string {
+	if isExternalReviewConclusion(remark.Body) || strings.Contains(remark.Body, "## Ответ на замечание ревизии") {
+		return ""
+	}
+
+	state := strings.ToLower(strings.TrimSpace(remark.State))
+	if strings.TrimSpace(remark.ReplyToID) != "" {
+		switch state {
+		case "", "unresolved", "pending", "open", "conversation":
+		default:
+			return ""
+		}
+	}
+
+	return strings.Join([]string{
+		strings.TrimSpace(remark.System),
+		strings.TrimSpace(remark.ExternalID),
+		strings.TrimSpace(remark.ReplyToID),
+		strings.TrimSpace(remark.Type),
+		state,
+	}, "\x00")
 }
 
 func orderReviewRemarksByCreatedAt(remarks []integration.ReviewRemark) []integration.ReviewRemark {

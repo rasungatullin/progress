@@ -670,6 +670,36 @@ func TestServiceProcessTaskStopsOnAlternatingRepeatedStates(t *testing.T) {
 	}
 }
 
+func TestProcessingStateSignatureIgnoresReviewHistory(t *testing.T) {
+	t.Parallel()
+
+	base := TaskProcessingCycle{
+		Issue: &integration.TrackerIssue{Labels: []string{LabelReviewPassed}},
+		MergeRequestExternalState: &decision.MergeRequestExternalState{
+			HasUnresolvedReviewRemarks: true,
+			ReviewRemarks: []integration.ReviewRemark{{
+				ExternalID: "remark-1",
+				ReplyToID:  "thread-1",
+				State:      "unresolved",
+				Body:       "Исправить обработку",
+			}},
+		},
+	}
+	withHistory := base
+	withHistory.MergeRequestExternalState = &decision.MergeRequestExternalState{
+		HasUnresolvedReviewRemarks: true,
+		ReviewRemarks: []integration.ReviewRemark{
+			{ExternalID: "remark-1", ReplyToID: "thread-1", State: "unresolved", Body: "Исправить обработку"},
+			{Author: integration.User{Login: "progress"}, Body: "## Заключение ревизии\n\napprove"},
+			{Author: integration.User{Login: "progress"}, Body: "## Заключение ревизии\n\napprove\n\nПовторная проверка"},
+		},
+	}
+
+	if got, want := processingStateSignature(base), processingStateSignature(withHistory); got != want {
+		t.Fatalf("processing state changed with review history: got %q, want %q", got, want)
+	}
+}
+
 func TestServiceProcessTaskReworksForRemarkQuotingConclusionHeader(t *testing.T) {
 	t.Parallel()
 
