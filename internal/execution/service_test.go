@@ -2249,6 +2249,38 @@ func TestReviewResponsesResolveProjectRemarkID(t *testing.T) {
 	}
 }
 
+func TestCanonicalReviewRemarksUseUniqueResponseIDs(t *testing.T) {
+	t.Parallel()
+
+	remarks := canonicalReviewRemarks([]integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание."},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание."},
+		{ExternalID: "comment-3", Body: "Идентификатор: remark-5\nОднозначное замечание."},
+	})
+
+	if len(remarks) != 3 || remarks[0].ID != "remark-ref:comment-1" || remarks[1].ID != "remark-ref:comment-2" || remarks[2].ID != "remark-5" {
+		t.Fatalf("canonical remarks must contain unique stable response identifiers: %#v", remarks)
+	}
+}
+
+func TestCanonicalReviewRemarksAvoidExternalProjectIDCollision(t *testing.T) {
+	t.Parallel()
+
+	canonical := []integration.ReviewRemark{
+		{ExternalID: "remark-4", Body: "Обычное замечание без проектного идентификатора."},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nПострочное замечание.", ReplyToID: "thread-2"},
+	}
+	remarks := canonicalReviewRemarks(canonical)
+	if len(remarks) != 2 || remarks[0].ID != "remark-ref:remark-4" || remarks[1].ID != "remark-ref:comment-2" {
+		t.Fatalf("canonical remarks must avoid external/project identifier collisions: %#v", remarks)
+	}
+	for _, remark := range remarks {
+		if _, ok := newReviewRemarkIndex(canonical).resolve(remark.ID); !ok {
+			t.Fatalf("canonical response identifier must resolve uniquely: %#v", remark)
+		}
+	}
+}
+
 func TestReviewResponsesRejectAmbiguousOrUnknownProjectRemarkID(t *testing.T) {
 	t.Parallel()
 

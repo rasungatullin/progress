@@ -1651,12 +1651,14 @@ func reviewRemarkProjectID(body string) string {
 type reviewRemarkIndex struct {
 	external map[string][]integration.ReviewRemark
 	project  map[string][]integration.ReviewRemark
+	stable   map[string][]integration.ReviewRemark
 }
 
 func newReviewRemarkIndex(remarks []integration.ReviewRemark) reviewRemarkIndex {
 	index := reviewRemarkIndex{
 		external: make(map[string][]integration.ReviewRemark),
 		project:  make(map[string][]integration.ReviewRemark),
+		stable:   make(map[string][]integration.ReviewRemark),
 	}
 	for _, remark := range remarks {
 		if id := strings.TrimSpace(remark.ExternalID); id != "" {
@@ -1664,6 +1666,9 @@ func newReviewRemarkIndex(remarks []integration.ReviewRemark) reviewRemarkIndex 
 		}
 		if id := reviewRemarkProjectID(remark.Body); id != "" {
 			index.project[id] = append(index.project[id], remark)
+		}
+		if id := strings.TrimSpace(remark.ExternalID); id != "" {
+			index.stable["remark-ref:"+id] = append(index.stable["remark-ref:"+id], remark)
 		}
 	}
 	return index
@@ -1673,6 +1678,10 @@ func (index reviewRemarkIndex) resolve(id string) (integration.ReviewRemark, boo
 	id = strings.TrimSpace(id)
 	externalMatches := index.external[id]
 	projectMatches := index.project[id]
+	stableMatches := index.stable[id]
+	if len(stableMatches) == 1 && len(externalMatches) == 0 && len(projectMatches) == 0 {
+		return stableMatches[0], true
+	}
 	if len(externalMatches) == 1 {
 		if len(projectMatches) == 0 || sameReviewRemark(externalMatches[0], projectMatches[0]) {
 			return externalMatches[0], true
@@ -1689,6 +1698,10 @@ func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
 	id = strings.TrimSpace(id)
 	externalMatches := index.external[id]
 	projectMatches := index.project[id]
+	stableMatches := index.stable[id]
+	if len(stableMatches) > 1 {
+		return true
+	}
 	if len(externalMatches) > 1 || len(projectMatches) > 1 {
 		return true
 	}

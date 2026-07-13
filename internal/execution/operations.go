@@ -1706,11 +1706,27 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 // canonicalReviewRemarks переводит поля интеграционного замечания в
 // словарь структурированного вывода до передачи данных исполнителю.
 func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.StructuredRemark {
+	index := newReviewRemarkIndex(reviewRemarks)
 	remarks := make([]model.StructuredRemark, 0, len(reviewRemarks))
 	for _, remark := range reviewRemarks {
-		projectID := firstNonEmptyTrimmed(reviewRemarkProjectID(remark.Body), remark.ExternalID)
+		projectID := reviewRemarkProjectID(remark.Body)
+		externalID := strings.TrimSpace(remark.ExternalID)
+		id := externalID
+		if projectID != "" && !index.hasAmbiguous(projectID) {
+			id = projectID
+		} else if id != "" {
+			// При конфликте проектного идентификатора возвращается отдельное
+			// устойчивое имя, разрешаемое через ExternalID замечания.
+			id = "remark-ref:" + id
+		}
+		// Проверяем также внешний идентификатор, когда проектный идентификатор
+		// отсутствует: он может совпасть с проектным идентификатором другого
+		// замечания и стать неразрешимым.
+		if projectID == "" && id != "" && index.hasAmbiguous(id) {
+			id = "remark-ref:" + id
+		}
 		remarks = append(remarks, model.StructuredRemark{
-			ID:         projectID,
+			ID:         id,
 			ExternalID: strings.TrimSpace(remark.ExternalID),
 			ThreadID:   strings.TrimSpace(remark.ReplyToID),
 			Status:     strings.TrimSpace(remark.State),
