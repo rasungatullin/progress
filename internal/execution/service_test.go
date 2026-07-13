@@ -2307,6 +2307,30 @@ func TestReviewResponsesRejectConflictingOrRepeatedAliases(t *testing.T) {
 	}
 }
 
+func TestReviewResponsesRejectAliasForAmbiguousProjectRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание.", URL: "https://example.test/2"},
+	}
+	output := &model.StructuredOutput{
+		Remarks: []model.StructuredRemark{{ID: "remark-4", ExternalID: "comment-1"}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-4",
+			Type:     "comment",
+			Status:   "resolved",
+			Summary:  "Не публиковать.",
+		}},
+	}
+
+	responses := reviewResponsesFromOutput(output, remarks)
+	err := validateReviewResponseTargets(responses, remarks, output)
+	if err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "conflicting or ambiguous") {
+		t.Fatalf("alias must not resolve an ambiguous project identifier: %v", err)
+	}
+}
+
 func TestPublishReviewResponsesRejectsUnknownTargetWithEmptyCanonicalRemarks(t *testing.T) {
 	t.Parallel()
 

@@ -1697,6 +1697,10 @@ func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map
 		if id == "" || externalID == "" {
 			continue
 		}
+		if matches := index.project[id]; len(matches) > 1 {
+			conflicts[id] = true
+			continue
+		}
 		matches := index.external[externalID]
 		if len(matches) != 1 {
 			continue
@@ -1711,6 +1715,9 @@ func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map
 		if canonical, ok := index.resolve(id); ok && strings.TrimSpace(canonical.ExternalID) != strings.TrimSpace(matches[0].ExternalID) {
 			conflicts[id] = true
 		}
+	}
+	for id := range conflicts {
+		delete(aliases, id)
 	}
 	return aliases, conflicts
 }
