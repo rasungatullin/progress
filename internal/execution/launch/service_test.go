@@ -422,7 +422,7 @@ func TestRunOpenCodeRunnerStopsAfterCompletedToolUseDeadline(t *testing.T) {
 	if !errors.Is(err, errRunnerNoOutputTimeout) {
 		t.Fatalf("expected no-output timeout, got %v", err)
 	}
-	for _, expected := range []string{"last structured event=tool_use/tool", "rule=200ms после структурированного события"} {
+	for _, expected := range []string{"last structured event=tool_use/tool", "base timeout=50ms", "applied timeout=200ms", "rule=200ms после структурированного события"} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
 		}
@@ -433,7 +433,7 @@ func TestRunRunnerCommandReportsStructuredOutputInsideOpenCodeEvent(t *testing.T
 	t.Parallel()
 
 	output := `{"type":"text","sessionID":"session-structured","part":{"type":"text","text":"Выполнение завершено.\n<progress-structured-output>\n{\"summary\":\"Проверка завершена.\"}\n</progress-structured-output>"}}`
-	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second)
+	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second, time.Second)
 	if !strings.Contains(err.Error(), "structured output=present") {
 		t.Fatalf("timeout diagnostics must detect structured output inside opencode event: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestRunRunnerCommandNoOutputTimeoutUsesLastFragment(t *testing.T) {
 	if !errors.As(err, &runnerErr) || runnerErr.output != "first" || runnerErr.lastOutputAt.IsZero() {
 		t.Fatalf("missing last-output diagnostics: %#v", runnerErr)
 	}
-	for _, expected := range []string{"last fragment at=", "last structured event=отсутствует at=отсутствует", "structured output=absent", "rule=200ms после последнего фрагмента"} {
+	for _, expected := range []string{"last fragment at=", "last structured event=отсутствует at=отсутствует", "structured output=absent", "base timeout=200ms", "applied timeout=200ms", "rule=200ms после последнего фрагмента"} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
 		}
@@ -493,7 +493,7 @@ func TestRunRunnerCommandNoOutputTimeoutReportsStructuredOutputState(t *testing.
 	t.Parallel()
 
 	output := "partial\n" + structuredOutputStart + "\n{\"summary\":\"Done.\"}\n" + structuredOutputEnd
-	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second)
+	err := newNoOutputTimeoutError(output, time.Now().Add(-time.Second), &runnerOutputWriter{}, time.Second, time.Second)
 	if !strings.Contains(err.Error(), "structured output=present") {
 		t.Fatalf("timeout diagnostics must report present structured output: %v", err)
 	}
@@ -585,7 +585,7 @@ func TestRunCodexRunnerPreservesEventsOnNoOutputTimeout(t *testing.T) {
 	if !errors.As(err, &runnerErr) || !strings.Contains(runnerErr.output, `"thread_id":"thread-test"`) || runnerErr.lastOutputAt.IsZero() {
 		t.Fatalf("codex events were not preserved before Wait: %#v", runnerErr)
 	}
-	for _, expected := range []string{"last structured event=item.completed/agent_message", "idle=", "rule=300ms после структурированного события"} {
+	for _, expected := range []string{"last structured event=item.completed/agent_message", "idle=", "base timeout=300ms", "applied timeout=300ms", "rule=300ms после структурированного события"} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("timeout diagnostics must include %q: %v", expected, err)
 		}

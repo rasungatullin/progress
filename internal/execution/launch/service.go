@@ -59,6 +59,8 @@ type runnerExecutionError struct {
 	structuredEventAt     time.Time
 	structuredOutputState string
 	idleDuration          time.Duration
+	baseTimeout           time.Duration
+	appliedTimeout        time.Duration
 	timeoutRule           string
 }
 
@@ -74,12 +76,14 @@ func (e *runnerExecutionError) Error() string {
 			outputState = structuredOutputState(e.output)
 		}
 		diagnostic = fmt.Sprintf(
-			"\nlast fragment at=%s last structured event=%s at=%s structured output=%s idle=%s rule=%s",
+			"\nlast fragment at=%s last structured event=%s at=%s structured output=%s idle=%s base timeout=%s applied timeout=%s rule=%s",
 			formatRunnerTime(e.lastOutputAt),
 			lastEvent,
 			formatRunnerTime(e.structuredEventAt),
 			outputState,
 			e.idleDuration.Round(time.Millisecond),
+			e.baseTimeout,
+			e.appliedTimeout,
 			e.timeoutRule,
 		)
 	}
@@ -1677,7 +1681,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 				cancel()
 				<-done
 				output, lastOutputAt := writer.snapshot()
-				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout)
+				return "", newNoOutputTimeoutError(output, lastOutputAt, writer, startupTimeout, noOutputTimeout)
 			}
 			_, lastOutputAt := writer.snapshot()
 			_, structuredEventAt := writer.structuredSnapshot()
@@ -1690,7 +1694,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 			cancel()
 			<-done
 			output, lastOutputAt := writer.snapshot()
-			return "", newNoOutputTimeoutError(output, lastOutputAt, writer, policy.timeout, policy.structured)
+			return "", newNoOutputTimeoutError(output, lastOutputAt, writer, policy.timeout, noOutputTimeout, policy.structured)
 		case <-ctx.Done():
 			<-done
 			output, lastOutputAt := writer.snapshot()
@@ -1702,7 +1706,7 @@ func runRunnerCommand(parent context.Context, cmd *exec.Cmd, spec model.LaunchSp
 	}
 }
 
-func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout time.Duration, structuredRule ...bool) *runnerExecutionError {
+func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runnerOutputWriter, timeout, baseTimeout time.Duration, structuredRule ...bool) *runnerExecutionError {
 	lastEvent, eventAt := writer.structuredSnapshot()
 	if lastEvent == "" {
 		lastEvent, eventAt = writer.runnerEventSnapshot()
@@ -1723,6 +1727,8 @@ func newNoOutputTimeoutError(output string, lastOutputAt time.Time, writer *runn
 		structuredEventAt:     eventAt,
 		structuredOutputState: structuredOutputState(output),
 		idleDuration:          idleDuration,
+		baseTimeout:           baseTimeout,
+		appliedTimeout:        timeout,
 		timeoutRule:           runnerTimeoutRule(lastEvent, lastOutputAt, timeout, len(structuredRule) > 0 && structuredRule[0]),
 	}
 }
