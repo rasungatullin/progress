@@ -2264,6 +2264,44 @@ func TestReviewResponsesRejectAmbiguousOrUnknownProjectRemarkID(t *testing.T) {
 	}
 }
 
+func TestReviewResponsesRejectExplicitTypeForAmbiguousOrUnknownRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание.", URL: "https://example.test/2"},
+	}
+	responses := []model.StructuredResponse{
+		{RemarkID: "remark-4", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+		{RemarkID: "remark-unknown", Type: "inline", ThreadID: "thread-unknown", Status: "resolved", Summary: "Не публиковать."},
+	}
+
+	err := validateReviewResponseTargets(responses, remarks, nil)
+	if err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "remark-unknown") {
+		t.Fatalf("explicit response types must not bypass target validation: %v", err)
+	}
+}
+
+func TestReviewResponsesPreferExactExternalIDOverAmbiguousProjectID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "remark-4", Body: "Идентификатор: remark-9\nТочное замечание.", URL: "https://example.test/exact"},
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание.", URL: "https://example.test/2"},
+	}
+	responses := reviewResponsesFromOutput(&model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
+		RemarkID: "remark-4", Status: "resolved", Summary: "Исправлено."},
+	}}, remarks)
+
+	if len(responses) != 1 || responses[0].Type != "comment" {
+		t.Fatalf("exact external identifier must remain resolvable: %#v", responses)
+	}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err != nil {
+		t.Fatalf("exact external identifier must not be rejected by project ambiguity: %v", err)
+	}
+}
+
 func TestPublishReviewResponsesRestoresKindByStructuredRemarkExternalID(t *testing.T) {
 	t.Parallel()
 
@@ -4319,16 +4357,26 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 			case "get":
 				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.MergeRequestNumber, State: "OPEN", BaseRef: "main", HeadRef: "feature/fixes"}}, nil
 			case "list":
-				return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
-					Repository:         req.Repository,
-					MergeRequestNumber: req.MergeRequestNumber,
-					ExternalID:         "thread-1",
-					ReplyToID:          "thread-1",
-					State:              "unresolved",
-					Body:               "Нужно добавить проверку.",
-					Path:               "internal/execution/service.go",
-					Line:               12,
-				}}}, nil
+				return integration.Response{ReviewRemarks: []integration.ReviewRemark{
+					{
+						Repository:         req.Repository,
+						MergeRequestNumber: req.MergeRequestNumber,
+						ExternalID:         "thread-1",
+						ReplyToID:          "thread-1",
+						State:              "unresolved",
+						Body:               "Нужно добавить проверку.",
+						Path:               "internal/execution/service.go",
+						Line:               12,
+					},
+					{
+						Repository:         req.Repository,
+						MergeRequestNumber: req.MergeRequestNumber,
+						ExternalID:         "thread-2",
+						ReplyToID:          "thread-2",
+						State:              "unresolved",
+						Body:               "Нужно добавить ещё одну проверку.",
+					},
+				}}, nil
 			case "create":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", URL: "https://github.com/owner/name/pull/17#issuecomment-1"}}, nil
 			case "reply":

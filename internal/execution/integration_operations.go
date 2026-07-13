@@ -655,6 +655,9 @@ func (e builtinOperationExecutor) publishReviewResponses(ctx context.Context, st
 		state.tracker.skipIO(name, publishReviewResponsesInputSummary(input, operation), publishReviewResponsesOutputSummary("", input.result, operation), "Структурированный вывод не содержит ответов на замечания.")
 		return nil
 	}
+	if err := validateReviewResponseTargets(responses, input.reviewRemarks, input.structuredOutput); err != nil {
+		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не прошли предварительную проверку.", err, "review_responses_invalid")
+	}
 	if err := validateReviewResponses(responses); err != nil {
 		return e.failPublishReviewResponsesOperation(ctx, state, operation, input, name, "Ответы на замечания не прошли предварительную проверку.", err, "review_responses_invalid")
 	}
@@ -1599,38 +1602,21 @@ func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.R
 	if output == nil {
 		return nil
 	}
-	byID := make(map[string]integration.ReviewRemark, len(remarks))
-	projectIDs := make(map[string][]integration.ReviewRemark)
-	for _, remark := range remarks {
-		if id := strings.TrimSpace(remark.ExternalID); id != "" {
-			byID[id] = remark
-		}
-		if id := reviewRemarkProjectID(remark.Body); id != "" {
-			projectIDs[id] = append(projectIDs[id], remark)
-		}
-	}
-	for id, matches := range projectIDs {
-		if len(matches) == 1 {
-			if _, exists := byID[id]; !exists {
-				byID[id] = matches[0]
-			}
-		} else {
-			delete(byID, id)
-		}
-	}
+	index := newReviewRemarkIndex(remarks)
+	byID := make(map[string]integration.ReviewRemark, len(remarks)+len(output.Remarks))
 	for _, remark := range output.Remarks {
 		id := strings.TrimSpace(remark.ID)
 		externalID := strings.TrimSpace(remark.ExternalID)
 		if id == "" || externalID == "" {
 			continue
 		}
-		if canonical, ok := byID[externalID]; ok {
+		if canonical, ok := index.resolve(externalID); ok {
 			byID[id] = canonical
 		}
 	}
 	responses := append([]StructuredResponse(nil), output.ReviewResponses...)
-	for index := range responses {
-		enrichReviewResponse(&responses[index], byID)
+	for responseIndex := range responses {
+		enrichReviewResponse(&responses[responseIndex], byID, index)
 	}
 	for _, remark := range output.Remarks {
 		if strings.TrimSpace(remark.Answer) == "" && strings.TrimSpace(remark.Resolution) == "" {
@@ -1642,7 +1628,7 @@ func reviewResponsesFromOutput(output *StructuredOutput, remarks []integration.R
 			Summary:  strings.TrimSpace(remark.Resolution),
 			Body:     strings.TrimSpace(remark.Answer),
 		}
-		enrichReviewResponse(&response, byID)
+		enrichReviewResponse(&response, byID, index)
 		responses = append(responses, response)
 	}
 	return responses
@@ -1672,11 +1658,51 @@ func reviewRemarkProjectID(body string) string {
 	return ""
 }
 
-func enrichReviewResponse(response *StructuredResponse, remarks map[string]integration.ReviewRemark) {
+type reviewRemarkIndex struct {
+	external map[string][]integration.ReviewRemark
+	project  map[string][]integration.ReviewRemark
+}
+
+func newReviewRemarkIndex(remarks []integration.ReviewRemark) reviewRemarkIndex {
+	index := reviewRemarkIndex{
+		external: make(map[string][]integration.ReviewRemark),
+		project:  make(map[string][]integration.ReviewRemark),
+	}
+	for _, remark := range remarks {
+		if id := strings.TrimSpace(remark.ExternalID); id != "" {
+			index.external[id] = append(index.external[id], remark)
+		}
+		if id := reviewRemarkProjectID(remark.Body); id != "" {
+			index.project[id] = append(index.project[id], remark)
+		}
+	}
+	return index
+}
+
+func (index reviewRemarkIndex) resolve(id string) (integration.ReviewRemark, bool) {
+	id = strings.TrimSpace(id)
+	if matches := index.external[id]; len(matches) == 1 {
+		return matches[0], true
+	}
+	if matches := index.project[id]; len(matches) == 1 {
+		return matches[0], true
+	}
+	return integration.ReviewRemark{}, false
+}
+
+func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
+	id = strings.TrimSpace(id)
+	return len(index.external[id]) > 1 || len(index.project[id]) > 1
+}
+
+func enrichReviewResponse(response *StructuredResponse, aliases map[string]integration.ReviewRemark, index reviewRemarkIndex) {
 	if response == nil {
 		return
 	}
-	remark, ok := remarks[strings.TrimSpace(response.RemarkID)]
+	remark, ok := aliases[strings.TrimSpace(response.RemarkID)]
+	if !ok {
+		remark, ok = index.resolve(response.RemarkID)
+	}
 	if !ok {
 		return
 	}
@@ -1698,6 +1724,45 @@ func enrichReviewResponse(response *StructuredResponse, remarks map[string]integ
 	if strings.TrimSpace(response.ThreadID) == "" {
 		response.ThreadID = strings.TrimSpace(remark.ReplyToID)
 	}
+}
+
+func validateReviewResponseTargets(responses []StructuredResponse, remarks []integration.ReviewRemark, output *StructuredOutput) error {
+	if len(remarks) == 0 {
+		return nil
+	}
+	index := newReviewRemarkIndex(remarks)
+	aliases := make(map[string]integration.ReviewRemark)
+	if output != nil {
+		for _, remark := range output.Remarks {
+			id := strings.TrimSpace(remark.ID)
+			externalID := strings.TrimSpace(remark.ExternalID)
+			if id == "" || externalID == "" {
+				continue
+			}
+			if canonical, ok := index.resolve(externalID); ok {
+				aliases[id] = canonical
+			}
+		}
+	}
+	var failures []error
+	for responseIndex, response := range responses {
+		if reviewResponseType(response) == "local" {
+			continue
+		}
+		id := strings.TrimSpace(response.RemarkID)
+		if _, ok := aliases[id]; ok {
+			continue
+		}
+		if _, ok := index.resolve(id); ok {
+			continue
+		}
+		reason := "unknown"
+		if index.hasAmbiguous(id) {
+			reason = "ambiguous"
+		}
+		failures = append(failures, fmt.Errorf("review response %d (remark_id %q): canonical remark is %s; external publication is not allowed", responseIndex, id, reason))
+	}
+	return errors.Join(failures...)
 }
 
 func reviewResponseTypeFromRemark(remark integration.ReviewRemark) string {
