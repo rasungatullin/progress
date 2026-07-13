@@ -1671,6 +1671,17 @@ func newReviewRemarkIndex(remarks []integration.ReviewRemark) reviewRemarkIndex 
 			index.stable["remark-ref:"+id] = append(index.stable["remark-ref:"+id], remark)
 		}
 	}
+	// Зарегистрировать только те суффиксированные устойчивые идентификаторы,
+	// которые действительно выдаёт canonicalReviewRemarks.
+	for _, remark := range remarks {
+		id := reviewRemarkResponseID(remark, index)
+		if strings.HasPrefix(id, "remark-ref:") {
+			matches := index.stable[id]
+			if len(matches) == 0 {
+				index.stable[id] = []integration.ReviewRemark{remark}
+			}
+		}
+	}
 	return index
 }
 
@@ -1721,23 +1732,7 @@ func (index reviewRemarkIndex) hasAmbiguous(id string) bool {
 }
 
 func (index reviewRemarkIndex) stableMatches(id string) []integration.ReviewRemark {
-	if matches := index.stable[id]; len(matches) > 0 {
-		return matches
-	}
-	if !strings.HasPrefix(id, "remark-ref:") {
-		return nil
-	}
-	base := strings.TrimPrefix(id, "remark-ref:")
-	separator := strings.LastIndexByte(base, '#')
-	if separator <= 0 {
-		return nil
-	}
-	for _, char := range base[separator+1:] {
-		if char < '0' || char > '9' {
-			return nil
-		}
-	}
-	return index.external[base[:separator]]
+	return index.stable[id]
 }
 
 func sameReviewRemark(left, right integration.ReviewRemark) bool {
@@ -1765,11 +1760,11 @@ func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map
 			conflicts[id] = true
 			continue
 		}
-		matches := index.external[externalID]
-		if len(matches) != 1 {
+		canonical, ok := index.resolve(externalID)
+		if !ok {
 			continue
 		}
-		aliases[id] = append(aliases[id], matches[0])
+		aliases[id] = append(aliases[id], canonical)
 	}
 	for id, matches := range aliases {
 		if len(matches) > 1 {

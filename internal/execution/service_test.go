@@ -2351,6 +2351,38 @@ func TestReviewResponsesRejectStableExternalIDCollision(t *testing.T) {
 	}
 }
 
+func TestReviewResponsesRejectNeverIssuedStableRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{ExternalID: "comment-1", Type: "comment"}}
+	responses := []model.StructuredResponse{
+		{RemarkID: "remark-ref:comment-1#999", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+		{RemarkID: "remark-ref:comment-1#", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+	}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil {
+		t.Fatal("never-issued stable identifiers must be rejected")
+	}
+}
+
+func TestReviewResponsesRejectAliasForAmbiguousAliasTarget(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-2\nПервое замечание."},
+		{ExternalID: "remark-2", Body: "Идентификатор: remark-3\nВторое замечание."},
+	}
+	output := &model.StructuredOutput{
+		Remarks: []model.StructuredRemark{{ID: "remark-alias", ExternalID: "remark-2"}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-alias", Type: "comment", Status: "resolved", Summary: "Не публиковать.",
+		}},
+	}
+	responses := reviewResponsesFromOutput(output, remarks)
+	if err := validateReviewResponseTargets(responses, remarks, output); err == nil || !strings.Contains(err.Error(), "remark-alias") {
+		t.Fatalf("alias with an ambiguous target must be rejected diagnostically: %v", err)
+	}
+}
+
 func TestReviewResponsesRejectAmbiguousOrUnknownProjectRemarkID(t *testing.T) {
 	t.Parallel()
 

@@ -1762,6 +1762,12 @@ func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkI
 }
 
 func reviewRemarkResponseIDAvailable(id string, remark integration.ReviewRemark, index reviewRemarkIndex) bool {
+	if strings.HasPrefix(id, "remark-ref:") && strings.Contains(id, "#") {
+		base := strings.TrimPrefix(id, "remark-ref:")
+		if separator := strings.LastIndexByte(base, '#'); separator > 0 && len(index.external[base[:separator]]) != 1 {
+			return false
+		}
+	}
 	for _, candidate := range index.external[id] {
 		if !sameReviewRemark(candidate, remark) {
 			return false
