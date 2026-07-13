@@ -566,13 +566,38 @@ func (r *APIRunner) RunPRReviewThreads(ctx context.Context, repository string, n
 	if err != nil {
 		return apiErrorResult("pr review threads", config, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()})
 	}
-	query := `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id isResolved isOutdated path line comments(first: 100) { nodes { id databaseId body url path line author { login url } createdAt updatedAt } } } } timelineItems(first: 100) { nodes { __typename ... on IssueComment { databaseId } ... on PullRequestReviewThread { id } } } } } }`
-	var raw json.RawMessage
-	result, err := r.graphql(ctx, config, query, map[string]any{"owner": owner, "name": name, "number": number}, &raw)
-	if err != nil {
-		return result, apiResolvedConfig(config), err
+	query := `query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id isResolved isOutdated path line comments(first: 100) { nodes { id databaseId body url path line author { login url } createdAt updatedAt } } } } timelineItems(first: 100, after: $after) { nodes { __typename ... on IssueComment { databaseId } ... on PullRequestReviewThread { id } } pageInfo { hasNextPage endCursor } } } } }`
+	var combined ghPRReviewThreadsResponse
+	var after *string
+	var result CommandResult
+	for {
+		var raw json.RawMessage
+		var err error
+		result, err = r.graphql(ctx, config, query, map[string]any{"owner": owner, "name": name, "number": number, "after": after}, &raw)
+		if err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		var page ghPRReviewThreadsResponse
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return result, apiResolvedConfig(config), err
+		}
+		if page.Data.Repository.PullRequest == nil {
+			combined = page
+			break
+		}
+		if combined.Data.Repository.PullRequest == nil {
+			combined = page
+		} else {
+			combined.Data.Repository.PullRequest.TimelineItems.Nodes = append(combined.Data.Repository.PullRequest.TimelineItems.Nodes, page.Data.Repository.PullRequest.TimelineItems.Nodes...)
+		}
+		pageInfo := page.Data.Repository.PullRequest.TimelineItems.PageInfo
+		if !pageInfo.HasNextPage || strings.TrimSpace(pageInfo.EndCursor) == "" {
+			break
+		}
+		cursor := pageInfo.EndCursor
+		after = &cursor
 	}
-	result.Stdout = string(raw)
+	result.Stdout = mustJSON(combined)
 	return result, apiResolvedConfig(config), nil
 }
 

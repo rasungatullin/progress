@@ -117,7 +117,8 @@ type ghPRReviewThreadsResponse struct {
 					Nodes []ghPRReviewThread `json:"nodes"`
 				} `json:"reviewThreads"`
 				TimelineItems struct {
-					Nodes []ghPRTimelineItem `json:"nodes"`
+					Nodes    []ghPRTimelineItem `json:"nodes"`
+					PageInfo ghPageInfo         `json:"pageInfo"`
 				} `json:"timelineItems"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
@@ -128,6 +129,11 @@ type ghPRTimelineItem struct {
 	Typename   string `json:"__typename"`
 	DatabaseID int64  `json:"databaseId"`
 	ID         string `json:"id"`
+}
+
+type ghPageInfo struct {
+	HasNextPage bool   `json:"hasNextPage"`
+	EndCursor   string `json:"endCursor"`
 }
 
 type ghPRReviewThread struct {
