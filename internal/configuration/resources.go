@@ -660,6 +660,8 @@ func validateGitConfig(config *model.GitConfig) error {
 			if parsed < 0 {
 				return fmt.Errorf("git.push.retry-delay must not be negative")
 			}
+		} else if push.RetryDelaySet {
+			return fmt.Errorf("git.push.retry-delay must not be empty")
 		}
 	}
 	return nil
@@ -671,7 +673,7 @@ func isGitConfigEmpty(config *model.GitConfig) bool {
 	}
 	identityEmpty := config.Identity == nil || (config.Identity.AuthorName == "" && config.Identity.AuthorEmail == "" && config.Identity.CommitterName == "" && config.Identity.CommitterEmail == "")
 	signingEmpty := config.Signing == nil || (!config.Signing.Enabled && config.Signing.Format == "" && config.Signing.SigningKey == "" && config.Signing.Program == "")
-	pushEmpty := config.Push == nil || (config.Push.SSHIdentityFile == "" && config.Push.SSHIdentityPrivate == "" && config.Push.KnownHostsFile == "" && !config.Push.IdentitiesOnly && !config.Push.AllowForceWithLease && config.Push.MaxAttempts == 0 && config.Push.RetryDelay == "")
+	pushEmpty := config.Push == nil || (config.Push.SSHIdentityFile == "" && config.Push.SSHIdentityPrivate == "" && config.Push.KnownHostsFile == "" && !config.Push.IdentitiesOnly && !config.Push.AllowForceWithLease && config.Push.MaxAttempts == 0 && !config.Push.MaxAttemptsSet && config.Push.RetryDelay == "" && !config.Push.RetryDelaySet)
 	return identityEmpty && signingEmpty && pushEmpty
 }
 

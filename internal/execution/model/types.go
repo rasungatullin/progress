@@ -296,6 +296,7 @@ type GitPushConfig struct {
 	MaxAttempts             int    `json:"max-attempts,omitempty"`
 	RetryDelay              string `json:"retry-delay,omitempty"`
 	MaxAttemptsSet          bool   `json:"-"`
+	RetryDelaySet           bool   `json:"-"`
 }
 
 func (c *GitPushConfig) UnmarshalJSON(data []byte) error {
@@ -310,6 +311,7 @@ func (c *GitPushConfig) UnmarshalJSON(data []byte) error {
 	}
 	*c = GitPushConfig(decoded)
 	_, c.MaxAttemptsSet = fields["max-attempts"]
+	_, c.RetryDelaySet = fields["retry-delay"]
 	return nil
 }
 

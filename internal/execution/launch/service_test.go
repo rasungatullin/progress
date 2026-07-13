@@ -841,6 +841,8 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 				return "", nil
 			case "push -u origin abc123:refs/heads/feature/test":
 				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
+			case "update-ref refs/remotes/origin/feature/test abc123":
+				return "", nil
 			case "branch --set-upstream-to=origin/feature/test feature/test":
 				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
 			default:
@@ -869,6 +871,7 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"rev-parse", "HEAD"},
 		{"ls-remote", "origin", "refs/heads/feature/test"},
 		{"push", "-u", "origin", "abc123:refs/heads/feature/test"},
+		{"update-ref", "refs/remotes/origin/feature/test", "abc123"},
 		{"branch", "--set-upstream-to=origin/feature/test", "feature/test"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
@@ -1053,6 +1056,8 @@ func TestLaunchCommitPushRebindsMismatchedUpstream(t *testing.T) {
 		case "push -u origin abc123:refs/heads/feature/test":
 			pushArgs = append([]string(nil), args...)
 			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
+		case "update-ref refs/remotes/origin/feature/test abc123":
+			return "", nil
 		case "branch --set-upstream-to=origin/feature/test feature/test":
 			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
 		default:

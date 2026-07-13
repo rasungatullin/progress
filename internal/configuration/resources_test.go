@@ -18,6 +18,15 @@ func TestValidateGitConfigRejectsExplicitZeroPushAttempts(t *testing.T) {
 	}
 }
 
+func TestValidateGitConfigRejectsExplicitEmptyRetryDelay(t *testing.T) {
+	t.Parallel()
+
+	err := validateGitConfig(&model.GitConfig{Push: &model.GitPushConfig{RetryDelaySet: true}})
+	if err == nil || !strings.Contains(err.Error(), "git.push.retry-delay must not be empty") {
+		t.Fatalf("explicit empty retry-delay must be rejected: %v", err)
+	}
+}
+
 func TestLoadExecutionResourceConfigMergesGlobalAndLocalLayersAndSetsBindingSource(t *testing.T) {
 	t.Parallel()
 

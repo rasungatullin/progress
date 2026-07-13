@@ -163,6 +163,14 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		return result, err
 	}
 	in.Launch = applyProfileStructuredOutput(in.Launch, profile)
+	launchTimeout, err := runnerDuration(in.Launch.Timeout, defaultRunnerTimeout)
+	if err != nil {
+		result := failedLaunchResult(err)
+		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
+		return result, err
+	}
+	launchCtx, cancelLaunch := context.WithTimeout(ctx, launchTimeout)
+	defer cancelLaunch()
 
 	if err := validateLaunch(in, workplace); err != nil {
 		result := failedLaunchResult(err)
@@ -170,7 +178,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		return result, err
 	}
 
-	runnerOutput, err := s.runRunner(ctx, in)
+	runnerOutput, err := s.runRunner(launchCtx, in)
 	if err != nil {
 		status := "failed"
 		partialOutput := ""
@@ -197,7 +205,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			RunnerStopReason: runnerStopReason(err),
 			LastOutputAt:     runnerLastOutputAt(err),
 		}
-		enrichFailedLaunchWithWorktree(ctx, s, &result, workplace)
+		enrichFailedLaunchWithWorktree(launchCtx, s, &result, workplace)
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, "", nil, nil, err)
 		return result, err
 	}
@@ -225,14 +233,14 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 		if structuredOutputState != trailingStructuredBlockValid {
 			result.StructuredOutput = nil
 		}
-		enrichFailedLaunchWithWorktree(ctx, s, &result, workplace)
+		enrichFailedLaunchWithWorktree(launchCtx, s, &result, workplace)
 		result.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, result, rawStructuredOutput, structuredOutput, err, err)
 		return result, err
 	}
 
 	gitSummary := "git=disabled"
 	if in.Launch.CommitPush {
-		result, err := s.commitAndPush(ctx, commitPushInputFromLaunch(in, allocation, workplace, structuredOutput))
+		result, err := s.commitAndPush(launchCtx, commitPushInputFromLaunch(in, allocation, workplace, structuredOutput))
 		if err != nil {
 			launchResult := model.LaunchResult{
 				Status:              "failed",
@@ -248,7 +256,7 @@ func (s *Service) Launch(ctx context.Context, in model.Invocation, profile model
 			if structuredOutputState != trailingStructuredBlockValid {
 				launchResult.StructuredOutput = nil
 			}
-			enrichFailedLaunchWithWorktree(ctx, s, &launchResult, workplace)
+			enrichFailedLaunchWithWorktree(launchCtx, s, &launchResult, workplace)
 			launchResult.RunRecordPath = persistExecutionRunRecord(historyHandle, workplace.Name, in, profile, allocation, workplace, launchResult, rawStructuredOutput, structuredOutput, structuredOutputErr, err)
 			return launchResult, err
 		}
@@ -1044,10 +1052,14 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 
 	remote := s.gitPushRemote(ctx, gitRoot, branch, upstream, pushArgs)
 	var pushDiagnostic string
-	if err := s.pushWithRetryDiagnostic(ctx, input.Directory, gitRoot, branch, pushArgs, pushEnv, input.Git, &pushDiagnostic, remote); err != nil {
+	expectedHead, err := s.pushWithRetryDiagnosticExpected(ctx, input.Directory, gitRoot, branch, pushArgs, pushEnv, input.Git, &pushDiagnostic, remote)
+	if err != nil {
 		return gitResult{}, err
 	}
 	if pushUsesUpstreamSetup(pushArgs) {
+		if _, err := s.runGitOutputWithEnv(ctx, input.Directory, pushEnv, "update-ref", "refs/remotes/"+remote+"/"+branch, expectedHead); err != nil {
+			return gitResult{}, fmt.Errorf("update git remote-tracking ref failed: %w", err)
+		}
 		if _, err := s.runGitOutputWithEnv(ctx, input.Directory, pushEnv, "branch", "--set-upstream-to="+remote+"/"+branch, branch); err != nil {
 			return gitResult{}, fmt.Errorf("set git upstream failed: %w", err)
 		}
@@ -1085,6 +1097,11 @@ func (s *Service) pushWithRetry(ctx context.Context, dir, gitRoot, branch string
 }
 
 func (s *Service) pushWithRetryDiagnostic(ctx context.Context, dir, gitRoot, branch string, args, env []string, config *model.GitConfig, diagnostic *string, remoteName ...string) error {
+	_, err := s.pushWithRetryDiagnosticExpected(ctx, dir, gitRoot, branch, args, env, config, diagnostic, remoteName...)
+	return err
+}
+
+func (s *Service) pushWithRetryDiagnosticExpected(ctx context.Context, dir, gitRoot, branch string, args, env []string, config *model.GitConfig, diagnostic *string, remoteName ...string) (string, error) {
 	maxAttempts, retryDelay := gitPushRetrySettings(config)
 	remote := "origin"
 	if len(remoteName) > 0 && strings.TrimSpace(remoteName[0]) != "" {
@@ -1092,10 +1109,10 @@ func (s *Service) pushWithRetryDiagnostic(ctx context.Context, dir, gitRoot, bra
 	}
 	expectedHead, originalRemoteHead, initialHeadsErr := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
 	if initialHeadsErr != nil {
-		return &gitPushFailure{attempts: 0, classification: classifyGitPushError(initialHeadsErr), lastError: fmt.Errorf("verify push heads: %w", initialHeadsErr)}
+		return "", &gitPushFailure{attempts: 0, classification: classifyGitPushError(initialHeadsErr), lastError: fmt.Errorf("verify push heads: %w", initialHeadsErr)}
 	}
 	if !isGitPushSHA(expectedHead) {
-		return &gitPushFailure{attempts: 0, classification: "uncertain", lastError: errors.New("expected local HEAD is empty")}
+		return "", &gitPushFailure{attempts: 0, classification: "uncertain", lastError: errors.New("expected local HEAD is empty")}
 	}
 	args = gitPushRetryArgs(args, expectedHead, branch, remote)
 	var lastErr error
@@ -1103,57 +1120,57 @@ func (s *Service) pushWithRetryDiagnostic(ctx context.Context, dir, gitRoot, bra
 		if attempt > 1 {
 			localHead, remoteHead, verifyErr := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
 			if verifyErr != nil {
-				return &gitPushFailure{attempts: attempt - 1, classification: "uncertain", lastError: fmt.Errorf("verify before retry: %w", verifyErr)}
+				return "", &gitPushFailure{attempts: attempt - 1, classification: "uncertain", lastError: fmt.Errorf("verify before retry: %w", verifyErr)}
 			}
 			if remoteHead == expectedHead {
 				setGitPushDiagnostic(diagnostic, attempt-1, "network", lastErr)
-				return nil
+				return expectedHead, nil
 			}
 			if expectedHead == "" || localHead != expectedHead {
-				return &gitPushFailure{attempts: attempt - 1, classification: "uncertain", lastError: fmt.Errorf("local HEAD changed from %s to %s", expectedHead, localHead)}
+				return "", &gitPushFailure{attempts: attempt - 1, classification: "uncertain", lastError: fmt.Errorf("local HEAD changed from %s to %s", expectedHead, localHead)}
 			}
 			if (originalRemoteHead != "" && remoteHead != originalRemoteHead) || (originalRemoteHead == "" && remoteHead != "") {
-				return &gitPushFailure{attempts: attempt - 1, classification: "history-conflict", lastError: fmt.Errorf("remote branch %s changed from %s to %s", branch, originalRemoteHead, remoteHead)}
+				return "", &gitPushFailure{attempts: attempt - 1, classification: "history-conflict", lastError: fmt.Errorf("remote branch %s changed from %s to %s", branch, originalRemoteHead, remoteHead)}
 			}
 		}
 		if _, err := s.runGitOutputWithEnv(ctx, dir, env, args...); err == nil {
 			if attempt > 1 {
 				setGitPushDiagnostic(diagnostic, attempt, "network", lastErr)
 			}
-			return nil
+			return expectedHead, nil
 		} else {
 			lastErr = err
 			classification := classifyGitPushError(err)
 			if classification == "authorization" || classification == "access-denied" || classification == "non-fast-forward" || classification == "history-conflict" {
-				return &gitPushFailure{attempts: attempt, classification: classification, lastError: err}
+				return "", &gitPushFailure{attempts: attempt, classification: classification, lastError: err}
 			}
 
 			localHead, remoteHead, verifyErr := s.gitPushHeads(ctx, gitRoot, branch, env, remote)
 			if verifyErr == nil {
 				if expectedHead != "" && remoteHead == expectedHead {
 					setGitPushDiagnostic(diagnostic, attempt, classification, err)
-					return nil
+					return expectedHead, nil
 				}
 				if expectedHead != "" && localHead != expectedHead {
-					return &gitPushFailure{attempts: attempt, classification: "uncertain", lastError: fmt.Errorf("local HEAD changed from %s to %s", expectedHead, localHead)}
+					return "", &gitPushFailure{attempts: attempt, classification: "uncertain", lastError: fmt.Errorf("local HEAD changed from %s to %s", expectedHead, localHead)}
 				}
 				if (originalRemoteHead != "" && remoteHead != originalRemoteHead) || (originalRemoteHead == "" && remoteHead != "") {
-					return &gitPushFailure{attempts: attempt, classification: "history-conflict", lastError: fmt.Errorf("remote branch %s changed from %s to %s", branch, originalRemoteHead, remoteHead)}
+					return "", &gitPushFailure{attempts: attempt, classification: "history-conflict", lastError: fmt.Errorf("remote branch %s changed from %s to %s", branch, originalRemoteHead, remoteHead)}
 				}
 			} else {
-				return &gitPushFailure{attempts: attempt, classification: "uncertain", lastError: fmt.Errorf("%w; verify remote head: %v", err, verifyErr)}
+				return "", &gitPushFailure{attempts: attempt, classification: "uncertain", lastError: fmt.Errorf("%w; verify remote head: %v", err, verifyErr)}
 			}
 
 			if classification != "network" || attempt == maxAttempts {
-				return &gitPushFailure{attempts: attempt, classification: classification, lastError: err}
+				return "", &gitPushFailure{attempts: attempt, classification: classification, lastError: err}
 			}
 			if err := waitGitPushRetry(ctx, retryDelay); err != nil {
-				return &gitPushFailure{attempts: attempt, classification: "interrupted", lastError: err}
+				return "", &gitPushFailure{attempts: attempt, classification: "interrupted", lastError: err}
 			}
 			args = gitPushRetryArgs(args, expectedHead, branch, remote)
 		}
 	}
-	return &gitPushFailure{attempts: maxAttempts, classification: "network", lastError: lastErr}
+	return "", &gitPushFailure{attempts: maxAttempts, classification: "network", lastError: lastErr}
 }
 
 func gitPushRetryArgs(args []string, expectedHead, branch, remote string) []string {
