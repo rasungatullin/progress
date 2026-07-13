@@ -1716,7 +1716,7 @@ func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map
 		if id == "" || externalID == "" {
 			continue
 		}
-		if matches := index.project[id]; len(matches) > 1 {
+		if index.hasAmbiguous(id) {
 			conflicts[id] = true
 			continue
 		}
