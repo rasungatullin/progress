@@ -281,8 +281,11 @@ func orderReviewRemarksByCreatedAt(remarks []integration.ReviewRemark) []integra
 			return true
 		}
 		if left.Equal(right) {
-			// GitHub не задаёт общий порядок замечаний с одинаковой
-			// секундной меткой времени. Не скрываем потенциально новое.
+			if ordered[i].Order != 0 && ordered[j].Order != 0 && ordered[i].Order != ordered[j].Order {
+				return ordered[i].Order < ordered[j].Order
+			}
+			// Если провайдер не передал общий порядок, сохраняем входную
+			// последовательность и не скрываем потенциально новое замечание.
 			return false
 		}
 		return left.Before(right)

@@ -135,14 +135,15 @@ type ghPRReviewComments struct {
 }
 
 type ghPRReviewComment struct {
-	ID        string       `json:"id"`
-	Body      string       `json:"body"`
-	URL       string       `json:"url"`
-	Path      string       `json:"path"`
-	Line      int          `json:"line"`
-	Author    *ghIssueUser `json:"author"`
-	CreatedAt string       `json:"createdAt"`
-	UpdatedAt string       `json:"updatedAt"`
+	ID         string       `json:"id"`
+	DatabaseID int64        `json:"databaseId"`
+	Body       string       `json:"body"`
+	URL        string       `json:"url"`
+	Path       string       `json:"path"`
+	Line       int          `json:"line"`
+	Author     *ghIssueUser `json:"author"`
+	CreatedAt  string       `json:"createdAt"`
+	UpdatedAt  string       `json:"updatedAt"`
 }
 
 type ghPRReviewCommentCreateResponse struct {
@@ -730,6 +731,7 @@ func reviewRemarkFromRESTComment(repository string, number int, comment ghPRRevi
 		State:              "unresolved",
 		CreatedAt:          comment.CreatedAt,
 		UpdatedAt:          comment.UpdatedAt,
+		Order:              comment.ID,
 	}
 	if comment.User != nil {
 		remark.Author = userFromTrackerUser(normalizeTrackerUser(*comment.User))
@@ -1895,6 +1897,7 @@ func reviewRemarkFromIssueComment(repository string, number int, raw ghIssueComm
 		URL:                url,
 		CreatedAt:          strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:          strings.TrimSpace(raw.UpdatedAt),
+		Order:              int64(raw.ID),
 	}
 }
 
@@ -1944,6 +1947,7 @@ func reviewRemarksFromThreads(repository string, number int, threads []ghPRRevie
 				URL:                strings.TrimSpace(comment.URL),
 				CreatedAt:          strings.TrimSpace(comment.CreatedAt),
 				UpdatedAt:          strings.TrimSpace(comment.UpdatedAt),
+				Order:              comment.DatabaseID,
 			})
 		}
 	}
@@ -1968,6 +1972,7 @@ func reviewRemarkFromThreadReply(threadID string, comment ghPRReviewComment) mod
 		URL:        strings.TrimSpace(comment.URL),
 		CreatedAt:  strings.TrimSpace(comment.CreatedAt),
 		UpdatedAt:  strings.TrimSpace(comment.UpdatedAt),
+		Order:      comment.DatabaseID,
 	}
 }
 

@@ -561,6 +561,45 @@ func TestServiceProcessTaskDoesNotCompareEqualTimeRemarkIDs(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskUsesProviderOrderForEqualTimeRemarks(t *testing.T) {
+	t.Parallel()
+
+	const createdAt = "2026-07-13T12:00:00Z"
+	for _, test := range []struct {
+		name       string
+		newRemark  bool
+		wantRework bool
+	}{
+		{name: "old inline remark", wantRework: false},
+		{name: "new inline remark", newRemark: true, wantRework: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			remarks := []integration.ReviewRemark{
+				{ExternalID: "approve", ReplyToID: "thread-2", Author: integration.User{Login: "progress"}, Body: "## Заключение ревизии\n\napprove", Type: "comment", CreatedAt: createdAt, Order: 20},
+			}
+			if test.newRemark {
+				remarks = append(remarks, integration.ReviewRemark{ExternalID: "new", ReplyToID: "thread-1", State: "unresolved", Type: "inline", Body: "Новое замечание", CreatedAt: createdAt, Order: 30})
+			} else {
+				remarks = append(remarks, integration.ReviewRemark{ExternalID: "old", ReplyToID: "thread-1", State: "unresolved", Type: "inline", Body: "Старое замечание", CreatedAt: createdAt, Order: 10})
+			}
+			integrations := newProcessingIntegrationStub([]string{LabelReviewPassed})
+			integrations.reviewRemarks = remarks
+			service := NewService(nil)
+			service.integration = integrations
+			service.execution = &processingExecutionStub{}
+
+			result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+			if err != nil {
+				t.Fatalf("process task: %v", err)
+			}
+			gotRework := result.Cycles[0].Consideration != nil && result.Cycles[0].Consideration.ExecutionPlan != nil && result.Cycles[0].Consideration.ExecutionPlan.Action == execution.ActionApplyReviewComments
+			if gotRework != test.wantRework {
+				t.Fatalf("rework = %t, want %t; result=%#v", gotRework, test.wantRework, result)
+			}
+		})
+	}
+}
+
 func TestServiceProcessTaskStopsOnRepeatedState(t *testing.T) {
 	t.Parallel()
 

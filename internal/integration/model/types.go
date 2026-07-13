@@ -416,6 +416,8 @@ type ReviewRemark struct {
 	URL                string
 	CreatedAt          string
 	UpdatedAt          string
+	// Order задаёт общий порядок публикации при недостаточной точности CreatedAt.
+	Order int64
 }
 
 type MessageThread struct {

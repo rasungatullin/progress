@@ -466,6 +466,7 @@ func (r *Runner) RunPRReviewThreads(ctx context.Context, repository string, numb
           comments(first: 100) {
             nodes {
               id
+              databaseId
               body
               url
               path

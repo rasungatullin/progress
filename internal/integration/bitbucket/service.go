@@ -1145,6 +1145,7 @@ func reviewRemarkFromAPIComment(repository string, number int, item apiComment) 
 		URL:                strings.TrimSpace(item.Links.HTML.Href),
 		CreatedAt:          strings.TrimSpace(item.CreatedOn),
 		UpdatedAt:          strings.TrimSpace(item.UpdatedOn),
+		Order:              int64(item.ID),
 	}
 	if item.Inline != nil {
 		remark.Path = strings.TrimSpace(item.Inline.Path)
@@ -1211,6 +1212,7 @@ func appendServerCommentRemarks(remarks []model.ReviewRemark, repository string,
 		URL:                firstServerSelfLink(raw.Links),
 		CreatedAt:          timestampMillisToRFC3339(raw.CreatedDate),
 		UpdatedAt:          timestampMillisToRFC3339(raw.UpdatedDate),
+		Order:              int64(raw.ID),
 	}
 	if raw.Anchor != nil {
 		remark.Path = strings.TrimSpace(raw.Anchor.Path)
