@@ -1707,13 +1707,14 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 	}
 
 	status := model.AuthStatus{
-		System:    "github",
-		Command:   config.Command,
-		Path:      result.Path,
-		ExitCode:  result.ExitCode,
-		Stdout:    result.Stdout,
-		Stderr:    result.Stderr,
-		Available: result.Path != "",
+		System:       "github",
+		ProviderType: "github",
+		Command:      config.Command,
+		Path:         result.Path,
+		ExitCode:     result.ExitCode,
+		Stdout:       result.Stdout,
+		Stderr:       result.Stderr,
+		Available:    result.Path != "",
 		Diagnostics: []string{
 			fmt.Sprintf("command=%s auth status", config.Command),
 		},

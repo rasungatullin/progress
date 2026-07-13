@@ -225,6 +225,7 @@ type OperationResult struct {
 
 type AuthStatus struct {
 	System        string
+	ProviderType  string
 	Login         string
 	State         string
 	Available     bool

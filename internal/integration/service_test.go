@@ -497,7 +497,7 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 	service.RegisterProvider("enterprise", stubProvider{
 		response: Response{
 			System:            "github",
-			AuthStatus:        &AuthStatus{System: "github"},
+			AuthStatus:        &AuthStatus{System: "github", ProviderType: "github"},
 			RepositoryStatus:  &RepositoryStatus{System: "github"},
 			IssueStatus:       &IssueStatus{System: "github"},
 			PullRequestStatus: &PullRequestStatus{System: "github"},
@@ -528,6 +528,9 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 
 	if result.System != "enterprise" || result.AuthStatus.System != "enterprise" || result.RepositoryStatus.System != "enterprise" || result.IssueStatus.System != "enterprise" || result.PullRequestStatus.System != "enterprise" {
 		t.Fatalf("expected top-level status systems to use route name, got %#v", result)
+	}
+	if result.AuthStatus.ProviderType != "github" {
+		t.Fatalf("expected auth provider type to remain canonical, got %#v", result.AuthStatus)
 	}
 	if result.Issue == nil || result.Issue.System != "enterprise" || result.Issue.Author.System != "enterprise" || result.Issue.Assignees[0].System != "enterprise" {
 		t.Fatalf("expected issue payload systems to use route name, got %#v", result.Issue)

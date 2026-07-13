@@ -363,9 +363,10 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 	authResponse, authErr := s.integration.Execute(ctx, integration.Request{System: system, Resource: "auth", Operation: "status"})
 	providerType := ""
 	if authResponse.AuthStatus != nil {
-		// AuthStatus.System — канонический тип фактического провайдера,
-		// а не имя настроенной системы.
-		providerType = strings.ToLower(strings.TrimSpace(authResponse.AuthStatus.System))
+		providerType = strings.ToLower(strings.TrimSpace(authResponse.AuthStatus.ProviderType))
+		if providerType == "" {
+			providerType = strings.ToLower(strings.TrimSpace(authResponse.AuthStatus.System))
+		}
 	}
 	if authErr != nil {
 		if providerType == "bitbucket" {

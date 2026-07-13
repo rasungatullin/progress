@@ -273,7 +273,7 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 		err := fmt.Errorf("Bitbucket token is required")
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindAuthRequired, Message: err.Error()}
-		response.AuthStatus = &model.AuthStatus{System: "bitbucket", State: model.FailureKindAuthRequired, Available: true, Authenticated: false, Message: err.Error()}
+		response.AuthStatus = &model.AuthStatus{System: "bitbucket", ProviderType: "bitbucket", State: model.FailureKindAuthRequired, Available: true, Authenticated: false, Message: err.Error()}
 		return response, err
 	}
 	if s.apiVariant() == apiVariantServer {
@@ -282,13 +282,14 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 
 	status, body, err := s.do(ctx, http.MethodGet, "user", nil)
 	auth := &model.AuthStatus{
-		System:      "bitbucket",
-		State:       "ready",
-		Available:   true,
-		Command:     "http",
-		ExitCode:    statusToExitCode(status),
-		Stdout:      string(body),
-		Diagnostics: []string{"endpoint=user"},
+		System:       "bitbucket",
+		ProviderType: "bitbucket",
+		State:        "ready",
+		Available:    true,
+		Command:      "http",
+		ExitCode:     statusToExitCode(status),
+		Stdout:       string(body),
+		Diagnostics:  []string{"endpoint=user"},
 	}
 	if err != nil {
 		auth.State = failureKindForHTTPStatus(status)
@@ -315,13 +316,14 @@ func (s *Service) executeServerAuthStatus(ctx context.Context, response model.Re
 	endpoint := s.serverEndpoint("projects?limit=1")
 	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
 	auth := &model.AuthStatus{
-		System:      "bitbucket",
-		State:       "ready",
-		Available:   true,
-		Command:     "http",
-		ExitCode:    statusToExitCode(status),
-		Stdout:      string(body),
-		Diagnostics: []string{"endpoint=" + endpoint, "api_variant=server"},
+		System:       "bitbucket",
+		ProviderType: "bitbucket",
+		State:        "ready",
+		Available:    true,
+		Command:      "http",
+		ExitCode:     statusToExitCode(status),
+		Stdout:       string(body),
+		Diagnostics:  []string{"endpoint=" + endpoint, "api_variant=server"},
 	}
 	if err != nil {
 		auth.State = failureKindForHTTPStatus(status)

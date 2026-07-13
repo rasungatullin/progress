@@ -990,7 +990,9 @@ func applyResponseSystem(result *Response, system string) {
 		result.OperationResult.System = system
 	}
 	if result.AuthStatus != nil {
+		providerType := result.AuthStatus.ProviderType
 		result.AuthStatus.System = system
+		result.AuthStatus.ProviderType = providerType
 	}
 	if result.RepositoryStatus != nil {
 		result.RepositoryStatus.System = system
