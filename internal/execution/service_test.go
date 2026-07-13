@@ -2519,6 +2519,30 @@ func TestReviewResponsesRejectAliasForExternalProjectIDCollision(t *testing.T) {
 	}
 }
 
+func TestReviewResponsesRejectAliasForAmbiguousExternalTarget(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nОбычное замечание.", URL: "https://example.test/1"},
+		{ExternalID: "remark-ref:comment-1", Body: "Идентификатор: remark-5\nДругое замечание.", URL: "https://example.test/2"},
+	}
+	output := &model.StructuredOutput{
+		Remarks: []model.StructuredRemark{{ID: "remark-alias", ExternalID: "remark-ref:comment-1"}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-alias",
+			Type:     "comment",
+			Status:   "resolved",
+			Summary:  "Не публиковать.",
+		}},
+	}
+
+	responses := reviewResponsesFromOutput(output, remarks)
+	err := validateReviewResponseTargets(responses, remarks, output)
+	if err == nil || !strings.Contains(err.Error(), "remark-alias") || !strings.Contains(err.Error(), "conflicting or ambiguous") {
+		t.Fatalf("alias must not resolve an ambiguous external target: %v", err)
+	}
+}
+
 func TestPublishReviewResponsesRejectsUnknownTargetWithEmptyCanonicalRemarks(t *testing.T) {
 	t.Parallel()
 

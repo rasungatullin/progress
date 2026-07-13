@@ -1773,6 +1773,10 @@ func reviewRemarkAliases(output *StructuredOutput, index reviewRemarkIndex) (map
 			conflicts[id] = true
 			continue
 		}
+		if index.hasAmbiguous(externalID) {
+			conflicts[id] = true
+			continue
+		}
 		canonical, ok := index.resolve(externalID)
 		if !ok {
 			continue
