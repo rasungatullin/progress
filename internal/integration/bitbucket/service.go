@@ -302,7 +302,9 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 	var raw apiUserResponse
 	_ = json.Unmarshal(body, &raw)
 	auth.Authenticated = true
-	auth.Login = strings.TrimSpace(firstNonEmpty(s.config.Username, raw.Nickname, raw.UUID))
+	// Никнейм приходит от Bitbucket вместе с подтверждённым ответом /user;
+	// настроечное имя используем только как запасной вариант.
+	auth.Login = strings.TrimSpace(firstNonEmpty(raw.Nickname, raw.UUID, s.config.Username))
 	auth.Message = strings.TrimSpace(firstNonEmpty(raw.DisplayName, raw.Nickname, raw.UUID, "Bitbucket authorization is available"))
 	response.AuthStatus = auth
 	response.Status = model.ResponseStatusOK

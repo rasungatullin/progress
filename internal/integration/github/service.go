@@ -1818,6 +1818,7 @@ func githubAuthLogin(command string, outputs ...string) string {
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		line = strings.TrimSpace(strings.TrimPrefix(line, "✓"))
+		line = strings.TrimSpace(strings.TrimPrefix(line, "-"))
 		const prefix = "Logged in to github.com account "
 		if strings.HasPrefix(line, prefix) {
 			login := strings.TrimSpace(strings.TrimPrefix(line, prefix))
