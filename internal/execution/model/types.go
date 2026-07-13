@@ -293,6 +293,8 @@ type GitPushConfig struct {
 	KnownHostsFile          string `json:"known-hosts-file,omitempty"`
 	IdentitiesOnly          bool   `json:"identities-only,omitempty"`
 	AllowForceWithLease     bool   `json:"allow-force-with-lease,omitempty"`
+	MaxAttempts             int    `json:"max-attempts,omitempty"`
+	RetryDelay              string `json:"retry-delay,omitempty"`
 }
 
 type RebaseInput struct {

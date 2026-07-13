@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
@@ -611,6 +612,7 @@ func normalizeGitConfig(config *model.GitConfig) *model.GitConfig {
 		push.SSHIdentityFile = strings.TrimSpace(push.SSHIdentityFile)
 		push.SSHIdentityPrivate = strings.TrimSpace(push.SSHIdentityPrivate)
 		push.KnownHostsFile = strings.TrimSpace(push.KnownHostsFile)
+		push.RetryDelay = strings.TrimSpace(push.RetryDelay)
 		normalized.Push = &push
 	}
 	if isGitConfigEmpty(&normalized) {
@@ -646,6 +648,16 @@ func validateGitConfig(config *model.GitConfig) error {
 	if push := config.Push; push != nil && strings.TrimSpace(push.SSHIdentityFile) != "" && strings.TrimSpace(push.SSHIdentityPrivate) != "" {
 		return fmt.Errorf("git.push must define only one of ssh-identity-file and ssh-identity-private")
 	}
+	if push := config.Push; push != nil {
+		if push.MaxAttempts < 0 {
+			return fmt.Errorf("git.push.max-attempts must not be negative")
+		}
+		if value := strings.TrimSpace(push.RetryDelay); value != "" {
+			if _, err := time.ParseDuration(value); err != nil {
+				return fmt.Errorf("git.push.retry-delay must be a duration: %w", err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -655,7 +667,7 @@ func isGitConfigEmpty(config *model.GitConfig) bool {
 	}
 	identityEmpty := config.Identity == nil || (config.Identity.AuthorName == "" && config.Identity.AuthorEmail == "" && config.Identity.CommitterName == "" && config.Identity.CommitterEmail == "")
 	signingEmpty := config.Signing == nil || (!config.Signing.Enabled && config.Signing.Format == "" && config.Signing.SigningKey == "" && config.Signing.Program == "")
-	pushEmpty := config.Push == nil || (config.Push.SSHIdentityFile == "" && config.Push.SSHIdentityPrivate == "" && config.Push.KnownHostsFile == "" && !config.Push.IdentitiesOnly && !config.Push.AllowForceWithLease)
+	pushEmpty := config.Push == nil || (config.Push.SSHIdentityFile == "" && config.Push.SSHIdentityPrivate == "" && config.Push.KnownHostsFile == "" && !config.Push.IdentitiesOnly && !config.Push.AllowForceWithLease && config.Push.MaxAttempts == 0 && config.Push.RetryDelay == "")
 	return identityEmpty && signingEmpty && pushEmpty
 }
 

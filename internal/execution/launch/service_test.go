@@ -1692,6 +1692,87 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 	}
 }
 
+func TestPushWithRetryRepeatsNetworkFailureWithoutCreatingCommit(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "push":
+				pushes++
+				if pushes == 1 {
+					return "", errors.New("exit status 128\nConnection closed by remote host")
+				}
+				return "", nil
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}})
+	if err != nil {
+		t.Fatalf("push with retry: %v", err)
+	}
+	if pushes != 2 {
+		t.Fatalf("expected two push attempts, got %d", pushes)
+	}
+}
+
+func TestPushWithRetryRecognizesAuthorizationFailure(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		if strings.Join(args, " ") == "push" {
+			pushes++
+			return "", errors.New("Permission denied (publickey)")
+		}
+		return "", fmt.Errorf("unexpected git command: %v", args)
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "authorization" || failure.attempts != 1 {
+		t.Fatalf("unexpected push failure: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("authorization failure must not repeat, got %d attempts", pushes)
+	}
+}
+
+func TestPushWithRetryAcceptsRemoteHeadAfterUncertainPush(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push":
+			pushes++
+			return "", errors.New("exit status 128\nConnection closed by remote host")
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			return "abc123\trefs/heads/feature/test\n", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	if err != nil {
+		t.Fatalf("push must be accepted after remote head verification: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("already accepted push must not be repeated, got %d attempts", pushes)
+	}
+}
+
 func TestLaunchCommitPushAppliesGitOverrideToCommitAndPush(t *testing.T) {
 	t.Parallel()
 

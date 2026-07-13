@@ -43,6 +43,8 @@ const (
 	defaultRunnerNoOutputTimeout         = 5 * time.Minute
 	defaultRunnerStructuredOutputTimeout = 15 * time.Minute
 	worktreeDiagnosticTimeout            = 10 * time.Second
+	defaultGitPushMaxAttempts            = 3
+	defaultGitPushRetryDelay             = 2 * time.Second
 )
 
 var (
@@ -722,6 +724,18 @@ type gitResult struct {
 	branch string
 }
 
+type gitPushFailure struct {
+	attempts       int
+	classification string
+	lastError      error
+}
+
+func (e *gitPushFailure) Error() string {
+	return fmt.Sprintf("git push failed: attempts=%d classification=%s last_error=%v", e.attempts, e.classification, e.lastError)
+}
+
+func (e *gitPushFailure) Unwrap() error { return e.lastError }
+
 type runRecord struct {
 	CreatedAt           string                  `json:"created_at"`
 	Invocation          model.Invocation        `json:"invocation"`
@@ -1023,11 +1037,104 @@ func (s *Service) commitAndPush(ctx context.Context, input model.CommitPushInput
 		pushArgs = append(pushArgs, "-u", "origin", branch)
 	}
 
-	if _, err := s.runGitOutputWithEnv(ctx, input.Directory, pushEnv, pushArgs...); err != nil {
-		return gitResult{}, fmt.Errorf("git push failed: %w", err)
+	if err := s.pushWithRetry(ctx, input.Directory, gitRoot, branch, pushArgs, pushEnv, input.Git); err != nil {
+		return gitResult{}, err
 	}
 
 	return gitResult{status: "committed+pushed", branch: branch}, nil
+}
+
+func (s *Service) pushWithRetry(ctx context.Context, dir, gitRoot, branch string, args, env []string, config *model.GitConfig) error {
+	maxAttempts, retryDelay := gitPushRetrySettings(config)
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if _, err := s.runGitOutputWithEnv(ctx, dir, env, args...); err == nil {
+			return nil
+		} else {
+			lastErr = err
+			classification := classifyGitPushError(err)
+			if classification == "authorization" || classification == "access-denied" || classification == "non-fast-forward" || classification == "history-conflict" {
+				return &gitPushFailure{attempts: attempt, classification: classification, lastError: err}
+			}
+
+			localHead, remoteHead, verifyErr := s.gitPushHeads(ctx, gitRoot, branch)
+			if verifyErr == nil {
+				if remoteHead == localHead && localHead != "" {
+					return nil
+				}
+				if remoteHead != "" && remoteHead != localHead {
+					return &gitPushFailure{attempts: attempt, classification: "history-conflict", lastError: fmt.Errorf("remote branch %s points to %s, local head is %s", branch, remoteHead, localHead)}
+				}
+			} else if classification != "network" {
+				return &gitPushFailure{attempts: attempt, classification: "uncertain", lastError: fmt.Errorf("%w; verify remote head: %v", err, verifyErr)}
+			}
+
+			if classification != "network" || attempt == maxAttempts {
+				return &gitPushFailure{attempts: attempt, classification: classification, lastError: err}
+			}
+			if err := waitGitPushRetry(ctx, retryDelay); err != nil {
+				return &gitPushFailure{attempts: attempt, classification: "interrupted", lastError: err}
+			}
+		}
+	}
+	return &gitPushFailure{attempts: maxAttempts, classification: "network", lastError: lastErr}
+}
+
+func gitPushRetrySettings(config *model.GitConfig) (int, time.Duration) {
+	maxAttempts := defaultGitPushMaxAttempts
+	delay := defaultGitPushRetryDelay
+	if config != nil && config.Push != nil {
+		if config.Push.MaxAttempts > 0 {
+			maxAttempts = config.Push.MaxAttempts
+		}
+		if value, err := time.ParseDuration(config.Push.RetryDelay); err == nil && value >= 0 {
+			delay = value
+		}
+	}
+	return maxAttempts, delay
+}
+
+func waitGitPushRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func classifyGitPushError(err error) string {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "non-fast-forward"), strings.Contains(message, "fetch first"):
+		return "non-fast-forward"
+	case strings.Contains(message, "permission denied"), strings.Contains(message, "could not read from remote repository"), strings.Contains(message, "authentication failed"), strings.Contains(message, "access denied"):
+		return "authorization"
+	case strings.Contains(message, "rejected"), strings.Contains(message, "updates were rejected"):
+		return "history-conflict"
+	case strings.Contains(message, "connection closed"), strings.Contains(message, "connection reset"), strings.Contains(message, "timed out"), strings.Contains(message, "could not resolve host"), strings.Contains(message, "network is unreachable"), strings.Contains(message, "broken pipe"):
+		return "network"
+	default:
+		return "uncertain"
+	}
+}
+
+func (s *Service) gitPushHeads(ctx context.Context, dir, branch string) (string, string, error) {
+	local, err := s.runGitOutput(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", fmt.Errorf("read local head: %w", err)
+	}
+	remote, err := s.runGitOutput(ctx, dir, "ls-remote", "origin", "refs/heads/"+branch)
+	if err != nil {
+		return strings.TrimSpace(local), "", fmt.Errorf("read remote head: %w", err)
+	}
+	fields := strings.Fields(remote)
+	if len(fields) == 0 {
+		return strings.TrimSpace(local), "", nil
+	}
+	return strings.TrimSpace(local), fields[0], nil
 }
 
 func commitPushInputFromLaunch(in model.Invocation, allocation model.Allocation, workplace model.Workplace, output *model.StructuredOutput) model.CommitPushInput {
