@@ -126,6 +126,42 @@ func TestIntegrationTypeOrientedTreeExcludesDispatcherAndPrivate(t *testing.T) {
 	}
 }
 
+func TestIntegrationTypeOrientedTreeContainsPublishedOperationCommands(t *testing.T) {
+	root := NewRootCommand()
+	paths := [][]string{
+		{"integration", "status"},
+		{"integration", "invoke"},
+		{"integration", "issue", "get"},
+		{"integration", "issue", "search"},
+		{"integration", "issue", "create"},
+		{"integration", "issue", "update"},
+		{"integration", "issue", "comment", "list"},
+		{"integration", "issue", "comment", "create"},
+		{"integration", "issue", "label", "add"},
+		{"integration", "issue", "label", "remove"},
+		{"integration", "repo", "get"},
+		{"integration", "repo", "merge-request", "get"},
+		{"integration", "repo", "merge-request", "search"},
+		{"integration", "repo", "merge-request", "create"},
+		{"integration", "repo", "merge-request", "comment", "list"},
+		{"integration", "repo", "merge-request", "comment", "create"},
+		{"integration", "repo", "merge-request", "review-remark", "list"},
+		{"integration", "repo", "merge-request", "review-remark", "create"},
+		{"integration", "repo", "merge-request", "review-remark", "reply"},
+		{"integration", "repo", "merge-request", "review-remark", "resolve"},
+		{"integration", "repo", "merge-request", "review-remark", "unresolve"},
+		{"integration", "messenger", "thread", "get"},
+		{"integration", "messenger", "message", "create"},
+		{"integration", "wiki", "page", "get"},
+		{"integration", "wiki", "page", "search"},
+	}
+	for _, path := range paths {
+		if _, _, err := root.Find(path); err != nil {
+			t.Errorf("published command %v is missing: %v", path, err)
+		}
+	}
+}
+
 func TestIntegrationIssueFlagsUseCatalogNames(t *testing.T) {
 	root := NewRootCommand()
 	for _, path := range [][]string{
@@ -324,5 +360,30 @@ func TestIntegrationInvokeReviewRemarkUsesReviewRemarkObject(t *testing.T) {
 	}
 	if provider.request.ObjectType != "review-remark" || provider.request.Operation != "create" {
 		t.Fatalf("review remark was routed as another object: %#v", provider.request)
+	}
+}
+
+func TestIntegrationReviewRemarkCreateCommandUsesReviewRemarkObject(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepo: "repo-system"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"repo-system": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}},
+		},
+	})
+	service.RegisterProvider("repo-system", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	cmd := NewRootCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "repo", "merge-request", "review-remark", "create", "--number", "7", "--body", "замечание", "--path", "file.go", "--line", "12"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute review remark create: %v", err)
+	}
+	if provider.request.Resource != "review-remark" || provider.request.ObjectType != "review-remark" {
+		t.Fatalf("review remark command was routed as ordinary comment: %#v", provider.request)
 	}
 }

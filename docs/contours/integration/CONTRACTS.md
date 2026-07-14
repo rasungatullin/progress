@@ -128,6 +128,8 @@ type Request struct {
     Labels          []string
     ExcludeLabels   []string
     Fields          []string
+    // Дополнительные поля сценарного ввода после проверки OperationInputContract.
+    // Имена и значения сохраняются без преобразования; секреты через Extra не передаются.
     Extra           map[string]any
 }
 ```

@@ -244,7 +244,11 @@ func newTypeOrientedReviewRemarkCreateCommandWithUse(use string, inline bool) *c
 		if inline && (strings.TrimSpace(flags.path) == "" || flags.line <= 0) {
 			return fmt.Errorf("--path and --line are required")
 		}
-		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: "comment", ObjectType: "merge-request-comment", Operation: "create", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), MergeRequestNumber: flags.number, Body: flags.body, Path: flags.path, Line: flags.line, Side: flags.side}, printIntegrationOperationResult)
+		resource, object := "comment", "merge-request-comment"
+		if inline {
+			resource, object = "review-remark", "review-remark"
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: resource, ObjectType: object, Operation: "create", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), MergeRequestNumber: flags.number, Body: flags.body, Path: flags.path, Line: flags.line, Side: flags.side}, printIntegrationOperationResult)
 	}}
 	bindTypeSystem(cmd, flags)
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")

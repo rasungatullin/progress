@@ -92,7 +92,7 @@ func (s *Service) OperationRoute(ctx context.Context, name, system string) (Rout
 	case "repo.merge-request.comment.list", "repo.merge-request.comment.create":
 		objectType = "merge-request-comment"
 	case "repo.review-remark.create":
-		objectType, operation = "merge-request-comment", "create"
+		objectType, operation = "review-remark", "create"
 	}
 	route, err := s.resolveRoute(Request{
 		IntegrationType: descriptor.IntegrationType,
