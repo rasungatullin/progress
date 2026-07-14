@@ -1766,6 +1766,7 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	input := launchSynthesisInputFromOperation(state, operation)
 	launchCtx := launch.WithHistoryHandle(ctx, state.historyHandle)
 	launchInvocation := invocation{Launch: launchSpec{Prompt: input.prompt, Directory: input.directory, Runner: input.runner, Model: input.model}}
+	launchInvocation.Launch.ReasoningEffort = input.reasoningEffort
 	if input.resumeSessionID != "" {
 		launchInvocation.Launch.Resume = &model.ResumeSpec{RunnerSessionID: input.resumeSessionID}
 	}

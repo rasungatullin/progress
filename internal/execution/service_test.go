@@ -48,6 +48,23 @@ func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 	}
 }
 
+func TestServiceLaunchPreservesExplicitReasoningEffortWhenAllocationOmitsIt(t *testing.T) {
+	t.Parallel()
+
+	launcher := &stubLauncher{}
+	service := &Service{logger: log.Default(), launcher: launcher}
+
+	_, err := service.launch(context.Background(), invocation{Launch: launchSpec{
+		Directory: "/tmp/work", Runner: "codex", Model: "gpt-5.3-codex-spark", ReasoningEffort: "medium", Prompt: "ship it",
+	}}, profile{}, allocation{Runner: "codex", Model: "gpt-5.3-codex-spark"}, workplace{})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if launcher.invocation.Launch.ReasoningEffort != "medium" {
+		t.Fatalf("expected explicit reasoning effort to be preserved, got %q", launcher.invocation.Launch.ReasoningEffort)
+	}
+}
+
 func TestServiceLaunchPreservesExistingPromptBehaviorWithoutProfileAdditions(t *testing.T) {
 	t.Parallel()
 
@@ -4622,6 +4639,7 @@ func structuredSynthesisMethodologyAction() methodology.Action {
 				"directory":                {Type: "string", Required: required},
 				"runner":                   {Type: "string", Required: required},
 				"model":                    {Type: "string", Required: required},
+				"reasoning_effort":         {Type: "string"},
 				"resume_session_id":        {Type: "string"},
 			},
 			Data: map[string]methodology.ActionContractField{
@@ -4669,6 +4687,7 @@ func testExecutionOperationRegistry() []methodology.Operation {
 				"directory":                {Type: "string", Required: required},
 				"runner":                   {Type: "string", Required: required},
 				"model":                    {Type: "string", Required: required},
+				"reasoning_effort":         {Type: "string"},
 				"resume_session_id":        {Type: "string"},
 			},
 			Out: map[string]methodology.OperationContractField{
@@ -4903,6 +4922,7 @@ func structuredSynthesisActionOperation() methodology.ActionOperation {
 			"directory":                mappingRef("data.workplace.name"),
 			"runner":                   mappingRef("data.allocation.runner"),
 			"model":                    mappingRef("data.allocation.model"),
+			"reasoning_effort":         mappingRef("data.allocation.reasoning_effort"),
 			"resume_session_id":        mappingRef("in.launch.resume.runner_session_id"),
 		},
 		Out: map[string]methodology.ActionMapping{
@@ -4938,6 +4958,7 @@ func structuredSynthesisLaunchOperation() methodology.ActionOperation {
 			"directory":         mappingRef("in.directory"),
 			"runner":            mappingRef("in.runner"),
 			"model":             mappingRef("in.model"),
+			"reasoning_effort":  mappingRef("in.reasoning_effort"),
 			"resume_session_id": mappingRef("in.resume_session_id"),
 		},
 		Out: map[string]methodology.ActionMapping{

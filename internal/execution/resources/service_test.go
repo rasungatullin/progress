@@ -251,6 +251,45 @@ func TestAllocateUsesExplicitRunnerAndModelWithoutBinding(t *testing.T) {
 	}
 }
 
+func TestAllocatePassesExplicitReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"runners": ["codex"],
+		"models": ["gpt-5.3-codex-spark"],
+		"bindings": {"default": {"runner": "codex", "model": "gpt-5.3-codex-spark"}}
+	}`)
+
+	allocation, err := service.Allocate(context.Background(), model.Invocation{Launch: model.LaunchSpec{
+		Runner: "codex", Model: "gpt-5.3-codex-spark", ReasoningEffort: " medium ",
+	}}, model.Profile{})
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if allocation.ReasoningEffort != "medium" {
+		t.Fatalf("unexpected reasoning effort: %#v", allocation)
+	}
+}
+
+func TestAllocateRejectsInvalidExplicitReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"runners": ["codex"],
+		"models": ["gpt-5.3-codex-spark"],
+		"bindings": {"default": {"runner": "codex", "model": "gpt-5.3-codex-spark"}}
+	}`)
+
+	_, err := service.Allocate(context.Background(), model.Invocation{Launch: model.LaunchSpec{
+		Runner: "codex", Model: "gpt-5.3-codex-spark", ReasoningEffort: "ultra",
+	}}, model.Profile{})
+	if err == nil || !strings.Contains(err.Error(), "explicit launch has invalid reasoning-effort") {
+		t.Fatalf("expected invalid explicit reasoning effort error, got %v", err)
+	}
+}
+
 func TestAllocateRejectsDisabledResource(t *testing.T) {
 	t.Parallel()
 

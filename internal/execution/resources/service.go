@@ -85,6 +85,9 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		if _, ok := config.Config.Resources[modelName]; !ok {
 			return model.Allocation{}, fmt.Errorf("unknown execution model: %s", modelName)
 		}
+		if err := validateReasoningEffort(runner, modelName, in.Launch.ReasoningEffort); err != nil {
+			return model.Allocation{}, fmt.Errorf("explicit launch has invalid reasoning-effort: %w", err)
+		}
 		if err := ensureToolResourceAvailable(config, runner, modelName); err != nil {
 			return model.Allocation{}, err
 		}
@@ -97,6 +100,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			Reserved:         true,
 			Runner:           runner,
 			Model:            modelName,
+			ReasoningEffort:  strings.TrimSpace(in.Launch.ReasoningEffort),
 			Environment:      environment,
 			EnvironmentType:  environmentType,
 			Source:           allocationSourceExplicitRunnerModel,
