@@ -198,13 +198,13 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 	}
 	tool := bindingTool(binding)
 	resource := bindingResource(binding)
-	if err := ensureToolResourceAvailable(config, tool, resource); err != nil {
-		return model.Allocation{}, err
-	}
 	if err := validateReasoningEffort(tool, resource, binding.ReasoningEffort); err != nil {
 		return model.Allocation{}, &invalidBindingConfigurationError{
 			err: fmt.Errorf("binding %q has invalid reasoning-effort: %w", bindingName, err),
 		}
+	}
+	if err := ensureToolResourceAvailable(config, tool, resource); err != nil {
+		return model.Allocation{}, err
 	}
 	environment, environmentType, err := resolveAllocationEnvironment(config, in, binding.Environment)
 	if err != nil {

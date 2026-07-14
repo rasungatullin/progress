@@ -1492,6 +1492,7 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	directiveInvocation := input.invocation
 	directiveInvocation.Launch.Runner = input.allocation.Runner
 	directiveInvocation.Launch.Model = input.allocation.Model
+	directiveInvocation.Launch.ReasoningEffort = input.allocation.ReasoningEffort
 	if strings.TrimSpace(directiveInvocation.Launch.ModelBinding) == "" {
 		directiveInvocation.Launch.ModelBinding = input.allocation.ModelBinding
 	}
@@ -1769,7 +1770,7 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 		launchInvocation.Launch.Resume = &model.ResumeSpec{RunnerSessionID: input.resumeSessionID}
 	}
 	launchWorkplace := workplace{Name: input.directory, RepositoryRoot: input.directory, Ready: true}
-	launchAllocation := allocation{Runner: input.runner, Model: input.model}
+	launchAllocation := allocation{Runner: input.runner, Model: input.model, ReasoningEffort: input.reasoningEffort}
 	result, err := e.service.launch(launchCtx, launchInvocation, profile{}, launchAllocation, launchWorkplace)
 	writeLaunchSynthesisData(state, operation, result)
 	if err != nil {
@@ -1808,6 +1809,7 @@ type launchSynthesisInput struct {
 	directory       string
 	runner          string
 	model           string
+	reasoningEffort string
 	resumeSessionID string
 }
 
@@ -1820,13 +1822,20 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 	input.directory, _ = operationMappingValue[string](state, operation.In["directory"])
 	input.runner, _ = operationMappingValue[string](state, operation.In["runner"])
 	input.model, _ = operationMappingValue[string](state, operation.In["model"])
+	input.reasoningEffort, _ = operationMappingValue[string](state, operation.In["reasoning_effort"])
 	input.resumeSessionID, _ = operationMappingValue[string](state, operation.In["resume_session_id"])
+	if strings.TrimSpace(input.reasoningEffort) == "" && state != nil {
+		if allocation, ok := state.data["allocation"].(allocation); ok {
+			input.reasoningEffort = allocation.ReasoningEffort
+		}
+	}
 	if strings.TrimSpace(input.prompt) == "" {
 		if directive, ok := directiveValueFromLaunchSynthesisMapping(state, operation.In["directive"]); ok {
 			input.prompt, _ = launch.BuildPrompt(directive)
 			input.directory = directive.Directory
 			input.runner = directive.Runner
 			input.model = directive.Model
+			input.reasoningEffort = directive.ReasoningEffort
 			if directive.Resume != nil {
 				input.resumeSessionID = directive.Resume.RunnerSessionID
 			}
@@ -2049,6 +2058,7 @@ func launchSynthesisInputSummary(input launchSynthesisInput, operation Operation
 		"directory":         input.directory,
 		"runner":            input.runner,
 		"model":             input.model,
+		"reasoning_effort":  presenceSummary(input.reasoningEffort),
 		"resume_session_id": presenceSummary(input.resumeSessionID),
 	})
 }

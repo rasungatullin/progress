@@ -4968,10 +4968,11 @@ func launchSynthesisActionOperation() methodology.ActionOperation {
 
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"prompt":    mappingRef("data.prompt"),
-			"directory": mappingRef("data.workplace.name"),
-			"runner":    mappingRef("data.allocation.runner"),
-			"model":     mappingRef("data.allocation.model"),
+			"prompt":           mappingRef("data.prompt"),
+			"directory":        mappingRef("data.workplace.name"),
+			"runner":           mappingRef("data.allocation.runner"),
+			"model":            mappingRef("data.allocation.model"),
+			"reasoning_effort": mappingRef("data.allocation.reasoning_effort"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"raw_output": mappingRef("data.raw_output"),
