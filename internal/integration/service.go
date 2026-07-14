@@ -476,6 +476,9 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 			objectType = "repository"
 		}
 	}
+	if req.RepoProvided && strings.TrimSpace(req.Repository) == "" {
+		return ProviderRequest{}, fmt.Errorf("invalid integration request: repository is required when explicitly provided")
+	}
 
 	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
 	normalized := ProviderRequest{
@@ -785,6 +788,13 @@ func systemSupportsOperation(state systemState, integrationType string, objectTy
 	if integrationType == model.IntegrationTypeRepo && objectType == "comment" {
 		for _, template := range builtinOperationTemplates(state.Type) {
 			if strings.HasPrefix(template.Name, "repo.merge-request.comment.") && normalizeOperation(template.Operation) == operation {
+				return true
+			}
+		}
+	}
+	if integrationType == model.IntegrationTypeRepo && objectType == "review-remark" && operation == "create" {
+		for _, template := range builtinOperationTemplates(state.Type) {
+			if template.Name == "repo.review-remark.create" {
 				return true
 			}
 		}

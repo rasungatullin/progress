@@ -155,6 +155,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			mergeRequestCreateOperation(),
 			mergeRequestCommentListOperation(),
 			mergeRequestCommentCreateOperation(),
+			reviewRemarkCreateOperation(),
 			reviewRemarkListOperation(),
 			reviewRemarkReplyOperation(),
 			reviewRemarkResolveOperation(),
@@ -168,6 +169,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			mergeRequestCreateOperation(),
 			mergeRequestCommentListOperation(),
 			mergeRequestCommentCreateOperation(),
+			reviewRemarkCreateOperation(),
 			reviewRemarkListOperation(),
 		}
 	case "mattermost":
@@ -287,16 +289,16 @@ func parseOperationName(name string) (string, string, string) {
 	if operation == "comments" {
 		operation = "list"
 	}
-	objectType := strings.Join(parts[1:len(parts)-1], "-")
+	objectType := strings.Join(parts[1:len(parts)-1], ".")
 	objectType = normalizeObjectType(objectType)
 	// Каноническое имя операции допускает вложенные объектные пространства,
 	// тогда как реестр сопоставляет их с единым объектом адаптера.
 	switch objectType {
-	case "issue-comment":
+	case "issue.comment", "issue-comment":
 		objectType = "comment"
-	case "issue-label":
+	case "issue.label", "issue-label":
 		objectType = "label"
-	case "merge-request-comment":
+	case "merge-request.comment", "merge-request-comment":
 		objectType = "comment"
 	}
 	if integrationType == model.IntegrationTypeIssue && objectType == "task" {
@@ -653,6 +655,24 @@ func reviewRemarkListOperation() operationTemplate {
 		Input:           input(requiredField("number", "integer"), optionalField("repository", "string")),
 		Output:          output("review-remark", "ReviewRemark[]"),
 		FailureKinds:    defaultFailureKinds(),
+	}
+}
+
+func reviewRemarkCreateOperation() operationTemplate {
+	return operationTemplate{
+		Name:            "repo.review-remark.create",
+		IntegrationType: model.IntegrationTypeRepository,
+		ObjectType:      "review-remark",
+		Operation:       "create",
+		SideEffect:      true,
+		Input: inputMany([]model.OperationField{
+			requiredField("number", "integer"),
+			requiredField("body", "string"),
+			requiredField("path", "string"),
+			requiredField("line", "integer"),
+		}, optionalFields("repository", "side")...),
+		Output:       output("operation-result", "OperationResult"),
+		FailureKinds: defaultFailureKinds(),
 	}
 }
 

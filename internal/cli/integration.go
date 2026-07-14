@@ -1708,12 +1708,15 @@ func newIntegrationInvokeCommand() *cobra.Command {
 			var err error
 			data, err = os.ReadFile(flags.inputFile)
 			if err != nil {
-				return fmt.Errorf("read input file: %w", err)
+				return printInvokeInputFailure(cmd, flags, fmt.Errorf("read input file: %w", err))
 			}
 		}
 		var values map[string]any
 		if err := json.Unmarshal(data, &values); err != nil {
-			return fmt.Errorf("parse input JSON: %w", err)
+			return printInvokeInputFailure(cmd, flags, fmt.Errorf("parse input JSON: %w", err))
+		}
+		if values == nil {
+			return printInvokeInputFailure(cmd, flags, fmt.Errorf("input JSON must be an object"))
 		}
 		service := newIntegrationService(cmd)
 		descriptor, found := service.OperationDescriptor(cmd.Context(), flags.operation, flags.system)
@@ -1902,6 +1905,7 @@ func validateInvokeField(field integration.OperationField, value any) error {
 func requestFromInvokeInput(descriptor integration.OperationDescriptor, values map[string]any) integration.Request {
 	objectType := descriptor.ObjectType
 	operation := descriptor.Operation
+	requestValues := cloneInvokeValues(values)
 	switch descriptor.Name {
 	case "issue.issue.comment.list":
 		objectType, operation = "issue", "comments"
@@ -1915,16 +1919,18 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 		objectType = "merge-request-comment"
 		// Обычный комментарий не может стать inline-замечанием даже при
 		// диагностическом вызове с лишними координатами diff.
-		delete(values, "path")
-		delete(values, "line")
-		delete(values, "side")
+		delete(requestValues, "path")
+		delete(requestValues, "line")
+		delete(requestValues, "side")
+	case "repo.review-remark.create":
+		objectType, operation = "merge-request-comment", "create"
 
 	case "repo.review-remark.list":
 		objectType, operation = "review-remark", "list"
 	case "repo.review-remark.unresolve":
 		objectType = "review-remark"
 	}
-	request := integration.Request{IntegrationType: descriptor.IntegrationType, Resource: objectType, ObjectType: objectType, Operation: operation, Extra: cloneInvokeValues(values)}
+	request := integration.Request{IntegrationType: descriptor.IntegrationType, Resource: objectType, ObjectType: objectType, Operation: operation, Extra: requestValues}
 	stringValue := func(name string) string {
 		if value, ok := values[name].(string); ok {
 			return value
