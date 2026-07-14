@@ -205,6 +205,7 @@ type ProfileOptions struct {
 	ModelBinding             string    `json:"model-binding"`
 	AllowModelFallback       *bool     `json:"allow-model-fallback"`
 	PromptAdditions          *[]string `json:"prompt-additions"`
+	PromptAdditionsFile      string    `json:"prompt-additions-file"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`
@@ -220,6 +221,7 @@ type ProfileConfig struct {
 	ModelBinding             string    `json:"model-binding"`
 	AllowModelFallback       *bool     `json:"allow-model-fallback"`
 	PromptAdditions          *[]string `json:"prompt-additions"`
+	PromptAdditionsFile      string    `json:"prompt-additions-file"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
 	StructuredOutputFields   *[]string `json:"structured-output-fields"`

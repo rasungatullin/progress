@@ -142,15 +142,65 @@ func TestResolveProfileReviewPresetFromRepositoryConfig(t *testing.T) {
 	}
 	joined := strings.Join(profile.PromptAdditions, "\n")
 	for _, expected := range []string{
-		"Ты выполняешь ревизию изменения.",
-		"Не изменяй код",
-		"дефекты, поведенческие регрессии, отсутствующие проверки",
-		"предыдущие замечания",
-		"conclusion.status=ok",
+		"Сделай **критическую ревизию кода**",
+		"Не останавливайся после первого найденного дефекта",
+		"привяжи замечание к конкретному файлу и строке",
+		"Верни список всех выявленных замечаний",
+		"заключением ревизии",
 	} {
 		if !strings.Contains(joined, expected) {
-			t.Fatalf("review prompt-additions must include %q, got %q", expected, joined)
+			t.Fatalf("review prompt must include %q, got %q", expected, joined)
 		}
+	}
+	for _, unexpected := range []string{"структурированный вывод", "conclusion.status", "remarks, questions"} {
+		if strings.Contains(joined, unexpected) {
+			t.Fatalf("review prompt must not duplicate structured output requirement %q: %q", unexpected, joined)
+		}
+	}
+}
+
+func TestResolveProfileLoadsPromptAdditionsFileInsideRepository(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		resolveRepoRoot: func(context.Context) (string, error) { return "/repo", nil },
+		readFile: func(path string) ([]byte, error) {
+			switch path {
+			case "/repo/.progress/execution/profiles.json":
+				return []byte(`{
+					"defaults": {"mode":"manual","prompt-additions":["Базовая инструкция."],"prompt-additions-file":"prompts/default.md"},
+					"profiles": {"review":{"prompt-additions":["Инструкция профиля."],"prompt-additions-file":"prompts/review.md"}}
+				}`), nil
+			case "/repo/prompts/default.md":
+				return []byte("Файл базовой инструкции."), nil
+			case "/repo/prompts/review.md":
+				return []byte("# Ревизия\n\nФайл инструкции профиля."), nil
+			default:
+				return nil, os.ErrNotExist
+			}
+		},
+	}
+
+	profile, err := service.Resolve(context.Background(), model.Invocation{Profile: "review"})
+	if err != nil {
+		t.Fatalf("resolve review profile: %v", err)
+	}
+	want := []string{"Базовая инструкция.", "Файл базовой инструкции.", "Инструкция профиля.", "# Ревизия\n\nФайл инструкции профиля."}
+	if !equalStrings(profile.PromptAdditions, want) {
+		t.Fatalf("unexpected prompt additions: %#v", profile.PromptAdditions)
+	}
+}
+
+func TestResolveProfileRejectsPromptAdditionsFileOutsideRepository(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"mode":"manual"},
+		"profiles": {"review":{"prompt-additions-file":"../review.md"}}
+	}`)
+	_, err := service.Resolve(context.Background(), model.Invocation{Profile: "review"})
+	if err == nil || !strings.Contains(err.Error(), "escapes repository root") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
