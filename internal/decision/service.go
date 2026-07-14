@@ -80,6 +80,13 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		Issue:        response.Issue,
 		MergeRequest: mergeRequest,
 	}
+	if mergeRequest != nil {
+		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest)
+		if stateErr != nil {
+			return StartResult{Context: decisionContext}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, stateErr)
+		}
+		decisionContext.MergeRequestExternalState = externalState
+	}
 	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext, Route: input.Route})
 	if err != nil {
 		if mergeRequestErr != nil && consideration.Failure != nil && consideration.Failure.Code == "merge_request_missing" {
@@ -403,6 +410,16 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	if strings.TrimSpace(result.Context.Task.ID) == "" {
 		result.Context.Task = canonicalTaskFromIssue(input.Context.Issue)
 	}
+	if isOpenMergeRequest(input.Context.MergeRequest) && input.Context.MergeRequestExternalState != nil && input.Context.MergeRequestExternalState.HasMergeConflict {
+		route := mergeConflictRoute()
+		result.Route = route.Route
+		result.Checks = route.Checks
+		decision := buildExecuteDecision(result.Context, route)
+		result.Status = ConsiderationStatusExecution
+		result.Reasons = append([]DecisionReason(nil), decision.Reasons...)
+		result.ExecutionPlan = decision.ExecutionPlan
+		return result, nil
+	}
 
 	route, err := s.selectWorkflowRoute(ctx, result.Context.Task, input.Route)
 	if err != nil {
@@ -462,6 +479,19 @@ func isOpenMergeRequest(mergeRequest *integration.MergeRequest) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func mergeConflictRoute() selectedWorkflowRoute {
+	reason := "Открытый запрос на слияние имеет подтверждённое конфликтное состояние; сначала требуется управляемое разрешение конфликта."
+	return selectedWorkflowRoute{
+		Action:         execution.ActionResolveMergeConflict,
+		ExpectedResult: "Разрешить конфликт запроса на слияние, завершить перебазирование, проверить результат и отправить ветку через --force-with-lease.",
+		Constraints:    []string{"Работать в отдельном исполнительном рабочем месте.", "Не выполнять обычную отправку ветки.", "После подтверждённого разрешения направить результат на повторную экспертизу."},
+		ReasonCode:     "merge_request_conflict",
+		ReasonMessage:  reason,
+		Route:          ProcessingRoute{Name: "task-processing-merge-conflict", Title: "Разрешение конфликта запроса на слияние", Description: "Отдельный маршрут управляемого разрешения конфликта открытого запроса на слияние."},
+		Checks:         []RouteCheckResult{{Name: "merge-request-conflict", Status: RouteCheckStatusPassed, Reasons: []DecisionReason{{Code: "merge_request_conflict", Message: reason}}}},
 	}
 }
 

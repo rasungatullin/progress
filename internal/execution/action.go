@@ -25,6 +25,7 @@ const (
 	ActionStartImplementationPR = "start-implementation-pr"
 	ActionReviewPullRequest     = "review-pull-request"
 	ActionApplyReviewComments   = "apply-review-comments"
+	ActionResolveMergeConflict  = "resolve-merge-conflict"
 
 	OperationKindPrepareData            = "prepare-data"
 	OperationKindLoadPullRequest        = "load-pull-request"
@@ -39,6 +40,7 @@ const (
 	OperationKindParseResult            = "parse-result"
 	OperationKindCommitPush             = "commit-push"
 	OperationKindRebase                 = "rebase"
+	OperationKindResolveMergeConflict   = "resolve-merge-conflict"
 	OperationKindPublishMergeRequest    = "publish-merge-request"
 	OperationKindPublishReviewRemarks   = "publish-review-remarks"
 	OperationKindPublishReviewResponses = "publish-review-responses"
@@ -355,6 +357,8 @@ func defaultOperationSpec(kind string) model.OperationSpec {
 		return builtinOperation(OperationKindCommitPush, "Создание коммита и отправка ветки", true)
 	case OperationKindRebase:
 		return builtinOperation(OperationKindRebase, "Безопасное перебазирование ветки", true)
+	case OperationKindResolveMergeConflict:
+		return builtinOperation(OperationKindResolveMergeConflict, "Завершение разрешения конфликта запроса на слияние", true)
 	case OperationKindPublishMergeRequest:
 		return builtinOperation(OperationKindPublishMergeRequest, "Открытие запроса на слияние", true)
 	case OperationKindPublishReviewRemarks:
@@ -374,7 +378,7 @@ func actionRequiresWorkplace(action methodology.Action, operations []model.Opera
 	}
 	for _, operation := range operations {
 		switch operationKind(operation) {
-		case OperationKindPrepareWorkplace, OperationKindCommitPush, OperationKindRebase, OperationKindPublishMergeRequest, OperationKindPublishReviewRemarks, OperationKindPublishReviewResponses:
+		case OperationKindPrepareWorkplace, OperationKindCommitPush, OperationKindRebase, OperationKindResolveMergeConflict, OperationKindPublishMergeRequest, OperationKindPublishReviewRemarks, OperationKindPublishReviewResponses:
 			return true
 		}
 	}

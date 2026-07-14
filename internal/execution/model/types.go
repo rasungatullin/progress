@@ -302,6 +302,7 @@ type RebaseInput struct {
 	ProtectedRef   string     `json:"protected_ref,omitempty"`
 	Push           bool       `json:"push,omitempty"`
 	ForceWithLease bool       `json:"force_with_lease,omitempty"`
+	AllowConflict  bool       `json:"allow_conflict,omitempty"`
 	Git            *GitConfig `json:"-"`
 }
 

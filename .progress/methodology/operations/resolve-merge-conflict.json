@@ -1,0 +1,17 @@
+{
+  "name": "resolve-merge-conflict",
+  "kind": "resolve-merge-conflict",
+  "title": "Завершение разрешения конфликта запроса на слияние",
+  "type": "builtin",
+  "required": true,
+  "contract": {
+    "in": {
+      "directory": {"type": "string", "required": true},
+      "base_ref": {"type": "string", "required": true},
+      "head_ref": {"type": "string", "required": true},
+      "remote_head": {"type": "string", "required": true},
+      "structured_output": {"type": "object", "required": true}
+    },
+    "out": {"resolution_summary": {"type": "string", "required": true}}
+  }
+}

@@ -281,16 +281,37 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 	mergeRequest := knownMergeRequest
 	if mergeRequest != nil {
 		copyOfMergeRequest := *mergeRequest
-		return response.Issue, &copyOfMergeRequest, nil, nil, nil
-	}
-	mergeRequest, err = s.findTaskMergeRequest(ctx, response.Issue)
-	if err != nil {
-		if requireMergeRequest || taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) {
-			return nil, nil, nil, err, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, err)
+		fresh, refreshErr := s.integration.Execute(ctx, integration.Request{IntegrationType: integrationTypeRepository, Resource: "merge-request", ObjectType: "merge-request", Operation: "get", Repository: copyOfMergeRequest.Repository, RepoProvided: strings.TrimSpace(copyOfMergeRequest.Repository) != "", MergeRequestNumber: copyOfMergeRequest.Number})
+		if refreshErr == nil {
+			if refreshed, ok := integrationMergeRequestFromResponse(fresh); ok {
+				copyOfMergeRequest = refreshed
+			}
 		}
-		s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%d ошибка=%v", taskNumber, err)
+		mergeRequest = &copyOfMergeRequest
+	} else {
+		mergeRequest, err = s.findTaskMergeRequest(ctx, response.Issue)
+		if err != nil {
+			if requireMergeRequest || taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) {
+				return nil, nil, nil, err, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, err)
+			}
+			s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%d ошибка=%v", taskNumber, err)
+		}
+	}
+	if mergeRequest != nil {
+		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest)
+		if stateErr != nil {
+			return response.Issue, mergeRequest, nil, nil, stateErr
+		}
+		return response.Issue, mergeRequest, externalState, nil, nil
 	}
 	return response.Issue, mergeRequest, nil, err, nil
+}
+
+func integrationMergeRequestFromResponse(response integration.Response) (integration.MergeRequest, bool) {
+	if response.MergeRequest == nil {
+		return integration.MergeRequest{}, false
+	}
+	return *response.MergeRequest, true
 }
 
 func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*decision.MergeRequestExternalState, error) {
@@ -681,6 +702,8 @@ func canonicalProcessingAction(action string) string {
 		return execution.ActionReviewPullRequest
 	case "address-review-comments", "fix-review-comments", "reply-review-comments", execution.ActionApplyReviewComments:
 		return execution.ActionApplyReviewComments
+	case "resolve-conflict", execution.ActionResolveMergeConflict:
+		return execution.ActionResolveMergeConflict
 	default:
 		return strings.TrimSpace(action)
 	}
@@ -688,7 +711,7 @@ func canonicalProcessingAction(action string) string {
 
 func requiresMergeRequest(action string) bool {
 	switch canonicalProcessingAction(action) {
-	case execution.ActionReviewPullRequest, execution.ActionApplyReviewComments:
+	case execution.ActionReviewPullRequest, execution.ActionApplyReviewComments, execution.ActionResolveMergeConflict:
 		return true
 	default:
 		return false
@@ -790,6 +813,8 @@ func expectedResultForAction(action string) string {
 		return "Проверить открытый запрос на слияние и записать заключение ревизии."
 	case execution.ActionApplyReviewComments:
 		return "Исправить замечания ревизии, отправить ветку и записать ответы на замечания."
+	case execution.ActionResolveMergeConflict:
+		return "Разрешить конфликт запроса на слияние, завершить перебазирование и отправить ветку через --force-with-lease."
 	default:
 		return "Выполнить выбранное действие и вернуть диагностируемый результат."
 	}
