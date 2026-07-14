@@ -1052,6 +1052,50 @@ func TestServiceResolveLoadsStoredCatalog(t *testing.T) {
 	}
 }
 
+func TestRepositoryInstructionBodiesStayWithDescriptions(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repository root: %v", err)
+	}
+
+	snapshot, err := LoadCatalogWithHome(repoRoot, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("load repository methodology catalog: %v", err)
+	}
+
+	wantProfiles := map[string]string{
+		"start-implementation-pr-directive": "coder",
+		"review-pull-request-directive":     "review",
+		"apply-review-comments-directive":   "review-rework",
+	}
+	for name, wantProfile := range wantProfiles {
+		var found *Instruction
+		for index := range snapshot.Catalog.Instructions {
+			if snapshot.Catalog.Instructions[index].Name == name {
+				found = &snapshot.Catalog.Instructions[index]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("instruction %q not found", name)
+		}
+		wantBodyFile := filepath.Join("instructions", name+".md")
+		if found.Profile != wantProfile || found.BodyFile != wantBodyFile || strings.TrimSpace(found.Body) == "" {
+			t.Fatalf("unexpected instruction %q: %#v", name, *found)
+		}
+	}
+
+	for _, action := range snapshot.Catalog.Actions {
+		if action.Name == "apply-review-comments" {
+			if action.Profile != "review-rework" {
+				t.Fatalf("unexpected apply-review-comments profile: %q", action.Profile)
+			}
+			return
+		}
+	}
+	t.Fatal("action apply-review-comments not found")
+}
+
 func TestListCatalogElementsFiltersGenericEntities(t *testing.T) {
 	t.Parallel()
 

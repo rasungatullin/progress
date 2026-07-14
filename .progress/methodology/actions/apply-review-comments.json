@@ -1,7 +1,7 @@
 {
   "name": "apply-review-comments",
   "class": "engineering-synthesis",
-  "profile": "coder",
+  "profile": "review-rework",
   "aliases": [
     "address-review-comments",
     "fix-review-comments",
