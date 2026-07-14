@@ -51,6 +51,29 @@ func (s *Service) Operations(_ context.Context, filter OperationFilter) []Operat
 	return result
 }
 
+// OperationDescriptor возвращает описание операции для явно выбранной
+// системы либо для системы по умолчанию соответствующего типа.
+func (s *Service) OperationDescriptor(ctx context.Context, name, system string) (OperationDescriptor, bool) {
+	filter := OperationFilter{Name: strings.TrimSpace(strings.ToLower(name)), System: strings.TrimSpace(strings.ToLower(system))}
+	if filter.System == "" {
+		descriptors := s.Operations(ctx, filter)
+		if len(descriptors) == 0 {
+			return OperationDescriptor{}, false
+		}
+		integrationType := descriptors[0].IntegrationType
+		defaultSystem := s.defaultSystemForType(integrationType)
+		if defaultSystem == "" {
+			return OperationDescriptor{}, false
+		}
+		filter.System = defaultSystem
+	}
+	descriptors := s.Operations(ctx, filter)
+	if len(descriptors) == 0 {
+		return OperationDescriptor{}, false
+	}
+	return descriptors[0], true
+}
+
 func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDescriptor {
 	var result []OperationDescriptor
 	for _, template := range builtinOperationTemplates(state.Type) {

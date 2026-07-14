@@ -250,7 +250,10 @@ func (s *Service) buildEnvelope(req model.ProviderRequest, operationName string,
 }
 
 func requestMap(req model.ProviderRequest) map[string]any {
-	request := map[string]any{}
+	request := make(map[string]any, len(req.Extra)+24)
+	for key, value := range req.Extra {
+		request[key] = value
+	}
 	putString(request, "system", req.System)
 	putString(request, "repository", req.Repository)
 	putString(request, "id", req.ID)

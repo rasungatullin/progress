@@ -44,6 +44,7 @@ type integrationFlags struct {
 	limit           int
 	labels          []string
 	excludeLabels   []string
+	fields          []string
 }
 
 // Оставлено только для сборочной совместимости старых тестовых и внутренних
@@ -114,18 +115,7 @@ func newIntegrationMessengerCommand() *cobra.Command {
 	thread := &cobra.Command{Use: "thread", Short: "Цепочки обсуждения"}
 	thread.AddCommand(newTypeOrientedMessengerThreadGetCommand())
 	cmd.AddCommand(thread)
-	messageFlags := &integrationFlags{}
-	message := &cobra.Command{Use: "message", Short: "Сообщения", RunE: func(cmd *cobra.Command, _ []string) error {
-		if strings.TrimSpace(messageFlags.text) == "" {
-			return fmt.Errorf("--text is required")
-		}
-		return executeTypeRequest(cmd, messageFlags, integration.Request{IntegrationType: "messenger", Resource: "message", ObjectType: "message", Operation: "create", ChannelID: messageFlags.channelID, ThreadID: messageFlags.threadID, Text: messageFlags.text}, printIntegrationMessage)
-	},
-	}
-	bindTypeSystem(message, messageFlags)
-	message.Flags().StringVar(&messageFlags.channelID, "channel", "", "Идентификатор канала")
-	message.Flags().StringVar(&messageFlags.threadID, "thread", "", "Идентификатор цепочки обсуждения")
-	message.Flags().StringVar(&messageFlags.text, "text", "", "Текст сообщения")
+	message := &cobra.Command{Use: "message", Short: "Сообщения"}
 	message.AddCommand(newTypeOrientedMessengerMessageCreateCommand())
 	cmd.AddCommand(message)
 	return cmd
@@ -136,14 +126,6 @@ func newIntegrationWikiCommand() *cobra.Command {
 	page := &cobra.Command{Use: "page", Short: "Страницы документации"}
 	page.AddCommand(newTypeOrientedWikiPageGetCommand(), newTypeOrientedWikiPageSearchCommand())
 	cmd.AddCommand(page)
-	legacyFlags := &integrationFlags{}
-	legacySearch := &cobra.Command{Use: "search", Hidden: true, Short: "Совместимый поиск страниц", RunE: func(cmd *cobra.Command, _ []string) error {
-		return executeTypeRequest(cmd, legacyFlags, integration.Request{IntegrationType: "wiki", Resource: "page", ObjectType: "page", Operation: "search", Query: legacyFlags.query, Limit: legacyFlags.limit}, printIntegrationWikiPages)
-	}}
-	bindTypeSystem(legacySearch, legacyFlags)
-	legacySearch.Flags().StringVar(&legacyFlags.query, "query", "", "Строка поиска")
-	legacySearch.Flags().IntVar(&legacyFlags.limit, "limit", 30, "Предельное число страниц")
-	cmd.AddCommand(legacySearch)
 	return cmd
 }
 
@@ -394,6 +376,7 @@ func newIntegrationIssueGetCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий в формате owner/name")
 	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор объекта")
+	cmd.Flags().StringArrayVar(&flags.labels, "fields", nil, "Поля объекта")
 	return cmd
 }
 
@@ -411,6 +394,8 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
+	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-label", nil, "Исключаемая метка задачи")
 	return cmd
 }
 
@@ -420,13 +405,15 @@ func newTypeOrientedIssueCreateCommand() *cobra.Command {
 		if strings.TrimSpace(flags.title) == "" {
 			return fmt.Errorf("--title is required")
 		}
-		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "issue", ObjectType: "issue", Operation: "create", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Title: flags.title, Body: flags.body, State: flags.state, Labels: flags.labels}, printTypeOrientedIssueResponse)
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "issue", ObjectType: "issue", Operation: "create", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Title: flags.title, Body: flags.body, State: flags.state, ExternalID: flags.externalID, ID: flags.externalID, Labels: flags.labels}, printTypeOrientedIssueResponse)
 	}}
 	bindTypeSystem(cmd, flags)
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
 	cmd.Flags().StringVar(&flags.title, "title", "", "Заголовок задачи")
 	cmd.Flags().StringVar(&flags.body, "body", "", "Описание задачи")
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние задачи")
+	cmd.Flags().StringVar(&flags.externalID, "external-id", "", "Внешний идентификатор задачи")
+	cmd.Flags().StringVar(&flags.externalID, "external_id", "", "Внешний идентификатор задачи")
 	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
 	return cmd
 }
@@ -516,6 +503,9 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 		Query:           flags.query,
 		State:           flags.state,
 		Limit:           flags.limit,
+		Fields:          flags.fields,
+		Labels:          flags.labels,
+		ExcludeLabels:   flags.excludeLabels,
 	}
 	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
 	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
@@ -1719,13 +1709,16 @@ func newIntegrationInvokeCommand() *cobra.Command {
 			return fmt.Errorf("parse input JSON: %w", err)
 		}
 		service := newIntegrationService(cmd)
-		descriptors := service.Operations(cmd.Context(), integration.OperationFilter{System: flags.system, Name: flags.operation})
-		if len(descriptors) == 0 {
-			return fmt.Errorf("operation is not available: %s", flags.operation)
+		descriptor, found := service.OperationDescriptor(cmd.Context(), flags.operation, flags.system)
+		if !found {
+			return printInvokeAvailabilityFailure(cmd, flags, "operation is not available: "+flags.operation, "unsupported-operation")
 		}
-		descriptor := descriptors[0]
 		if !descriptor.Available {
-			return fmt.Errorf("operation is not available: %s", flags.operation)
+			kind := "unsupported-operation"
+			if !descriptor.Enabled {
+				kind = "not-configured"
+			}
+			return printInvokeAvailabilityFailure(cmd, flags, "operation is not available: "+flags.operation, kind)
 		}
 		for _, field := range descriptor.Input.Required {
 			value, ok := values[field.Name]
@@ -1753,6 +1746,28 @@ func newIntegrationInvokeCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.input, "input", "", "JSON структурированного ввода")
 	cmd.Flags().StringVar(&flags.inputFile, "input-file", "", "Путь к JSON-файлу структурированного ввода")
 	return cmd
+}
+
+func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags, message, kind string) error {
+	format, err := integrationOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
+	response := integration.Response{
+		IntegrationType: strings.SplitN(flags.operation, ".", 2)[0],
+		System:          flags.system,
+		Operation:       flags.operation,
+		Status:          "failed",
+		Failure:         &integration.Failure{Kind: kind, Message: message},
+	}
+	if format == integrationOutputJSON {
+		if err := printIntegrationJSON(cmd, response); err != nil {
+			return err
+		}
+	} else {
+		printFailure(cmd, response)
+	}
+	return fmt.Errorf("%s", message)
 }
 
 func validateInvokeField(field integration.OperationField, value any) error {
@@ -1799,12 +1814,17 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 		objectType, operation = "merge-request-comment", "list"
 	case "repo.merge-request.comment.create":
 		objectType = "merge-request-comment"
+		// Обычный комментарий не может быть преобразован в inline-замечание
+		// даже если диагностический ввод содержит лишние координаты diff.
+		delete(values, "path")
+		delete(values, "line")
+		delete(values, "side")
 	case "repo.review-remark.list":
 		objectType, operation = "review-remark", "list"
 	case "repo.review-remark.unresolve":
 		objectType = "review-remark"
 	}
-	request := integration.Request{IntegrationType: descriptor.IntegrationType, Resource: objectType, ObjectType: objectType, Operation: operation}
+	request := integration.Request{IntegrationType: descriptor.IntegrationType, Resource: objectType, ObjectType: objectType, Operation: operation, Extra: cloneInvokeValues(values)}
 	stringValue := func(name string) string {
 		if value, ok := values[name].(string); ok {
 			return value
@@ -1814,7 +1834,7 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 	request.Repository = stringValue("repository")
 	request.RepoProvided = request.Repository != ""
 	request.ID = stringValue("id")
-	request.ExternalID = request.ID
+	request.ExternalID = firstNonEmpty(request.ID, stringValue("external_id"))
 	request.Base = stringValue("base")
 	request.Head = stringValue("head")
 	request.Title = stringValue("title")
@@ -1864,6 +1884,14 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 	return request
 }
 
+func cloneInvokeValues(values map[string]any) map[string]any {
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
+}
+
 func executeTypeRequestWithService(cmd *cobra.Command, flags *integrationFlags, service *integration.Service, request integration.Request, printer func(*cobra.Command, integration.Response)) error {
 	format, err := integrationOutputFormat(cmd)
 	if err != nil {
@@ -1884,15 +1912,15 @@ func executeTypeRequestWithService(cmd *cobra.Command, flags *integrationFlags, 
 
 func printIntegrationResponse(cmd *cobra.Command, response integration.Response) {
 	switch {
-	case response.Task != nil || len(response.TaskComments) > 0 || len(response.SearchResults) > 0:
+	case response.Task != nil || response.TaskComments != nil || response.SearchResults != nil:
 		printTypeOrientedIssueResponse(cmd, response)
 	case response.Repository != nil:
 		printIntegrationRepository(cmd, response)
 	case response.MergeRequest != nil:
 		printIntegrationMergeRequest(cmd, response)
-	case len(response.MergeRequests) > 0:
+	case response.MergeRequests != nil:
 		printIntegrationMergeRequests(cmd, response)
-	case len(response.ReviewRemarks) > 0:
+	case response.ReviewRemarks != nil:
 		printIntegrationReviewRemarks(cmd, response)
 	case response.Conversation != nil:
 		printIntegrationThread(cmd, response)
@@ -1900,7 +1928,7 @@ func printIntegrationResponse(cmd *cobra.Command, response integration.Response)
 		printIntegrationMessage(cmd, response)
 	case response.WikiPage != nil:
 		printIntegrationWikiPage(cmd, response)
-	case len(response.WikiPages) > 0:
+	case response.WikiPages != nil:
 		printIntegrationWikiPages(cmd, response)
 	case response.AuthStatus != nil:
 		printIntegrationAuthStatus(cmd, response)

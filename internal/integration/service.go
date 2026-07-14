@@ -506,6 +506,7 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		Fields:             trimStrings(req.Fields),
 		Labels:             trimStrings(req.Labels),
 		ExcludeLabels:      trimStrings(req.ExcludeLabels),
+		Extra:              cloneExtra(req.Extra),
 	}
 	if normalized.ObjectType == "" {
 		normalized.ObjectType = normalizeObjectType(normalized.Resource)
@@ -524,6 +525,17 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	}
 
 	return normalized, nil
+}
+
+func cloneExtra(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 func (s *Service) errorRoute(req Request, err error) Route {

@@ -61,6 +61,7 @@ type Request struct {
 	Fields             []string
 	Labels             []string
 	ExcludeLabels      []string
+	Extra              map[string]any
 }
 
 type ProviderRequest struct {
@@ -95,6 +96,7 @@ type ProviderRequest struct {
 	Fields             []string
 	Labels             []string
 	ExcludeLabels      []string
+	Extra              map[string]any
 	Route              Route
 }
 
