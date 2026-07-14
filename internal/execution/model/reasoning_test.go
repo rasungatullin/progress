@@ -31,3 +31,13 @@ func TestValidateReasoningEffortUsesRunnerModelCapabilities(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateReasoningEffortNormalizesExplicitValue(t *testing.T) {
+	for _, effort := range []string{"MEDIUM", " Medium "} {
+		t.Run(effort, func(t *testing.T) {
+			if err := ValidateReasoningEffort("codex", "gpt-5.3-codex-spark", effort); err != nil {
+				t.Fatalf("ValidateReasoningEffort() error = %v", err)
+			}
+		})
+	}
+}

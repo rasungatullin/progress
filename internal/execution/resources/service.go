@@ -100,7 +100,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			Reserved:         true,
 			Runner:           runner,
 			Model:            modelName,
-			ReasoningEffort:  strings.TrimSpace(in.Launch.ReasoningEffort),
+			ReasoningEffort:  model.NormalizeReasoningEffort(in.Launch.ReasoningEffort),
 			Environment:      environment,
 			EnvironmentType:  environmentType,
 			Source:           allocationSourceExplicitRunnerModel,

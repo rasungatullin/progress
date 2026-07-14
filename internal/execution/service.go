@@ -414,8 +414,9 @@ func (s *Service) prepareWorkplace(ctx context.Context, in invocation, profile p
 func (s *Service) launch(ctx context.Context, in invocation, profile profile, allocation allocation, workplace workplace) (LaunchResult, error) {
 	in.Launch.Runner = allocation.Runner
 	in.Launch.Model = allocation.Model
+	in.Launch.ReasoningEffort = model.NormalizeReasoningEffort(in.Launch.ReasoningEffort)
 	if strings.TrimSpace(allocation.ReasoningEffort) != "" {
-		in.Launch.ReasoningEffort = allocation.ReasoningEffort
+		in.Launch.ReasoningEffort = model.NormalizeReasoningEffort(allocation.ReasoningEffort)
 	}
 	if strings.TrimSpace(in.Launch.ModelBinding) == "" {
 		in.Launch.ModelBinding = allocation.ModelBinding

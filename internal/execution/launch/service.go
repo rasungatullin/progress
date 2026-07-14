@@ -2144,7 +2144,7 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 		} else {
 			args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
 		}
-		if effort := strings.TrimSpace(spec.ReasoningEffort); effort != "" {
+		if effort := model.NormalizeReasoningEffort(spec.ReasoningEffort); effort != "" {
 			args = append([]string{args[0], "-c", `model_reasoning_effort="` + effort + `"`}, args[1:]...)
 		}
 	default:

@@ -39,7 +39,7 @@ func ReasoningEffortValues(runner, modelName string) []string {
 // ValidateReasoningEffort проверяет значение reasoning-effort по возможностям
 // конкретной связки исполнительного модуля и модели.
 func ValidateReasoningEffort(runner, modelName, effort string) error {
-	effort = strings.TrimSpace(effort)
+	effort = NormalizeReasoningEffort(effort)
 	if effort == "" {
 		return nil
 	}
@@ -59,4 +59,10 @@ func ValidateReasoningEffort(runner, modelName, effort string) error {
 	}
 
 	return fmt.Errorf("unsupported reasoning-effort value %q", effort)
+}
+
+// NormalizeReasoningEffort приводит явно заданное усилие рассуждения к
+// канонической форме, используемой в конфигурации и командной строке.
+func NormalizeReasoningEffort(effort string) string {
+	return strings.ToLower(strings.TrimSpace(effort))
 }
