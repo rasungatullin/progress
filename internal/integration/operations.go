@@ -141,12 +141,12 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			Output:          template.Output,
 			FailureKinds:    append([]string(nil), template.FailureKinds...),
 		}
-		if bitbucketServerState(state) && descriptor.Name == "repo.merge-request.comment.create" {
+		if bitbucketServerState(state) && (descriptor.Name == "repo.merge-request.comment.create" || descriptor.Name == "repo.review-remark.create") {
 			descriptor.Available = false
 		}
 		descriptor.Diagnostics = operationDiagnostics(state, descriptor.Available)
-		if bitbucketServerState(state) && descriptor.Name == "repo.merge-request.comment.create" {
-			descriptor.Diagnostics = append(descriptor.Diagnostics, "Bitbucket Server does not support pull request comment creation")
+		if bitbucketServerState(state) && (descriptor.Name == "repo.merge-request.comment.create" || descriptor.Name == "repo.review-remark.create") {
+			descriptor.Diagnostics = append(descriptor.Diagnostics, "Bitbucket Server does not support pull request comment or inline remark creation")
 		}
 		result = append(result, descriptor)
 	}

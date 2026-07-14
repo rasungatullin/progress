@@ -17,37 +17,35 @@ import (
 )
 
 type integrationFlags struct {
-	integrationType     string
-	system              string
-	resource            string
-	object              string
-	operation           string
-	repo                string
-	number              int
-	base                string
-	head                string
-	title               string
-	body                string
-	text                string
-	query               string
-	state               string
-	scope               string
-	path                string
-	side                string
-	channelID           string
-	threadID            string
-	messageID           string
-	input               string
-	inputFile           string
-	externalID          string
-	draft               bool
-	line                int
-	limit               int
-	labels              []string
-	labelAliases        []string
-	excludeLabels       []string
-	excludeLabelAliases []string
-	fields              []string
+	integrationType string
+	system          string
+	resource        string
+	object          string
+	operation       string
+	repo            string
+	number          int
+	base            string
+	head            string
+	title           string
+	body            string
+	text            string
+	query           string
+	state           string
+	scope           string
+	path            string
+	side            string
+	channelID       string
+	threadID        string
+	messageID       string
+	input           string
+	inputFile       string
+	externalID      string
+	draft           bool
+	line            int
+	limit           int
+	labels          []string
+	excludeLabels   []string
+	fields          []string
 }
 
 // Оставлено только для сборочной совместимости старых тестовых и внутренних
@@ -389,8 +387,6 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 		Use:   "search",
 		Short: "Поиск объектов типа issue",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			flags.labels = append(append([]string(nil), flags.labels...), flags.labelAliases...)
-			flags.excludeLabels = append(append([]string(nil), flags.excludeLabels...), flags.excludeLabelAliases...)
 			return executeTypeOrientedIssueCommand(cmd, flags, "search")
 		},
 	}
@@ -400,9 +396,7 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
 	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
-	cmd.Flags().StringArrayVar(&flags.labelAliases, "label", nil, "Метка задачи")
-	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-labels", nil, "Метки, исключаемые из поиска")
-	cmd.Flags().StringArrayVar(&flags.excludeLabelAliases, "exclude-label", nil, "Исключаемая метка задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude_labels", nil, "Метки, исключаемые из поиска")
 	return cmd
 }
 
@@ -480,14 +474,14 @@ func newTypeOrientedIssueLabelCommand(operation string) *cobra.Command {
 			return fmt.Errorf("--id is required")
 		}
 		if len(flags.labels) == 0 {
-			return fmt.Errorf("--label is required")
+			return fmt.Errorf("--labels is required")
 		}
 		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "label", ObjectType: "label", Operation: operation, ID: flags.externalID, ExternalID: flags.externalID, Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Labels: flags.labels}, printIntegrationOperationResult)
 	}}
 	bindTypeSystem(cmd, flags)
 	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор задачи")
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
-	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
 	return cmd
 }
 
@@ -514,8 +508,6 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 		Labels:          append([]string(nil), flags.labels...),
 		ExcludeLabels:   append([]string(nil), flags.excludeLabels...),
 	}
-	request.Labels = append(request.Labels, flags.labelAliases...)
-	request.ExcludeLabels = append(request.ExcludeLabels, flags.excludeLabelAliases...)
 	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
 	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
 		return printErr
@@ -1716,10 +1708,10 @@ func newIntegrationInvokeCommand() *cobra.Command {
 		}
 		var values map[string]any
 		if err := json.Unmarshal(data, &values); err != nil {
-			return printInvokeInputFailure(cmd, flags, nil, fmt.Errorf("parse input JSON: %w", err))
+			return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("parse input JSON: %w", err))
 		}
 		if values == nil {
-			return printInvokeInputFailure(cmd, flags, nil, fmt.Errorf("input JSON must be an object"))
+			return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("input JSON must be an object"))
 		}
 		descriptor, found := service.OperationDescriptor(cmd.Context(), flags.operation, flags.system)
 		if !found {
@@ -1968,38 +1960,38 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 	request.Query = stringValue("query")
 	request.State = stringValue("state")
 	request.Scope = stringValue("scope")
-	request.Path = stringValue("path")
-	request.Side = stringValue("side")
-	request.ChannelID = stringValue("channel")
-	request.ThreadID = stringValue("thread")
-	request.MessageID = stringValue("message")
-	if value, ok := values["number"].(float64); ok {
+	request.Path = stringValueFrom(requestValues, "path")
+	request.Side = stringValueFrom(requestValues, "side")
+	request.ChannelID = stringValueFrom(requestValues, "channel")
+	request.ThreadID = stringValueFrom(requestValues, "thread")
+	request.MessageID = stringValueFrom(requestValues, "message")
+	if value, ok := requestValues["number"].(float64); ok {
 		request.MergeRequestNumber = int(value)
 	}
-	if value, ok := values["line"].(float64); ok {
+	if value, ok := requestValues["line"].(float64); ok {
 		request.Line = int(value)
 	}
-	if value, ok := values["limit"].(float64); ok {
+	if value, ok := requestValues["limit"].(float64); ok {
 		request.Limit = int(value)
 	}
-	if value, ok := values["draft"].(bool); ok {
+	if value, ok := requestValues["draft"].(bool); ok {
 		request.Draft = value
 	}
-	if labels, ok := values["labels"].([]any); ok {
+	if labels, ok := requestValues["labels"].([]any); ok {
 		for _, label := range labels {
 			if value, ok := label.(string); ok {
 				request.Labels = append(request.Labels, value)
 			}
 		}
 	}
-	if excludeLabels, ok := values["exclude_labels"].([]any); ok {
+	if excludeLabels, ok := requestValues["exclude_labels"].([]any); ok {
 		for _, label := range excludeLabels {
 			if value, ok := label.(string); ok {
 				request.ExcludeLabels = append(request.ExcludeLabels, value)
 			}
 		}
 	}
-	if fields, ok := values["fields"].([]any); ok {
+	if fields, ok := requestValues["fields"].([]any); ok {
 		for _, field := range fields {
 			if value, ok := field.(string); ok {
 				request.Fields = append(request.Fields, value)
@@ -2007,6 +1999,13 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 		}
 	}
 	return request
+}
+
+func stringValueFrom(values map[string]any, name string) string {
+	if value, ok := values[name].(string); ok {
+		return value
+	}
+	return ""
 }
 
 func cloneInvokeValues(values map[string]any) map[string]any {

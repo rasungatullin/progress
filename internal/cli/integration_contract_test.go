@@ -179,7 +179,7 @@ func TestLegacySystemCommandReportsTypeOrientedReplacement(t *testing.T) {
 	}
 }
 
-func TestIntegrationIssueSearchMergesLabelFlagAliases(t *testing.T) {
+func TestIntegrationIssueSearchPassesRepeatedLabelFields(t *testing.T) {
 	provider := &contractCaptureProvider{}
 	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
 		DefaultSystems: map[string]string{model.IntegrationTypeIssue: "tracker"},
@@ -195,7 +195,7 @@ func TestIntegrationIssueSearchMergesLabelFlagAliases(t *testing.T) {
 	cmd := NewRootCommand()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"integration", "issue", "search", "--labels", "one", "--label", "two", "--exclude-labels", "three", "--exclude-label", "four"})
+	cmd.SetArgs([]string{"integration", "issue", "search", "--labels", "one", "--labels", "two", "--exclude_labels", "three", "--exclude_labels", "four"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute issue search: %v", err)
 	}
@@ -239,5 +239,32 @@ func TestIntegrationInvokeInputFailurePreservesCatalogRoute(t *testing.T) {
 	}
 	if response.Route.ProviderType != "script" || !response.Route.ProviderAvailable || response.Route.ObjectType != "custom.field" {
 		t.Fatalf("incomplete invoke route: %#v", response.Route)
+	}
+}
+
+func TestIntegrationInvokeOrdinaryCommentDropsInlineCoordinates(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepo: "repo-system"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"repo-system": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}, Operations: map[string]model.IntegrationOperationConfig{
+				"repo.merge-request.comment.create": {Required: []string{"number", "body"}, Optional: []string{"repository", "path", "line", "side"}, Command: "unused"},
+			}},
+		},
+	})
+	service.RegisterProvider("repo-system", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	cmd := NewRootCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "invoke", "--name", "repo.merge-request.comment.create", "--input", `{"number":7,"body":"обычный комментарий","path":"file.go","line":12,"side":"RIGHT"}`})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute invoke: %v", err)
+	}
+	if provider.request.Path != "" || provider.request.Line != 0 || provider.request.Side != "" {
+		t.Fatalf("ordinary comment retained inline coordinates: %#v", provider.request)
 	}
 }

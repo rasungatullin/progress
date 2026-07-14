@@ -196,7 +196,9 @@ type serverPullRequest struct {
 }
 
 type serverActivityPage struct {
-	Values []serverActivity `json:"values"`
+	Values        []serverActivity `json:"values"`
+	IsLastPage    bool             `json:"isLastPage"`
+	NextPageStart int              `json:"nextPageStart"`
 }
 
 type serverPullRequestPage struct {
@@ -593,15 +595,17 @@ func (s *Service) executePullRequestList(ctx context.Context, response model.Res
 }
 
 func (s *Service) executeServerPullRequestList(ctx context.Context, response model.Response, req model.ProviderRequest, repository repositoryRef, state string, scope string, limit int) (model.Response, error) {
-	if scope != "all" {
-		err := fmt.Errorf("Bitbucket Server pull request scope %s is not supported by current integration adapter", scope)
-		response.Status = model.ResponseStatusFailed
-		response.Failure = &model.Failure{Kind: model.FailureKindUnsupportedOperation, Message: err.Error()}
-		return response, err
-	}
 	query := url.Values{}
 	query.Set("state", bitbucketServerListState(state))
 	query.Set("limit", strconv.Itoa(limit))
+	if strings.TrimSpace(req.Query) != "" {
+		query.Set("filterText", strings.TrimSpace(req.Query))
+	}
+	if scope == "authored" {
+		query.Set("role", "AUTHOR")
+	} else if scope == "reviewer" {
+		query.Set("role", "REVIEWER")
+	}
 	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests?%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), query.Encode()))
 	items := make([]serverPullRequest, 0, limit)
 	for endpoint != "" && len(items) < limit {
@@ -632,6 +636,14 @@ func (s *Service) executeServerPullRequestList(ctx context.Context, response mod
 		nextQuery := url.Values{}
 		nextQuery.Set("state", bitbucketServerListState(state))
 		nextQuery.Set("limit", strconv.Itoa(limit))
+		if strings.TrimSpace(req.Query) != "" {
+			nextQuery.Set("filterText", strings.TrimSpace(req.Query))
+		}
+		if scope == "authored" {
+			nextQuery.Set("role", "AUTHOR")
+		} else if scope == "reviewer" {
+			nextQuery.Set("role", "REVIEWER")
+		}
 		nextQuery.Set("start", strconv.Itoa(raw.NextPageStart))
 		endpoint = s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests?%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), nextQuery.Encode()))
 	}
@@ -689,6 +701,9 @@ func (s *Service) executePullRequestCreate(ctx context.Context, response model.R
 			"branch": map[string]string{"name": strings.TrimSpace(req.Base)},
 		},
 	}
+	if req.Draft {
+		payload["draft"] = true
+	}
 	content, _ := json.Marshal(payload)
 	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests", url.PathEscape(repository.workspace), url.PathEscape(repository.slug))
 	status, body, err := s.do(ctx, http.MethodPost, endpoint, content)
@@ -742,6 +757,9 @@ func (s *Service) executeServerPullRequestCreate(ctx context.Context, response m
 				},
 			},
 		},
+	}
+	if req.Draft {
+		payload["draft"] = true
 	}
 	content, _ := json.Marshal(payload)
 	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests", url.PathEscape(repository.workspace), url.PathEscape(repository.slug)))
@@ -939,20 +957,28 @@ func (s *Service) executeServerPullRequestComments(ctx context.Context, response
 		limit = 100
 	}
 	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d/activities?limit=%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber, limit))
-	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		response.Status = model.ResponseStatusFailed
-		response.Failure = failureForHTTPStatus(status, err, string(body))
-		response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
-		return response, err
-	}
+	var pages []serverActivity
+	for endpoint != "" {
+		status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			response.Status = model.ResponseStatusFailed
+			response.Failure = failureForHTTPStatus(status, err, string(body))
+			response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+			return response, err
+		}
 
-	var raw serverActivityPage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return responseWithDecodeFailure(response, err)
+		var raw serverActivityPage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return responseWithDecodeFailure(response, err)
+		}
+		pages = append(pages, raw.Values...)
+		if raw.IsLastPage || raw.NextPageStart <= 0 {
+			break
+		}
+		endpoint = s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d/activities?limit=%d&start=%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber, limit, raw.NextPageStart))
 	}
 	response.ReviewRemarks = []model.ReviewRemark{}
-	for _, item := range raw.Values {
+	for _, item := range pages {
 		if item.Comment == nil {
 			continue
 		}

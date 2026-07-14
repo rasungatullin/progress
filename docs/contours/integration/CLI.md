@@ -265,10 +265,10 @@ progress integration operations --name issue.issue.get
 
 ```bash
 progress integration issue get --id ABC-123 --fields title --format json
-progress integration issue search --query "готово" --label backend --exclude-label blocked
-progress integration issue create --title "Новая задача" --external-id EXT-123
+progress integration issue search --query "готово" --labels backend --exclude_labels blocked
+progress integration issue create --title "Новая задача" --external_id EXT-123
 progress integration issue comment list --id ABC-123
-progress integration issue label add --id ABC-123 --label backend
+progress integration issue label add --id ABC-123 --labels backend
 progress integration repo merge-request get --repo owner/name --number 456
 progress integration repo merge-request comment list --repo owner/name --number 456
 progress integration repo merge-request review-remark create --repo owner/name --number 456 --path internal/service.go --line 42 --body "Проверить обработку"
@@ -300,8 +300,9 @@ flowchart TD
 Для унификации вызовов целесообразно ввести общие флаги:
 
 - `--repo` — репозиторий `owner/name`;
-- `--number` — номер issue или PR;
-- `--label` — каноническое название метки задачи;
+- `--number` — номер запроса на слияние;
+- `--labels` — метки задачи;
+- `--exclude_labels` — метки, исключаемые из поиска;
 - `--id` — внешний идентификатор объекта, если источник не использует числовой номер;
 - `--query` — поисковая строка;
 - `--limit` — ограничение числа результатов;
@@ -310,8 +311,8 @@ flowchart TD
 Базовые правила:
 
 1. если операция требует репозиторий, `--repo` обязателен; при его отсутствии адаптер может использовать `default_repo` выбранной системы;
-2. если операция адресует сущность по номеру, `--number` обязателен;
-3. если операция изменяет метки задачи, `--label` задаётся каноническим названием и может повторяться;
+2. если операция адресует запрос на слияние по номеру, `--number` обязателен;
+3. если операция ищет задачи по меткам, используются имена полей каталога `--labels` и `--exclude_labels`;
 4. если операция адресует страницу документации, `--id` содержит внешний идентификатор страницы;
 5. для машинного использования предпочтителен `--format json`;
 6. текстовый вывод нужен для ручной диагностики и первичного освоения CLI.
@@ -482,6 +483,10 @@ GitHub-адаптер должен различать как минимум сл
 17. `settings` задаёт несекретные настройки сценарных систем и других расширяемых адаптеров;
 18. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
 19. `operations` задаёт пооперационную настройку сценариев и их входных контрактов.
+
+Поле `Extra` внутренней модели запроса не является отдельным флагом CLI. Оно передаёт в сценарий дополнительные поля, прошедшие проверку входного контракта операции, без изменения имён и значений. Поле не предназначено для секретов и не заменяет типизированные поля встроенных операций.
+
+При чтении прежних установок сохраняется совместимость с `github.json`: его значения преобразуются в текущую конфигурацию интеграционных систем. Для токенов применяется следующий порядок: явно заданный `token`, затем значение из `token_private`, затем переменная из `token_env`; приватные значения читаются через `private_store` и не выводятся в диагностике. `default_repo` используется только выбранным адаптером, если репозиторий не передан явно через `--repo`.
 
 Пример GitHub-системы в режиме `api`:
 

@@ -516,6 +516,7 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 	}
 	if commentRequest.Path != "" {
 		if existing, config, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
+			repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
 			pendingReviewID, err := s.findPendingPRReview(ctx, repository, number)
 			if err != nil {
 				return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pending GitHub pull request review lookup failed after existing comment lookup")
