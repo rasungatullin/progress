@@ -2232,6 +2232,11 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	if _, err := gitOutput(ctx, input.Directory, "fetch", "origin", input.BaseRef); err != nil {
 		return e.failRebase(state, operation, name, "Получение базовой ссылки завершилось отказом.", "rebase_fetch_failed", err)
 	}
+	if input.AllowConflict {
+		if _, err := gitOutput(ctx, input.Directory, "fetch", "origin", input.HeadRef); err != nil {
+			return e.failRebase(state, operation, name, "Получение актуальной рабочей ветки завершилось отказом.", "rebase_fetch_head_failed", err)
+		}
+	}
 	remoteOID := ""
 	if input.ForceWithLease {
 		remoteOID, err = gitOutput(ctx, input.Directory, "rev-parse", "--verify", "refs/remotes/origin/"+branch)

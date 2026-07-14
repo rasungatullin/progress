@@ -74,6 +74,11 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 	s.fingerprintMu.Lock()
 	resolvedConflictFingerprint = s.resolvedConflictFingerprints[input.TaskNumber]
 	s.fingerprintMu.Unlock()
+	if resolvedConflictFingerprint == "" {
+		resolvedConflictAttempts.Lock()
+		resolvedConflictFingerprint = resolvedConflictAttempts.values[input.TaskNumber]
+		resolvedConflictAttempts.Unlock()
+	}
 	for index := 1; index <= maxCycles; index++ {
 		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index, knownMergeRequest, resolvedConflictFingerprint)
 		result.Cycles = append(result.Cycles, cycle)
@@ -92,6 +97,11 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 			}
 			s.resolvedConflictFingerprints[input.TaskNumber] = resolvedConflictFingerprint
 			s.fingerprintMu.Unlock()
+			if resolvedConflictFingerprint != "" {
+				resolvedConflictAttempts.Lock()
+				resolvedConflictAttempts.values[input.TaskNumber] = resolvedConflictFingerprint
+				resolvedConflictAttempts.Unlock()
+			}
 		}
 		if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil {
 			result.Completed = true
@@ -163,6 +173,10 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route st
 	if err != nil {
 		return TaskProcessingCycle{Index: index}, err
 	}
+	_, hasReviewPassedLabel := findLabel(issue.Labels, LabelReviewPassed)
+	if mergeRequestErr != nil && mergeRequest != nil && (processingRouteNeedsReviewRemarks(route) || hasReviewPassedLabel) {
+		return TaskProcessingCycle{Index: index, Issue: issue, MergeRequest: mergeRequest}, fmt.Errorf("восстановить актуальное состояние запроса на слияние для задачи %d: %w", taskNumber, mergeRequestErr)
+	}
 
 	cycle := TaskProcessingCycle{
 		Index:                     index,
@@ -185,6 +199,9 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route st
 			return cycle, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, mergeRequestErr)
 		}
 		return cycle, err
+	}
+	if mergeRequestErr != nil && (processingRouteNeedsReviewRemarks(route) || (consideration.ExecutionPlan != nil && requiresMergeRequest(consideration.ExecutionPlan.Action))) {
+		return cycle, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", taskNumber, mergeRequestErr)
 	}
 	if consideration.Status == decision.ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil && externalState == nil && taskLabelsRequireMergeRequest(issue.Labels) {
 		externalState, err = s.loadMergeRequestExternalState(ctx, mergeRequest)
@@ -227,14 +244,25 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route st
 	return cycle, nil
 }
 
+func processingRouteNeedsReviewRemarks(route string) bool {
+	switch strings.ToLower(strings.TrimSpace(route)) {
+	case execution.ActionReviewPullRequest, execution.ActionApplyReviewComments, "pull-request-review":
+		return true
+	default:
+		return false
+	}
+}
+
 func mergeConflictFingerprint(mergeRequest *integration.MergeRequest, state *decision.MergeRequestExternalState) string {
 	if mergeRequest == nil || state == nil || !state.HasMergeConflict {
 		return ""
 	}
-	values := []string{mergeRequest.Repository, strconv.Itoa(mergeRequest.Number), mergeRequest.BaseRef, mergeRequest.HeadRef}
-	for _, key := range []string{"base_sha"} {
-		values = append(values, key+"="+strings.TrimSpace(mergeRequest.Attributes[key]))
+	baseSHA := strings.TrimSpace(mergeRequest.Attributes["base_sha"])
+	if baseSHA == "" {
+		return ""
 	}
+	values := []string{mergeRequest.Repository, strconv.Itoa(mergeRequest.Number), mergeRequest.BaseRef, mergeRequest.HeadRef}
+	values = append(values, "base_sha="+baseSHA)
 	return strings.Join(values, "|")
 }
 
@@ -315,7 +343,11 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 		if refreshed, ok := integrationMergeRequestFromResponse(fresh); ok {
 			copyOfMergeRequest = refreshed
 		} else {
-			return response.Issue, mergeRequest, nil, fmt.Errorf("контур интеграции не вернул актуальный запрос на слияние"), nil
+			// Некоторые интеграционные реализации не возвращают объект в
+			// повторном чтении, хотя не сообщают ошибку. Сохраняем известный
+			// объект для несвязанных маршрутов; явная ошибка чтения передаётся
+			// вызывающему контуру выше.
+			return response.Issue, mergeRequest, nil, nil, nil
 		}
 		mergeRequest = &copyOfMergeRequest
 	} else {

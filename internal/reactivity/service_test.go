@@ -840,6 +840,25 @@ func TestMergeRequestHasConflictIgnoresNonConflictGitHubStatesAndLabels(t *testi
 	}
 }
 
+func TestMergeConflictFingerprintRequiresBaseSHA(t *testing.T) {
+	state := &decision.MergeRequestExternalState{HasMergeConflict: true}
+	mergeRequest := &integration.MergeRequest{
+		Repository: "owner/name",
+		Number:     184,
+		BaseRef:    "main",
+		HeadRef:    "feature",
+		Attributes: map[string]string{},
+	}
+	if fingerprint := mergeConflictFingerprint(mergeRequest, state); fingerprint != "" {
+		t.Fatalf("fingerprint without a confirmed base SHA must be empty: %q", fingerprint)
+	}
+
+	mergeRequest.Attributes["base_sha"] = "0123456789abcdef0123456789abcdef01234567"
+	if fingerprint := mergeConflictFingerprint(mergeRequest, state); fingerprint == "" {
+		t.Fatal("fingerprint with a confirmed base SHA must be recorded")
+	}
+}
+
 func TestServiceProcessTaskReturnsMergeRequestSearchErrorForReviewLabel(t *testing.T) {
 	t.Parallel()
 

@@ -68,6 +68,10 @@ func TestRebaseAllowsLeaseCaptureBeforeConflictResolution(t *testing.T) {
 	if strings.Contains(strings.Join(calls, "\n"), "push ") {
 		t.Fatalf("conflict preparation must not push: %v", calls)
 	}
+	joined := strings.Join(calls, "\n")
+	if !strings.Contains(joined, "fetch origin main") || !strings.Contains(joined, "fetch origin feature") {
+		t.Fatalf("conflict preparation must refresh both base and head refs: %v", calls)
+	}
 }
 
 func TestRebaseRejectsDirtyWorktreeAndDoesNotFetch(t *testing.T) {

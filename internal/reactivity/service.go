@@ -71,6 +71,11 @@ type Service struct {
 	resolvedConflictFingerprints map[int]string
 }
 
+var resolvedConflictAttempts = struct {
+	sync.Mutex
+	values map[int]string
+}{values: make(map[int]string)}
+
 func NewService(logger *log.Logger) *Service {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
