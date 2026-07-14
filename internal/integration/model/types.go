@@ -199,6 +199,7 @@ type Response struct {
 	SearchResults     []TrackerSearchResult
 	Artifacts         []Artifact
 	Metadata          map[string]string
+	Data              map[string]any
 }
 
 type Failure struct {

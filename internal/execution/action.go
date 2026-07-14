@@ -51,8 +51,9 @@ const (
 	OperationStatusFailed    = "failed"
 	OperationStatusSkipped   = "skipped"
 
-	OperationTypeBuiltin = "builtin"
-	OperationTypeAction  = "action"
+	OperationTypeBuiltin     = "builtin"
+	OperationTypeAction      = "action"
+	OperationTypeIntegration = "integration"
 )
 
 type actionResolver interface {

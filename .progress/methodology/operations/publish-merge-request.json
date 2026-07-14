@@ -1,8 +1,8 @@
 {
   "name": "publish-merge-request",
-  "kind": "publish-merge-request",
+  "kind": "repository.merge-request.create",
   "title": "Открытие запроса на слияние",
-  "type": "builtin",
+  "type": "integration",
   "required": true,
   "contract": {
     "in": {
