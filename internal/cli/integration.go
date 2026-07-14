@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -397,9 +398,9 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
 	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
-	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.labelAliases, "label", nil, "Метка задачи")
 	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-labels", nil, "Метки, исключаемые из поиска")
-	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-label", nil, "Исключаемая метка задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabelAliases, "exclude-label", nil, "Исключаемая метка задачи")
 	return cmd
 }
 
@@ -1859,7 +1860,7 @@ func validateInvokeField(field integration.OperationField, value any) error {
 		_, valid = value.(string)
 	case "integer":
 		number, ok := value.(float64)
-		valid = ok && number == float64(int64(number))
+		valid = ok && !math.IsNaN(number) && !math.IsInf(number, 0) && math.Trunc(number) == number && number >= float64(-1<<63) && number < float64(1<<63)
 	case "boolean":
 		_, valid = value.(bool)
 	case "string[]":
@@ -1897,11 +1898,6 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 		objectType, operation = "merge-request-comment", "list"
 	case "repo.merge-request.comment.create":
 		objectType = "merge-request-comment"
-		// Обычный комментарий не может быть преобразован в inline-замечание
-		// даже если диагностический ввод содержит лишние координаты diff.
-		delete(values, "path")
-		delete(values, "line")
-		delete(values, "side")
 	case "repo.review-remark.list":
 		objectType, operation = "review-remark", "list"
 	case "repo.review-remark.unresolve":
