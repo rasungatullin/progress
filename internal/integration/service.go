@@ -790,6 +790,11 @@ func systemSupportsOperation(state systemState, integrationType string, objectTy
 		}
 	}
 	for name := range state.Operations {
+		configuredName := canonicalConfiguredOperationName(name)
+		requestedName := canonicalConfiguredOperationName(integrationType + "." + objectType + "." + operation)
+		if configuredName == requestedName {
+			return true
+		}
 		configuredType, configuredObject, configuredOperation := parseOperationName(name)
 		if configuredType == integrationType && configuredObject == objectType && configuredOperation == operation {
 			return true

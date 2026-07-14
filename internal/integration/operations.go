@@ -638,7 +638,7 @@ func mergeRequestCommentCreateOperation() operationTemplate {
 		ObjectType:      "merge-request-comment",
 		Operation:       "create",
 		SideEffect:      true,
-		Input:           inputMany([]model.OperationField{requiredField("number", "integer"), requiredField("body", "string")}, optionalFields("repository", "path", "line", "side")...),
+		Input:           inputMany([]model.OperationField{requiredField("number", "integer"), requiredField("body", "string")}, optionalFields("repository")...),
 		Output:          output("operation-result", "OperationResult"),
 		FailureKinds:    defaultFailureKinds(),
 	}

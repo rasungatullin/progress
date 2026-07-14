@@ -398,9 +398,9 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
 	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
-	cmd.Flags().StringArrayVar(&flags.labelAliases, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
 	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-labels", nil, "Метки, исключаемые из поиска")
-	cmd.Flags().StringArrayVar(&flags.excludeLabelAliases, "exclude-label", nil, "Исключаемая метка задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-label", nil, "Исключаемая метка задачи")
 	return cmd
 }
 
@@ -509,8 +509,8 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 		State:           flags.state,
 		Limit:           flags.limit,
 		Fields:          flags.fields,
-		Labels:          append(append([]string(nil), flags.labels...), flags.labelAliases...),
-		ExcludeLabels:   append(append([]string(nil), flags.excludeLabels...), flags.excludeLabelAliases...),
+		Labels:          append([]string(nil), flags.labels...),
+		ExcludeLabels:   append([]string(nil), flags.excludeLabels...),
 	}
 	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
 	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
@@ -1758,9 +1758,12 @@ func newIntegrationInvokeCommand() *cobra.Command {
 		for _, field := range descriptor.Input.Required {
 			value, ok := values[field.Name]
 			if !ok {
+				if field.Default != "" {
+					continue
+				}
 				return printInvokeInputFailure(cmd, flags, fmt.Errorf("input field is required: %s", field.Name))
 			}
-			if field.Type == "string" && strings.TrimSpace(value.(string)) == "" {
+			if field.Type == "string" && strings.TrimSpace(value.(string)) == "" && field.Default == "" {
 				return printInvokeInputFailure(cmd, flags, fmt.Errorf("input field is required: %s", field.Name))
 			}
 		}
@@ -1792,6 +1795,17 @@ func invokeDefaultValue(field integration.OperationField) (any, bool) {
 				items[index] = value
 			}
 			return items, true
+		}
+	}
+	defaultValue := strings.TrimSpace(field.Default)
+	if strings.HasPrefix(defaultValue, "${") && strings.HasSuffix(defaultValue, "}") {
+		switch field.Type {
+		case "string":
+			return "", true
+		case "integer":
+			return float64(0), true
+		case "boolean":
+			return false, true
 		}
 	}
 	return field.Default, true
@@ -1835,7 +1849,7 @@ func invokeRouteObjectType(name string) (string, string) {
 		return "", ""
 	}
 	operation := parts[len(parts)-1]
-	object := strings.ReplaceAll(strings.Join(parts[1:len(parts)-1], "-"), ".", "-")
+	object := strings.Join(parts[1:len(parts)-1], ".")
 	switch strings.Join(parts, ".") {
 	case "issue.issue.comment.list":
 		object, operation = "issue", "comments"
@@ -1999,8 +2013,6 @@ func printIntegrationResponse(cmd *cobra.Command, response integration.Response)
 		printIntegrationRepository(cmd, response)
 	case response.MergeRequest != nil:
 		printIntegrationMergeRequest(cmd, response)
-	case response.MergeRequests != nil:
-		printIntegrationMergeRequests(cmd, response)
 	case response.ReviewRemarks != nil:
 		printIntegrationReviewRemarks(cmd, response)
 	case response.Conversation != nil:

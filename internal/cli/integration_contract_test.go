@@ -152,9 +152,9 @@ func TestIntegrationTypeOrientedCommandsResolveConfiguredSystems(t *testing.T) {
 		wantSystem string
 	}{
 		{args: []string{"integration", "repo", "get", "--repo", "owner/name"}, wantType: model.IntegrationTypeRepo, wantSystem: "github-main"},
-		{args: []string{"integration", "messenger", "message", "--text", "Состояние обновлено"}, wantType: model.IntegrationTypeMessenger, wantSystem: "mattermost-main"},
-		{args: []string{"integration", "wiki", "search", "--query", "эксплуатация"}, wantType: model.IntegrationTypeWiki, wantSystem: "confluence-main"},
-		{args: []string{"integration", "wiki", "search", "--query", "эксплуатация", "--system", "wiki-explicit"}, wantType: model.IntegrationTypeWiki, wantSystem: "wiki-explicit"},
+		{args: []string{"integration", "messenger", "message", "create", "--text", "Состояние обновлено"}, wantType: model.IntegrationTypeMessenger, wantSystem: "mattermost-main"},
+		{args: []string{"integration", "wiki", "page", "search", "--query", "эксплуатация"}, wantType: model.IntegrationTypeWiki, wantSystem: "confluence-main"},
+		{args: []string{"integration", "wiki", "page", "search", "--query", "эксплуатация", "--system", "wiki-explicit"}, wantType: model.IntegrationTypeWiki, wantSystem: "wiki-explicit"},
 	} {
 		cmd := NewRootCommand()
 		cmd.SetOut(io.Discard)
@@ -170,25 +170,9 @@ func TestIntegrationTypeOrientedCommandsResolveConfiguredSystems(t *testing.T) {
 }
 
 func TestLegacySystemCommandReportsTypeOrientedReplacement(t *testing.T) {
-	provider := &contractCaptureProvider{}
-	service := integration.NewService(log.New(io.Discard, "", 0))
-	service.RegisterProvider("github", provider)
-	original := integrationServiceFactory
-	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
-	t.Cleanup(func() { integrationServiceFactory = original })
-
 	cmd := NewRootCommand()
-	var stderr strings.Builder
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--number", "123", "--repo", "owner/name"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("выполнить переходную команду: %v", err)
-	}
-	if provider.request.ID != "123" {
-		t.Fatalf("числовая форма не преобразована в строковый идентификатор: %#v", provider.request)
-	}
-	if !strings.Contains(stderr.String(), "форма integration github устарела") {
-		t.Fatalf("отсутствует диагностика перехода: %q", stderr.String())
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--id", "123"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("устаревшая команда по имени системы должна отсутствовать")
 	}
 }

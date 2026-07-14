@@ -442,18 +442,18 @@ GitHub-адаптер должен различать как минимум сл
         "tracker_url": "https://tracker.example"
       },
       "operations": {
-        "tracker.task.get": {
+        "issue.issue.get": {
           "script": ".progress/integration/work-tracker/task-get.sh",
-          "required": ["number"],
+          "required": ["id"],
           "optional": ["project", "tracker_url"],
           "defaults": {
             "project": "${system.project}",
             "tracker_url": "${system.settings.tracker_url}"
           }
         },
-        "tracker.task.comment.create": {
+        "issue.issue.comment.create": {
           "script": ".progress/integration/work-tracker/task-comment-create.sh",
-          "required": ["number", "body"]
+          "required": ["id", "body"]
         }
       }
     }
@@ -561,7 +561,7 @@ PROGRESS_INTEGRATION_REQUEST_FILE
 PROGRESS_INTEGRATION_TIMEOUT
 ```
 
-Файл `PROGRESS_INTEGRATION_REQUEST_FILE` содержит `system`, `integration_type`, `operation_name`, `object_type`, `operation`, `request` и `settings`. Для `tracker.task.search` поле `request` может содержать `query`, `state`, `labels`, `exclude_labels` и `limit`. Поле `settings` содержит только явно настроенные несекретные значения. `token` и значение из `token_env` в JSON-файл не записываются.
+Файл `PROGRESS_INTEGRATION_REQUEST_FILE` содержит `system`, `integration_type`, `operation_name`, `object_type`, `operation`, `request` и `settings`. Для `issue.issue.search` поле `request` может содержать `query`, `state`, `labels`, `exclude_labels` и `limit`. Поле `settings` содержит только явно настроенные несекретные значения. `token` и значение из `token_env` в JSON-файл не записываются.
 
 Успешный ответ сценария:
 
