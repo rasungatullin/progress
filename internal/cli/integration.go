@@ -16,35 +16,37 @@ import (
 )
 
 type integrationFlags struct {
-	integrationType string
-	system          string
-	resource        string
-	object          string
-	operation       string
-	repo            string
-	number          int
-	base            string
-	head            string
-	title           string
-	body            string
-	text            string
-	query           string
-	state           string
-	scope           string
-	path            string
-	side            string
-	channelID       string
-	threadID        string
-	messageID       string
-	input           string
-	inputFile       string
-	externalID      string
-	draft           bool
-	line            int
-	limit           int
-	labels          []string
-	excludeLabels   []string
-	fields          []string
+	integrationType     string
+	system              string
+	resource            string
+	object              string
+	operation           string
+	repo                string
+	number              int
+	base                string
+	head                string
+	title               string
+	body                string
+	text                string
+	query               string
+	state               string
+	scope               string
+	path                string
+	side                string
+	channelID           string
+	threadID            string
+	messageID           string
+	input               string
+	inputFile           string
+	externalID          string
+	draft               bool
+	line                int
+	limit               int
+	labels              []string
+	labelAliases        []string
+	excludeLabels       []string
+	excludeLabelAliases []string
+	fields              []string
 }
 
 // Оставлено только для сборочной совместимости старых тестовых и внутренних
@@ -367,7 +369,7 @@ func newIntegrationIssueGetCommand() *cobra.Command {
 		Use:   "get",
 		Short: "Получение объекта issue по непрозрачному идентификатору",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !cmd.Flags().Changed("id") {
+			if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
 				return fmt.Errorf("--id is required")
 			}
 			return executeTypeOrientedIssueCommand(cmd, flags, "get")
@@ -395,9 +397,9 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
 	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
-	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.labelAliases, "label", nil, "Метка задачи")
 	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-labels", nil, "Метки, исключаемые из поиска")
-	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-label", nil, "Исключаемая метка задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabelAliases, "exclude-label", nil, "Исключаемая метка задачи")
 	return cmd
 }
 
@@ -423,7 +425,7 @@ func newTypeOrientedIssueCreateCommand() *cobra.Command {
 func newTypeOrientedIssueUpdateCommand() *cobra.Command {
 	flags := &integrationFlags{}
 	cmd := &cobra.Command{Use: "update", Short: "Обновление задачи", RunE: func(cmd *cobra.Command, _ []string) error {
-		if !cmd.Flags().Changed("id") {
+		if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
 			return fmt.Errorf("--id is required")
 		}
 		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "issue", ObjectType: "issue", Operation: "update", ID: flags.externalID, ExternalID: flags.externalID, Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Title: flags.title, Body: flags.body, State: flags.state, Labels: flags.labels}, printTypeOrientedIssueResponse)
@@ -441,7 +443,7 @@ func newTypeOrientedIssueUpdateCommand() *cobra.Command {
 func newTypeOrientedIssueCommentListCommand() *cobra.Command {
 	flags := &integrationFlags{}
 	cmd := &cobra.Command{Use: "list", Short: "Получение комментариев задачи", RunE: func(cmd *cobra.Command, _ []string) error {
-		if !cmd.Flags().Changed("id") {
+		if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
 			return fmt.Errorf("--id is required")
 		}
 		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "issue", ObjectType: "issue", Operation: "comments", ID: flags.externalID, ExternalID: flags.externalID, Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo")}, printTypeOrientedIssueResponse)
@@ -454,7 +456,7 @@ func newTypeOrientedIssueCommentListCommand() *cobra.Command {
 func newTypeOrientedIssueCommentCreateCommand() *cobra.Command {
 	flags := &integrationFlags{}
 	cmd := &cobra.Command{Use: "create", Short: "Создание комментария задачи", RunE: func(cmd *cobra.Command, _ []string) error {
-		if !cmd.Flags().Changed("id") {
+		if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
 			return fmt.Errorf("--id is required")
 		}
 		if strings.TrimSpace(flags.body) == "" {
@@ -506,8 +508,8 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 		State:           flags.state,
 		Limit:           flags.limit,
 		Fields:          flags.fields,
-		Labels:          flags.labels,
-		ExcludeLabels:   flags.excludeLabels,
+		Labels:          append(append([]string(nil), flags.labels...), flags.labelAliases...),
+		ExcludeLabels:   append(append([]string(nil), flags.excludeLabels...), flags.excludeLabelAliases...),
 	}
 	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
 	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
@@ -1745,6 +1747,9 @@ func newIntegrationInvokeCommand() *cobra.Command {
 			if err := validateInvokeField(field, value); err != nil {
 				return err
 			}
+			if field.Type == "string" && strings.TrimSpace(value.(string)) == "" {
+				return fmt.Errorf("input field is required: %s", field.Name)
+			}
 		}
 		for _, field := range descriptor.Input.Optional {
 			if value, ok := values[field.Name]; ok {
@@ -1777,11 +1782,10 @@ func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags,
 		Status:          "failed",
 		Failure:         &integration.Failure{Kind: kind, Message: message},
 	}
-	parts := strings.Split(flags.operation, ".")
-	if len(parts) >= 3 {
-		response.Resource = parts[1]
-		response.ObjectType = parts[1]
-		response.Operation = parts[len(parts)-1]
+	if objectType, operation := invokeRouteObjectType(flags.operation); objectType != "" {
+		response.Resource = objectType
+		response.ObjectType = objectType
+		response.Operation = operation
 		response.Route = integration.Route{IntegrationType: response.IntegrationType, System: response.System, Provider: response.System, Resource: response.Resource, ObjectType: response.ObjectType, Operation: response.Operation}
 	}
 	if format == integrationOutputJSON {
@@ -1792,6 +1796,30 @@ func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags,
 		printFailure(cmd, response)
 	}
 	return fmt.Errorf("%s", message)
+}
+
+func invokeRouteObjectType(name string) (string, string) {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(name)), ".")
+	if len(parts) < 3 {
+		return "", ""
+	}
+	operation := parts[len(parts)-1]
+	object := strings.Join(parts[1:len(parts)-1], "-")
+	switch strings.Join(parts, ".") {
+	case "issue.issue.comment.list":
+		object, operation = "issue", "comments"
+	case "issue.issue.comment.create":
+		object = "comment"
+	case "issue.issue.label.add", "issue.issue.label.remove":
+		object = "label"
+	case "repo.merge-request.comment.list", "repo.merge-request.comment.create":
+		object = "merge-request-comment"
+	case "repo.review-remark.list":
+		object = "review-remark"
+	case "repo.review-remark.unresolve":
+		object = "review-remark"
+	}
+	return object, operation
 }
 
 func validateInvokeField(field integration.OperationField, value any) error {
@@ -1856,7 +1884,7 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 		return ""
 	}
 	request.Repository = stringValue("repository")
-	request.RepoProvided = request.Repository != ""
+	_, request.RepoProvided = values["repository"]
 	request.ID = stringValue("id")
 	request.ExternalID = firstNonEmpty(request.ID, stringValue("external_id"))
 	request.Base = stringValue("base")

@@ -131,6 +131,9 @@ type apiComment struct {
 		To   int    `json:"to"`
 		From int    `json:"from"`
 	} `json:"inline"`
+	Parent *struct {
+		ID int `json:"id"`
+	} `json:"parent"`
 }
 
 type apiUserResponse struct {
@@ -789,7 +792,7 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 	}
 
 	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber)
-	response.ReviewRemarks = []model.ReviewRemark{}
+	comments := make([]apiComment, 0)
 	for endpoint != "" {
 		status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
@@ -803,16 +806,48 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 		if err := json.Unmarshal(body, &raw); err != nil {
 			return responseWithDecodeFailure(response, err)
 		}
-		for _, item := range raw.Values {
-			remark := reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, item)
-			if isReviewRemarkRequest(req) == (strings.TrimSpace(remark.Path) != "") {
-				response.ReviewRemarks = append(response.ReviewRemarks, remark)
-			}
-		}
+		comments = append(comments, raw.Values...)
 		endpoint = strings.TrimSpace(raw.Next)
+	}
+	response.ReviewRemarks = []model.ReviewRemark{}
+	byID := make(map[int]apiComment, len(comments))
+	for _, item := range comments {
+		byID[item.ID] = item
+	}
+	for _, item := range comments {
+		inline := commentIsInline(item, byID)
+		if isReviewRemarkRequest(req) != inline {
+			continue
+		}
+		remark := reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, item)
+		if item.Parent != nil {
+			remark.ReplyToID = strconv.Itoa(item.Parent.ID)
+		}
+		if inline && remark.Path == "" {
+			remark.Type = "inline-reply"
+		}
+		response.ReviewRemarks = append(response.ReviewRemarks, remark)
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
+}
+
+func commentIsInline(item apiComment, byID map[int]apiComment) bool {
+	seen := map[int]bool{}
+	for {
+		if item.Inline != nil {
+			return true
+		}
+		if item.Parent == nil || item.Parent.ID == 0 || seen[item.ID] {
+			return false
+		}
+		seen[item.ID] = true
+		parent, ok := byID[item.Parent.ID]
+		if !ok {
+			return false
+		}
+		item = parent
+	}
 }
 
 func (s *Service) executePullRequestCommentCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
@@ -1211,6 +1246,10 @@ func userFromServerAPI(raw serverUser) model.User {
 }
 
 func appendServerCommentRemarks(remarks []model.ReviewRemark, repository string, number int, raw serverComment) []model.ReviewRemark {
+	return appendServerCommentRemarksWithAnchor(remarks, repository, number, raw, raw.Anchor)
+}
+
+func appendServerCommentRemarksWithAnchor(remarks []model.ReviewRemark, repository string, number int, raw serverComment, inherited *serverAnchor) []model.ReviewRemark {
 	remark := model.ReviewRemark{
 		System:             "bitbucket",
 		Repository:         repository,
@@ -1222,14 +1261,18 @@ func appendServerCommentRemarks(remarks []model.ReviewRemark, repository string,
 		CreatedAt:          timestampMillisToRFC3339(raw.CreatedDate),
 		UpdatedAt:          timestampMillisToRFC3339(raw.UpdatedDate),
 	}
-	if raw.Anchor != nil {
-		remark.Path = strings.TrimSpace(raw.Anchor.Path)
-		remark.Line = raw.Anchor.Line
-		remark.Side = strings.TrimSpace(raw.Anchor.LineType)
+	anchor := raw.Anchor
+	if anchor == nil {
+		anchor = inherited
+	}
+	if anchor != nil {
+		remark.Path = strings.TrimSpace(anchor.Path)
+		remark.Line = anchor.Line
+		remark.Side = strings.TrimSpace(anchor.LineType)
 	}
 	remarks = append(remarks, remark)
 	for _, child := range raw.Comments {
-		remarks = appendServerCommentRemarks(remarks, repository, number, child)
+		remarks = appendServerCommentRemarksWithAnchor(remarks, repository, number, child, anchor)
 	}
 	return remarks
 }

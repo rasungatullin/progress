@@ -106,11 +106,11 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			Output:          template.Output,
 			FailureKinds:    append([]string(nil), template.FailureKinds...),
 		}
-		if state.Type == "bitbucket" && state.APIVariant == "server" && descriptor.Name == "repo.merge-request.comment.create" {
+		if bitbucketServerState(state) && descriptor.Name == "repo.merge-request.comment.create" {
 			descriptor.Available = false
 		}
 		descriptor.Diagnostics = operationDiagnostics(state, descriptor.Available)
-		if state.Type == "bitbucket" && state.APIVariant == "server" && descriptor.Name == "repo.merge-request.comment.create" {
+		if bitbucketServerState(state) && descriptor.Name == "repo.merge-request.comment.create" {
 			descriptor.Diagnostics = append(descriptor.Diagnostics, "Bitbucket Server does not support pull request comment creation")
 		}
 		result = append(result, descriptor)
@@ -125,6 +125,18 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 	}
 
 	return result
+}
+
+func bitbucketServerState(state systemState) bool {
+	if state.Type != "bitbucket" {
+		return false
+	}
+	switch normalizeSystem(state.APIVariant) {
+	case "server", "bitbucket-server", "data-center", "datacenter", "stash":
+		return true
+	}
+	base := strings.TrimRight(strings.ToLower(strings.TrimSpace(state.BaseURL)), "/")
+	return strings.Contains(base, "/rest/api/") || strings.Contains(base, "://stash.") || strings.Contains(base, ".stash.")
 }
 
 func builtinOperationTemplates(adapterType string) []operationTemplate {

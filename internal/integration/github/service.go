@@ -467,7 +467,8 @@ func (s *Service) executePRComments(ctx context.Context, response model.Response
 		return response, nil
 	}
 
-	threadResult, _, err := s.runner.RunPRReviewThreads(ctx, repository, number)
+	threadResult, threadConfig, err := s.runner.RunPRReviewThreads(ctx, repository, number)
+	repository = firstNonEmpty(repository, strings.TrimSpace(threadConfig.DefaultRepo))
 	if err != nil {
 		return responseWithGitHubFailure(response, threadResult, err, "gh pull request review threads failed before returning a comments payload")
 	}

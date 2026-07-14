@@ -108,7 +108,7 @@ type Request struct {
     Operation       string
     Repository      string
     ID              string // непрозрачный идентификатор объекта issue
-    MergeRequestNumber int // числовой идентификатор запроса на слияние переходного контура
+    MergeRequestNumber int // числовой номер запроса на слияние
     ExternalID      string
     Base            string
     Head            string

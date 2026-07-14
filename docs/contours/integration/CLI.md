@@ -286,39 +286,13 @@ progress integration wiki page search --query "интеграция"
 flowchart TD
     A[progress] --> B[integration]
     B --> C[реестр типов, систем и операций]
-    B --> D[github]
-    D --> E[auth status]
-    D --> F[repo get]
-    D --> G[issue get]
-    D --> H[issue comments]
-    D --> I[issue comment create]
-    D --> J[issue label add]
-    D --> K[issue label remove]
-    D --> L[pr get]
-    D --> M[pr list]
-    D --> N[pr comments]
-    D --> O[pr comment create]
-    D --> P[pr comment reply]
-    D --> AA[pr comment resolve]
-    B --> Q[bitbucket]
-    Q --> R[auth status]
-    Q --> S[repo get]
-    Q --> T[pr get]
-    Q --> U[pr list]
-    Q --> V[pr comments]
-    Q --> W[pr comment create]
-    B --> X[mattermost]
-    X --> Y[auth status]
-    X --> Z[thread get]
-    X --> AA[message create]
-    B --> AB[telegram]
-    AB --> AC[auth status]
-    AB --> AD[thread get]
-    AB --> AE[message create]
-    B --> AF[confluence]
-    AF --> AG[auth status]
-    AF --> AH[page get]
-    AF --> AI[page search]
+    B --> C1[operations]
+    B --> C2[status --system]
+    B --> C3[invoke --name]
+    B --> C4[issue]
+    B --> C5[repo]
+    B --> C6[messenger]
+    B --> C7[wiki]
 ```
 
 ## 9. Общие флаги и правила вызова
@@ -332,11 +306,10 @@ flowchart TD
 - `--query` — поисковая строка;
 - `--limit` — ограничение числа результатов;
 - `--format` — `text` или `json`;
-- `--jq` или внутренний фильтр, если позже потребуется пользовательская фильтрация результата.
 
 Базовые правила:
 
-1. если операция требует репозиторий, `--repo` обязателен, кроме `github repo get`, `github issue get` и `github pr get`, где можно опустить `--repo` и использовать `default_repo` из конфигурации;
+1. если операция требует репозиторий, `--repo` обязателен; при его отсутствии адаптер может использовать `default_repo` выбранной системы;
 2. если операция адресует сущность по номеру, `--number` обязателен;
 3. если операция изменяет метки задачи, `--label` задаётся каноническим названием и может повторяться;
 4. если операция адресует страницу документации, `--id` содержит внешний идентификатор страницы;
