@@ -1173,6 +1173,7 @@ type apiPullRequest struct {
 	User      *ghIssueUser `json:"user"`
 	Base      struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"base"`
 	Head struct {
 		Ref string `json:"ref"`
@@ -1210,7 +1211,7 @@ func issueViewFromAPI(raw apiIssue) ghIssueView {
 }
 
 func prViewFromAPI(raw apiPullRequest) ghPRView {
-	return ghPRView{Number: raw.Number, Title: raw.Title, Body: raw.Body, State: prStateFromAPI(raw), Author: raw.User, BaseRefName: raw.Base.Ref, HeadRefName: raw.Head.Ref, URL: raw.HTMLURL, CreatedAt: raw.CreatedAt, UpdatedAt: raw.UpdatedAt}
+	return ghPRView{Number: raw.Number, Title: raw.Title, Body: raw.Body, State: prStateFromAPI(raw), Author: raw.User, BaseRefName: raw.Base.Ref, BaseRefOID: raw.Base.SHA, HeadRefName: raw.Head.Ref, HeadRefOID: raw.Head.SHA, URL: raw.HTMLURL, CreatedAt: raw.CreatedAt, UpdatedAt: raw.UpdatedAt}
 }
 
 func prStateFromAPI(raw apiPullRequest) string {

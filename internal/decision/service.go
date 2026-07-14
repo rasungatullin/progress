@@ -70,9 +70,6 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 	}
 
 	mergeRequest, mergeRequestErr := s.findTaskMergeRequest(ctx, response.Issue)
-	if mergeRequestErr != nil {
-		s.logger.Printf("Не удалось восстановить связанный запрос на слияние: задача=%d ошибка=%v", input.TaskNumber, mergeRequestErr)
-	}
 
 	decisionContext := DecisionContext{
 		Signal:       signal,
@@ -81,7 +78,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		MergeRequest: mergeRequest,
 	}
 	if mergeRequest != nil {
-		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest, taskLabelsRequireMergeRequest(response.Issue.Labels))
+		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest, taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) || routeNeedsReviewRemarks(input.Route))
 		if stateErr != nil {
 			return StartResult{Context: decisionContext}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, stateErr)
 		}
@@ -89,13 +86,32 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 	}
 	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext, Route: input.Route})
 	if err != nil {
-		if mergeRequestErr != nil && consideration.Failure != nil && consideration.Failure.Code == "merge_request_missing" {
+		if mergeRequestErr != nil && (routeNeedsReviewRemarks(input.Route) || (consideration.Failure != nil && consideration.Failure.Code == "merge_request_missing")) {
 			err = fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, mergeRequestErr)
 		}
 		return StartResult{
 			Context:       decisionContext,
 			Consideration: &consideration,
 		}, err
+	}
+	if mergeRequestErr != nil && (routeNeedsReviewRemarks(input.Route) || (consideration.ExecutionPlan != nil && requiresMergeRequest(consideration.ExecutionPlan.Action))) {
+		failure := decisionFailure("merge_request_missing", mergeRequestErr, false, true)
+		consideration.Status = ConsiderationStatusManualIntervention
+		consideration.Failure = failure
+		return StartResult{Context: decisionContext, Consideration: &consideration}, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, mergeRequestErr)
+	}
+	if consideration.ExecutionPlan != nil && mergeRequest != nil && decisionContext.MergeRequestExternalState == nil && (consideration.ExecutionPlan.Action == execution.ActionReviewPullRequest || consideration.ExecutionPlan.Action == execution.ActionApplyReviewComments) {
+		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest, true)
+		if stateErr != nil {
+			return StartResult{Context: decisionContext, Consideration: &consideration}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, stateErr)
+		}
+		if externalState != nil {
+			decisionContext.MergeRequestExternalState = externalState
+			consideration, err = s.Consider(ctx, ConsiderationInput{Context: decisionContext, Route: input.Route})
+			if err != nil {
+				return StartResult{Context: decisionContext, Consideration: &consideration}, err
+			}
+		}
 	}
 	if consideration.Status == ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil {
 		externalState, err := s.loadMergeRequestExternalState(ctx, mergeRequest, true)
@@ -174,6 +190,19 @@ func taskLabelsRequireMergeRequest(labels []string) bool {
 	return hasLabel(labels, "Ожидает экспертизы") || hasLabel(labels, "Требует доработки") || hasLabel(labels, "Экспертиза пройдена")
 }
 
+func taskLabelsRequireCompletionMergeRequest(labels []string) bool {
+	return hasLabel(labels, "Экспертиза пройдена")
+}
+
+func routeNeedsReviewRemarks(route string) bool {
+	switch strings.ToLower(strings.TrimSpace(route)) {
+	case execution.ActionReviewPullRequest, execution.ActionApplyReviewComments, "pull-request-review":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest, loadRemarks bool) (*MergeRequestExternalState, error) {
 	if mergeRequest == nil {
 		return nil, nil
@@ -196,9 +225,6 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		MergeRequestNumber: mergeRequest.Number,
 	})
 	if err != nil {
-		if state.HasMergeConflict {
-			return state, nil
-		}
 		return nil, err
 	}
 	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)

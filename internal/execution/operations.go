@@ -49,7 +49,7 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 	for _, operation := range state.action.Operations {
 		if err := executor.Execute(ctx, state, operation); err != nil {
 			if state.action.Name == ActionResolveMergeConflict {
-				if cleanupErr := executor.abortActiveMergeConflictRebase(state); cleanupErr != nil {
+				if cleanupErr := executor.cleanupMergeConflictWorkplace(state); cleanupErr != nil {
 					return fmt.Errorf("%w; очистка незавершённого перебазирования завершилась отказом: %v", err, cleanupErr)
 				}
 			}
@@ -2243,6 +2243,11 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 		}
 		remoteOID = strings.TrimSpace(remoteOID)
 	}
+	if input.AllowConflict {
+		if _, err := gitOutput(ctx, input.Directory, "reset", "--hard", "refs/remotes/origin/"+branch); err != nil {
+			return e.failRebase(state, operation, name, "Рабочая ветка не синхронизирована с удалённой вершиной.", "rebase_remote_sync_failed", err)
+		}
+	}
 	rebaseTarget := "FETCH_HEAD"
 	if input.AllowConflict {
 		if target, targetErr := gitOutput(ctx, input.Directory, "rev-parse", "--verify", "FETCH_HEAD"); targetErr == nil && strings.TrimSpace(target) != "" {
@@ -2359,6 +2364,10 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 	if !allowForceWithLease(gitConfig) {
 		return e.failRebase(state, operation, name, "Безопасная принудительная отправка не разрешена настройкой Git.", "merge_conflict_force_with_lease_not_allowed", fmt.Errorf("git.push.allow-force-with-lease is not enabled"))
 	}
+	pr, ok := state.data["pull_request"].(integration.MergeRequest)
+	if !ok || !confirmedMergeConflict(pr) {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Действие разрешения конфликта требует подтверждённого конфликтного состояния запроса на слияние.", "merge_conflict_not_confirmed", fmt.Errorf("pull request conflict is not confirmed"))
+	}
 	if output, ok := operationMappingValue[StructuredOutput](state, operation.In["structured_output"]); !ok || !hasSuccessfulResolutionChecks(output) {
 		return e.failRebase(state, operation, name, "Исполнительный модуль не подтвердил разрешение конфликта.", "merge_conflict_resolution_failed", fmt.Errorf("successful structured conclusion is required"))
 	}
@@ -2416,7 +2425,7 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 	return nil
 }
 
-const mergeConflictVerificationAttempts = 3
+const mergeConflictVerificationAttempts = 8
 
 func (e builtinOperationExecutor) verifyMergeConflictPush(ctx context.Context, state *operationExecution, sentHead, base, head string) error {
 	pr, ok := state.data["pull_request"].(integration.MergeRequest)
@@ -2442,8 +2451,14 @@ func (e builtinOperationExecutor) verifyMergeConflictPush(ctx context.Context, s
 			if currentHead == "" {
 				currentHead = strings.TrimSpace(refreshed.Attributes["head_ref_oid"])
 			}
+			currentBase := strings.TrimSpace(refreshed.Attributes["base_sha"])
+			if currentBase == "" {
+				currentBase = strings.TrimSpace(refreshed.Attributes["base_ref_oid"])
+			}
 			if currentHead != sentHead {
 				last = fmt.Sprintf("GitHub head SHA %q does not match sent SHA %q", currentHead, sentHead)
+			} else if currentBase == "" || currentBase != strings.TrimSpace(base) {
+				last = fmt.Sprintf("GitHub base SHA %q does not match rebased base SHA %q", currentBase, base)
 			} else if mergeState, known := mergeRequestState(refreshed); known && !mergeState {
 				return nil
 			} else {
@@ -2493,6 +2508,38 @@ func (e builtinOperationExecutor) abortActiveMergeConflictRebase(state *operatio
 	return e.abortActiveMergeConflictRebaseDirectory(workplace.Name)
 }
 
+func (e builtinOperationExecutor) cleanupMergeConflictWorkplace(state *operationExecution) error {
+	if err := e.abortActiveMergeConflictRebase(state); err != nil {
+		return err
+	}
+	workplace, ok := state.data["workplace"].(workplace)
+	if !ok || strings.TrimSpace(workplace.Name) == "" {
+		return nil
+	}
+	contextValue, ok := state.data["conflict_context"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	original, _ := contextValue["remote_head"].(string)
+	branch, _ := contextValue["head_ref"].(string)
+	if strings.TrimSpace(original) == "" || strings.TrimSpace(branch) == "" {
+		return nil
+	}
+	gitOutput := e.service.runGitOutput
+	if gitOutput == nil {
+		gitOutput = runGitOutput
+	}
+	current, err := gitOutput(context.Background(), workplace.Name, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(current) != strings.TrimSpace(branch) {
+		if err == nil {
+			err = fmt.Errorf("current branch %q does not match conflict branch %q", strings.TrimSpace(current), strings.TrimSpace(branch))
+		}
+		return err
+	}
+	_, err = gitOutput(context.Background(), workplace.Name, "reset", "--hard", strings.TrimSpace(original))
+	return err
+}
+
 func (e builtinOperationExecutor) abortActiveMergeConflictRebaseDirectory(directory string) error {
 	gitOutput := e.service.runGitOutput
 	if gitOutput == nil {
@@ -2524,11 +2571,24 @@ func hasSuccessfulResolutionChecks(output StructuredOutput) bool {
 		return false
 	}
 	for _, command := range output.Commands {
-		if strings.TrimSpace(command.Name) == "" {
+		if strings.TrimSpace(command.Name) == "" || !isSuccessfulCommand(command) {
 			return false
 		}
 	}
 	return true
+}
+
+func isSuccessfulCommand(command StructuredCommand) bool {
+	status := strings.ToLower(strings.TrimSpace(command.Status))
+	if status == "" || (status != "ok" && status != "success" && status != "passed" && status != "completed") {
+		return false
+	}
+	return command.ExitCode != nil && *command.ExitCode == 0
+}
+
+func confirmedMergeConflict(pr integration.MergeRequest) bool {
+	conflicting, known := mergeRequestState(pr)
+	return known && conflicting
 }
 
 func splitGitPathList(value string) []string {

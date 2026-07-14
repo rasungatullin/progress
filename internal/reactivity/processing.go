@@ -232,7 +232,7 @@ func mergeConflictFingerprint(mergeRequest *integration.MergeRequest, state *dec
 		return ""
 	}
 	values := []string{mergeRequest.Repository, strconv.Itoa(mergeRequest.Number), mergeRequest.BaseRef, mergeRequest.HeadRef}
-	for _, key := range []string{"base_sha", "head_sha"} {
+	for _, key := range []string{"base_sha"} {
 		values = append(values, key+"="+strings.TrimSpace(mergeRequest.Attributes[key]))
 	}
 	return strings.Join(values, "|")
@@ -307,9 +307,6 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 
 	mergeRequest := knownMergeRequest
 	if mergeRequest != nil {
-		if !taskLabelsRequireMergeRequest(response.Issue.Labels) {
-			return response.Issue, mergeRequest, nil, nil, nil
-		}
 		copyOfMergeRequest := *mergeRequest
 		fresh, refreshErr := s.integration.Execute(ctx, integration.Request{IntegrationType: integrationTypeRepository, Resource: "merge-request", ObjectType: "merge-request", Operation: "get", Repository: copyOfMergeRequest.Repository, RepoProvided: strings.TrimSpace(copyOfMergeRequest.Repository) != "", MergeRequestNumber: copyOfMergeRequest.Number})
 		if refreshErr != nil {
@@ -375,10 +372,7 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		if state.HasMergeConflict {
 			return state, nil
 		}
-		// Ошибка чтения замечаний не должна блокировать маршруты, которым
-		// замечания не нужны. Само действие ревизии загрузит их отдельно.
-		s.logger.Printf("Замечания запроса на слияние не восстановлены: номер=%d ошибка=%v", mergeRequest.Number, err)
-		return nil, nil
+		return nil, fmt.Errorf("получить замечания запроса на слияние %d: %w", mergeRequest.Number, err)
 	}
 	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
 	state.HasUnresolvedReviewRemarks = hasUnresolvedExternalReviewRemarks(response.ReviewRemarks)
