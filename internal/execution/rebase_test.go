@@ -196,10 +196,16 @@ func TestRebaseAbortsAfterCanceledRebaseWithIndependentContext(t *testing.T) {
 }
 
 func TestAbortActiveRebaseIgnoresRaceWithCompletedAbort(t *testing.T) {
+	rebaseDir := filepath.Join(t.TempDir(), "rebase-merge")
+	if err := os.MkdirAll(rebaseDir, 0o755); err != nil {
+		t.Fatalf("create rebase state: %v", err)
+	}
 	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
 		switch strings.Join(args, " ") {
-		case "rev-parse --verify REBASE_HEAD":
-			return "0123456789abcdef0123456789abcdef01234567", nil
+		case "rev-parse --git-path rebase-merge":
+			return rebaseDir, nil
+		case "rev-parse --git-path rebase-apply":
+			return filepath.Join(t.TempDir(), "rebase-apply"), nil
 		case "rebase --abort":
 			return "", errors.New("exit status 128: fatal: no rebase in progress")
 		default:

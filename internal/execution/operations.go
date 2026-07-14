@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -2422,7 +2424,11 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 		}
 		return e.failResolveMergeConflict(state, operation, name, directory, "Текущая ветка не совпадает с рабочей веткой.", "merge_conflict_head_ref_mismatch", err)
 	}
-	if _, err := gitOutput(ctx, directory, "rev-parse", "--verify", "REBASE_HEAD"); err == nil {
+	inProgress, err := rebaseInProgress(ctx, directory, gitOutput)
+	if err != nil {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Состояние перебазирования не определено.", "merge_conflict_rebase_state_failed", err)
+	}
+	if inProgress {
 		return e.failResolveMergeConflict(state, operation, name, directory, "Перебазирование после разрешения конфликта не завершено.", "merge_conflict_rebase_incomplete", fmt.Errorf("git rebase is still in progress"))
 	}
 	baseHead, err := gitOutput(ctx, directory, "rev-parse", "--verify", base+"^{commit}")
@@ -2579,7 +2585,11 @@ func (e builtinOperationExecutor) abortActiveMergeConflictRebaseDirectory(direct
 	if gitOutput == nil {
 		gitOutput = runGitOutput
 	}
-	if _, err := gitOutput(context.Background(), directory, "rev-parse", "--verify", "REBASE_HEAD"); err != nil {
+	inProgress, err := rebaseInProgress(context.Background(), directory, gitOutput)
+	if err != nil {
+		return err
+	}
+	if !inProgress {
 		return nil
 	}
 	abortCtx, cancel := context.WithTimeout(context.Background(), rebaseAbortTimeout)
@@ -2592,6 +2602,33 @@ func (e builtinOperationExecutor) abortActiveMergeConflictRebaseDirectory(direct
 	}
 	cancel()
 	return nil
+}
+
+func rebaseInProgress(ctx context.Context, directory string, gitOutput func(context.Context, string, ...string) (string, error)) (bool, error) {
+	for _, stateDirectory := range []string{"rebase-merge", "rebase-apply"} {
+		path, err := gitOutput(ctx, directory, "rev-parse", "--git-path", stateDirectory)
+		if err != nil {
+			return false, err
+		}
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(directory, path)
+		}
+		info, statErr := os.Stat(path)
+		if os.IsNotExist(statErr) {
+			continue
+		}
+		if statErr != nil {
+			return false, statErr
+		}
+		if info.IsDir() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func isNoRebaseInProgressError(err error) bool {
