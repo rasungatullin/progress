@@ -392,7 +392,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 
 	route, err := s.resolveRoute(req)
 	if err != nil {
-		return Response{}, err
+		return responseWithFailure(route, model.FailureKindUnsupportedOperation, false, err), err
 	}
 
 	normalized.Route = route

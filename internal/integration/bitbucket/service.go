@@ -250,7 +250,7 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executePullRequestList(ctx, response, req)
 	case isMergeRequestObject(req) && req.Operation == "create":
 		return s.executePullRequestCreate(ctx, response, req)
-	case isMergeRequestObject(req) && req.Operation == "comments":
+	case (isMergeRequestObject(req) && req.Operation == "comments") || (isMergeRequestCommentObject(req) && (req.Operation == "list" || req.Operation == "comments")):
 		return s.executePullRequestComments(ctx, response, req)
 	case isMergeRequestCommentObject(req) && req.Operation == "create":
 		return s.executePullRequestCommentCreate(ctx, response, req)
@@ -1335,7 +1335,7 @@ func isMergeRequestObject(req model.ProviderRequest) bool {
 
 func isMergeRequestCommentObject(req model.ProviderRequest) bool {
 	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
-	return object == "comment" && req.IntegrationType == model.IntegrationTypeRepository
+	return (object == "comment" || object == "review-remark" || object == "merge-request-comment") && req.IntegrationType == model.IntegrationTypeRepository
 }
 
 func firstNonEmpty(values ...string) string {

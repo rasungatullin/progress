@@ -90,12 +90,6 @@ func newIntegrationCommand() *cobra.Command {
 	cmd.AddCommand(newIntegrationRepoCommand())
 	cmd.AddCommand(newIntegrationMessengerCommand())
 	cmd.AddCommand(newIntegrationWikiCommand())
-	// Совместимость с уже выпущенными вызовами сохраняется вне публичной
-	// справки; новые сценарии используют только типо-ориентированное дерево.
-	for _, legacy := range []*cobra.Command{newIntegrationGitHubCommand(), newIntegrationBitbucketCommand(), newIntegrationMattermostCommand(), newIntegrationTelegramCommand(), newIntegrationConfluenceCommand()} {
-		legacy.Hidden = true
-		cmd.AddCommand(legacy)
-	}
 	return cmd
 }
 
@@ -273,9 +267,11 @@ func newTypeOrientedReviewRemarkCreateCommandWithUse(use string, inline bool) *c
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
 	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер запроса на слияние")
 	cmd.Flags().StringVar(&flags.body, "body", "", "Текст комментария")
-	cmd.Flags().StringVar(&flags.path, "path", "", "Путь файла для inline-замечания")
-	cmd.Flags().IntVar(&flags.line, "line", 0, "Номер строки для inline-замечания")
-	cmd.Flags().StringVar(&flags.side, "side", flags.side, "Сторона diff: LEFT или RIGHT")
+	if inline {
+		cmd.Flags().StringVar(&flags.path, "path", "", "Путь файла для inline-замечания")
+		cmd.Flags().IntVar(&flags.line, "line", 0, "Номер строки для inline-замечания")
+		cmd.Flags().StringVar(&flags.side, "side", flags.side, "Сторона diff: LEFT или RIGHT")
+	}
 	return cmd
 }
 
@@ -1728,6 +1724,9 @@ func newIntegrationInvokeCommand() *cobra.Command {
 			return fmt.Errorf("operation is not available: %s", flags.operation)
 		}
 		descriptor := descriptors[0]
+		if !descriptor.Available {
+			return fmt.Errorf("operation is not available: %s", flags.operation)
+		}
 		for _, field := range descriptor.Input.Required {
 			value, ok := values[field.Name]
 			if !ok {
@@ -1762,7 +1761,8 @@ func validateInvokeField(field integration.OperationField, value any) error {
 	case "string":
 		_, valid = value.(string)
 	case "integer":
-		_, valid = value.(float64)
+		number, ok := value.(float64)
+		valid = ok && number == float64(int64(number))
 	case "boolean":
 		_, valid = value.(bool)
 	case "string[]":
@@ -1787,13 +1787,24 @@ func validateInvokeField(field integration.OperationField, value any) error {
 
 func requestFromInvokeInput(descriptor integration.OperationDescriptor, values map[string]any) integration.Request {
 	objectType := descriptor.ObjectType
-	if descriptor.Name == "repo.merge-request.comment.list" || descriptor.Name == "repo.merge-request.comment.create" {
+	operation := descriptor.Operation
+	switch descriptor.Name {
+	case "issue.issue.comment.list":
+		objectType, operation = "issue", "comments"
+	case "issue.issue.comment.create":
+		objectType = "comment"
+	case "issue.issue.label.add", "issue.issue.label.remove":
+		objectType = "label"
+	case "repo.merge-request.comment.list":
+		objectType, operation = "merge-request-comment", "list"
+	case "repo.merge-request.comment.create":
 		objectType = "merge-request-comment"
-	}
-	if descriptor.Name == "repo.review-remark.list" || descriptor.Name == "repo.review-remark.unresolve" {
+	case "repo.review-remark.list":
+		objectType, operation = "review-remark", "list"
+	case "repo.review-remark.unresolve":
 		objectType = "review-remark"
 	}
-	request := integration.Request{IntegrationType: descriptor.IntegrationType, Resource: objectType, ObjectType: objectType, Operation: descriptor.Operation}
+	request := integration.Request{IntegrationType: descriptor.IntegrationType, Resource: objectType, ObjectType: objectType, Operation: operation}
 	stringValue := func(name string) string {
 		if value, ok := values[name].(string); ok {
 			return value
@@ -1836,6 +1847,20 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 			}
 		}
 	}
+	if excludeLabels, ok := values["exclude_labels"].([]any); ok {
+		for _, label := range excludeLabels {
+			if value, ok := label.(string); ok {
+				request.ExcludeLabels = append(request.ExcludeLabels, value)
+			}
+		}
+	}
+	if fields, ok := values["fields"].([]any); ok {
+		for _, field := range fields {
+			if value, ok := field.(string); ok {
+				request.Fields = append(request.Fields, value)
+			}
+		}
+	}
 	return request
 }
 
@@ -1846,7 +1871,10 @@ func executeTypeRequestWithService(cmd *cobra.Command, flags *integrationFlags, 
 	}
 	response, executeErr := service.Execute(cmd.Context(), request)
 	if format == integrationOutputJSON {
-		return printIntegrationJSON(cmd, response)
+		if printErr := printIntegrationJSON(cmd, response); printErr != nil {
+			return printErr
+		}
+		return executeErr
 	}
 	if printer != nil {
 		printer(cmd, response)
@@ -1864,6 +1892,16 @@ func printIntegrationResponse(cmd *cobra.Command, response integration.Response)
 		printIntegrationMergeRequest(cmd, response)
 	case len(response.MergeRequests) > 0:
 		printIntegrationMergeRequests(cmd, response)
+	case len(response.ReviewRemarks) > 0:
+		printIntegrationReviewRemarks(cmd, response)
+	case response.Conversation != nil:
+		printIntegrationThread(cmd, response)
+	case response.Message != nil:
+		printIntegrationMessage(cmd, response)
+	case response.WikiPage != nil:
+		printIntegrationWikiPage(cmd, response)
+	case len(response.WikiPages) > 0:
+		printIntegrationWikiPages(cmd, response)
 	case response.AuthStatus != nil:
 		printIntegrationAuthStatus(cmd, response)
 	default:
