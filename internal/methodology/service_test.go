@@ -5,6 +5,16 @@ import (
 	"testing"
 )
 
+func TestNormalizeActionPreservesExplicitEmptyStructuredOutputFields(t *testing.T) {
+	action := normalizeAction(Action{StructuredOutputFields: []string{" ", ""}})
+	if action.StructuredOutputFields == nil {
+		t.Fatal("явно заданный пустой список полей структурированного вывода не должен превращаться в nil")
+	}
+	if len(action.StructuredOutputFields) != 0 {
+		t.Fatalf("ожидался пустой список полей структурированного вывода, получено: %#v", action.StructuredOutputFields)
+	}
+}
+
 func TestServiceSelectsRouteActionAndInstruction(t *testing.T) {
 	t.Parallel()
 

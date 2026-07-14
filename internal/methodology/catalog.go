@@ -883,13 +883,24 @@ func normalizeAction(action Action) Action {
 	action.Name = normalizeName(action.Name)
 	action.Class = strings.TrimSpace(action.Class)
 	action.Profile = strings.TrimSpace(action.Profile)
-	action.StructuredOutputFields = normalizeStringList(action.StructuredOutputFields)
+	action.StructuredOutputFields = normalizeOptionalStringList(action.StructuredOutputFields)
 	action.Aliases = normalizeNameList(action.Aliases)
 	action.Contract = normalizeActionContract(action.Contract)
 	action.Operations = normalizeActionOperations(action.Operations)
 	action.Description = strings.TrimSpace(action.Description)
 	action.ExpectedResult = strings.TrimSpace(action.ExpectedResult)
 	return action
+}
+
+func normalizeOptionalStringList(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	normalized := normalizeStringList(values)
+	if normalized == nil {
+		return []string{}
+	}
+	return normalized
 }
 
 func normalizeActionOperations(operations []ActionOperation) []ActionOperation {
