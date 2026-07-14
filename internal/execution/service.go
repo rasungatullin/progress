@@ -76,6 +76,10 @@ type integrationExecutor interface {
 	Execute(context.Context, integration.Request) (integration.Response, error)
 }
 
+type integrationOperationCatalog interface {
+	Operations(context.Context, integration.OperationFilter) []integration.OperationDescriptor
+}
+
 type Service struct {
 	logger       *log.Logger
 	actions      actionResolver

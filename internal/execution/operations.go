@@ -81,6 +81,8 @@ func (e builtinOperationExecutor) Execute(ctx context.Context, state *operationE
 		err = e.execute(ctx, state, operation)
 	case OperationTypeAction:
 		err = e.executeAction(ctx, state, operation)
+	case OperationTypeIntegration:
+		err = e.executeIntegration(ctx, state, operation)
 	default:
 		err = fmt.Errorf("operation %q has unsupported type %q", operationResultName(operation), operation.Type)
 		state.tracker.fail(operationResultName(operation), "Тип обработчика операции не поддержан.", err, "operation_type_unsupported", false, true)

@@ -645,8 +645,11 @@ func validateCatalog(catalog Catalog) error {
 		}
 		seenOperations[operation.Name] = struct{}{}
 		operationsByName[operation.Name] = operation
-		if operation.Type != "builtin" && operation.Type != "action" {
-			return fmt.Errorf("operation %q type must be builtin or action", operation.Name)
+		switch operation.Type {
+		case "builtin", "action":
+		case "integration":
+		default:
+			return fmt.Errorf("operation %q type must be builtin, action or integration", operation.Name)
 		}
 		if operation.Kind == "" {
 			return fmt.Errorf("operation %q kind must be non-empty", operation.Name)
