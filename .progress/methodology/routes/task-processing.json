@@ -19,7 +19,7 @@
       "name": "task-processing-rework",
       "title": "Доработка по результатам экспертизы",
       "action": "apply-review-comments",
-      "profile": "coder",
+      "profile": "review-rework",
       "description": "Направляет задачу на доработку, если предыдущая ревизия выявила замечания.",
       "step": "apply-review-comments",
       "has_labels": [

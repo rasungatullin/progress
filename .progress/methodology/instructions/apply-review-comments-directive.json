@@ -1,8 +1,8 @@
 {
   "name": "apply-review-comments-directive",
-  "profile": "coder",
+  "profile": "review-rework",
   "action": "apply-review-comments",
   "target_contour": "execution",
   "title": "Доработка по замечаниям ревизии",
-  "body": "Исправить полученные замечания ревизии в подготовленном рабочем месте. Сохранять корректные уже выполненные изменения. Вернуть структурированный вывод с commit_message, changes, review_responses и conclusion. Запись ответов выполняется отдельной операцией контура исполнения через контур интеграции."
+  "body_file": "apply-review-comments-directive.md"
 }

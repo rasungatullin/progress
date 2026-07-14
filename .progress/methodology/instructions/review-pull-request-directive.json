@@ -4,5 +4,5 @@
   "action": "review-pull-request",
   "target_contour": "execution",
   "title": "Ревизия запроса на слияние",
-  "body_file": "../instructions-texts/review-pull-request-directive.md"
+  "body_file": "review-pull-request-directive.md"
 }

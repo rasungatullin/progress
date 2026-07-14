@@ -88,13 +88,13 @@ CLI доступен через `progress methodology`. Он позволяет 
 ```text
 methodology/
   instructions/start-implementation-pr-directive.json
-  instructions-texts/start-implementation-pr-directive.md
+  instructions/start-implementation-pr-directive.md
 ```
 
 ```json
 {
   "name": "start-implementation-pr-directive",
-  "body_file": "../instructions-texts/start-implementation-pr-directive.md"
+  "body_file": "start-implementation-pr-directive.md"
 }
 ```
 

@@ -25,6 +25,21 @@
     "coder": {
       "description": "Профиль инженерного синтеза с binding для реализации",
       "model-binding": "coder",
+      "prompt-additions-file": ".progress/methodology/instructions/start-implementation-pr-directive.md",
+      "structured-output": true,
+      "structured-output-fields": [
+        "commit_message",
+        "changes",
+        "remarks",
+        "review_responses",
+        "commands",
+        "conclusion"
+      ]
+    },
+    "review-rework": {
+      "description": "Профиль доработки по замечаниям ревизии с binding для реализации",
+      "model-binding": "coder",
+      "prompt-additions-file": ".progress/methodology/instructions/apply-review-comments-directive.md",
       "structured-output": true,
       "structured-output-fields": [
         "commit_message",
@@ -38,7 +53,7 @@
     "review": {
       "description": "Профиль ревизии без изменения файлов",
       "model-binding": "review",
-      "prompt-additions-file": ".progress/methodology/instructions-texts/review-pull-request-directive.md",
+      "prompt-additions-file": ".progress/methodology/instructions/review-pull-request-directive.md",
       "structured-output": true,
       "structured-output-required": true,
       "structured-output-fields": [

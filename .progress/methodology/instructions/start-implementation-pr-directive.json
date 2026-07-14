@@ -4,5 +4,5 @@
   "action": "start-implementation-pr",
   "target_contour": "execution",
   "title": "Реализация задачи с запросом на слияние",
-  "body_file": "../instructions-texts/start-implementation-pr-directive.md"
+  "body_file": "start-implementation-pr-directive.md"
 }
