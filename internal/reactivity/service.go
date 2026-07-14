@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rasungatullin/progress/internal/decision"
@@ -61,12 +62,19 @@ type Result struct {
 }
 
 type Service struct {
-	logger      *log.Logger
-	now         func() time.Time
-	integration integrationExecutor
-	decision    decisionConsiderer
-	execution   executionStarter
+	logger                       *log.Logger
+	now                          func() time.Time
+	integration                  integrationExecutor
+	decision                     decisionConsiderer
+	execution                    executionStarter
+	fingerprintMu                sync.Mutex
+	resolvedConflictFingerprints map[int]string
 }
+
+var resolvedConflictAttempts = struct {
+	sync.Mutex
+	values map[int]string
+}{values: make(map[int]string)}
 
 func NewService(logger *log.Logger) *Service {
 	if logger == nil {
@@ -74,11 +82,12 @@ func NewService(logger *log.Logger) *Service {
 	}
 
 	return &Service{
-		logger:      logger,
-		now:         time.Now,
-		integration: integration.NewConfiguredService(logger),
-		decision:    decision.NewService(logger),
-		execution:   execution.NewService(logger),
+		logger:                       logger,
+		now:                          time.Now,
+		integration:                  integration.NewConfiguredService(logger),
+		decision:                     decision.NewService(logger),
+		execution:                    execution.NewService(logger),
+		resolvedConflictFingerprints: make(map[int]string),
 	}
 }
 

@@ -105,10 +105,12 @@ type StructuredChange struct {
 }
 
 type StructuredCommand struct {
-	Name  string   `json:"name,omitempty"`
-	Args  []string `json:"args,omitempty"`
-	Title string   `json:"title,omitempty"`
-	Body  string   `json:"body,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Args     []string `json:"args,omitempty"`
+	Title    string   `json:"title,omitempty"`
+	Body     string   `json:"body,omitempty"`
+	Status   string   `json:"status,omitempty"`
+	ExitCode *int     `json:"exit_code,omitempty"`
 }
 
 type StructuredConclusion struct {
@@ -304,6 +306,7 @@ type RebaseInput struct {
 	ProtectedRef   string     `json:"protected_ref,omitempty"`
 	Push           bool       `json:"push,omitempty"`
 	ForceWithLease bool       `json:"force_with_lease,omitempty"`
+	AllowConflict  bool       `json:"allow_conflict,omitempty"`
 	Git            *GitConfig `json:"-"`
 }
 

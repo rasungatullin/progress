@@ -99,7 +99,9 @@ type ghPRView struct {
 	Labels         []ghIssueLabel `json:"labels"`
 	ReviewDecision string         `json:"reviewDecision"`
 	BaseRefName    string         `json:"baseRefName"`
+	BaseRefOID     string         `json:"baseRefOid"`
 	HeadRefName    string         `json:"headRefName"`
+	HeadRefOID     string         `json:"headRefOid"`
 	URL            string         `json:"url"`
 	CreatedAt      string         `json:"createdAt"`
 	UpdatedAt      string         `json:"updatedAt"`
@@ -1820,12 +1822,21 @@ func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {
 }
 
 func mergeRequestAttributesFromGHPR(raw ghPRView) map[string]string {
-	attributes := make(map[string]string, 2)
+	attributes := make(map[string]string, 5)
 	if value := normalizedExternalValue(raw.Mergeable); value != "" {
 		attributes["mergeable"] = value
 	}
 	if value := strings.TrimSpace(raw.MergeState); value != "" {
 		attributes["merge_state_status"] = value
+	}
+	if value := strings.TrimSpace(raw.BaseRefOID); value != "" {
+		attributes["base_sha"] = value
+	}
+	if value := strings.TrimSpace(raw.HeadRefOID); value != "" {
+		attributes["head_sha"] = value
+	}
+	if value := strings.TrimSpace(raw.UpdatedAt); value != "" {
+		attributes["updated_at"] = value
 	}
 	if len(attributes) == 0 {
 		return nil

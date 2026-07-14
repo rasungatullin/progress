@@ -367,7 +367,7 @@ func (r *Runner) RunPRView(ctx context.Context, repository string, number int) (
 		}
 	}
 
-	return r.runCommandWithResolvedConfig(ctx, config, []string{"pr", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"})
+	return r.runCommandWithResolvedConfig(ctx, config, []string{"pr", "view", strconv.Itoa(number), "--repo", repository, "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,baseRefOid,headRefName,headRefOid,url,createdAt,updatedAt"})
 }
 
 func (r *Runner) RunPRList(ctx context.Context, repository string, request PRListRequest) (CommandResult, resolvedConfig, error) {

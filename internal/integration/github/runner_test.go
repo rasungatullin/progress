@@ -578,7 +578,7 @@ func TestRunnerRunPRViewBuildsJSONCommand(t *testing.T) {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"}
+		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,baseRefOid,headRefName,headRefOid,url,createdAt,updatedAt"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}
@@ -619,7 +619,7 @@ func TestRunnerRunPRViewUsesConfiguredDefaultRepository(t *testing.T) {
 		if path != "/usr/bin/gh" {
 			t.Fatalf("unexpected path: %q", path)
 		}
-		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt"}
+		expected := []string{"pr", "view", "123", "--repo", "owner/name", "--json", "number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,baseRefOid,headRefName,headRefOid,url,createdAt,updatedAt"}
 		if fmt.Sprint(args) != fmt.Sprint(expected) {
 			t.Fatalf("unexpected args: %#v", args)
 		}

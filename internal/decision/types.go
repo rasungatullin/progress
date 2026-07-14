@@ -45,6 +45,7 @@ type DecisionContext struct {
 type MergeRequestExternalState struct {
 	HasUnresolvedReviewRemarks bool
 	HasMergeConflict           bool
+	MergeStateUnknown          bool
 	ReviewRemarks              []integration.ReviewRemark
 }
 

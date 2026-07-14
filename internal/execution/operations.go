@@ -13,6 +13,7 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
 	"github.com/rasungatullin/progress/internal/integration"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 type operationExecution struct {
@@ -47,6 +48,11 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 	executor := builtinOperationExecutor{service: s}
 	for _, operation := range state.action.Operations {
 		if err := executor.Execute(ctx, state, operation); err != nil {
+			if state.action.Name == ActionResolveMergeConflict {
+				if cleanupErr := executor.cleanupMergeConflictWorkplace(state); cleanupErr != nil {
+					return fmt.Errorf("%w; очистка незавершённого перебазирования завершилась отказом: %v", err, cleanupErr)
+				}
+			}
 			return err
 		}
 	}
@@ -369,6 +375,8 @@ func (e builtinOperationExecutor) execute(ctx context.Context, state *operationE
 		return e.commitPush(ctx, state, operation, name)
 	case OperationKindRebase:
 		return e.rebase(ctx, state, operation, name)
+	case OperationKindResolveMergeConflict:
+		return e.resolveMergeConflict(ctx, state, operation, name)
 	case OperationKindPublishMergeRequest:
 		return e.publishMergeRequest(ctx, state, operation, name)
 	case OperationKindPublishReviewRemarks:
@@ -1664,7 +1672,15 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 	spec := launchSpec{}
 	spec.Prompt, _ = operationMappingValue[string](state, operation.In["prompt"])
 	spec.PromptAdditions, _ = operationMappingValue[[]string](state, operation.In["prompt_additions"])
+	if instruction, ok := operationMappingValue[string](state, operation.In["instruction"]); ok && strings.TrimSpace(instruction) != "" {
+		spec.PromptAdditions = append(spec.PromptAdditions, instruction)
+	}
 	spec.StructuredInput, _ = operationMappingValue[*StructuredInput](state, operation.In["structured_input"])
+	if conflictContext, ok := operationMappingValue[map[string]any](state, operation.In["conflict_context"]); ok && len(conflictContext) != 0 {
+		if payload, marshalErr := json.Marshal(conflictContext); marshalErr == nil {
+			spec.PromptAdditions = append(spec.PromptAdditions, "Структурированный контекст конфликтного перебазирования:\n"+string(payload))
+		}
+	}
 	spec.StructuredOutput, _ = operationMappingValue[bool](state, operation.In["structured_output"])
 	spec.StructuredOutputRequired, _ = operationMappingValue[bool](state, operation.In["structured_output_required"])
 	spec.StructuredOutputFields, _ = operationMappingValue[[]string](state, operation.In["structured_output_fields"])
@@ -2191,7 +2207,7 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	if input.ForceWithLease && !allowForceWithLease(input.Git) {
 		return e.failRebase(state, operation, name, "Безопасная принудительная отправка не разрешена настройкой Git.", "rebase_force_with_lease_not_allowed", fmt.Errorf("git.push.allow-force-with-lease is not enabled"))
 	}
-	if input.ForceWithLease && !input.Push {
+	if input.ForceWithLease && !input.Push && !input.AllowConflict {
 		return e.failRebase(state, operation, name, "Политика --force-with-lease требует явного разрешения отправки.", "rebase_push_policy_required", fmt.Errorf("force-with-lease requires push=true"))
 	}
 	branch, err := gitOutput(ctx, input.Directory, "branch", "--show-current")
@@ -2216,6 +2232,11 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	if _, err := gitOutput(ctx, input.Directory, "fetch", "origin", input.BaseRef); err != nil {
 		return e.failRebase(state, operation, name, "Получение базовой ссылки завершилось отказом.", "rebase_fetch_failed", err)
 	}
+	if input.AllowConflict {
+		if _, err := gitOutput(ctx, input.Directory, "fetch", "origin", input.HeadRef); err != nil {
+			return e.failRebase(state, operation, name, "Получение актуальной рабочей ветки завершилось отказом.", "rebase_fetch_head_failed", err)
+		}
+	}
 	remoteOID := ""
 	if input.ForceWithLease {
 		remoteOID, err = gitOutput(ctx, input.Directory, "rev-parse", "--verify", "refs/remotes/origin/"+branch)
@@ -2227,7 +2248,46 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 		}
 		remoteOID = strings.TrimSpace(remoteOID)
 	}
-	if _, err := gitOutput(ctx, input.Directory, "rebase", "--", "FETCH_HEAD"); err != nil {
+	if input.AllowConflict {
+		if _, err := gitOutput(ctx, input.Directory, "reset", "--hard", "refs/remotes/origin/"+branch); err != nil {
+			return e.failRebase(state, operation, name, "Рабочая ветка не синхронизирована с удалённой вершиной.", "rebase_remote_sync_failed", err)
+		}
+	}
+	rebaseTarget := "FETCH_HEAD"
+	if input.AllowConflict {
+		if target, targetErr := gitOutput(ctx, input.Directory, "rev-parse", "--verify", "FETCH_HEAD"); targetErr == nil && strings.TrimSpace(target) != "" {
+			rebaseTarget = strings.TrimSpace(target)
+		} else if targetErr != nil {
+			return e.failRebase(state, operation, name, "Вершина базовой ветки не определена.", "rebase_base_head_failed", targetErr)
+		}
+	}
+	if _, err := gitOutput(ctx, input.Directory, "rebase", "--", rebaseTarget); err != nil {
+		if input.AllowConflict {
+			paths, pathsErr := gitOutput(ctx, input.Directory, "diff", "--name-only", "--diff-filter=U")
+			if pathsErr != nil || strings.TrimSpace(paths) == "" {
+				if pathsErr == nil {
+					pathsErr = fmt.Errorf("rebase conflict did not expose unmerged paths")
+				}
+				if cleanupErr := e.abortActiveMergeConflictRebaseDirectory(input.Directory); cleanupErr != nil {
+					pathsErr = fmt.Errorf("%w; очистка незавершённого перебазирования завершилась отказом: %v", pathsErr, cleanupErr)
+				}
+				return e.failRebase(state, operation, name, "Конфликт перебазирования не удалось диагностировать.", "rebase_conflict_context_failed", pathsErr)
+			}
+			conflictingPaths := splitGitPathList(paths)
+			contextValue := map[string]any{
+				"base_ref": input.BaseRef, "base_head": rebaseTarget, "head_ref": branch, "remote_head": remoteOID,
+				"conflicting_paths": conflictingPaths, "stage": "rebase-conflict",
+				"directory": input.Directory,
+			}
+			out := operation.Out
+			if len(out) == 0 {
+				out = model.OperationMap{"rebase_summary": {Ref: "data.rebase_summary"}, "conflict_context": {Ref: "data.conflict_context"}}
+			}
+			writeOperationData(state, out, "rebase_summary", fmt.Sprintf("rebase conflict branch=%s base=%s", branch, input.BaseRef))
+			writeOperationData(state, out, "conflict_context", contextValue)
+			state.tracker.completeIO(name, rebaseInputSummary(input, operation), operationIOSummary(operation.Out, map[string]string{"rebase_summary": "conflict prepared"}), "Конфликтное состояние перебазирования передано на разрешение.")
+			return nil
+		}
 		abortErr := error(nil)
 		abortCtx, cancelAbort := context.WithTimeout(context.WithoutCancel(ctx), rebaseAbortTimeout)
 		_, abortErr = gitOutput(abortCtx, input.Directory, "rebase", "--abort")
@@ -2257,8 +2317,13 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 
 	out := operation.Out
 	if len(out) == 0 {
-		out = model.OperationMap{"rebase_summary": {Ref: "data.rebase_summary"}}
+		out = model.OperationMap{"rebase_summary": {Ref: "data.rebase_summary"}, "conflict_context": {Ref: "data.conflict_context"}}
 	}
+	writeOperationData(state, out, "conflict_context", map[string]any{
+		"base_ref": input.BaseRef, "base_head": rebaseTarget, "head_ref": branch,
+		"remote_head": remoteOID, "conflicting_paths": []string{}, "stage": "rebased",
+		"directory": input.Directory,
+	})
 	writeOperationData(state, out, "rebase_summary", summary)
 	state.tracker.completeIO(name, rebaseInputSummary(input, operation), operationIOSummary(operation.Out, map[string]string{"rebase_summary": summary}), summary)
 	return nil
@@ -2281,6 +2346,7 @@ func rebaseInputFromOperation(state *operationExecution, operation OperationSpec
 	input.ProtectedRef, _ = operationMappingValue[string](state, operation.In["protected_ref"])
 	input.Push, _ = operationMappingValue[bool](state, operation.In["push"])
 	input.ForceWithLease, _ = operationMappingValue[bool](state, operation.In["force_with_lease"])
+	input.AllowConflict, _ = operationMappingValue[bool](state, operation.In["allow_conflict"])
 	if mapping, ok := operation.In["git"]; ok {
 		if strings.TrimSpace(mapping.Ref) == "data.allocation.git" && state != nil {
 			input.Git, _ = state.data["allocation"].(allocation).Git, true
@@ -2289,6 +2355,263 @@ func rebaseInputFromOperation(state *operationExecution, operation OperationSpec
 		}
 	}
 	return input
+}
+
+func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {
+	directory, _ := operationMappingValue[string](state, operation.In["directory"])
+	head, _ := operationMappingValue[string](state, operation.In["head_ref"])
+	base, _ := operationMappingValue[string](state, operation.In["base_ref"])
+	remoteOID, _ := operationMappingValue[string](state, operation.In["remote_head"])
+	gitConfig, _ := operationMappingValue[*model.GitConfig](state, operation.In["git"])
+	if strings.TrimSpace(directory) == "" || strings.TrimSpace(head) == "" || strings.TrimSpace(remoteOID) == "" {
+		return e.failRebase(state, operation, name, "Контекст разрешения конфликта неполон.", "merge_conflict_context_invalid", fmt.Errorf("directory, head_ref and remote_head are required"))
+	}
+	if !allowForceWithLease(gitConfig) {
+		return e.failRebase(state, operation, name, "Безопасная принудительная отправка не разрешена настройкой Git.", "merge_conflict_force_with_lease_not_allowed", fmt.Errorf("git.push.allow-force-with-lease is not enabled"))
+	}
+	pr, ok := state.data["pull_request"].(integration.MergeRequest)
+	if !ok || !confirmedMergeConflict(pr) {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Действие разрешения конфликта требует подтверждённого конфликтного состояния запроса на слияние.", "merge_conflict_not_confirmed", fmt.Errorf("pull request conflict is not confirmed"))
+	}
+	if output, ok := operationMappingValue[StructuredOutput](state, operation.In["structured_output"]); !ok || !hasSuccessfulResolutionChecks(output) {
+		return e.failRebase(state, operation, name, "Исполнительный модуль не подтвердил разрешение конфликта.", "merge_conflict_resolution_failed", fmt.Errorf("successful structured conclusion is required"))
+	}
+	gitOutput := e.service.runGitOutput
+	if gitOutput == nil {
+		gitOutput = runGitOutput
+	}
+	if unmerged, err := gitOutput(ctx, directory, "diff", "--name-only", "--diff-filter=U"); err != nil || strings.TrimSpace(unmerged) != "" {
+		if err == nil {
+			err = fmt.Errorf("unmerged paths remain: %s", strings.TrimSpace(unmerged))
+		}
+		return e.failResolveMergeConflict(state, operation, name, directory, "В рабочем месте остались неслитые пути.", "merge_conflict_unmerged_paths", err)
+	}
+	branch, err := gitOutput(ctx, directory, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(branch) != strings.TrimSpace(head) {
+		if err == nil {
+			err = fmt.Errorf("current branch %q does not match %q", strings.TrimSpace(branch), head)
+		}
+		return e.failResolveMergeConflict(state, operation, name, directory, "Текущая ветка не совпадает с рабочей веткой.", "merge_conflict_head_ref_mismatch", err)
+	}
+	if _, err := gitOutput(ctx, directory, "rev-parse", "--verify", "REBASE_HEAD"); err == nil {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Перебазирование после разрешения конфликта не завершено.", "merge_conflict_rebase_incomplete", fmt.Errorf("git rebase is still in progress"))
+	}
+	baseHead, err := gitOutput(ctx, directory, "rev-parse", "--verify", base+"^{commit}")
+	if err != nil || strings.TrimSpace(baseHead) == "" {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Вершина базовой ветки не определена.", "merge_conflict_base_head_missing", err)
+	}
+	if _, err := gitOutput(ctx, directory, "merge-base", "--is-ancestor", strings.TrimSpace(baseHead), "HEAD"); err != nil {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Рабочая ветка не перебазирована на базовую вершину.", "merge_conflict_base_not_ancestor", err)
+	}
+	if status, err := gitOutput(ctx, directory, "status", "--porcelain", "-z", "-uall"); err != nil || strings.TrimSpace(strings.ReplaceAll(status, "\x00", "")) != "" {
+		if err == nil {
+			err = fmt.Errorf("working tree has uncommitted changes")
+		}
+		return e.failResolveMergeConflict(state, operation, name, directory, "После разрешения конфликта рабочее место не чисто.", "merge_conflict_worktree_dirty", err)
+	}
+	sentHead, err := gitOutput(ctx, directory, "rev-parse", "--verify", "HEAD")
+	if err != nil || strings.TrimSpace(sentHead) == "" {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Вершина отправляемой ветки не определена.", "merge_conflict_head_sha_missing", err)
+	}
+	sentHead = strings.TrimSpace(sentHead)
+	if _, err := gitOutput(ctx, directory, "push", "--force-with-lease=refs/heads/"+head+":"+remoteOID, "origin", "HEAD:"+head); err != nil {
+		return e.failRebase(state, operation, name, "Безопасная отправка разрешённого конфликта завершилась отказом.", "merge_conflict_push_failed", err)
+	}
+	if err := e.verifyMergeConflictPush(ctx, state, sentHead, base, head); err != nil {
+		return e.failRebase(state, operation, name, "GitHub не подтвердил устранение конфликта после отправки.", "merge_conflict_external_state_unconfirmed", err)
+	}
+	summary := fmt.Sprintf("resolved merge conflict branch=%s base=%s pushed=force-with-lease", head, base)
+	out := operation.Out
+	if len(out) == 0 {
+		out = model.OperationMap{"resolution_summary": {Ref: "data.resolution_summary"}}
+	}
+	writeOperationData(state, out, "resolution_summary", summary)
+	state.tracker.completeIO(name, operationIOSummary(operation.In, nil), operationIOSummary(operation.Out, map[string]string{"resolution_summary": summary}), summary)
+	return nil
+}
+
+const mergeConflictVerificationAttempts = 8
+
+func (e builtinOperationExecutor) verifyMergeConflictPush(ctx context.Context, state *operationExecution, sentHead, base, head string) error {
+	pr, ok := state.data["pull_request"].(integration.MergeRequest)
+	if !ok || pr.Number <= 0 {
+		return fmt.Errorf("связанный запрос на слияние не доступен для проверки")
+	}
+	executor, err := e.integrationExecutor()
+	if err != nil {
+		return err
+	}
+	var last string
+	for attempt := 0; attempt < mergeConflictVerificationAttempts; attempt++ {
+		response, getErr := executor.Execute(ctx, integration.Request{
+			IntegrationType: integrationmodel.IntegrationTypeRepository,
+			Resource:        "merge-request", ObjectType: "merge-request", Operation: "get",
+			Repository: pr.Repository, RepoProvided: strings.TrimSpace(pr.Repository) != "",
+			MergeRequestNumber: pr.Number,
+		})
+		if getErr != nil {
+			last = getErr.Error()
+		} else if refreshed, exists := mergeRequestFromIntegrationResponse(response); exists {
+			currentHead := strings.TrimSpace(refreshed.Attributes["head_sha"])
+			if currentHead == "" {
+				currentHead = strings.TrimSpace(refreshed.Attributes["head_ref_oid"])
+			}
+			currentBase := strings.TrimSpace(refreshed.Attributes["base_sha"])
+			if currentBase == "" {
+				currentBase = strings.TrimSpace(refreshed.Attributes["base_ref_oid"])
+			}
+			if currentHead != sentHead {
+				last = fmt.Sprintf("GitHub head SHA %q does not match sent SHA %q", currentHead, sentHead)
+			} else if currentBase == "" || currentBase != strings.TrimSpace(base) {
+				last = fmt.Sprintf("GitHub base SHA %q does not match rebased base SHA %q", currentBase, base)
+			} else if mergeState, known := mergeRequestState(refreshed); known && !mergeState {
+				return nil
+			} else {
+				last = "GitHub returned a transition or conflicting merge state"
+			}
+		}
+		if attempt+1 < mergeConflictVerificationAttempts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	return fmt.Errorf("%s (base=%s head=%s)", last, base, head)
+}
+
+func mergeRequestState(pr integration.MergeRequest) (conflicting bool, known bool) {
+	mergeable := strings.ToLower(strings.TrimSpace(pr.Attributes["mergeable"]))
+	mergeState := strings.ToLower(strings.TrimSpace(pr.Attributes["merge_state_status"]))
+	if mergeable == "" && mergeState == "" {
+		return false, false
+	}
+	for _, value := range []string{mergeable, mergeState} {
+		switch value {
+		case "unknown", "unstable", "queued", "":
+			return false, false
+		case "conflict", "conflicted", "conflicting", "dirty", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict", "false":
+			return true, true
+		}
+	}
+	return false, true
+}
+
+func (e builtinOperationExecutor) failResolveMergeConflict(state *operationExecution, operation OperationSpec, name, directory, summary, code string, err error) error {
+	if cleanupErr := e.abortActiveMergeConflictRebaseDirectory(directory); cleanupErr != nil {
+		err = fmt.Errorf("%w; очистка незавершённого перебазирования завершилась отказом: %v", err, cleanupErr)
+	}
+	return e.failRebase(state, operation, name, summary, code, err)
+}
+
+func (e builtinOperationExecutor) abortActiveMergeConflictRebase(state *operationExecution) error {
+	workplace, ok := state.data["workplace"].(workplace)
+	if !ok || strings.TrimSpace(workplace.Name) == "" {
+		return nil
+	}
+	return e.abortActiveMergeConflictRebaseDirectory(workplace.Name)
+}
+
+func (e builtinOperationExecutor) cleanupMergeConflictWorkplace(state *operationExecution) error {
+	if err := e.abortActiveMergeConflictRebase(state); err != nil {
+		return err
+	}
+	workplace, ok := state.data["workplace"].(workplace)
+	if !ok || strings.TrimSpace(workplace.Name) == "" {
+		return nil
+	}
+	contextValue, ok := state.data["conflict_context"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	original, _ := contextValue["remote_head"].(string)
+	branch, _ := contextValue["head_ref"].(string)
+	if strings.TrimSpace(original) == "" || strings.TrimSpace(branch) == "" {
+		return nil
+	}
+	gitOutput := e.service.runGitOutput
+	if gitOutput == nil {
+		gitOutput = runGitOutput
+	}
+	current, err := gitOutput(context.Background(), workplace.Name, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(current) != strings.TrimSpace(branch) {
+		if err == nil {
+			err = fmt.Errorf("current branch %q does not match conflict branch %q", strings.TrimSpace(current), strings.TrimSpace(branch))
+		}
+		return err
+	}
+	_, err = gitOutput(context.Background(), workplace.Name, "reset", "--hard", strings.TrimSpace(original))
+	return err
+}
+
+func (e builtinOperationExecutor) abortActiveMergeConflictRebaseDirectory(directory string) error {
+	gitOutput := e.service.runGitOutput
+	if gitOutput == nil {
+		gitOutput = runGitOutput
+	}
+	if _, err := gitOutput(context.Background(), directory, "rev-parse", "--verify", "REBASE_HEAD"); err != nil {
+		return nil
+	}
+	abortCtx, cancel := context.WithTimeout(context.Background(), rebaseAbortTimeout)
+	if _, abortErr := gitOutput(abortCtx, directory, "rebase", "--abort"); abortErr != nil {
+		cancel()
+		return abortErr
+	}
+	cancel()
+	return nil
+}
+
+func isSuccessfulConclusion(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ok", "ready", "passed", "approved", "approve", "success", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasSuccessfulResolutionChecks(output StructuredOutput) bool {
+	if output.Conclusion == nil || !isSuccessfulConclusion(output.Conclusion.Status) || len(output.Commands) == 0 {
+		return false
+	}
+	for _, command := range output.Commands {
+		if strings.TrimSpace(command.Name) == "" || !isSuccessfulCommand(command) {
+			return false
+		}
+	}
+	return true
+}
+
+func isSuccessfulCommand(command StructuredCommand) bool {
+	status := strings.ToLower(strings.TrimSpace(command.Status))
+	if status == "" || (status != "ok" && status != "success" && status != "passed" && status != "completed") {
+		return false
+	}
+	return command.ExitCode != nil && *command.ExitCode == 0
+}
+
+func confirmedMergeConflict(pr integration.MergeRequest) bool {
+	conflicting, known := mergeRequestState(pr)
+	return known && conflicting
+}
+
+func splitGitPathList(value string) []string {
+	value = strings.TrimSuffix(value, "\x00")
+	if value == "" {
+		return nil
+	}
+	if strings.Contains(value, "\x00") {
+		parts := strings.Split(value, "\x00")
+		result := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if part != "" {
+				result = append(result, part)
+			}
+		}
+		return result
+	}
+	return strings.Split(strings.TrimSpace(value), "\n")
 }
 
 func rebaseInputSummary(input model.RebaseInput, operation OperationSpec) string {

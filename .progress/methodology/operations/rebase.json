@@ -12,10 +12,12 @@
       "protected_ref": {"type": "string", "description": "Защищённая ветка, которую нельзя перебазировать или отправлять."},
       "push": {"type": "boolean", "description": "Явное разрешение отправки ветки после перебазирования."},
       "force_with_lease": {"type": "boolean", "description": "Запрос безопасной принудительной отправки; дополнительно требует настройки Git."},
+      "allow_conflict": {"type": "boolean", "description": "Оставить конфликтное состояние для отдельного действия разрешения."},
       "git": {"type": "object", "description": "Настройки Git из ресурсного снабжения."}
     },
     "out": {
-      "rebase_summary": {"type": "string", "description": "Сводка перебазирования и отправки ветки."}
+      "rebase_summary": {"type": "string", "description": "Сводка перебазирования и отправки ветки."},
+      "conflict_context": {"type": "object", "description": "Структурированный контекст конфликтного перебазирования."}
     }
   }
 }

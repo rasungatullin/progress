@@ -185,7 +185,7 @@ func TestServiceStartRecoversMergeRequestForReviewRoute(t *testing.T) {
 	if object.Type != "merge-request" {
 		t.Fatalf("expected merge-request related object type: %#v", object)
 	}
-	if len(integrationStub.requests) != 2 {
+	if len(integrationStub.requests) != 3 {
 		t.Fatalf("unexpected number of integration requests: %d", len(integrationStub.requests))
 	}
 	if integrationStub.requests[1].Query != "head:201" {
@@ -844,7 +844,7 @@ func TestServiceConsiderRoutesReviewPassedTaskToReworkForExternalRemarks(t *test
 		t.Fatalf("unexpected status: %q", result.Status)
 	}
 	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionApplyReviewComments {
-		t.Fatalf("expected rework execution plan, got %#v", result.ExecutionPlan)
+		t.Fatalf("expected apply-review-comments execution plan, got %#v", result.ExecutionPlan)
 	}
 	if result.Route.Name != "task-processing-external-pr-rework" {
 		t.Fatalf("unexpected route: %#v", result.Route)
@@ -879,8 +879,8 @@ func TestServiceConsiderRoutesReviewPassedTaskToReworkForMergeConflict(t *testin
 	if err != nil {
 		t.Fatalf("consider: %v", err)
 	}
-	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionApplyReviewComments {
-		t.Fatalf("expected rework execution plan, got %#v", result.ExecutionPlan)
+	if result.ExecutionPlan == nil || result.ExecutionPlan.Action != execution.ActionResolveMergeConflict {
+		t.Fatalf("expected conflict resolution execution plan, got %#v", result.ExecutionPlan)
 	}
 	if len(result.Reasons) != 1 || result.Reasons[0].Code != "merge_request_conflict" {
 		t.Fatalf("unexpected reasons: %#v", result.Reasons)

@@ -70,9 +70,6 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 	}
 
 	mergeRequest, mergeRequestErr := s.findTaskMergeRequest(ctx, response.Issue)
-	if mergeRequestErr != nil {
-		s.logger.Printf("Не удалось восстановить связанный запрос на слияние: задача=%d ошибка=%v", input.TaskNumber, mergeRequestErr)
-	}
 
 	decisionContext := DecisionContext{
 		Signal:       signal,
@@ -80,9 +77,16 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		Issue:        response.Issue,
 		MergeRequest: mergeRequest,
 	}
+	if mergeRequest != nil {
+		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest, taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) || routeNeedsReviewRemarks(input.Route))
+		if stateErr != nil {
+			return StartResult{Context: decisionContext}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, stateErr)
+		}
+		decisionContext.MergeRequestExternalState = externalState
+	}
 	consideration, err := s.Consider(ctx, ConsiderationInput{Context: decisionContext, Route: input.Route})
 	if err != nil {
-		if mergeRequestErr != nil && consideration.Failure != nil && consideration.Failure.Code == "merge_request_missing" {
+		if mergeRequestErr != nil && (routeNeedsReviewRemarks(input.Route) || (consideration.Failure != nil && consideration.Failure.Code == "merge_request_missing")) {
 			err = fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, mergeRequestErr)
 		}
 		return StartResult{
@@ -90,8 +94,27 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 			Consideration: &consideration,
 		}, err
 	}
+	if mergeRequestErr != nil && (routeNeedsReviewRemarks(input.Route) || (consideration.ExecutionPlan != nil && requiresMergeRequest(consideration.ExecutionPlan.Action))) {
+		failure := decisionFailure("merge_request_missing", mergeRequestErr, false, true)
+		consideration.Status = ConsiderationStatusManualIntervention
+		consideration.Failure = failure
+		return StartResult{Context: decisionContext, Consideration: &consideration}, fmt.Errorf("восстановить связанный запрос на слияние для задачи %d: %w", input.TaskNumber, mergeRequestErr)
+	}
+	if consideration.ExecutionPlan != nil && mergeRequest != nil && decisionContext.MergeRequestExternalState == nil && (consideration.ExecutionPlan.Action == execution.ActionReviewPullRequest || consideration.ExecutionPlan.Action == execution.ActionApplyReviewComments) {
+		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest, true)
+		if stateErr != nil {
+			return StartResult{Context: decisionContext, Consideration: &consideration}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, stateErr)
+		}
+		if externalState != nil {
+			decisionContext.MergeRequestExternalState = externalState
+			consideration, err = s.Consider(ctx, ConsiderationInput{Context: decisionContext, Route: input.Route})
+			if err != nil {
+				return StartResult{Context: decisionContext, Consideration: &consideration}, err
+			}
+		}
+	}
 	if consideration.Status == ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil {
-		externalState, err := s.loadMergeRequestExternalState(ctx, mergeRequest)
+		externalState, err := s.loadMergeRequestExternalState(ctx, mergeRequest, true)
 		if err != nil {
 			return StartResult{Context: decisionContext, Consideration: &consideration}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, err)
 		}
@@ -167,12 +190,31 @@ func taskLabelsRequireMergeRequest(labels []string) bool {
 	return hasLabel(labels, "Ожидает экспертизы") || hasLabel(labels, "Требует доработки") || hasLabel(labels, "Экспертиза пройдена")
 }
 
-func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*MergeRequestExternalState, error) {
+func taskLabelsRequireCompletionMergeRequest(labels []string) bool {
+	return hasLabel(labels, "Экспертиза пройдена")
+}
+
+func routeNeedsReviewRemarks(route string) bool {
+	switch strings.ToLower(strings.TrimSpace(route)) {
+	case execution.ActionReviewPullRequest, execution.ActionApplyReviewComments, "pull-request-review":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest, loadRemarks bool) (*MergeRequestExternalState, error) {
 	if mergeRequest == nil {
 		return nil, nil
 	}
 
-	state := &MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest)}
+	state := &MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest), MergeStateUnknown: mergeRequestStateUnknown(mergeRequest)}
+	if !loadRemarks {
+		if !state.HasMergeConflict && !state.MergeStateUnknown {
+			return nil, nil
+		}
+		return state, nil
+	}
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType:    integrationmodel.IntegrationTypeRepository,
 		Resource:           "review-remark",
@@ -183,9 +225,6 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		MergeRequestNumber: mergeRequest.Number,
 	})
 	if err != nil {
-		if state.HasMergeConflict {
-			return state, nil
-		}
 		return nil, err
 	}
 	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
@@ -355,6 +394,31 @@ func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
 	return false
 }
 
+func mergeRequestStateUnknown(mergeRequest *integration.MergeRequest) bool {
+	if mergeRequest == nil {
+		return false
+	}
+	found := false
+	unknown := false
+	for key, value := range mergeRequest.Attributes {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "mergeable", "can_merge", "mergeable_state", "merge_state", "merge_state_status":
+			found = true
+			unknown = unknown || isUnknownMergeState(value)
+		}
+	}
+	return found && unknown
+}
+
+func isUnknownMergeState(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "unknown", "unstable", "queued", "checking":
+		return true
+	default:
+		return false
+	}
+}
+
 func isConflictMergeState(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "conflict", "conflicted", "conflicting", "dirty", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
@@ -402,6 +466,22 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	}
 	if strings.TrimSpace(result.Context.Task.ID) == "" {
 		result.Context.Task = canonicalTaskFromIssue(input.Context.Issue)
+	}
+	if isOpenMergeRequest(input.Context.MergeRequest) && input.Context.MergeRequestExternalState != nil && input.Context.MergeRequestExternalState.MergeStateUnknown {
+		err := fmt.Errorf("внешнее состояние запроса на слияние ещё не подтверждено")
+		result.Status = ConsiderationStatusAwaiting
+		result.Failure = decisionFailure("merge_request_state_unconfirmed", err, true, false)
+		return result, err
+	}
+	if isOpenMergeRequest(input.Context.MergeRequest) && input.Context.MergeRequestExternalState != nil && input.Context.MergeRequestExternalState.HasMergeConflict {
+		route := mergeConflictRoute()
+		result.Route = route.Route
+		result.Checks = route.Checks
+		decision := buildExecuteDecision(result.Context, route)
+		result.Status = ConsiderationStatusExecution
+		result.Reasons = append([]DecisionReason(nil), decision.Reasons...)
+		result.ExecutionPlan = decision.ExecutionPlan
+		return result, nil
 	}
 
 	route, err := s.selectWorkflowRoute(ctx, result.Context.Task, input.Route)
@@ -462,6 +542,19 @@ func isOpenMergeRequest(mergeRequest *integration.MergeRequest) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func mergeConflictRoute() selectedWorkflowRoute {
+	reason := "Открытый запрос на слияние имеет подтверждённое конфликтное состояние; сначала требуется управляемое разрешение конфликта."
+	return selectedWorkflowRoute{
+		Action:         execution.ActionResolveMergeConflict,
+		ExpectedResult: "Разрешить конфликт запроса на слияние, завершить перебазирование, проверить результат и отправить ветку через --force-with-lease.",
+		Constraints:    []string{"Работать в отдельном исполнительном рабочем месте.", "Не выполнять обычную отправку ветки.", "После подтверждённого разрешения направить результат на повторную экспертизу."},
+		ReasonCode:     "merge_request_conflict",
+		ReasonMessage:  reason,
+		Route:          ProcessingRoute{Name: "task-processing-merge-conflict", Title: "Разрешение конфликта запроса на слияние", Description: "Отдельный маршрут управляемого разрешения конфликта открытого запроса на слияние."},
+		Checks:         []RouteCheckResult{{Name: "merge-request-conflict", Status: RouteCheckStatusPassed, Reasons: []DecisionReason{{Code: "merge_request_conflict", Message: reason}}}},
 	}
 }
 
