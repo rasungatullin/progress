@@ -292,7 +292,7 @@ func operationSpecFromMethodology(action methodology.Action, operation methodolo
 	}
 	defaultSpec.In = operationMappingFromMethodology(operation.In)
 	defaultSpec.Out = operationMappingFromMethodology(operation.Out)
-	if operation.Required == nil && strings.TrimSpace(action.Name) == ActionApplyReviewComments && string(defaultSpec.Kind) == OperationKindLoadReviewRemarks {
+	if operation.Required == nil && strings.TrimSpace(action.Name) == ActionApplyReviewComments && defaultSpec.Name == OperationKindLoadReviewRemarks {
 		defaultSpec.Required = true
 	}
 	if operation.Required != nil {
@@ -370,8 +370,6 @@ func defaultOperationSpec(kind string) model.OperationSpec {
 	switch strings.TrimSpace(kind) {
 	case OperationKindPrepareData:
 		return builtinOperation(OperationKindPrepareData, "Подготовка данных", true)
-	case OperationKindLoadReviewRemarks:
-		return builtinOperation(OperationKindLoadReviewRemarks, "Получение замечаний ревизии", false)
 	case OperationKindResolveProfile:
 		return builtinOperation(OperationKindResolveProfile, "Выбор исполнительного профиля", true)
 	case OperationKindAllocateResources:

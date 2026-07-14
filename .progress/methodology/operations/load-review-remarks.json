@@ -1,8 +1,8 @@
 {
   "name": "load-review-remarks",
-  "kind": "load-review-remarks",
+  "kind": "repository.merge-request.comment.list",
   "title": "Получение замечаний ревизии",
-  "type": "builtin",
+  "type": "integration",
   "contract": {
     "in": {
       "invocation": {

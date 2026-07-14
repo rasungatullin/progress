@@ -239,7 +239,7 @@ func addIntegrationExtra(extra map[string]any, name string, value any) map[strin
 }
 
 func writeIntegrationResponse(state *operationExecution, operation OperationSpec, response integration.Response) {
-	values := map[string]any{"response": response, "merge_request": response.MergeRequest, "operation_result": response.OperationResult, "failure": response.Failure}
+	values := map[string]any{"response": response, "merge_request": response.MergeRequest, "review_remarks": response.ReviewRemarks, "operation_result": response.OperationResult, "failure": response.Failure}
 	if values["merge_request"] == nil {
 		if response.PullRequestStatus != nil {
 			status := response.PullRequestStatus
@@ -249,7 +249,13 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 			values["merge_request"] = integration.MergeRequest{System: result.System, ExternalID: result.ExternalID, State: result.Status, URL: result.URL}
 		}
 	}
-	if mergeRequest, ok := values["merge_request"].(integration.MergeRequest); ok {
+	mergeRequest, ok := values["merge_request"].(integration.MergeRequest)
+	if !ok {
+		if pointer, pointerOK := values["merge_request"].(*integration.MergeRequest); pointerOK && pointer != nil {
+			mergeRequest, ok = *pointer, true
+		}
+	}
+	if ok {
 		if current, exists := state.data["invocation"].(invocation); exists {
 			values["invocation"] = invocationWithPullRequest(current, mergeRequest)
 		}
@@ -275,6 +281,15 @@ func integrationResponseAlreadyAvailable(response integration.Response) bool {
 }
 
 func (e builtinOperationExecutor) failIntegrationOperation(state *operationExecution, operation OperationSpec, name, summary string, err error, code string) error {
+	if !operation.Required {
+		for field, mapping := range operation.Out {
+			if field == "review_remarks" {
+				writeOperationData(state, model.OperationMap{field: mapping}, field, []integration.ReviewRemark(nil))
+			}
+		}
+		state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
+		return nil
+	}
 	result := resultFromExecutionData(state)
 	if strings.TrimSpace(result.Status) == "" {
 		result = failedStartResult(err)

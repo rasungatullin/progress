@@ -346,7 +346,7 @@ func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
 		if jsonName == "" {
 			jsonName = fieldType.Name
 		}
-		if jsonName == path[0] {
+		if jsonName == path[0] || strings.EqualFold(fieldType.Name, path[0]) {
 			return reflectedPathValue(value.Field(index), path[1:])
 		}
 	}
@@ -376,7 +376,7 @@ func reflectedPathResolved(value reflect.Value, path []string) bool {
 		if jsonName == "" {
 			jsonName = fieldType.Name
 		}
-		if jsonName != name {
+		if jsonName != name && !strings.EqualFold(fieldType.Name, name) {
 			continue
 		}
 		return reflectedPathResolved(value.Field(index), path[1:])
@@ -389,8 +389,6 @@ func (e builtinOperationExecutor) execute(ctx context.Context, state *operationE
 	switch operationKind(operation) {
 	case OperationKindPrepareData:
 		return e.prepareData(ctx, state, operation, name)
-	case OperationKindLoadReviewRemarks:
-		return e.loadReviewRemarks(ctx, state, operation, name, operation.Required)
 	case OperationKindResolveProfile:
 		return e.resolveProfile(ctx, state, operation, name)
 	case OperationKindAllocateResources:

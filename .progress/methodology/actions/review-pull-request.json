@@ -135,6 +135,12 @@
         },
         "pull_request": {
           "ref": "data.pull_request"
+        },
+        "repository": {
+          "ref": "data.pull_request.repository"
+        },
+        "number": {
+          "ref": "data.pull_request.number"
         }
       },
       "out": {
