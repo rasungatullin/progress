@@ -207,6 +207,22 @@ func operationMappingRawValue(state *operationExecution, mapping model.Operation
 		return nil, false
 	}
 	ref := strings.TrimSpace(mapping.Ref)
+	if ref == "data.allocation.git" {
+		allocation, ok := state.data["allocation"].(allocation)
+		if !ok || allocation.Git == nil {
+			return nil, false
+		}
+		return allocation.Git, true
+	}
+	if ref == "data.structured_output" {
+		if value, ok := state.data["structured_output"]; ok && value != nil {
+			return value, true
+		}
+		if result, ok := state.data["result"].(LaunchResult); ok && result.StructuredOutput != nil {
+			return result.StructuredOutput, true
+		}
+		return nil, false
+	}
 	parts := strings.Split(ref, ".")
 	if len(parts) < 2 {
 		return nil, false
@@ -300,6 +316,13 @@ func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
 	}
 	if len(path) == 0 {
 		return value.Interface(), true
+	}
+	if value.Kind() == reflect.Map && value.Type().Key().Kind() == reflect.String {
+		mapped := value.MapIndex(reflect.ValueOf(path[0]).Convert(value.Type().Key()))
+		if !mapped.IsValid() {
+			return nil, false
+		}
+		return reflectedPathValue(mapped, path[1:])
 	}
 	if value.Kind() != reflect.Struct {
 		return nil, false
@@ -2201,7 +2224,7 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	if err != nil {
 		return e.failRebase(state, operation, name, "Состояние рабочего места не получено.", "rebase_status_failed", err)
 	}
-	if strings.TrimSpace(strings.ReplaceAll(dirty, "\x00", "")) != "" {
+	if hasRelevantGitChanges(dirty) {
 		return e.failRebase(state, operation, name, "Перебазирование запрещено при незаписанных изменениях.", "rebase_worktree_dirty", fmt.Errorf("working tree has uncommitted changes"))
 	}
 	if input.ForceWithLease && !allowForceWithLease(input.Git) {
@@ -2255,11 +2278,7 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 	}
 	rebaseTarget := "FETCH_HEAD"
 	if input.AllowConflict {
-		if target, targetErr := gitOutput(ctx, input.Directory, "rev-parse", "--verify", "FETCH_HEAD"); targetErr == nil && strings.TrimSpace(target) != "" {
-			rebaseTarget = strings.TrimSpace(target)
-		} else if targetErr != nil {
-			return e.failRebase(state, operation, name, "Вершина базовой ветки не определена.", "rebase_base_head_failed", targetErr)
-		}
+		rebaseTarget = "refs/remotes/origin/" + normalizeRebaseRef(input.BaseRef)
 	}
 	if _, err := gitOutput(ctx, input.Directory, "rebase", "--", rebaseTarget); err != nil {
 		if input.AllowConflict {
@@ -2380,11 +2399,26 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 	if gitOutput == nil {
 		gitOutput = runGitOutput
 	}
-	if unmerged, err := gitOutput(ctx, directory, "diff", "--name-only", "--diff-filter=U"); err != nil || strings.TrimSpace(unmerged) != "" {
+	unmerged, err := gitOutput(ctx, directory, "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Список неслитых путей не получен.", "merge_conflict_unmerged_paths", err)
+	}
+	conflictingPaths := splitGitPathList(unmerged)
+	if len(conflictingPaths) == 0 {
+		return e.failResolveMergeConflict(state, operation, name, directory, "После синтеза не обнаружены неслитые пути.", "merge_conflict_unmerged_paths", fmt.Errorf("no unmerged paths remain for automatic completion"))
+	}
+	addArgs := append([]string{"add", "--"}, conflictingPaths...)
+	if _, err := gitOutput(ctx, directory, addArgs...); err != nil {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Конфликтные файлы не добавлены в индекс.", "merge_conflict_stage_failed", err)
+	}
+	if _, err := gitOutput(ctx, directory, "-c", "core.editor=true", "rebase", "--continue"); err != nil {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Перебазирование после разрешения конфликта не завершено.", "merge_conflict_rebase_continue_failed", err)
+	}
+	if unmerged, err := gitOutput(ctx, directory, "diff", "--name-only", "--diff-filter=U", "-z"); err != nil || strings.TrimSpace(strings.ReplaceAll(unmerged, "\x00", "")) != "" {
 		if err == nil {
-			err = fmt.Errorf("unmerged paths remain: %s", strings.TrimSpace(unmerged))
+			err = fmt.Errorf("unmerged paths remain after rebase --continue: %s", strings.TrimSpace(strings.ReplaceAll(unmerged, "\x00", " ")))
 		}
-		return e.failResolveMergeConflict(state, operation, name, directory, "В рабочем месте остались неслитые пути.", "merge_conflict_unmerged_paths", err)
+		return e.failResolveMergeConflict(state, operation, name, directory, "После завершения перебазирования остались неслитые пути.", "merge_conflict_unmerged_paths", err)
 	}
 	branch, err := gitOutput(ctx, directory, "branch", "--show-current")
 	if err != nil || strings.TrimSpace(branch) != strings.TrimSpace(head) {
@@ -2403,7 +2437,7 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 	if _, err := gitOutput(ctx, directory, "merge-base", "--is-ancestor", strings.TrimSpace(baseHead), "HEAD"); err != nil {
 		return e.failResolveMergeConflict(state, operation, name, directory, "Рабочая ветка не перебазирована на базовую вершину.", "merge_conflict_base_not_ancestor", err)
 	}
-	if status, err := gitOutput(ctx, directory, "status", "--porcelain", "-z", "-uall"); err != nil || strings.TrimSpace(strings.ReplaceAll(status, "\x00", "")) != "" {
+	if status, err := gitOutput(ctx, directory, "status", "--porcelain", "-z", "-uall"); err != nil || hasRelevantGitChanges(status) {
 		if err == nil {
 			err = fmt.Errorf("working tree has uncommitted changes")
 		}
@@ -2417,7 +2451,7 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 	if _, err := gitOutput(ctx, directory, "push", "--force-with-lease=refs/heads/"+head+":"+remoteOID, "origin", "HEAD:"+head); err != nil {
 		return e.failRebase(state, operation, name, "Безопасная отправка разрешённого конфликта завершилась отказом.", "merge_conflict_push_failed", err)
 	}
-	if err := e.verifyMergeConflictPush(ctx, state, sentHead, base, head); err != nil {
+	if err := e.verifyMergeConflictPush(ctx, state, sentHead, strings.TrimSpace(baseHead), head); err != nil {
 		return e.failRebase(state, operation, name, "GitHub не подтвердил устранение конфликта после отправки.", "merge_conflict_external_state_unconfirmed", err)
 	}
 	summary := fmt.Sprintf("resolved merge conflict branch=%s base=%s pushed=force-with-lease", head, base)
@@ -2585,10 +2619,10 @@ func hasSuccessfulResolutionChecks(output StructuredOutput) bool {
 
 func isSuccessfulCommand(command StructuredCommand) bool {
 	status := strings.ToLower(strings.TrimSpace(command.Status))
-	if status == "" || (status != "ok" && status != "success" && status != "passed" && status != "completed") {
+	if status != "" && status != "ok" && status != "success" && status != "passed" && status != "completed" {
 		return false
 	}
-	return command.ExitCode != nil && *command.ExitCode == 0
+	return command.ExitCode == nil || *command.ExitCode == 0
 }
 
 func confirmedMergeConflict(pr integration.MergeRequest) bool {
@@ -2612,6 +2646,24 @@ func splitGitPathList(value string) []string {
 		return result
 	}
 	return strings.Split(strings.TrimSpace(value), "\n")
+}
+
+func hasRelevantGitChanges(value string) bool {
+	value = strings.TrimSuffix(value, "\x00")
+	if strings.TrimSpace(value) == "" {
+		return false
+	}
+	for _, entry := range strings.Split(value, "\x00") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.HasPrefix(entry, "?? ") && strings.Contains(entry[3:], "/.progress") {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func rebaseInputSummary(input model.RebaseInput, operation OperationSpec) string {
