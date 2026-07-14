@@ -2,6 +2,11 @@
   "defaults": {
     "model-binding": "default"
   },
+  "git": {
+    "push": {
+      "allow-force-with-lease": true
+    }
+  },
   "runners": ["opencode", "codex"],
   "models": ["openai/gpt-5.6-luna", "gpt-5.6-luna", "openai/gpt-5.6-sol"],
   "resources": {

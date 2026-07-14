@@ -55,8 +55,6 @@ func TestRebaseAllowsLeaseCaptureBeforeConflictResolution(t *testing.T) {
 			return "feature", nil
 		case "rev-parse --verify refs/remotes/origin/feature":
 			return "0123456789abcdef0123456789abcdef01234567", nil
-		case "rev-parse --verify FETCH_HEAD":
-			return "fedcba9876543210fedcba9876543210fedcba98", nil
 		default:
 			return "", nil
 		}
@@ -71,6 +69,9 @@ func TestRebaseAllowsLeaseCaptureBeforeConflictResolution(t *testing.T) {
 	joined := strings.Join(calls, "\n")
 	if !strings.Contains(joined, "fetch origin main") || !strings.Contains(joined, "fetch origin feature") {
 		t.Fatalf("conflict preparation must refresh both base and head refs: %v", calls)
+	}
+	if !strings.Contains(joined, "rebase -- refs/remotes/origin/main") {
+		t.Fatalf("conflict preparation must rebase onto the explicit base ref: %v", calls)
 	}
 }
 

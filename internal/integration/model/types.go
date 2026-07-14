@@ -392,8 +392,8 @@ type MergeRequest struct {
 	State          string
 	Traits         []string
 	Attributes     map[string]string
-	BaseRef        string
-	HeadRef        string
+	BaseRef        string `json:"base_ref,omitempty"`
+	HeadRef        string `json:"head_ref,omitempty"`
 	Author         User
 	ReviewDecision string
 	URL            string
