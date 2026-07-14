@@ -804,7 +804,10 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 			return responseWithDecodeFailure(response, err)
 		}
 		for _, item := range raw.Values {
-			response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, item))
+			remark := reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, item)
+			if isReviewRemarkRequest(req) == (strings.TrimSpace(remark.Path) != "") {
+				response.ReviewRemarks = append(response.ReviewRemarks, remark)
+			}
 		}
 		endpoint = strings.TrimSpace(raw.Next)
 	}
@@ -918,10 +921,19 @@ func (s *Service) executeServerPullRequestComments(ctx context.Context, response
 		if item.Comment == nil {
 			continue
 		}
-		response.ReviewRemarks = appendServerCommentRemarks(response.ReviewRemarks, repository.fullName, req.MergeRequestNumber, *item.Comment)
+		remarks := appendServerCommentRemarks(nil, repository.fullName, req.MergeRequestNumber, *item.Comment)
+		for _, remark := range remarks {
+			if isReviewRemarkRequest(req) == (strings.TrimSpace(remark.Path) != "") {
+				response.ReviewRemarks = append(response.ReviewRemarks, remark)
+			}
+		}
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
+}
+
+func isReviewRemarkRequest(req model.ProviderRequest) bool {
+	return strings.TrimSpace(req.ObjectType) == "review-remark"
 }
 
 func (s *Service) do(ctx context.Context, method string, endpoint string, payload []byte) (int, []byte, error) {

@@ -344,7 +344,7 @@ func newTypeOrientedWikiPageSearchCommand() *cobra.Command {
 }
 
 // newIntegrationIssueCommand предоставляет типо-ориентированный контракт
-// issue. Старые команды по имени системы сохраняются на переходный период.
+// issue.
 func newIntegrationIssueCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "issue",
@@ -376,7 +376,7 @@ func newIntegrationIssueGetCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий в формате owner/name")
 	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор объекта")
-	cmd.Flags().StringArrayVar(&flags.labels, "fields", nil, "Поля объекта")
+	cmd.Flags().StringArrayVar(&flags.fields, "fields", nil, "Поля объекта")
 	return cmd
 }
 
@@ -394,7 +394,9 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
+	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
 	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-labels", nil, "Метки, исключаемые из поиска")
 	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-label", nil, "Исключаемая метка задачи")
 	return cmd
 }
@@ -1711,9 +1713,24 @@ func newIntegrationInvokeCommand() *cobra.Command {
 		service := newIntegrationService(cmd)
 		descriptor, found := service.OperationDescriptor(cmd.Context(), flags.operation, flags.system)
 		if !found {
-			return printInvokeAvailabilityFailure(cmd, flags, "operation is not available: "+flags.operation, "unsupported-operation")
+			kind := "unsupported-operation"
+			integrationType := strings.SplitN(flags.operation, ".", 2)[0]
+			defaultSystem := service.DefaultSystemForType(integrationType)
+			if strings.TrimSpace(flags.system) == "" && defaultSystem == "" {
+				kind = "not-configured"
+			}
+			if strings.TrimSpace(flags.system) != "" && !service.IsSystemConfigured(flags.system) {
+				kind = "not-configured"
+			}
+			if strings.TrimSpace(flags.system) == "" {
+				flags.system = defaultSystem
+			}
+			return printInvokeAvailabilityFailure(cmd, flags, "operation is not available: "+flags.operation, kind)
 		}
 		if !descriptor.Available {
+			if strings.TrimSpace(flags.system) == "" {
+				flags.system = descriptor.System
+			}
 			kind := "unsupported-operation"
 			if !descriptor.Enabled {
 				kind = "not-configured"
@@ -1759,6 +1776,13 @@ func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags,
 		Operation:       flags.operation,
 		Status:          "failed",
 		Failure:         &integration.Failure{Kind: kind, Message: message},
+	}
+	parts := strings.Split(flags.operation, ".")
+	if len(parts) >= 3 {
+		response.Resource = parts[1]
+		response.ObjectType = parts[1]
+		response.Operation = parts[len(parts)-1]
+		response.Route = integration.Route{IntegrationType: response.IntegrationType, System: response.System, Provider: response.System, Resource: response.Resource, ObjectType: response.ObjectType, Operation: response.Operation}
 	}
 	if format == integrationOutputJSON {
 		if err := printIntegrationJSON(cmd, response); err != nil {

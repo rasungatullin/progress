@@ -56,11 +56,10 @@ func (s *Service) Operations(_ context.Context, filter OperationFilter) []Operat
 func (s *Service) OperationDescriptor(ctx context.Context, name, system string) (OperationDescriptor, bool) {
 	filter := OperationFilter{Name: strings.TrimSpace(strings.ToLower(name)), System: strings.TrimSpace(strings.ToLower(system))}
 	if filter.System == "" {
-		descriptors := s.Operations(ctx, filter)
-		if len(descriptors) == 0 {
+		integrationType, _, _ := parseOperationName(filter.Name)
+		if integrationType == "" {
 			return OperationDescriptor{}, false
 		}
-		integrationType := descriptors[0].IntegrationType
 		defaultSystem := s.defaultSystemForType(integrationType)
 		if defaultSystem == "" {
 			return OperationDescriptor{}, false
@@ -72,6 +71,18 @@ func (s *Service) OperationDescriptor(ctx context.Context, name, system string) 
 		return OperationDescriptor{}, false
 	}
 	return descriptors[0], true
+}
+
+// IsSystemConfigured сообщает, существует ли система в загруженной
+// конфигурации или среди зарегистрированных провайдеров.
+func (s *Service) IsSystemConfigured(system string) bool {
+	_, ok := s.systems[normalizeSystem(system)]
+	return ok
+}
+
+// DefaultSystemForType возвращает систему по умолчанию для предметного типа.
+func (s *Service) DefaultSystemForType(integrationType string) string {
+	return s.defaultSystemForType(integrationType)
 }
 
 func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDescriptor {
@@ -95,7 +106,13 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			Output:          template.Output,
 			FailureKinds:    append([]string(nil), template.FailureKinds...),
 		}
+		if state.Type == "bitbucket" && state.APIVariant == "server" && descriptor.Name == "repo.merge-request.comment.create" {
+			descriptor.Available = false
+		}
 		descriptor.Diagnostics = operationDiagnostics(state, descriptor.Available)
+		if state.Type == "bitbucket" && state.APIVariant == "server" && descriptor.Name == "repo.merge-request.comment.create" {
+			descriptor.Diagnostics = append(descriptor.Diagnostics, "Bitbucket Server does not support pull request comment creation")
+		}
 		result = append(result, descriptor)
 	}
 
@@ -139,6 +156,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			mergeRequestCreateOperation(),
 			mergeRequestCommentListOperation(),
 			mergeRequestCommentCreateOperation(),
+			reviewRemarkListOperation(),
 		}
 	case "mattermost":
 		return []operationTemplate{

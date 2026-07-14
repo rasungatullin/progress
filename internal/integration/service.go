@@ -76,6 +76,7 @@ type systemState struct {
 	Registered       bool
 	Default          bool
 	Transport        string
+	APIVariant       string
 	TaskLabelMapping map[string]string
 	Operations       map[string]model.IntegrationOperationConfig
 }
@@ -135,6 +136,7 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 			Enabled:          systemEnabled(systemConfig),
 			Default:          systemConfig.Default,
 			Transport:        normalizeSystem(systemConfig.Transport),
+			APIVariant:       normalizeSystem(systemConfig.APIVariant),
 			TaskLabelMapping: normalizeLabelMapping(systemConfig.TaskLabelMapping),
 			Operations:       normalizeOperationConfigMap(systemConfig.Operations),
 		}

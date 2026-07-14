@@ -262,6 +262,11 @@ func requestMap(req model.ProviderRequest) map[string]any {
 	if number, err := strconv.Atoi(strings.TrimSpace(req.ID)); err == nil && number > 0 {
 		request["number"] = number
 	}
+	if _, exists := request["number"]; !exists && strings.TrimSpace(req.ID) != "" {
+		// Каталог представляет непрозрачный идентификатор сценарной операции
+		// как id:string, но старые сценарии могут требовать поле number.
+		request["number"] = req.ID
+	}
 	if req.MergeRequestNumber > 0 {
 		request["number"] = req.MergeRequestNumber
 	}
