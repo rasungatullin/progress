@@ -1060,7 +1060,17 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 				return "[feature/test abc123] Ship release notes\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "", nil
-			case "push -u origin feature/test":
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "rev-parse --verify --quiet refs/remotes/origin/feature/test":
+				return "", errors.New("missing remote-tracking ref")
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			case "push -u origin abc123:refs/heads/feature/test":
+				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
+			case "update-ref refs/remotes/origin/feature/test abc123 ":
+				return "", nil
+			case "branch --set-upstream-to=origin/feature/test feature/test":
 				return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1085,7 +1095,12 @@ func TestLaunchCommitPushWithChanges(t *testing.T) {
 		{"status", "--porcelain", "-z", "-uall"},
 		{"commit", "-m", "Ship release notes"},
 		{"for-each-ref", "--format=%(upstream:short)", "refs/heads/feature/test"},
-		{"push", "-u", "origin", "feature/test"},
+		{"rev-parse", "--verify", "--quiet", "refs/remotes/origin/feature/test"},
+		{"rev-parse", "HEAD"},
+		{"ls-remote", "origin", "refs/heads/feature/test"},
+		{"push", "-u", "origin", "abc123:refs/heads/feature/test"},
+		{"update-ref", "refs/remotes/origin/feature/test", "abc123", ""},
+		{"branch", "--set-upstream-to=origin/feature/test", "feature/test"},
 	}
 	if !reflect.DeepEqual(calls, expectedCalls) {
 		t.Fatalf("unexpected git calls: %#v", calls)
@@ -1262,8 +1277,18 @@ func TestLaunchCommitPushRebindsMismatchedUpstream(t *testing.T) {
 			return "[feature/test abc123] Ship result\n", nil
 		case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 			return "origin/main\n", nil
-		case "push -u origin feature/test":
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "rev-parse --verify --quiet refs/remotes/origin/feature/test":
+			return "", errors.New("missing remote-tracking ref")
+		case "ls-remote origin refs/heads/feature/test":
+			return "", nil
+		case "push -u origin abc123:refs/heads/feature/test":
 			pushArgs = append([]string(nil), args...)
+			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
+		case "update-ref refs/remotes/origin/feature/test abc123 ":
+			return "", nil
+		case "branch --set-upstream-to=origin/feature/test feature/test":
 			return "branch 'feature/test' set up to track 'origin/feature/test'.\n", nil
 		default:
 			return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1277,7 +1302,7 @@ func TestLaunchCommitPushRebindsMismatchedUpstream(t *testing.T) {
 	if !strings.Contains(result.Summary, "git=committed+pushed branch=feature/test") {
 		t.Fatalf("unexpected summary: %q", result.Summary)
 	}
-	if !reflect.DeepEqual(pushArgs, []string{"push", "-u", "origin", "feature/test"}) {
+	if !reflect.DeepEqual(pushArgs, []string{"push", "-u", "origin", "abc123:refs/heads/feature/test"}) {
 		t.Fatalf("push must rebind mismatched upstream: %#v", pushArgs)
 	}
 }
@@ -1315,7 +1340,11 @@ func TestLaunchCommitPushExcludesRunnerOutputFromGitAdd(t *testing.T) {
 				return "[feature/test abc123] repo\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "origin/feature/test\n", nil
-			case "push":
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			case "push", "push origin abc123:refs/heads/feature/test":
 				return "Everything up-to-date\n", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1370,7 +1399,11 @@ func TestLaunchCommitPushStagesPathsFromRepositoryRootForSubdirectoryLaunch(t *t
 				return "[feature/test abc123] repo\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "origin/feature/test\n", nil
-			case "push":
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			case "push origin abc123:refs/heads/feature/test":
 				return "Everything up-to-date\n", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: dir=%q args=%v", dir, args)
@@ -1422,7 +1455,11 @@ func TestLaunchCommitPushUsesUAllForVisibleProgressFiles(t *testing.T) {
 				return "[feature/test abc123] repo\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "origin/feature/test\n", nil
-			case "push":
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			case "push origin abc123:refs/heads/feature/test":
 				return "Everything up-to-date\n", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1469,7 +1506,11 @@ func TestLaunchCommitPushUsesWorkplaceNameWhenStructuredCommitMessageBlank(t *te
 				return "[feature/test abc123] review-fixes\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "origin/feature/test\n", nil
-			case "push":
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			case "push origin abc123:refs/heads/feature/test":
 				return "Everything up-to-date\n", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1513,7 +1554,11 @@ func TestLaunchCommitPushUsesWorktreeDirectoryNameWhenWorkplaceNameMissing(t *te
 				return "[feature/test abc123] structured-contract-v1-worktree\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "origin/feature/test\n", nil
-			case "push":
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			case "push origin abc123:refs/heads/feature/test":
 				return "Everything up-to-date\n", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1747,7 +1792,11 @@ func TestCommitAndPushStagesTrackedRuntimeDeletionWithoutAddingNewRuntimeFile(t 
 				return "[feature/test abc123] remove execution database\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "origin/feature/test\n", nil
-			case "push":
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			case "push origin abc123:refs/heads/feature/test":
 				return "Everything up-to-date\n", nil
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1884,7 +1933,11 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 				return "[feature/test abc123] repo\n", nil
 			case "for-each-ref --format=%(upstream:short) refs/heads/feature/test":
 				return "origin/feature/test\n", nil
-			case "push":
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			case "push origin abc123:refs/heads/feature/test":
 				return "", errors.New("exit status 1\nremote rejected")
 			default:
 				return "", fmt.Errorf("unexpected git command: %v", args)
@@ -1917,6 +1970,394 @@ func TestLaunchPushErrorReturned(t *testing.T) {
 	}
 }
 
+func TestPushWithRetryRepeatsNetworkFailureWithoutCreatingCommit(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	var retryArgs []string
+	service := &Service{
+		runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+			switch strings.Join(args, " ") {
+			case "push origin abc123:refs/heads/feature/test":
+				pushes++
+				if pushes == 1 {
+					return "", errors.New("exit status 128\nConnection closed by remote host")
+				}
+				retryArgs = append([]string(nil), args...)
+				return "", nil
+			case "rev-parse HEAD":
+				return "abc123\n", nil
+			case "ls-remote origin refs/heads/feature/test":
+				return "", nil
+			default:
+				return "", fmt.Errorf("unexpected git command: %v", args)
+			}
+		},
+	}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}})
+	if err != nil {
+		t.Fatalf("push with retry: %v", err)
+	}
+	if pushes != 2 {
+		t.Fatalf("expected two push attempts, got %d", pushes)
+	}
+	if !reflect.DeepEqual(retryArgs, []string{"push", "origin", "abc123:refs/heads/feature/test"}) {
+		t.Fatalf("retry must push the expected head: %#v", retryArgs)
+	}
+}
+
+func TestUpdateGitRemoteTrackingRefUsesCompareAndSwap(t *testing.T) {
+	t.Parallel()
+
+	var updateArgs []string
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse --verify --quiet refs/remotes/origin/feature/test":
+			return "def456\n", nil
+		case "update-ref refs/remotes/origin/feature/test abc123 def456":
+			updateArgs = append([]string(nil), args...)
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	if err := service.updateGitRemoteTrackingRef(context.Background(), "/repo", nil, "origin", "feature/test", "abc123"); err != nil {
+		t.Fatalf("update remote-tracking ref: %v", err)
+	}
+	if !reflect.DeepEqual(updateArgs, []string{"update-ref", "refs/remotes/origin/feature/test", "abc123", "def456"}) {
+		t.Fatalf("update-ref must use the observed old head: %#v", updateArgs)
+	}
+}
+
+func TestPushWithRetryRecognizesAuthorizationFailure(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		if strings.Join(args, " ") == "push origin abc123:refs/heads/feature/test" {
+			pushes++
+			return "", errors.New("Permission denied (publickey)")
+		}
+		if strings.Join(args, " ") == "rev-parse HEAD" {
+			return "abc123\n", nil
+		}
+		if strings.Join(args, " ") == "ls-remote origin refs/heads/feature/test" {
+			return "\n", nil
+		}
+		return "", fmt.Errorf("unexpected git command: %v", args)
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "authorization" || failure.attempts != 1 {
+		t.Fatalf("unexpected push failure: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("authorization failure must not repeat, got %d attempts", pushes)
+	}
+}
+
+func TestPushWithRetryRecognizesAccessDeniedFailure(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		if strings.Join(args, " ") == "push origin abc123:refs/heads/feature/test" {
+			pushes++
+			return "", errors.New("remote: Permission to OWNER/REPO.git denied to USER\nremote: error: 403")
+		}
+		if strings.Join(args, " ") == "rev-parse HEAD" {
+			return "abc123\n", nil
+		}
+		if strings.Join(args, " ") == "ls-remote origin refs/heads/feature/test" {
+			return "\n", nil
+		}
+		return "", fmt.Errorf("unexpected git command: %v", args)
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "access-denied" || failure.attempts != 1 {
+		t.Fatalf("unexpected push failure: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("access-denied failure must not repeat, got %d attempts", pushes)
+	}
+}
+
+func TestClassifyGitPushErrorPrioritizesExplicitAccessOverNetwork(t *testing.T) {
+	t.Parallel()
+
+	if got := classifyGitPushError(errors.New("Permission denied (publickey)\nConnection closed by remote host")); got != "authorization" {
+		t.Fatalf("explicit authorization failure must not be retried as network: %q", got)
+	}
+	if got := classifyGitPushError(errors.New("remote: Permission to OWNER/REPO.git denied to USER\nConnection closed by remote host")); got != "access-denied" {
+		t.Fatalf("explicit access denial must not be retried as network: %q", got)
+	}
+}
+
+func TestClassifyGitPushErrorDistinguishesServerAccessRejection(t *testing.T) {
+	t.Parallel()
+
+	for _, message := range []string{
+		"remote rejected: protected branch hook declined",
+		"remote: pre-receive hook declined",
+	} {
+		if got := classifyGitPushError(errors.New(message)); got != "access-denied" {
+			t.Fatalf("server access rejection %q classified as %q", message, got)
+		}
+	}
+	if got := classifyGitPushError(errors.New("remote rejected")); got != "uncertain" {
+		t.Fatalf("generic rejection classified as %q", got)
+	}
+}
+
+func TestClassifyGitPushErrorRecognizesConnectionRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, message := range []string{
+		"ssh: connect to host github.com port 22: Connection refused",
+		"Connection was reset by peer",
+		"No route to host",
+		"remote end hung up unexpectedly",
+		"unexpected disconnect while reading sideband packet",
+	} {
+		if got := classifyGitPushError(errors.New(message)); got != "network" {
+			t.Fatalf("network error %q classified as %q", message, got)
+		}
+	}
+}
+
+func TestPushWithRetryRejectsInvalidInitialHeadWithoutPush(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse HEAD":
+			return "not-a-sha\n", nil
+		case "push origin not-a-sha:refs/heads/feature/test":
+			pushes++
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.attempts != 0 || failure.classification != "uncertain" {
+		t.Fatalf("invalid initial head must fail before push: %v", err)
+	}
+	if pushes != 0 {
+		t.Fatalf("invalid initial head must not be pushed: %d", pushes)
+	}
+}
+
+func TestPushWithRetryStopsWhenInitialHeadCannotBeRead(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse HEAD":
+			return "", errors.New("rev-parse failed")
+		case "push origin abc123:refs/heads/feature/test":
+			pushes++
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.attempts != 0 {
+		t.Fatalf("initial head error must fail before push: %v", err)
+	}
+	if pushes != 0 {
+		t.Fatalf("initial head error must not be pushed: %d", pushes)
+	}
+}
+
+func TestGitPushHeadsIgnoresOutputBeforeExactBranchReference(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			return "WARNING: host key\nnot-a-sha refs/heads/other\nabc123\trefs/heads/feature/test\n", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	localHead, remoteHead, err := service.gitPushHeads(context.Background(), "/repo", "feature/test", nil, "origin")
+	if err != nil {
+		t.Fatalf("read push heads: %v", err)
+	}
+	if localHead != "abc123" || remoteHead != "abc123" {
+		t.Fatalf("unexpected push heads: local=%q remote=%q", localHead, remoteHead)
+	}
+}
+
+func TestPushWithRetryAcceptsRemoteHeadAfterUncertainPush(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push origin abc123:refs/heads/feature/test":
+			pushes++
+			return "", errors.New("exit status 128\nConnection closed by remote host")
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			return "abc123\trefs/heads/feature/test\n", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, nil)
+	if err != nil {
+		t.Fatalf("push must be accepted after remote head verification: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("already accepted push must not be repeated, got %d attempts", pushes)
+	}
+}
+
+func TestPushWithRetryDoesNotPushChangedLocalHead(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	revReads := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push origin abc123:refs/heads/feature/test":
+			pushes++
+			return "", errors.New("connection closed by remote host")
+		case "rev-parse HEAD":
+			revReads++
+			if revReads >= 3 {
+				return "def456\n", nil
+			}
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}})
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "uncertain" {
+		t.Fatalf("changed local head must stop retry: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("changed local head must not be pushed: %d", pushes)
+	}
+}
+
+func TestPushWithRetryDoesNotRetryWhenRemoteHeadCannotBeVerified(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push origin abc123:refs/heads/feature/test":
+			pushes++
+			return "", errors.New("connection closed by remote host")
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			if pushes > 0 {
+				return "", errors.New("connection reset by remote host")
+			}
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}})
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "uncertain" || failure.attempts != 1 {
+		t.Fatalf("unverified remote result must stop retry: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("unverified remote result must not be pushed again: %d", pushes)
+	}
+}
+
+func TestPushWithRetryTreatsNewRemoteBranchAsConflict(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push origin abc123:refs/heads/feature/test":
+			pushes++
+			return "", errors.New("connection closed by remote host")
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			if pushes > 0 {
+				return "def456\trefs/heads/feature/test\n", nil
+			}
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	err := service.pushWithRetry(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}})
+	var failure *gitPushFailure
+	if !errors.As(err, &failure) || failure.classification != "history-conflict" {
+		t.Fatalf("new remote branch must stop retry: %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("new remote branch must not be pushed again: %d", pushes)
+	}
+}
+
+func TestPushWithRetryPreservesRetryDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	pushes := 0
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "push origin abc123:refs/heads/feature/test":
+			pushes++
+			if pushes == 1 {
+				return "", errors.New("connection closed by remote host")
+			}
+			return "", nil
+		case "rev-parse HEAD":
+			return "abc123\n", nil
+		case "ls-remote origin refs/heads/feature/test":
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git command: %v", args)
+		}
+	}}
+
+	var diagnostic string
+	err := service.pushWithRetryDiagnostic(context.Background(), "/repo", "/repo", "feature/test", []string{"push"}, nil, &model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 2, RetryDelay: "0s"}}, &diagnostic)
+	if err != nil {
+		t.Fatalf("push with retry: %v", err)
+	}
+	if !strings.Contains(diagnostic, "attempts=2") || !strings.Contains(diagnostic, "classification=network") || !strings.Contains(diagnostic, "connection closed") {
+		t.Fatalf("retry diagnostic was not preserved: %q", diagnostic)
+	}
+}
+
 func TestLaunchCommitPushAppliesGitOverrideToCommitAndPush(t *testing.T) {
 	t.Parallel()
 
@@ -1946,13 +2387,19 @@ func TestLaunchCommitPushAppliesGitOverrideToCommitAndPush(t *testing.T) {
 			}
 		},
 		runGitOutputEnv: func(_ context.Context, _ string, env []string, args ...string) (string, error) {
+			if strings.Join(args, " ") == "rev-parse HEAD" {
+				return "abc123\n", nil
+			}
+			if strings.Join(args, " ") == "ls-remote origin refs/heads/feature/test" {
+				return "", nil
+			}
 			switch args[len(args)-1] {
 			case "repo":
 				commitEnv = append([]string(nil), env...)
 				commitArgs = append([]string(nil), args...)
 				return "[feature/test abc123] repo\n", nil
 			default:
-				if len(args) == 1 && args[0] == "push" {
+				if strings.Join(args, " ") == "push origin abc123:refs/heads/feature/test" {
 					pushEnv = append([]string(nil), env...)
 					return "", nil
 				}

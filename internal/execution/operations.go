@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -2206,7 +2207,12 @@ func (e builtinOperationExecutor) commitPush(ctx context.Context, state *operati
 
 	summary, err := pusher.CommitAndPush(ctx, input.request)
 	if err != nil {
-		state.tracker.fail(name, "Создание коммита или отправка ветки не выполнены.", err, "commit_push_failed", true, true)
+		retryable := false
+		var classified interface{ Retryable() bool }
+		if errors.As(err, &classified) {
+			retryable = classified.Retryable()
+		}
+		state.tracker.fail(name, "Создание коммита или отправка ветки не выполнены.", err, "commit_push_failed", retryable, true)
 		return err
 	}
 

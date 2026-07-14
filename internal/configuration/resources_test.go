@@ -5,7 +5,27 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
+
+	"github.com/rasungatullin/progress/internal/execution/model"
 )
+
+func TestValidateGitConfigRejectsExplicitZeroPushAttempts(t *testing.T) {
+	t.Parallel()
+
+	err := validateGitConfig(&model.GitConfig{Push: &model.GitPushConfig{MaxAttempts: 0, MaxAttemptsSet: true}})
+	if err == nil || !strings.Contains(err.Error(), "git.push.max-attempts must be greater than zero") {
+		t.Fatalf("explicit zero max-attempts must be rejected: %v", err)
+	}
+}
+
+func TestValidateGitConfigRejectsExplicitEmptyRetryDelay(t *testing.T) {
+	t.Parallel()
+
+	err := validateGitConfig(&model.GitConfig{Push: &model.GitPushConfig{RetryDelaySet: true}})
+	if err == nil || !strings.Contains(err.Error(), "git.push.retry-delay must not be empty") {
+		t.Fatalf("explicit empty retry-delay must be rejected: %v", err)
+	}
+}
 
 func TestLoadExecutionResourceConfigMergesGlobalAndLocalLayersAndSetsBindingSource(t *testing.T) {
 	t.Parallel()
