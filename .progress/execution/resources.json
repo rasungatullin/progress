@@ -23,16 +23,16 @@
   },
   "bindings": {
     "default": {
-      "runner": "opencode",
-      "model": "openai/gpt-5.6-luna"
+      "runner": "codex",
+      "model": "gpt-5.6-luna"
     },
     "coder": {
       "runner": "codex",
       "model": "gpt-5.6-luna"
     },
     "review": {
-      "runner": "opencode",
-      "model": "openai/gpt-5.6-sol"
+      "runner": "codex",
+      "model": "gpt-5.6-luna"
     }
   }
 }
