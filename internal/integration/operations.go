@@ -51,6 +51,75 @@ func (s *Service) Operations(_ context.Context, filter OperationFilter) []Operat
 	return result
 }
 
+// OperationDescriptor возвращает описание операции для явно выбранной
+// системы либо для системы по умолчанию соответствующего типа.
+func (s *Service) OperationDescriptor(ctx context.Context, name, system string) (OperationDescriptor, bool) {
+	filter := OperationFilter{Name: strings.TrimSpace(strings.ToLower(name)), System: strings.TrimSpace(strings.ToLower(system))}
+	if filter.System == "" {
+		integrationType, _, _ := parseOperationName(filter.Name)
+		if integrationType == "" {
+			return OperationDescriptor{}, false
+		}
+		defaultSystem := s.defaultSystemForType(integrationType)
+		if defaultSystem == "" {
+			return OperationDescriptor{}, false
+		}
+		filter.System = defaultSystem
+	}
+	descriptors := s.Operations(ctx, filter)
+	if len(descriptors) == 0 {
+		return OperationDescriptor{}, false
+	}
+	return descriptors[0], true
+}
+
+// OperationRoute возвращает маршрут каталога без выполнения операции. Он
+// используется диагностическими командами, которым нужно представить тот
+// же нормализованный маршрут при отказе до вызова провайдера.
+func (s *Service) OperationRoute(ctx context.Context, name, system string) (Route, bool) {
+	descriptor, ok := s.OperationDescriptor(ctx, name, system)
+	if !ok {
+		return Route{}, false
+	}
+	objectType, operation := descriptor.ObjectType, descriptor.Operation
+	switch descriptor.Name {
+	case "issue.issue.comment.list":
+		objectType, operation = "issue", "comments"
+	case "issue.issue.comment.create":
+		objectType = "comment"
+	case "issue.issue.label.add", "issue.issue.label.remove":
+		objectType = "label"
+	case "repo.merge-request.comment.list", "repo.merge-request.comment.create":
+		objectType = "merge-request-comment"
+	case "repo.review-remark.create":
+		objectType, operation = "review-remark", "create"
+	}
+	route, err := s.resolveRoute(Request{
+		IntegrationType: descriptor.IntegrationType,
+		System:          descriptor.System,
+		SystemProvided:  true,
+		Resource:        objectType,
+		ObjectType:      objectType,
+		Operation:       operation,
+	})
+	if err != nil {
+		return route, false
+	}
+	return route, true
+}
+
+// IsSystemConfigured сообщает, существует ли система в загруженной
+// конфигурации или среди зарегистрированных провайдеров.
+func (s *Service) IsSystemConfigured(system string) bool {
+	_, ok := s.systems[normalizeSystem(system)]
+	return ok
+}
+
+// DefaultSystemForType возвращает систему по умолчанию для предметного типа.
+func (s *Service) DefaultSystemForType(integrationType string) string {
+	return s.defaultSystemForType(integrationType)
+}
+
 func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDescriptor {
 	var result []OperationDescriptor
 	for _, template := range builtinOperationTemplates(state.Type) {
@@ -72,7 +141,13 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 			Output:          template.Output,
 			FailureKinds:    append([]string(nil), template.FailureKinds...),
 		}
+		if bitbucketServerState(state) && (descriptor.Name == "repo.merge-request.comment.create" || descriptor.Name == "repo.review-remark.create") {
+			descriptor.Available = false
+		}
 		descriptor.Diagnostics = operationDiagnostics(state, descriptor.Available)
+		if bitbucketServerState(state) && (descriptor.Name == "repo.merge-request.comment.create" || descriptor.Name == "repo.review-remark.create") {
+			descriptor.Diagnostics = append(descriptor.Diagnostics, "Bitbucket Server does not support pull request comment or inline remark creation")
+		}
 		result = append(result, descriptor)
 	}
 
@@ -85,6 +160,18 @@ func (s *Service) operationDescriptorsForSystem(state systemState) []OperationDe
 	}
 
 	return result
+}
+
+func bitbucketServerState(state systemState) bool {
+	if state.Type != "bitbucket" {
+		return false
+	}
+	switch normalizeSystem(state.APIVariant) {
+	case "server", "bitbucket-server", "data-center", "datacenter", "stash":
+		return true
+	}
+	base := strings.TrimRight(strings.ToLower(strings.TrimSpace(state.BaseURL)), "/")
+	return strings.Contains(base, "/rest/api/") || strings.Contains(base, "://stash.") || strings.Contains(base, ".stash.")
 }
 
 func builtinOperationTemplates(adapterType string) []operationTemplate {
@@ -103,6 +190,7 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			mergeRequestCreateOperation(),
 			mergeRequestCommentListOperation(),
 			mergeRequestCommentCreateOperation(),
+			reviewRemarkCreateOperation(),
 			reviewRemarkListOperation(),
 			reviewRemarkReplyOperation(),
 			reviewRemarkResolveOperation(),
@@ -116,6 +204,8 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 			mergeRequestCreateOperation(),
 			mergeRequestCommentListOperation(),
 			mergeRequestCommentCreateOperation(),
+			reviewRemarkCreateOperation(),
+			reviewRemarkListOperation(),
 		}
 	case "mattermost":
 		return []operationTemplate{
@@ -234,16 +324,16 @@ func parseOperationName(name string) (string, string, string) {
 	if operation == "comments" {
 		operation = "list"
 	}
-	objectType := strings.Join(parts[1:len(parts)-1], "-")
+	objectType := strings.Join(parts[1:len(parts)-1], ".")
 	objectType = normalizeObjectType(objectType)
 	// Каноническое имя операции допускает вложенные объектные пространства,
 	// тогда как реестр сопоставляет их с единым объектом адаптера.
 	switch objectType {
-	case "issue-comment":
+	case "issue.comment", "issue-comment":
 		objectType = "comment"
-	case "issue-label":
+	case "issue.label", "issue-label":
 		objectType = "label"
-	case "merge-request-comment":
+	case "merge-request.comment", "merge-request-comment":
 		objectType = "comment"
 	}
 	if integrationType == model.IntegrationTypeIssue && objectType == "task" {
@@ -585,7 +675,7 @@ func mergeRequestCommentCreateOperation() operationTemplate {
 		ObjectType:      "merge-request-comment",
 		Operation:       "create",
 		SideEffect:      true,
-		Input:           inputMany([]model.OperationField{requiredField("number", "integer"), requiredField("body", "string")}, optionalFields("repository", "path", "line", "side")...),
+		Input:           inputMany([]model.OperationField{requiredField("number", "integer"), requiredField("body", "string")}, optionalFields("repository")...),
 		Output:          output("operation-result", "OperationResult"),
 		FailureKinds:    defaultFailureKinds(),
 	}
@@ -600,6 +690,24 @@ func reviewRemarkListOperation() operationTemplate {
 		Input:           input(requiredField("number", "integer"), optionalField("repository", "string")),
 		Output:          output("review-remark", "ReviewRemark[]"),
 		FailureKinds:    defaultFailureKinds(),
+	}
+}
+
+func reviewRemarkCreateOperation() operationTemplate {
+	return operationTemplate{
+		Name:            "repo.review-remark.create",
+		IntegrationType: model.IntegrationTypeRepository,
+		ObjectType:      "review-remark",
+		Operation:       "create",
+		SideEffect:      true,
+		Input: inputMany([]model.OperationField{
+			requiredField("number", "integer"),
+			requiredField("body", "string"),
+			requiredField("path", "string"),
+			requiredField("line", "integer"),
+		}, optionalFields("repository", "side")...),
+		Output:       output("operation-result", "OperationResult"),
+		FailureKinds: defaultFailureKinds(),
 	}
 }
 
@@ -631,7 +739,7 @@ func reviewRemarkResolveOperation() operationTemplate {
 
 func reviewRemarkUnresolveOperation() operationTemplate {
 	return operationTemplate{
-		Name: "repository.review-remark.unresolve", IntegrationType: model.IntegrationTypeRepository, ObjectType: "review-remark", Operation: "unresolve", SideEffect: true,
+		Name: "repo.review-remark.unresolve", IntegrationType: model.IntegrationTypeRepository, ObjectType: "review-remark", Operation: "unresolve", SideEffect: true,
 		Input: input(requiredField("thread", "string")), Output: output("operation-result", "OperationResult"), FailureKinds: defaultFailureKinds(),
 	}
 }

@@ -294,6 +294,42 @@ func TestServiceServerPullRequestCommentsNormalizesActivities(t *testing.T) {
 	}
 }
 
+func TestServiceServerPullRequestCommentsFollowsPaginationAndKeepsReplyAnchor(t *testing.T) {
+	t.Parallel()
+	var seenStarts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenStarts = append(seenStarts, r.URL.Query().Get("start"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("start") == "2" {
+			_, _ = w.Write([]byte(`{"isLastPage":true,"values":[{"id":3,"comment":{"id":9,"text":"second page","author":{"user":{"name":"carol","displayName":"Carol"}}}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"isLastPage":false,"nextPageStart":2,"values":[{"id":1,"comment":{"id":7,"text":"inline","author":{"user":{"name":"alice","displayName":"Alice"}},"anchor":{"path":"file.go","line":12,"lineType":"ADDED"},"comments":[{"id":8,"text":"reply","author":{"user":{"name":"bob","displayName":"Bob"}}}]}}]}`))
+	}))
+	defer server.Close()
+
+	service := NewService(model.IntegrationSystemConfig{BaseURL: server.URL, APIVariant: "server", Repository: "PROJ/repo"})
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType:    model.IntegrationTypeRepository,
+		Resource:           "review-remark",
+		ObjectType:         "review-remark",
+		Operation:          "list",
+		MergeRequestNumber: 5,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(seenStarts) != 2 || seenStarts[0] != "" || seenStarts[1] != "2" {
+		t.Fatalf("unexpected pagination requests: %#v", seenStarts)
+	}
+	if len(response.ReviewRemarks) != 3 {
+		t.Fatalf("unexpected remarks: %#v", response.ReviewRemarks)
+	}
+	if response.ReviewRemarks[1].Path != "file.go" || response.ReviewRemarks[1].Line != 12 {
+		t.Fatalf("reply lost parent anchor: %#v", response.ReviewRemarks[1])
+	}
+}
+
 func TestServiceCloudPullRequestCommentsFollowsPagination(t *testing.T) {
 	t.Parallel()
 

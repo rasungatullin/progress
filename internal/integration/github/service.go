@@ -442,20 +442,33 @@ func (s *Service) executePRComments(ctx context.Context, response model.Response
 		return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error()}, "pull request comments request rejected before invoking gh")
 	}
 
-	result, config, err := s.runner.RunIssueComments(ctx, repository, number)
-	repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
-	if err != nil {
-		return responseWithGitHubFailure(response, result, err, "gh issue comments for pull request failed before returning a comments payload")
+	var rawComments []ghIssueComment
+	if req.ObjectType != "review-remark" || (req.Resource == "comment" && req.ObjectType == "review-remark") {
+		result, config, err := s.runner.RunIssueComments(ctx, repository, number)
+		repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
+		if err != nil {
+			return responseWithGitHubFailure(response, result, err, "gh issue comments for pull request failed before returning a comments payload")
+		}
+		if result.ExitCode != 0 {
+			return responseWithGitHubExitFailure(response, result, repository, number, "gh issue comments for pull request exited with a non-zero code")
+		}
+		rawComments, err = decodeIssueComments(result.Stdout)
+		if err != nil {
+			return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}, "gh issue comments for pull request returned malformed JSON")
+		}
 	}
-	if result.ExitCode != 0 {
-		return responseWithGitHubExitFailure(response, result, repository, number, "gh issue comments for pull request exited with a non-zero code")
-	}
-	rawComments, err := decodeIssueComments(result.Stdout)
-	if err != nil {
-		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}, "gh issue comments for pull request returned malformed JSON")
+	if req.ObjectType == "merge-request-comment" {
+		response.ReviewRemarks = make([]model.ReviewRemark, 0, len(rawComments))
+		for _, item := range rawComments {
+			response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarkFromIssueComment(repository, number, item))
+		}
+		response.Metadata = map[string]string{"repository": repository, "number": strconv.Itoa(number), "kind": "comment"}
+		response.Status = model.ResponseStatusOK
+		return response, nil
 	}
 
-	threadResult, _, err := s.runner.RunPRReviewThreads(ctx, repository, number)
+	threadResult, threadConfig, err := s.runner.RunPRReviewThreads(ctx, repository, number)
+	repository = firstNonEmpty(repository, strings.TrimSpace(threadConfig.DefaultRepo))
 	if err != nil {
 		return responseWithGitHubFailure(response, threadResult, err, "gh pull request review threads failed before returning a comments payload")
 	}
@@ -503,6 +516,7 @@ func (s *Service) executePRCommentCreate(ctx context.Context, response model.Res
 	}
 	if commentRequest.Path != "" {
 		if existing, config, found := s.findExistingPRRemark(ctx, repository, number, commentRequest); found {
+			repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
 			pendingReviewID, err := s.findPendingPRReview(ctx, repository, number)
 			if err != nil {
 				return responseWithGitHubFailure(response, CommandResult{Command: defaultCommand, ExitCode: -1}, err, "pending GitHub pull request review lookup failed after existing comment lookup")

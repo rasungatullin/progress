@@ -250,7 +250,10 @@ func (s *Service) buildEnvelope(req model.ProviderRequest, operationName string,
 }
 
 func requestMap(req model.ProviderRequest) map[string]any {
-	request := map[string]any{}
+	request := make(map[string]any, len(req.Extra)+24)
+	for key, value := range req.Extra {
+		request[key] = value
+	}
 	putString(request, "system", req.System)
 	putString(request, "repository", req.Repository)
 	putString(request, "id", req.ID)
@@ -258,6 +261,11 @@ func requestMap(req model.ProviderRequest) map[string]any {
 	// каноническим значением остаётся непрозрачная строка id.
 	if number, err := strconv.Atoi(strings.TrimSpace(req.ID)); err == nil && number > 0 {
 		request["number"] = number
+	}
+	if _, exists := request["number"]; !exists && strings.TrimSpace(req.ID) != "" {
+		// Каталог представляет непрозрачный идентификатор сценарной операции
+		// как id:string, но старые сценарии могут требовать поле number.
+		request["number"] = req.ID
 	}
 	if req.MergeRequestNumber > 0 {
 		request["number"] = req.MergeRequestNumber

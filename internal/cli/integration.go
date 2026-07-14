@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -36,12 +37,15 @@ type integrationFlags struct {
 	channelID       string
 	threadID        string
 	messageID       string
+	input           string
+	inputFile       string
 	externalID      string
 	draft           bool
 	line            int
 	limit           int
 	labels          []string
 	excludeLabels   []string
+	fields          []string
 }
 
 // Оставлено только для сборочной совместимости старых тестовых и внутренних
@@ -82,15 +86,12 @@ func newIntegrationCommand() *cobra.Command {
 	cmd.PersistentFlags().String("format", integrationOutputText, "Формат вывода: text (по умолчанию) или json")
 
 	cmd.AddCommand(newIntegrationOperationsCommand())
+	cmd.AddCommand(newIntegrationStatusCommand())
+	cmd.AddCommand(newIntegrationInvokeCommand())
 	cmd.AddCommand(newIntegrationIssueCommand())
 	cmd.AddCommand(newIntegrationRepoCommand())
 	cmd.AddCommand(newIntegrationMessengerCommand())
 	cmd.AddCommand(newIntegrationWikiCommand())
-	cmd.AddCommand(newIntegrationGitHubCommand())
-	cmd.AddCommand(newIntegrationBitbucketCommand())
-	cmd.AddCommand(newIntegrationMattermostCommand())
-	cmd.AddCommand(newIntegrationTelegramCommand())
-	cmd.AddCommand(newIntegrationConfluenceCommand())
 	return cmd
 }
 
@@ -98,72 +99,257 @@ func newIntegrationCommand() *cobra.Command {
 // Система выбирается по --system либо по default_systems.
 func newIntegrationRepoCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "repo", Short: "Операции с объектами типа repo"}
-	flags := &integrationFlags{}
-	get := &cobra.Command{Use: "get", Short: "Получение репозитория", RunE: func(cmd *cobra.Command, _ []string) error {
-		format, err := integrationOutputFormat(cmd)
-		if err != nil {
-			return err
-		}
-		response, err := newIntegrationService(cmd).Execute(cmd.Context(), integration.Request{IntegrationType: "repo", System: flags.system, SystemProvided: cmd.Flags().Changed("system"), Resource: "repo", ObjectType: "repository", Operation: "get", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo")})
-		if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationRepository); printErr != nil {
-			return printErr
-		}
-		return err
-	}}
-	get.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
-	get.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
-	cmd.AddCommand(get)
+	cmd.AddCommand(newTypeOrientedRepoGetCommand())
+	merge := &cobra.Command{Use: "merge-request", Short: "Операции с запросами на слияние"}
+	merge.AddCommand(newTypeOrientedMergeRequestGetCommand(), newTypeOrientedMergeRequestSearchCommand(), newTypeOrientedMergeRequestCreateCommand())
+	comment := &cobra.Command{Use: "comment", Short: "Комментарии запроса на слияние"}
+	comment.AddCommand(newTypeOrientedMergeRequestCommentListCommand(), newTypeOrientedMergeRequestCommentCreateCommand())
+	remark := &cobra.Command{Use: "review-remark", Short: "Замечания ревизии запроса на слияние"}
+	remark.AddCommand(newTypeOrientedReviewRemarkListCommand(), newTypeOrientedReviewRemarkCreateCommand(), newTypeOrientedReviewRemarkReplyCommand(), newTypeOrientedReviewRemarkResolveCommand(), newTypeOrientedReviewRemarkUnresolveCommand())
+	merge.AddCommand(comment, remark)
+	cmd.AddCommand(merge)
 	return cmd
 }
 
 func newIntegrationMessengerCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "messenger", Short: "Операции с объектами типа messenger"}
-	flags := &integrationFlags{}
-	create := &cobra.Command{Use: "message", Short: "Создание сообщения", RunE: func(cmd *cobra.Command, _ []string) error {
-		if strings.TrimSpace(flags.text) == "" {
-			return fmt.Errorf("--text is required")
-		}
-		format, err := integrationOutputFormat(cmd)
-		if err != nil {
-			return err
-		}
-		response, err := newIntegrationService(cmd).Execute(cmd.Context(), integration.Request{IntegrationType: "messenger", System: flags.system, SystemProvided: cmd.Flags().Changed("system"), Resource: "message", ObjectType: "message", Operation: "create", Text: flags.text, ChannelID: flags.channelID, ThreadID: flags.threadID})
-		if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationMessage); printErr != nil {
-			return printErr
-		}
-		return err
-	}}
-	create.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
-	create.Flags().StringVar(&flags.text, "text", "", "Текст сообщения")
-	create.Flags().StringVar(&flags.channelID, "channel", "", "Идентификатор канала")
-	create.Flags().StringVar(&flags.threadID, "thread", "", "Идентификатор цепочки обсуждения")
-	cmd.AddCommand(create)
+	thread := &cobra.Command{Use: "thread", Short: "Цепочки обсуждения"}
+	thread.AddCommand(newTypeOrientedMessengerThreadGetCommand())
+	cmd.AddCommand(thread)
+	message := &cobra.Command{Use: "message", Short: "Сообщения"}
+	message.AddCommand(newTypeOrientedMessengerMessageCreateCommand())
+	cmd.AddCommand(message)
 	return cmd
 }
 
 func newIntegrationWikiCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "wiki", Short: "Операции с объектами типа wiki"}
-	flags := &integrationFlags{}
-	search := &cobra.Command{Use: "search", Short: "Поиск страниц", RunE: func(cmd *cobra.Command, _ []string) error {
-		format, err := integrationOutputFormat(cmd)
-		if err != nil {
-			return err
-		}
-		response, err := newIntegrationService(cmd).Execute(cmd.Context(), integration.Request{IntegrationType: "wiki", System: flags.system, SystemProvided: cmd.Flags().Changed("system"), Resource: "page", ObjectType: "page", Operation: "search", Query: flags.query, Limit: flags.limit})
-		if printErr := printIntegrationResponseOrJSON(cmd, response, format, printIntegrationWikiPages); printErr != nil {
-			return printErr
-		}
+	page := &cobra.Command{Use: "page", Short: "Страницы документации"}
+	page.AddCommand(newTypeOrientedWikiPageGetCommand(), newTypeOrientedWikiPageSearchCommand())
+	cmd.AddCommand(page)
+	return cmd
+}
+
+func bindTypeSystem(cmd *cobra.Command, flags *integrationFlags) {
+	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+}
+
+func executeTypeRequest(cmd *cobra.Command, flags *integrationFlags, request integration.Request, printer func(*cobra.Command, integration.Response)) error {
+	format, err := integrationOutputFormat(cmd)
+	if err != nil {
 		return err
+	}
+	request.System = flags.system
+	request.SystemProvided = cmd.Flags().Changed("system")
+	response, executeErr := newIntegrationService(cmd).Execute(cmd.Context(), request)
+	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printer); printErr != nil {
+		return printErr
+	}
+	return executeErr
+}
+
+func newTypeOrientedRepoGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "get", Short: "Получение репозитория", RunE: func(cmd *cobra.Command, _ []string) error {
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: "repo", ObjectType: "repository", Operation: "get", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo")}, printIntegrationRepository)
 	}}
-	search.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
-	search.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
-	search.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число страниц")
-	cmd.AddCommand(search)
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	return cmd
+}
+
+func newTypeOrientedMergeRequestGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "get", Short: "Получение запроса на слияние", RunE: func(cmd *cobra.Command, _ []string) error {
+		if !cmd.Flags().Changed("number") {
+			return fmt.Errorf("--number is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: "merge-request", ObjectType: "merge-request", Operation: "get", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), MergeRequestNumber: flags.number}, printIntegrationMergeRequest)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер запроса на слияние")
+	return cmd
+}
+
+func newTypeOrientedMergeRequestSearchCommand() *cobra.Command {
+	flags := &integrationFlags{state: "closed", scope: "all", limit: 30}
+	cmd := &cobra.Command{Use: "search", Aliases: []string{"list"}, Short: "Поиск запросов на слияние", RunE: func(cmd *cobra.Command, _ []string) error {
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: "merge-request", ObjectType: "merge-request", Operation: "search", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Query: flags.query, State: flags.state, Scope: flags.scope, Limit: flags.limit}, printIntegrationMergeRequests)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
+	cmd.Flags().StringVar(&flags.state, "state", flags.state, "Состояние запросов на слияние: open, closed или all")
+	cmd.Flags().StringVar(&flags.scope, "scope", flags.scope, "Область отбора: all, authored или reviewer")
+	cmd.Flags().IntVar(&flags.limit, "limit", flags.limit, "Предельное число результатов")
+	return cmd
+}
+
+func newTypeOrientedMergeRequestCreateCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "create", Short: "Создание запроса на слияние", RunE: func(cmd *cobra.Command, _ []string) error {
+		for _, name := range []string{"repo", "base", "head", "title"} {
+			if !cmd.Flags().Changed(name) || strings.TrimSpace(cmd.Flag(name).Value.String()) == "" {
+				return fmt.Errorf("--%s is required", name)
+			}
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: "merge-request", ObjectType: "merge-request", Operation: "create", Repository: flags.repo, RepoProvided: true, Base: flags.base, Head: flags.head, Title: flags.title, Body: flags.body, Draft: flags.draft}, printIntegrationOperationResult)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().StringVar(&flags.base, "base", "", "Базовая ветка запроса на слияние")
+	cmd.Flags().StringVar(&flags.head, "head", "", "Ветка с изменениями")
+	cmd.Flags().StringVar(&flags.title, "title", "", "Заголовок запроса на слияние")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Описание запроса на слияние")
+	cmd.Flags().BoolVar(&flags.draft, "draft", false, "Создать запрос как черновик")
+	return cmd
+}
+
+func newTypeOrientedMergeRequestCommentListCommand() *cobra.Command {
+	return newTypeOrientedMergeRequestListLikeCommand("list", "list", "merge-request-comment", printIntegrationReviewRemarks)
+}
+func newTypeOrientedReviewRemarkListCommand() *cobra.Command {
+	return newTypeOrientedMergeRequestListLikeCommand("list", "list", "review-remark", printIntegrationReviewRemarks)
+}
+func newTypeOrientedMergeRequestListLikeCommand(use, operation, object string, printer func(*cobra.Command, integration.Response)) *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: use, Short: "Получение элементов запроса на слияние", RunE: func(cmd *cobra.Command, _ []string) error {
+		if !cmd.Flags().Changed("number") {
+			return fmt.Errorf("--number is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: object, ObjectType: object, Operation: operation, Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), MergeRequestNumber: flags.number}, printer)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер запроса на слияние")
+	return cmd
+}
+
+func newTypeOrientedMergeRequestCommentCreateCommand() *cobra.Command {
+	return newTypeOrientedReviewRemarkCreateCommandWithUse("create", false)
+}
+func newTypeOrientedReviewRemarkCreateCommand() *cobra.Command {
+	return newTypeOrientedReviewRemarkCreateCommandWithUse("create", true)
+}
+func newTypeOrientedReviewRemarkCreateCommandWithUse(use string, inline bool) *cobra.Command {
+	flags := &integrationFlags{side: "RIGHT"}
+	cmd := &cobra.Command{Use: use, Short: "Создание комментария запроса на слияние", RunE: func(cmd *cobra.Command, _ []string) error {
+		if !cmd.Flags().Changed("number") {
+			return fmt.Errorf("--number is required")
+		}
+		if strings.TrimSpace(flags.body) == "" {
+			return fmt.Errorf("--body is required")
+		}
+		if inline && (strings.TrimSpace(flags.path) == "" || flags.line <= 0) {
+			return fmt.Errorf("--path and --line are required")
+		}
+		resource, object := "comment", "merge-request-comment"
+		if inline {
+			resource, object = "review-remark", "review-remark"
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: resource, ObjectType: object, Operation: "create", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), MergeRequestNumber: flags.number, Body: flags.body, Path: flags.path, Line: flags.line, Side: flags.side}, printIntegrationOperationResult)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().IntVar(&flags.number, "number", 0, "Номер запроса на слияние")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Текст комментария")
+	if inline {
+		cmd.Flags().StringVar(&flags.path, "path", "", "Путь файла для inline-замечания")
+		cmd.Flags().IntVar(&flags.line, "line", 0, "Номер строки для inline-замечания")
+		cmd.Flags().StringVar(&flags.side, "side", flags.side, "Сторона diff: LEFT или RIGHT")
+	}
+	return cmd
+}
+
+func newTypeOrientedReviewRemarkReplyCommand() *cobra.Command {
+	return newTypeOrientedReviewRemarkActionCommand("reply", "Ответ на замечание ревизии", true)
+}
+func newTypeOrientedReviewRemarkResolveCommand() *cobra.Command {
+	return newTypeOrientedReviewRemarkActionCommand("resolve", "Разрешение замечания ревизии", false)
+}
+func newTypeOrientedReviewRemarkUnresolveCommand() *cobra.Command {
+	return newTypeOrientedReviewRemarkActionCommand("unresolve", "Отмена разрешения замечания ревизии", false)
+}
+func newTypeOrientedReviewRemarkActionCommand(operation, short string, bodyRequired bool) *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: operation, Short: short, RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.threadID) == "" {
+			return fmt.Errorf("--thread is required")
+		}
+		if bodyRequired && strings.TrimSpace(flags.body) == "" {
+			return fmt.Errorf("--body is required")
+		}
+		object, resource := "comment", "comment"
+		if operation == "unresolve" {
+			object, resource = "review-remark", "review-remark"
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "repo", Resource: resource, ObjectType: object, Operation: operation, ThreadID: flags.threadID, Body: flags.body}, printIntegrationOperationResult)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.threadID, "thread", "", "Идентификатор цепочки замечания")
+	if bodyRequired {
+		cmd.Flags().StringVar(&flags.body, "body", "", "Текст ответа")
+	}
+	return cmd
+}
+
+func newTypeOrientedMessengerThreadGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "get", Short: "Получение цепочки обсуждения", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.threadID) == "" {
+			return fmt.Errorf("--thread is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "messenger", Resource: "thread", ObjectType: "thread", Operation: "get", ThreadID: flags.threadID}, printIntegrationThread)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.threadID, "thread", "", "Идентификатор цепочки обсуждения")
+	return cmd
+}
+func newTypeOrientedMessengerMessageCreateCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "create", Short: "Создание сообщения", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.text) == "" {
+			return fmt.Errorf("--text is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "messenger", Resource: "message", ObjectType: "message", Operation: "create", ChannelID: flags.channelID, ThreadID: flags.threadID, MessageID: flags.messageID, Text: flags.text}, printIntegrationMessage)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.channelID, "channel", "", "Идентификатор канала")
+	cmd.Flags().StringVar(&flags.threadID, "thread", "", "Идентификатор цепочки обсуждения")
+	cmd.Flags().StringVar(&flags.messageID, "message", "", "Идентификатор сообщения для ответа")
+	cmd.Flags().StringVar(&flags.text, "text", "", "Текст сообщения")
+	return cmd
+}
+
+func newTypeOrientedWikiPageGetCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "get", Short: "Получение страницы документации", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.externalID) == "" {
+			return fmt.Errorf("--id is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "wiki", Resource: "page", ObjectType: "page", Operation: "get", ExternalID: flags.externalID}, printIntegrationWikiPage)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.externalID, "id", "", "Идентификатор страницы")
+	return cmd
+}
+func newTypeOrientedWikiPageSearchCommand() *cobra.Command {
+	flags := &integrationFlags{limit: 10}
+	cmd := &cobra.Command{Use: "search", Short: "Поиск страниц документации", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.query) == "" {
+			return fmt.Errorf("--query is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "wiki", Resource: "page", ObjectType: "page", Operation: "search", Query: flags.query, Limit: flags.limit}, printIntegrationWikiPages)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
+	cmd.Flags().IntVar(&flags.limit, "limit", flags.limit, "Предельное число страниц")
 	return cmd
 }
 
 // newIntegrationIssueCommand предоставляет типо-ориентированный контракт
-// issue. Старые команды по имени системы сохраняются на переходный период.
+// issue.
 func newIntegrationIssueCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "issue",
@@ -171,6 +357,12 @@ func newIntegrationIssueCommand() *cobra.Command {
 	}
 	cmd.AddCommand(newIntegrationIssueGetCommand())
 	cmd.AddCommand(newIntegrationIssueSearchCommand())
+	cmd.AddCommand(newTypeOrientedIssueCreateCommand(), newTypeOrientedIssueUpdateCommand())
+	comment := &cobra.Command{Use: "comment", Short: "Комментарии задачи"}
+	comment.AddCommand(newTypeOrientedIssueCommentListCommand(), newTypeOrientedIssueCommentCreateCommand())
+	label := &cobra.Command{Use: "label", Short: "Метки задачи"}
+	label.AddCommand(newTypeOrientedIssueLabelCommand("add"), newTypeOrientedIssueLabelCommand("remove"))
+	cmd.AddCommand(comment, label)
 	return cmd
 }
 
@@ -180,7 +372,7 @@ func newIntegrationIssueGetCommand() *cobra.Command {
 		Use:   "get",
 		Short: "Получение объекта issue по непрозрачному идентификатору",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !cmd.Flags().Changed("id") {
+			if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
 				return fmt.Errorf("--id is required")
 			}
 			return executeTypeOrientedIssueCommand(cmd, flags, "get")
@@ -189,6 +381,7 @@ func newIntegrationIssueGetCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
 	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий в формате owner/name")
 	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор объекта")
+	cmd.Flags().StringArrayVar(&flags.fields, "fields", nil, "Поля объекта")
 	return cmd
 }
 
@@ -206,6 +399,92 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.query, "query", "", "Строка поиска")
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
+	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude_labels", nil, "Метки, исключаемые из поиска")
+	return cmd
+}
+
+func newTypeOrientedIssueCreateCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "create", Short: "Создание задачи", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.title) == "" {
+			return fmt.Errorf("--title is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "issue", ObjectType: "issue", Operation: "create", Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Title: flags.title, Body: flags.body, State: flags.state, ExternalID: flags.externalID, ID: flags.externalID, Labels: flags.labels}, printTypeOrientedIssueResponse)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().StringVar(&flags.title, "title", "", "Заголовок задачи")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Описание задачи")
+	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние задачи")
+	cmd.Flags().StringVar(&flags.externalID, "external_id", "", "Внешний идентификатор задачи")
+	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
+	return cmd
+}
+
+func newTypeOrientedIssueUpdateCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "update", Short: "Обновление задачи", RunE: func(cmd *cobra.Command, _ []string) error {
+		if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
+			return fmt.Errorf("--id is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "issue", ObjectType: "issue", Operation: "update", ID: flags.externalID, ExternalID: flags.externalID, Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Title: flags.title, Body: flags.body, State: flags.state, Labels: flags.labels}, printTypeOrientedIssueResponse)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор задачи")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().StringVar(&flags.title, "title", "", "Заголовок задачи")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Описание задачи")
+	cmd.Flags().StringVar(&flags.state, "state", "", "Состояние задачи")
+	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
+	return cmd
+}
+
+func newTypeOrientedIssueCommentListCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "list", Short: "Получение комментариев задачи", RunE: func(cmd *cobra.Command, _ []string) error {
+		if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
+			return fmt.Errorf("--id is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "issue", ObjectType: "issue", Operation: "comments", ID: flags.externalID, ExternalID: flags.externalID, Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo")}, printTypeOrientedIssueResponse)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор задачи")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	return cmd
+}
+func newTypeOrientedIssueCommentCreateCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "create", Short: "Создание комментария задачи", RunE: func(cmd *cobra.Command, _ []string) error {
+		if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
+			return fmt.Errorf("--id is required")
+		}
+		if strings.TrimSpace(flags.body) == "" {
+			return fmt.Errorf("--body is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "comment", ObjectType: "comment", Operation: "create", ID: flags.externalID, ExternalID: flags.externalID, Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Body: flags.body}, printIntegrationOperationResult)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор задачи")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().StringVar(&flags.body, "body", "", "Текст комментария")
+	return cmd
+}
+func newTypeOrientedIssueLabelCommand(operation string) *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: operation, Short: "Изменение меток задачи", RunE: func(cmd *cobra.Command, _ []string) error {
+		if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
+			return fmt.Errorf("--id is required")
+		}
+		if len(flags.labels) == 0 {
+			return fmt.Errorf("--labels is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "issue", Resource: "label", ObjectType: "label", Operation: operation, ID: flags.externalID, ExternalID: flags.externalID, Repository: flags.repo, RepoProvided: cmd.Flags().Changed("repo"), Labels: flags.labels}, printIntegrationOperationResult)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.externalID, "id", "", "Непрозрачный идентификатор задачи")
+	cmd.Flags().StringVar(&flags.repo, "repo", "", "Репозиторий внешней системы")
+	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
 	return cmd
 }
 
@@ -228,6 +507,9 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 		Query:           flags.query,
 		State:           flags.state,
 		Limit:           flags.limit,
+		Fields:          flags.fields,
+		Labels:          append([]string(nil), flags.labels...),
+		ExcludeLabels:   append([]string(nil), flags.excludeLabels...),
 	}
 	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
 	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
@@ -238,6 +520,18 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 
 func printTypeOrientedIssueResponse(cmd *cobra.Command, response integration.Response) {
 	cmd.Printf("system=%s\nresource=issue\nobject=issue\noperation=%s\nstatus=%s\n", response.System, response.Operation, response.Status)
+	if response.SearchResults != nil {
+		cmd.Printf("issue_count=%d\n", len(response.SearchResults))
+		for _, issue := range response.SearchResults {
+			cmd.Printf("id=%s\ntitle=%s\nstate=%s\nurl=%s\n", issue.ID, issue.Title, issue.State, issue.URL)
+		}
+	}
+	if response.TaskComments != nil {
+		cmd.Printf("comment_count=%d\n", len(response.TaskComments))
+		for _, comment := range response.TaskComments {
+			cmd.Printf("comment_id=%s\ncomment_body=%s\n", firstNonEmpty(comment.ExternalID, comment.TaskID), comment.Body)
+		}
+	}
 	if response.Task != nil {
 		cmd.Printf("id=%s\n", firstNonEmpty(response.Task.ExternalID, response.Task.ID))
 		cmd.Printf("title=%s\nstate=%s\n", response.Task.Title, response.Task.State)
@@ -1385,6 +1679,393 @@ func newIntegrationOperationsCommand() *cobra.Command {
 	return cmd
 }
 
+func newIntegrationStatusCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "status", Short: "Проверка состояния системы", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.system) == "" {
+			return fmt.Errorf("--system is required")
+		}
+		return executeTypeRequest(cmd, flags, integration.Request{Resource: "auth", ObjectType: "auth", Operation: "status"}, printIntegrationAuthStatus)
+	}}
+	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	return cmd
+}
+
+func newIntegrationInvokeCommand() *cobra.Command {
+	flags := &integrationFlags{}
+	cmd := &cobra.Command{Use: "invoke", Short: "Диагностический вызов канонической операции", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(flags.operation) == "" {
+			return fmt.Errorf("--name is required")
+		}
+		if (strings.TrimSpace(flags.input) == "") == (strings.TrimSpace(flags.inputFile) == "") {
+			return fmt.Errorf("exactly one of --input or --input-file is required")
+		}
+		service := newIntegrationService(cmd)
+		data := []byte(flags.input)
+		if flags.inputFile != "" {
+			var err error
+			data, err = os.ReadFile(flags.inputFile)
+			if err != nil {
+				return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("read input file: %w", err))
+			}
+		}
+		var values map[string]any
+		if err := json.Unmarshal(data, &values); err != nil {
+			return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("parse input JSON: %w", err))
+		}
+		if values == nil {
+			return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("input JSON must be an object"))
+		}
+		descriptor, found := service.OperationDescriptor(cmd.Context(), flags.operation, flags.system)
+		if !found {
+			kind := "unsupported-operation"
+			integrationType := strings.SplitN(flags.operation, ".", 2)[0]
+			defaultSystem := service.DefaultSystemForType(integrationType)
+			if strings.TrimSpace(flags.system) == "" && defaultSystem == "" {
+				kind = "not-configured"
+			}
+			if strings.TrimSpace(flags.system) != "" && !service.IsSystemConfigured(flags.system) {
+				kind = "not-configured"
+			}
+			if strings.TrimSpace(flags.system) == "" {
+				flags.system = defaultSystem
+			}
+			return printInvokeAvailabilityFailure(cmd, flags, service, "operation is not available: "+flags.operation, kind)
+		}
+		if strings.TrimSpace(flags.system) == "" {
+			flags.system = descriptor.System
+		}
+		if !descriptor.Available {
+			kind := "unsupported-operation"
+			if !descriptor.Enabled {
+				kind = "not-configured"
+			}
+			return printInvokeAvailabilityFailure(cmd, flags, service, "operation is not available: "+flags.operation, kind)
+		}
+		for _, field := range append(append([]integration.OperationField{}, descriptor.Input.Required...), descriptor.Input.Optional...) {
+			value, ok := values[field.Name]
+			if !ok && field.Default != "" {
+				value, ok = invokeDefaultValue(field)
+				if ok {
+					values[field.Name] = value
+				}
+			}
+			if !ok {
+				continue
+			}
+			if err := validateInvokeField(field, value); err != nil {
+				return printInvokeInputFailure(cmd, flags, service, err)
+			}
+		}
+		for _, field := range descriptor.Input.Required {
+			value, ok := values[field.Name]
+			if !ok {
+				if field.Default != "" {
+					continue
+				}
+				return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("input field is required: %s", field.Name))
+			}
+			if field.Type == "string" && strings.TrimSpace(value.(string)) == "" && field.Default == "" {
+				return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("input field is required: %s", field.Name))
+			}
+		}
+		request := requestFromInvokeInput(descriptor, values)
+		request.System = flags.system
+		request.SystemProvided = cmd.Flags().Changed("system")
+		return executeTypeRequestWithService(cmd, flags, service, request, printIntegrationResponse)
+	}}
+	cmd.Flags().StringVar(&flags.operation, "name", "", "Каноническое имя операции")
+	cmd.Flags().StringVar(&flags.system, "system", "", "Имя системы из конфигурации")
+	cmd.Flags().StringVar(&flags.input, "input", "", "JSON структурированного ввода")
+	cmd.Flags().StringVar(&flags.inputFile, "input-file", "", "Путь к JSON-файлу структурированного ввода")
+	return cmd
+}
+
+func invokeDefaultValue(field integration.OperationField) (any, bool) {
+	// Значения ${system.*} разрешаются сценарным адаптером, у которого есть
+	// доступ к настройкам выбранной системы. Не подменяем их заглушками: это
+	// одновременно сохраняет типовую проверку и позволяет адаптеру применить
+	// динамическое значение по умолчанию.
+	if strings.HasPrefix(strings.TrimSpace(field.Default), "${") && strings.HasSuffix(strings.TrimSpace(field.Default), "}") {
+		return nil, false
+	}
+	switch field.Type {
+	case "integer":
+		value, err := strconv.ParseInt(strings.TrimSpace(field.Default), 10, 64)
+		return float64(value), err == nil
+	case "boolean":
+		value, err := strconv.ParseBool(strings.TrimSpace(field.Default))
+		return value, err == nil
+	case "string[]":
+		var values []string
+		if err := json.Unmarshal([]byte(field.Default), &values); err == nil {
+			items := make([]any, len(values))
+			for index, value := range values {
+				items[index] = value
+			}
+			return items, true
+		}
+	}
+	defaultValue := strings.TrimSpace(field.Default)
+	if strings.HasPrefix(defaultValue, "${") && strings.HasSuffix(defaultValue, "}") {
+		switch field.Type {
+		case "string":
+			return "", true
+		case "integer":
+			return float64(0), true
+		case "boolean":
+			return false, true
+		}
+	}
+	return field.Default, true
+}
+
+func printInvokeInputFailure(cmd *cobra.Command, flags *integrationFlags, service *integration.Service, err error) error {
+	return printInvokeAvailabilityFailure(cmd, flags, service, err.Error(), "invalid-request")
+}
+
+func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags, service *integration.Service, message, kind string) error {
+	format, err := integrationOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
+	response := integration.Response{
+		IntegrationType: strings.SplitN(flags.operation, ".", 2)[0],
+		System:          flags.system,
+		Operation:       flags.operation,
+		Status:          "failed",
+		Failure:         &integration.Failure{Kind: kind, Message: message},
+	}
+	if service != nil {
+		if route, ok := service.OperationRoute(cmd.Context(), flags.operation, flags.system); ok {
+			response.Route = route
+			response.Resource = route.Resource
+			response.ObjectType = route.ObjectType
+			response.Operation = route.Operation
+		}
+	}
+	if response.Route.Resource == "" {
+		if objectType, operation := invokeRouteObjectType(flags.operation); objectType != "" {
+			response.Resource = objectType
+			response.ObjectType = objectType
+			response.Operation = operation
+			response.Route = integration.Route{IntegrationType: response.IntegrationType, System: response.System, Provider: response.System, Resource: response.Resource, ObjectType: response.ObjectType, Operation: response.Operation}
+		}
+	}
+	if format == integrationOutputJSON {
+		if err := printIntegrationJSON(cmd, response); err != nil {
+			return err
+		}
+	} else {
+		printFailure(cmd, response)
+	}
+	return fmt.Errorf("%s", message)
+}
+
+func invokeRouteObjectType(name string) (string, string) {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(name)), ".")
+	if len(parts) < 3 {
+		return "", ""
+	}
+	operation := parts[len(parts)-1]
+	object := strings.Join(parts[1:len(parts)-1], ".")
+	switch strings.Join(parts, ".") {
+	case "issue.issue.comment.list":
+		object, operation = "issue", "comments"
+	case "issue.issue.comment.create":
+		object = "comment"
+	case "issue.issue.label.add", "issue.issue.label.remove":
+		object = "label"
+	case "repo.merge-request.comment.list", "repo.merge-request.comment.create":
+		object = "merge-request-comment"
+	case "repo.review-remark.list":
+		object = "review-remark"
+	case "repo.review-remark.unresolve":
+		object = "review-remark"
+	}
+	return object, operation
+}
+
+func validateInvokeField(field integration.OperationField, value any) error {
+	valid := false
+	switch field.Type {
+	case "string":
+		_, valid = value.(string)
+	case "integer":
+		number, ok := value.(float64)
+		valid = ok && !math.IsNaN(number) && !math.IsInf(number, 0) && math.Trunc(number) == number && number >= float64(-1<<63) && number < float64(1<<63)
+	case "boolean":
+		_, valid = value.(bool)
+	case "string[]":
+		items, ok := value.([]any)
+		valid = ok
+		if valid {
+			for _, item := range items {
+				if _, ok := item.(string); !ok {
+					valid = false
+					break
+				}
+			}
+		}
+	default:
+		valid = true
+	}
+	if !valid {
+		return fmt.Errorf("input field %s must have type %s", field.Name, field.Type)
+	}
+	return nil
+}
+
+func requestFromInvokeInput(descriptor integration.OperationDescriptor, values map[string]any) integration.Request {
+	objectType := descriptor.ObjectType
+	operation := descriptor.Operation
+	requestValues := cloneInvokeValues(values)
+	switch descriptor.Name {
+	case "issue.issue.comment.list":
+		objectType, operation = "issue", "comments"
+	case "issue.issue.comment.create":
+		objectType = "comment"
+	case "issue.issue.label.add", "issue.issue.label.remove":
+		objectType = "label"
+	case "repo.merge-request.comment.list":
+		objectType, operation = "merge-request-comment", "list"
+	case "repo.merge-request.comment.create":
+		objectType = "merge-request-comment"
+	case "repo.review-remark.create":
+		objectType, operation = "review-remark", "create"
+
+	case "repo.review-remark.list":
+		objectType, operation = "review-remark", "list"
+	case "repo.review-remark.unresolve":
+		objectType = "review-remark"
+	}
+	request := integration.Request{IntegrationType: descriptor.IntegrationType, Resource: objectType, ObjectType: objectType, Operation: operation, Extra: requestValues}
+	stringValue := func(name string) string {
+		if value, ok := values[name].(string); ok {
+			return value
+		}
+		return ""
+	}
+	request.Repository = stringValue("repository")
+	_, request.RepoProvided = values["repository"]
+	request.ID = stringValue("id")
+	request.ExternalID = firstNonEmpty(request.ID, stringValue("external_id"))
+	request.Base = stringValue("base")
+	request.Head = stringValue("head")
+	request.Title = stringValue("title")
+	request.Body = stringValue("body")
+	request.Text = stringValue("text")
+	request.Query = stringValue("query")
+	request.State = stringValue("state")
+	request.Scope = stringValue("scope")
+	// Координаты diff остаются в Extra для сценарных операций, если они
+	// опубликованы их входным контрактом, но встроенный обычный комментарий
+	// всегда выполняется без координат и не превращается в inline-замечание.
+	if descriptor.Name != "repo.merge-request.comment.create" {
+		request.Path = stringValueFrom(requestValues, "path")
+		request.Side = stringValueFrom(requestValues, "side")
+	}
+	request.ChannelID = stringValueFrom(requestValues, "channel")
+	request.ThreadID = stringValueFrom(requestValues, "thread")
+	request.MessageID = stringValueFrom(requestValues, "message")
+	if value, ok := requestValues["number"].(float64); ok {
+		request.MergeRequestNumber = int(value)
+	}
+	if descriptor.Name != "repo.merge-request.comment.create" {
+		if value, ok := requestValues["line"].(float64); ok {
+			request.Line = int(value)
+		}
+	}
+	if value, ok := requestValues["limit"].(float64); ok {
+		request.Limit = int(value)
+	}
+	if value, ok := requestValues["draft"].(bool); ok {
+		request.Draft = value
+	}
+	if labels, ok := requestValues["labels"].([]any); ok {
+		for _, label := range labels {
+			if value, ok := label.(string); ok {
+				request.Labels = append(request.Labels, value)
+			}
+		}
+	}
+	if excludeLabels, ok := requestValues["exclude_labels"].([]any); ok {
+		for _, label := range excludeLabels {
+			if value, ok := label.(string); ok {
+				request.ExcludeLabels = append(request.ExcludeLabels, value)
+			}
+		}
+	}
+	if fields, ok := requestValues["fields"].([]any); ok {
+		for _, field := range fields {
+			if value, ok := field.(string); ok {
+				request.Fields = append(request.Fields, value)
+			}
+		}
+	}
+	return request
+}
+
+func stringValueFrom(values map[string]any, name string) string {
+	if value, ok := values[name].(string); ok {
+		return value
+	}
+	return ""
+}
+
+func cloneInvokeValues(values map[string]any) map[string]any {
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
+}
+
+func executeTypeRequestWithService(cmd *cobra.Command, flags *integrationFlags, service *integration.Service, request integration.Request, printer func(*cobra.Command, integration.Response)) error {
+	format, err := integrationOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
+	response, executeErr := service.Execute(cmd.Context(), request)
+	if format == integrationOutputJSON {
+		if printErr := printIntegrationJSON(cmd, response); printErr != nil {
+			return printErr
+		}
+		return executeErr
+	}
+	if printer != nil {
+		printer(cmd, response)
+	}
+	return executeErr
+}
+
+func printIntegrationResponse(cmd *cobra.Command, response integration.Response) {
+	switch {
+	case response.MergeRequests != nil:
+		printIntegrationMergeRequests(cmd, response)
+	case response.Task != nil || response.TaskComments != nil || response.SearchResults != nil:
+		printTypeOrientedIssueResponse(cmd, response)
+	case response.Repository != nil:
+		printIntegrationRepository(cmd, response)
+	case response.MergeRequest != nil:
+		printIntegrationMergeRequest(cmd, response)
+	case response.ReviewRemarks != nil:
+		printIntegrationReviewRemarks(cmd, response)
+	case response.Conversation != nil:
+		printIntegrationThread(cmd, response)
+	case response.Message != nil:
+		printIntegrationMessage(cmd, response)
+	case response.WikiPage != nil:
+		printIntegrationWikiPage(cmd, response)
+	case response.WikiPages != nil:
+		printIntegrationWikiPages(cmd, response)
+	case response.AuthStatus != nil:
+		printIntegrationAuthStatus(cmd, response)
+	default:
+		printIntegrationOperationResult(cmd, response)
+	}
+}
+
 func newIntegrationService(cmd *cobra.Command) *integration.Service {
 	path := cmd.CommandPath()
 	for _, system := range []string{"github", "bitbucket", "mattermost", "telegram", "confluence"} {
@@ -1763,8 +2444,9 @@ func printIntegrationReviewRemarkOperation(cmd *cobra.Command, response integrat
 
 func printIntegrationReviewRemarks(cmd *cobra.Command, response integration.Response) {
 	if len(response.ReviewRemarks) == 0 {
-		printFailure(cmd, response)
-		if response.Failure == nil {
+		if response.Failure != nil {
+			printFailure(cmd, response)
+		} else {
 			cmd.Printf("system=%s\nresource=%s\noperation=%s\nremark_count=0\n", response.System, response.Resource, response.Operation)
 		}
 		return

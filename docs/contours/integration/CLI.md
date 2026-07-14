@@ -95,8 +95,8 @@ flowchart LR
 JWT, установочный токен и содержимое PEM не включаются в CLI-вывод, структурированный вывод, журналы или `CommandResult.Stdout`. Для живой проверки после заполнения `github_app_id` или `github_app_client_id` можно выполнить:
 
 ```bash
-progress integration github auth status --system github-app --format json
-progress integration github repo get --system github-app --repo rasungatullin/progress --format json
+progress integration status --system github-app --format json
+progress integration repo get --system github-app --repo rasungatullin/progress --format json
 ```
 
 ## 4. Внутренние модули реализации
@@ -192,48 +192,21 @@ type Provider interface {
 
 ## 6. Состав CLI-команд
 
-В текущей конфигурации поддерживаются следующие команды. Команды с именем
-внешней системы сохранены только как переходная форма: при запуске они выводят
-предупреждение и должны постепенно заменяться типо-ориентированными командами
-с флагом `--system`.
+Публичное дерево использует предметные типы и служебные команды. Система
+выбирается флагом `--system` либо настройкой `default_systems`.
 
 - `progress integration operations`;
+- `progress integration status --system github`;
+- `progress integration invoke --name issue.issue.get --input '{"id":"123"}'`;
 - `progress integration issue get --id 123`;
 - `progress integration issue search --query "текст"`;
-- `progress integration repo get --system github`;
-- `progress integration github auth status`;
-- `progress integration github repo get`;
-- `progress integration github issue get`;
-- `progress integration github issue comments`;
-- `progress integration github issue comment create`;
-- `progress integration github issue label add`;
-- `progress integration github issue label remove`;
-- `progress integration github pr get`;
-- `progress integration github pr list`;
-- `progress integration github pr search`;
-- `progress integration github pr create`;
-- `progress integration github pr comments`;
-- `progress integration github pr comment create`;
-- `progress integration github pr comment reply`;
-- `progress integration github pr comment resolve`;
-- `progress integration bitbucket auth status`;
-- `progress integration bitbucket repo get`;
-- `progress integration bitbucket pr get`;
-- `progress integration bitbucket pr list`;
-- `progress integration bitbucket pr search`;
-- `progress integration bitbucket pr create`;
-- `progress integration bitbucket pr comments`;
-- `progress integration bitbucket pr comment create`;
-- `progress integration bitbucket pr comment resolve`;
-- `progress integration mattermost auth status`;
-- `progress integration mattermost thread get`;
-- `progress integration mattermost message create`;
-- `progress integration telegram auth status`;
-- `progress integration telegram thread get`;
-- `progress integration telegram message create`;
-- `progress integration confluence auth status`;
-- `progress integration confluence page get`;
-- `progress integration confluence page search`.
+- `progress integration issue create`, `issue update`, `issue comment list`, `issue comment create`, `issue label add`, `issue label remove`;
+- `progress integration repo get`;
+- `progress integration repo merge-request get`, `search`, `create`;
+- `progress integration repo merge-request comment list`, `create`;
+- `progress integration repo merge-request review-remark list`, `create`, `reply`, `resolve`, `unresolve`;
+- `progress integration messenger thread get` и `messenger message create`;
+- `progress integration wiki page get` и `wiki page search`.
 
 ## 7. Назначение команд
 
@@ -246,7 +219,7 @@ progress integration issue get --id ABC-123
 progress integration issue search --query "готово к реализации" --system jira-main
 ```
 
-Флаг `--id` принимает непрозрачную строку: как числовое значение `123`, так и значение внешней системы `ABC-123`. Если `--system` не задан, контур выбирает систему по умолчанию для типа `issue`; явное значение выбирается по имени записи в конфигурации. Старые команды вида `integration github issue ...` сохраняются как совместимый переход.
+Флаг `--id` принимает непрозрачную строку: как числовое значение `123`, так и значение внешней системы `ABC-123`. Если `--system` не задан, контур выбирает систему по умолчанию для типа `issue`; явное значение выбирается по имени записи в конфигурации. Команды по именам внешних систем отсутствуют в публичной справке.
 
 ### 7.1 `progress integration operations`
 
@@ -284,292 +257,28 @@ progress integration operations --name issue.issue.get
 
 Хранилище приватных значений не входит в публичное пространство имён интеграции и настраивается только через контур настроек и ресурсов.
 
-### 7.4 `progress integration github auth status`
+### 7.4 Предметные команды
 
-Команда проверяет доступность GitHub-интеграции. В режиме `cli` она проверяет, доступен ли `gh` и авторизован ли пользователь. В режиме `api` она проверяет, что токен задан и GitHub API принимает запрос.
+Все предметные команды поддерживают общий флаг `--format text|json` и выбор системы через `--system` либо `default_systems`. Команды по именам внешних систем в публичный контракт не входят.
 
-Базовый системный вызов:
-
-```bash
-gh auth status
-```
-
-Назначение команды:
-
-1. проверить наличие `gh` в `PATH`;
-2. убедиться, что для GitHub выполнена авторизация;
-3. вернуть диагностируемую ошибку, если дальнейшие вызовы невозможны.
-
-Для режима `api` с готовым токеном вместо системного вызова выполняется `GET /user` с заголовком `Authorization: Bearer <token>`. Для режима GitHub App команда выпускает установочный токен через `POST /app/installations/{installation_id}/access_tokens` и считает интеграцию готовой, если выпуск завершён успешно.
-
-### 7.5 `progress integration github repo get`
-
-Команда получает сведения о репозитории по `owner/name`.
-
-Предпочтительный вызов:
+Примеры вызовов:
 
 ```bash
-gh repo view owner/name --json name,owner,description,defaultBranchRef,url
+progress integration issue get --id ABC-123 --fields title --format json
+progress integration issue search --query "готово" --labels backend --exclude_labels blocked
+progress integration issue create --title "Новая задача" --external_id EXT-123 --labels backend
+progress integration issue comment list --id ABC-123
+progress integration issue label add --id ABC-123 --labels backend
+progress integration repo merge-request get --repo owner/name --number 456
+progress integration repo merge-request comment list --repo owner/name --number 456
+progress integration repo merge-request review-remark create --repo owner/name --number 456 --path internal/service.go --line 42 --body "Проверить обработку"
+progress integration messenger thread get --thread THREAD-1 --system mattermost
+progress integration messenger message create --channel CHANNEL-1 --thread THREAD-1 --text "Состояние обновлено"
+progress integration wiki page get --id 12345 --system confluence
+progress integration wiki page search --query "интеграция"
 ```
 
-Возвращаемые сведения используются как базовый контекст для последующих вызовов задач и запросов на слияние.
-
-### 7.6 `progress integration github issue get`
-
-Команда получает одну карточку issue по номеру и репозиторию.
-
-Предпочтительный вызов:
-
-```bash
-gh issue view 123 --repo owner/name --json number,title,body,state,labels,assignees,author,url,createdAt,updatedAt
-```
-
-Назначение команды:
-
-1. извлечь нормализованное представление задачи;
-2. дать контуру принятия решения исходную карточку задачи;
-3. поддержать прямую диагностику интеграции через CLI.
-
-### 7.7 `progress integration github issue comments`
-
-Команда получает комментарии issue.
-
-Вариант через `gh api`:
-
-```bash
-gh api --paginate --slurp repos/owner/name/issues/123/comments
-```
-
-Команда принимает `--repo` и обязательный `--number`. Если `--repo` не передан, адаптер может использовать `default_repo` из `.progress/integration/systems.json` или глобального `$PROGRESS_CONFIG_HOME/integration/systems.json`; если пользователь явно передал пустой `--repo=`, резервный выбор не применяется и запрос отклоняется как `invalid-request`.
-
-Адаптер преобразует paginated REST-ответ GitHub в массив `TrackerComment` с полями `System`, `Repository`, `TaskID`, `Author`, `Body`, `URL`, `CreatedAt` и `UpdatedAt`. В текстовом выводе команда печатает общий `comment_count`, затем поля каждого комментария и тело построчно.
-
-### 7.8 `progress integration github issue label add`
-
-Команда добавляет к задаче одну или несколько меток по каноническим названиям.
-
-```bash
-progress integration github issue label add --repo owner/name --number 123 --label bug --label backend
-```
-
-Поле `--label` принимает каноническое название метки задачи. Перед вызовом GitHub контур интеграции переводит каноническое название во внешнее имя по `task_label_mapping`. Если сопоставление не задано, используется то же название.
-
-Вариант системного вызова:
-
-```bash
-gh issue edit 123 --repo owner/name --add-label bug --add-label backend
-```
-
-### 7.9 `progress integration github issue label remove`
-
-Команда снимает с задачи одну или несколько меток по каноническим названиям.
-
-```bash
-progress integration github issue label remove --repo owner/name --number 123 --label bug
-```
-
-Вариант системного вызова:
-
-```bash
-gh issue edit 123 --repo owner/name --remove-label bug
-```
-
-### 7.10 `progress integration github issue search`
-
-Команда получает список задач GitHub с фильтрами по состоянию, строке поиска и меткам.
-
-Вариант вызова:
-
-```bash
-progress integration github issue search \
-  --repo owner/name \
-  --label "Готово к реализации" \
-  --exclude-label "Требует проработки" \
-  --state open
-```
-
-Вариант системного вызова:
-
-```bash
-gh issue list --repo owner/name --state open --limit 30 --json number,title,state,labels,assignees,author,url,createdAt,updatedAt --search 'label:"Готово к реализации" -label:"Требует проработки"'
-```
-
-Команда поддерживает:
-
-- `--repo` — репозиторий GitHub в формате `owner/name`; если флаг не передан, адаптер может использовать `default_repo` из конфигурации; если пользователь явно передал пустой `--repo=`, резервный выбор не применяется и запрос отклоняется как `invalid-request`;
-- `--state` — состояние задач: `open`, `closed`, `all`; по умолчанию `open`;
-- `--label` — включающая метка, флаг можно повторять; несколько меток задают пересечение;
-- `--exclude-label` — исключающая метка, флаг можно повторять; несколько меток исключают задачи, у которых есть любая из этих меток;
-- `--query` — дополнительная строка поиска GitHub, добавляется к сформированным фильтрам по меткам;
-- `--limit` — предельное число задач;
-- `--format json` — машинно-читаемый вывод без потери меток.
-
-Поля `--label` и `--exclude-label` принимают канонические названия меток задачи. Перед вызовом GitHub контур интеграции переводит их во внешние имена по `task_label_mapping`. Если сопоставление не задано, используется то же название.
-
-Текстовый вывод содержит количество найденных задач и основные поля каждой задачи: номер, заголовок, состояние, метки, автор, назначенные исполнители, URL и время изменения.
-
-### 7.11 `progress integration github pr get`
-
-Команда получает одну карточку запроса на слияние.
-
-Предпочтительный вызов:
-
-```bash
-gh pr view 456 --repo owner/name --json number,title,body,state,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt
-```
-
-Результат должен использоваться как нормализованная карточка запроса на слияние.
-
-### 7.12 `progress integration github pr comments`
-
-Команда получает комментарии запроса на слияние, включая замечания ревизии.
-
-Адаптер GitHub читает два источника:
-
-1. обычные комментарии обсуждения PR через issue-часть запроса на слияние;
-2. inline-замечания ревизии через review threads GraphQL API.
-
-Предпочтительные вызовы:
-
-```bash
-gh api --paginate --slurp repos/owner/name/issues/456/comments
-gh api graphql -f query='<review threads query>' -f owner=owner -f name=name -F number=456
-```
-
-Адаптер приводит оба вида комментариев к `ReviewRemark`. Поле `Type` принимает значение `comment` для обычного комментария и `inline` для замечания ревизии в цепочке. Для обычного комментария поля `Path`, `Line` и `ReplyToID` пустые. Для inline-замечания `ReplyToID` содержит идентификатор review thread, а `State` отражает состояние `resolved` или `unresolved`.
-
-### 7.13 `progress integration github pr search`
-
-Команда выполняет поиск запросов на слияние по фильтрам GitHub.
-
-Вариант вызова:
-
-```bash
-gh pr list --repo owner/name --state closed --limit 30 --json number,title,body,state,author,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt
-```
-
-Команда поддерживает:
-
-- `--state` со значениями `open`, `closed`, `merged` и `all`; по умолчанию используется `closed`;
-- `--scope` со значениями `all`, `authored` и `reviewer`; по умолчанию используется `all`;
-- `--query` для дополнительной строки поиска GitHub;
-- `--limit` для ограничения количества результатов.
-
-Для `--scope authored` адаптер добавляет `--author @me`. Для `--scope reviewer` адаптер добавляет поисковый фильтр `reviewed-by:@me`.
-
-Если `--repo` не передан, GitHub-адаптер сначала использует `default_repo` из конфигурации, а при его отсутствии вызывает `gh pr list` без `--repo`, чтобы `gh` выбрал текущий репозиторий рабочей директории.
-
-В режиме `api` базовый список запросов на слияние поддерживает `--state`, `--limit` и явный или резервный репозиторий. Расширенные фильтры `--query`, `--scope authored` и `--scope reviewer` временно возвращают отказ `unsupported-operation`, пока сопоставление с поисковым API GitHub не закреплено в адаптере.
-
-### 7.14 `progress integration github pr comment create`
-
-Команда создаёт комментарий к запросу на слияние.
-
-Обычный комментарий обсуждения:
-
-```bash
-progress integration github pr comment create --repo owner/name --number 456 --body "Проверил, замечание принято"
-```
-
-Inline-замечание ревизии:
-
-```bash
-progress integration github pr comment create --repo owner/name --number 456 --body "Нужно обработать пустой ответ" --path internal/service.go --line 42
-```
-
-Если `--path` и `--line` не переданы, адаптер создаёт обычный комментарий обсуждения через issue-часть PR. Если они переданы, адаптер создаёт review thread через GraphQL mutation `addPullRequestReviewThread`. Флаг `--side` задаёт сторону diff и по умолчанию равен `RIGHT`.
-
-### 7.15 `progress integration github pr comment reply`
-
-Команда создаёт ответ в существующей цепочке inline-замечания ревизии.
-
-```bash
-progress integration github pr comment reply --thread PRRT_kw... --body "Исправлено в новом коммите"
-```
-
-Команда использует GraphQL mutation `addPullRequestReviewThreadReply`. Идентификатор thread можно получить из поля `remark_thread_id` команды `progress integration github pr comments` или из ответа команды создания inline-замечания.
-
-### 7.16 `progress integration github pr comment resolve`
-
-Команда разрешает inline-замечание ревизии по идентификатору review thread.
-
-```bash
-progress integration github pr comment resolve --thread PRRT_kw...
-```
-
-Команда использует GraphQL mutation `resolveReviewThread`. Идентификатор thread можно получить из поля `remark_thread_id` команды `progress integration github pr comments`.
-
-### 7.17 `progress integration bitbucket pr search`
-
-Команда выполняет поиск запросов на слияние в Bitbucket.
-
-Для Bitbucket Cloud закрытое состояние разворачивается в состояния API `MERGED` и `DECLINED`, потому что единого внешнего значения `closed` у Cloud API нет. По умолчанию команда ищет закрытые запросы на слияние.
-
-Команда поддерживает:
-
-- `--state` со значениями `open`, `closed`, `merged`, `declined` и `all`;
-- `--scope` со значениями `all`, `authored` и `reviewer` для Bitbucket Cloud;
-- `--query` для выражения фильтра Bitbucket Cloud;
-- `--limit` для ограничения количества результатов.
-
-### 7.18 `progress integration bitbucket pr comment create`
-
-Команда создаёт комментарий к запросу на слияние Bitbucket Cloud. Для inline-комментария используются `--path`, `--line` и `--side`.
-
-`progress integration bitbucket pr comment resolve` присутствует в CLI как единая операция контура, но текущий Bitbucket-адаптер возвращает `unsupported-operation`, потому что механизм разрешения замечаний различается между Bitbucket Cloud и Server/Data Center и требует отдельного контракта.
-
-### 7.19 `progress integration github api`
-
-Команда даёт управляемый резервный путь для редких операций, которые ещё не вынесены в отдельный подкомандный интерфейс.
-
-Пример вызова:
-
-```bash
-progress integration github api repos/owner/name/issues/123/events
-```
-
-Ограничение команды состоит в том, что она не должна становиться основным пользовательским интерфейсом контура. Её задача — ускорить расширение адаптера без немедленного разрастания CLI-дерева.
-
-### 7.19 `progress integration confluence auth status`
-
-Команда проверяет доступность Confluence через HTTP API. Для локально размещённой версии Confluence Server/Data Center используется базовый адрес из `base_url` и путь `/rest/api/user/current`.
-
-Настройка поддерживает два режима авторизации:
-
-- `username` + `token` или `token_env` — HTTP Basic;
-- только `token` или `token_env` — заголовок `Authorization: Bearer`.
-
-### 7.20 `progress integration confluence page get`
-
-Команда получает страницу документации по идентификатору Confluence.
-
-```bash
-progress integration confluence page get --id 12345
-```
-
-Вариант HTTP-вызова для локально размещённой версии Confluence:
-
-```bash
-GET /rest/api/content/12345?expand=space,body.storage,version,history
-```
-
-Адаптер возвращает `WikiPage` — страницу документации с идентификатором, пространством, заголовком, телом в формате `storage`, номером версии, временем обновления, пользователем обновления и ссылкой на страницу.
-
-### 7.21 `progress integration confluence page search`
-
-Команда ищет страницы документации по CQL-запросу Confluence.
-
-```bash
-progress integration confluence page search --query 'type=page and text ~ "integration"' --limit 10
-```
-
-Вариант HTTP-вызова:
-
-```bash
-GET /rest/api/content/search?cql=type%3Dpage&limit=10&expand=space,version
-```
-
-Команда возвращает массив `WikiPage` без обязательного тела страницы. Для получения полного тела нужно выполнить `page get` по идентификатору.
+Обычный комментарий запроса на слияние и замечание ревизии являются разными командами. Координаты `--path`, `--line` и `--side` доступны только для создания замечания ревизии. Для диагностического вызова `invoke` вход проверяется по `OperationInputContract`, а выполнение проходит через тот же `Service.Execute`, что и предметные команды.
 
 ## 8. Схема дерева команд
 
@@ -577,39 +286,13 @@ GET /rest/api/content/search?cql=type%3Dpage&limit=10&expand=space,version
 flowchart TD
     A[progress] --> B[integration]
     B --> C[реестр типов, систем и операций]
-    B --> D[github]
-    D --> E[auth status]
-    D --> F[repo get]
-    D --> G[issue get]
-    D --> H[issue comments]
-    D --> I[issue comment create]
-    D --> J[issue label add]
-    D --> K[issue label remove]
-    D --> L[pr get]
-    D --> M[pr list]
-    D --> N[pr comments]
-    D --> O[pr comment create]
-    D --> P[pr comment reply]
-    D --> AA[pr comment resolve]
-    B --> Q[bitbucket]
-    Q --> R[auth status]
-    Q --> S[repo get]
-    Q --> T[pr get]
-    Q --> U[pr list]
-    Q --> V[pr comments]
-    Q --> W[pr comment create]
-    B --> X[mattermost]
-    X --> Y[auth status]
-    X --> Z[thread get]
-    X --> AA[message create]
-    B --> AB[telegram]
-    AB --> AC[auth status]
-    AB --> AD[thread get]
-    AB --> AE[message create]
-    B --> AF[confluence]
-    AF --> AG[auth status]
-    AF --> AH[page get]
-    AF --> AI[page search]
+    B --> C1[operations]
+    B --> C2[status --system]
+    B --> C3[invoke --name]
+    B --> C4[issue]
+    B --> C5[repo]
+    B --> C6[messenger]
+    B --> C7[wiki]
 ```
 
 ## 9. Общие флаги и правила вызова
@@ -617,19 +300,19 @@ flowchart TD
 Для унификации вызовов целесообразно ввести общие флаги:
 
 - `--repo` — репозиторий `owner/name`;
-- `--number` — номер issue или PR;
-- `--label` — каноническое название метки задачи;
-- `--id` — внешний идентификатор объекта, если источник не использует числовой номер;
+- `--number` — номер запроса на слияние;
+- `--labels` — метки задачи;
+- `--exclude_labels` — метки, исключаемые из поиска;
+- `--id` — непрозрачный идентификатор задачи, страницы или другого объекта; для запроса на слияние используется `--number`;
 - `--query` — поисковая строка;
 - `--limit` — ограничение числа результатов;
 - `--format` — `text` или `json`;
-- `--jq` или внутренний фильтр, если позже потребуется пользовательская фильтрация результата.
 
 Базовые правила:
 
-1. если операция требует репозиторий, `--repo` обязателен, кроме `github repo get`, `github issue get` и `github pr get`, где можно опустить `--repo` и использовать `default_repo` из конфигурации;
-2. если операция адресует сущность по номеру, `--number` обязателен;
-3. если операция изменяет метки задачи, `--label` задаётся каноническим названием и может повторяться;
+1. если операция требует репозиторий, `--repo` обязателен; при его отсутствии адаптер может использовать `default_repo` выбранной системы;
+2. если операция адресует запрос на слияние по номеру, `--number` обязателен;
+3. если операция ищет задачи по меткам, используются имена полей каталога `--labels` и `--exclude_labels`;
 4. если операция адресует страницу документации, `--id` содержит внешний идентификатор страницы;
 5. для машинного использования предпочтителен `--format json`;
 6. текстовый вывод нужен для ручной диагностики и первичного освоения CLI.
@@ -760,18 +443,18 @@ GitHub-адаптер должен различать как минимум сл
         "tracker_url": "https://tracker.example"
       },
       "operations": {
-        "tracker.task.get": {
+        "issue.issue.get": {
           "script": ".progress/integration/work-tracker/task-get.sh",
-          "required": ["number"],
+          "required": ["id"],
           "optional": ["project", "tracker_url"],
           "defaults": {
             "project": "${system.project}",
             "tracker_url": "${system.settings.tracker_url}"
           }
         },
-        "tracker.task.comment.create": {
+        "issue.issue.comment.create": {
           "script": ".progress/integration/work-tracker/task-comment-create.sh",
-          "required": ["number", "body"]
+          "required": ["id", "body"]
         }
       }
     }
@@ -800,6 +483,10 @@ GitHub-адаптер должен различать как минимум сл
 17. `settings` задаёт несекретные настройки сценарных систем и других расширяемых адаптеров;
 18. `task_label_mapping` задаёт сопоставление меток задачи: внешняя метка в ключе, каноническое название в значении, пустое значение для игнорирования внешней метки;
 19. `operations` задаёт пооперационную настройку сценариев и их входных контрактов.
+
+Поле `Extra` внутренней модели запроса не является отдельным флагом CLI. Оно передаёт в сценарий дополнительные поля, прошедшие проверку входного контракта операции, без изменения имён и значений. Поле не предназначено для секретов и не заменяет типизированные поля встроенных операций.
+
+При чтении прежних установок сохраняется совместимость с `github.json`: его значения преобразуются в текущую конфигурацию интеграционных систем. Для токенов применяется следующий порядок: явно заданный `token`, затем значение из `token_private`, затем переменная из `token_env`; приватные значения читаются через `private_store` и не выводятся в диагностике. `default_repo` используется только выбранным адаптером, если репозиторий не передан явно через `--repo`.
 
 Пример GitHub-системы в режиме `api`:
 
@@ -879,7 +566,7 @@ PROGRESS_INTEGRATION_REQUEST_FILE
 PROGRESS_INTEGRATION_TIMEOUT
 ```
 
-Файл `PROGRESS_INTEGRATION_REQUEST_FILE` содержит `system`, `integration_type`, `operation_name`, `object_type`, `operation`, `request` и `settings`. Для `tracker.task.search` поле `request` может содержать `query`, `state`, `labels`, `exclude_labels` и `limit`. Поле `settings` содержит только явно настроенные несекретные значения. `token` и значение из `token_env` в JSON-файл не записываются.
+Файл `PROGRESS_INTEGRATION_REQUEST_FILE` содержит `system`, `integration_type`, `operation_name`, `object_type`, `operation`, `request` и `settings`. Для `issue.issue.search` поле `request` может содержать `query`, `state`, `labels`, `exclude_labels` и `limit`. Поле `settings` содержит только явно настроенные несекретные значения. `token` и значение из `token_env` в JSON-файл не записываются.
 
 Успешный ответ сценария:
 
@@ -925,65 +612,3 @@ PROGRESS_INTEGRATION_TIMEOUT
 Ошибки запуска, ненулевой код выхода, таймаут, невалидный JSON и неподдержанная операция переводятся в канонические отказные состояния контура интеграции.
 
 Настройка `private_store` выбирает реализацию хранилища приватных значений. Если `type` не задан, на macOS в сборке с `cgo` используется `keychain` с сервисом `progress`. В остальных средах используется файловая реализация `file` в `$PROGRESS_CONFIG_HOME/integration/private-values.json` или `~/.config/progress/integration/private-values.json` с правами доступа `0600`. Явный `keychain` отклоняется при запуске сборки, где macOS Keychain недоступен.
-
-Поддержанные поля `private_store`:
-
-1. `type` — `keychain` или `file`;
-2. `service` — имя сервиса macOS Keychain для `keychain`;
-3. `path` — путь файла для реализации `file`; относительный путь считается от каталога конфигурации комплекса.
-
-Правило приоритета авторизации:
-
-1. если задан `token`, используется прямое значение из конфигурации;
-2. если `token` не задан и указан `token_private`, значение читается из хранилища приватных значений по имени;
-3. если `token` и `token_private` не заданы, сохраняется совместимость с `token_env`.
-
-При слиянии слоёв `token`, `token_private` и `token_env` считаются взаимоисключающими источниками токена. Если более приоритетный слой задаёт один из этих ключей, ранее унаследованные альтернативы очищаются.
-
-Пример записи приватного значения для Mattermost:
-
-```bash
-private_store.type=keychain
-```
-
-После записи локальная конфигурация может ссылаться на это значение:
-
-```json
-{
-  "systems": {
-    "mattermost": {
-      "type": "mattermost",
-      "integration_type": "messenger",
-      "base_url": "https://mattermost.example",
-      "token_private": "mt_auth_token",
-      "channel_id": "channel-id"
-    }
-  }
-}
-```
-
-При создании HTTP-запроса адаптер получает уже разрешённое значение токена в памяти процесса. Значение не передаётся через переменные окружения и не выводится командой записи.
-
-Правило приоритета `--repo`, `repository` и `default_repo`:
-
-1. если `--repo` не передан, сервис использует `repository`, а при его отсутствии может использовать `default_repo`;
-2. если `--repo` передан с непустым значением, используется именно это значение;
-3. если `--repo` передан явно пустым (`--repo=`), запрос отклоняется как `invalid-request`, резервный выбор через `repository` и `default_repo` не применяется.
-
-Для переходного периода сохраняется совместимость с локальным файлом `.progress/integration/github.json`, если новый `systems.json` отсутствует. Новый конфигурационный слой считается приоритетным и должен использоваться как основной.
-
-## 12. Текущее состояние реализации
-
-Реализованный рабочий срез включает:
-
-1. реестр типов, систем и операций, который выбирает интегрируемую систему по `IntegrationType`, `System` и `default_systems`;
-2. единый вызов `Execute`, который возвращает `Response` с каноническим объектом, маршрутом и отказным состоянием;
-3. GitHub-адаптер через `gh` или прямой GitHub API для задач, комментариев задач, репозиториев и запросов на слияние;
-4. Bitbucket-адаптер через HTTP API для репозиториев и запросов на слияние;
-5. Mattermost-адаптер через HTTP API для цепочек обсуждения и сообщений;
-6. Telegram-адаптер через Bot API для отправки сообщений;
-7. локальный трекер задач с SQLite-хранилищем по умолчанию;
-8. сценарный адаптер `script` для операций трекера, настроенных через `systems.<name>.operations`;
-9. нормализованные отказные состояния для отсутствия авторизации, недоступности, неподдерживаемой операции, неполного ответа, таймаута и ошибок внешнего источника.
-
-Принцип проектирования остаётся прежним: другие контуры не должны знать синтаксис `gh`, HTTP-маршруты GitHub, Bitbucket, Mattermost или Telegram, формат токенов и поля внешних ответов. Эти сведения остаются внутри адаптеров, а наружу выходит канонический ответ контура интеграции.

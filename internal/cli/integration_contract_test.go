@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"strings"
@@ -124,6 +126,70 @@ func TestIntegrationTypeOrientedTreeExcludesDispatcherAndPrivate(t *testing.T) {
 	}
 }
 
+func TestIntegrationTypeOrientedTreeContainsPublishedOperationCommands(t *testing.T) {
+	root := NewRootCommand()
+	paths := [][]string{
+		{"integration", "status"},
+		{"integration", "invoke"},
+		{"integration", "issue", "get"},
+		{"integration", "issue", "search"},
+		{"integration", "issue", "create"},
+		{"integration", "issue", "update"},
+		{"integration", "issue", "comment", "list"},
+		{"integration", "issue", "comment", "create"},
+		{"integration", "issue", "label", "add"},
+		{"integration", "issue", "label", "remove"},
+		{"integration", "repo", "get"},
+		{"integration", "repo", "merge-request", "get"},
+		{"integration", "repo", "merge-request", "search"},
+		{"integration", "repo", "merge-request", "create"},
+		{"integration", "repo", "merge-request", "comment", "list"},
+		{"integration", "repo", "merge-request", "comment", "create"},
+		{"integration", "repo", "merge-request", "review-remark", "list"},
+		{"integration", "repo", "merge-request", "review-remark", "create"},
+		{"integration", "repo", "merge-request", "review-remark", "reply"},
+		{"integration", "repo", "merge-request", "review-remark", "resolve"},
+		{"integration", "repo", "merge-request", "review-remark", "unresolve"},
+		{"integration", "messenger", "thread", "get"},
+		{"integration", "messenger", "message", "create"},
+		{"integration", "wiki", "page", "get"},
+		{"integration", "wiki", "page", "search"},
+	}
+	for _, path := range paths {
+		if _, _, err := root.Find(path); err != nil {
+			t.Errorf("published command %v is missing: %v", path, err)
+		}
+	}
+}
+
+func TestIntegrationIssueFlagsUseCatalogNames(t *testing.T) {
+	root := NewRootCommand()
+	for _, path := range [][]string{
+		{"integration", "issue", "create"},
+		{"integration", "issue", "update"},
+		{"integration", "issue", "search"},
+		{"integration", "issue", "label", "add"},
+	} {
+		cmd, _, err := root.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if cmd.Flags().Lookup("labels") == nil {
+			t.Fatalf("%v must publish --labels", path)
+		}
+		if cmd.Flags().Lookup("label") != nil {
+			t.Fatalf("%v must not publish parallel --label", path)
+		}
+	}
+	cmd, _, err := root.Find([]string{"integration", "issue", "create"})
+	if err != nil {
+		t.Fatalf("find issue create: %v", err)
+	}
+	if cmd.Flags().Lookup("external_id") == nil || cmd.Flags().Lookup("external-id") != nil {
+		t.Fatal("issue create must publish only --external_id")
+	}
+}
+
 func TestIntegrationTypeOrientedCommandsResolveConfiguredSystems(t *testing.T) {
 	provider := &contractCaptureProvider{}
 	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
@@ -152,9 +218,9 @@ func TestIntegrationTypeOrientedCommandsResolveConfiguredSystems(t *testing.T) {
 		wantSystem string
 	}{
 		{args: []string{"integration", "repo", "get", "--repo", "owner/name"}, wantType: model.IntegrationTypeRepo, wantSystem: "github-main"},
-		{args: []string{"integration", "messenger", "message", "--text", "Состояние обновлено"}, wantType: model.IntegrationTypeMessenger, wantSystem: "mattermost-main"},
-		{args: []string{"integration", "wiki", "search", "--query", "эксплуатация"}, wantType: model.IntegrationTypeWiki, wantSystem: "confluence-main"},
-		{args: []string{"integration", "wiki", "search", "--query", "эксплуатация", "--system", "wiki-explicit"}, wantType: model.IntegrationTypeWiki, wantSystem: "wiki-explicit"},
+		{args: []string{"integration", "messenger", "message", "create", "--text", "Состояние обновлено"}, wantType: model.IntegrationTypeMessenger, wantSystem: "mattermost-main"},
+		{args: []string{"integration", "wiki", "page", "search", "--query", "эксплуатация"}, wantType: model.IntegrationTypeWiki, wantSystem: "confluence-main"},
+		{args: []string{"integration", "wiki", "page", "search", "--query", "эксплуатация", "--system", "wiki-explicit"}, wantType: model.IntegrationTypeWiki, wantSystem: "wiki-explicit"},
 	} {
 		cmd := NewRootCommand()
 		cmd.SetOut(io.Discard)
@@ -170,25 +236,154 @@ func TestIntegrationTypeOrientedCommandsResolveConfiguredSystems(t *testing.T) {
 }
 
 func TestLegacySystemCommandReportsTypeOrientedReplacement(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--id", "123"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("устаревшая команда по имени системы должна отсутствовать")
+	}
+}
+
+func TestIntegrationIssueSearchPassesRepeatedLabelFields(t *testing.T) {
 	provider := &contractCaptureProvider{}
-	service := integration.NewService(log.New(io.Discard, "", 0))
-	service.RegisterProvider("github", provider)
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeIssue: "tracker"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"tracker": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeIssue}},
+		},
+	})
+	service.RegisterProvider("tracker", provider)
 	original := integrationServiceFactory
 	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
 	t.Cleanup(func() { integrationServiceFactory = original })
 
 	cmd := NewRootCommand()
-	var stderr strings.Builder
 	cmd.SetOut(io.Discard)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--number", "123", "--repo", "owner/name"})
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "issue", "search", "--labels", "one", "--labels", "two", "--exclude_labels", "three", "--exclude_labels", "four"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("выполнить переходную команду: %v", err)
+		t.Fatalf("execute issue search: %v", err)
 	}
-	if provider.request.ID != "123" {
-		t.Fatalf("числовая форма не преобразована в строковый идентификатор: %#v", provider.request)
+	if got, want := strings.Join(provider.request.Labels, ","), "one,two"; got != want {
+		t.Fatalf("labels = %q, want %q", got, want)
 	}
-	if !strings.Contains(stderr.String(), "форма integration github устарела") {
-		t.Fatalf("отсутствует диагностика перехода: %q", stderr.String())
+	if got, want := strings.Join(provider.request.ExcludeLabels, ","), "three,four"; got != want {
+		t.Fatalf("exclude labels = %q, want %q", got, want)
+	}
+}
+
+func TestIntegrationInvokeInputFailurePreservesCatalogRoute(t *testing.T) {
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepo: "repo-system"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"repo-system": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}, Operations: map[string]model.IntegrationOperationConfig{
+				"repo.custom.field.get": {Required: []string{"repository"}, Command: "unused"},
+			}},
+		},
+	})
+	provider := &contractCaptureProvider{}
+	service.RegisterProvider("repo-system", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand()
+	cmd.SetOut(stdout)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "invoke", "--name", "repo.custom.field.get", "--input", `{}`, "--format", "json"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("invoke must reject a missing required field")
+	}
+	var response integration.Response
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("decode invoke response: %v; output=%q", err, stdout.String())
+	}
+	if response.Failure == nil || response.Failure.Kind != "invalid-request" {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
+	}
+	if response.Route.ProviderType != "script" || !response.Route.ProviderAvailable || response.Route.ObjectType != "custom.field" {
+		t.Fatalf("incomplete invoke route: %#v", response.Route)
+	}
+}
+
+func TestIntegrationInvokeOrdinaryCommentDropsInlineCoordinates(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepo: "repo-system"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"repo-system": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}, Operations: map[string]model.IntegrationOperationConfig{
+				"repo.merge-request.comment.create": {Required: []string{"number", "body"}, Optional: []string{"repository", "path", "line", "side"}, Command: "unused"},
+			}},
+		},
+	})
+	service.RegisterProvider("repo-system", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	cmd := NewRootCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "invoke", "--name", "repo.merge-request.comment.create", "--input", `{"number":7,"body":"обычный комментарий","path":"file.go","line":12,"side":"RIGHT"}`})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute invoke: %v", err)
+	}
+	if provider.request.Path != "" || provider.request.Line != 0 || provider.request.Side != "" {
+		t.Fatalf("ordinary comment retained inline coordinates: %#v", provider.request)
+	}
+	if provider.request.Extra["path"] != "file.go" || provider.request.Extra["line"] != float64(12) || provider.request.Extra["side"] != "RIGHT" {
+		t.Fatalf("ordinary comment lost contract fields for script: %#v", provider.request.Extra)
+	}
+}
+
+func TestIntegrationInvokeReviewRemarkUsesReviewRemarkObject(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepo: "repo-system"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"repo-system": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}, Operations: map[string]model.IntegrationOperationConfig{
+				"repo.review-remark.create": {Required: []string{"number", "body", "path", "line"}, Command: "unused"},
+			}},
+		},
+	})
+	service.RegisterProvider("repo-system", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	cmd := NewRootCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "invoke", "--name", "repo.review-remark.create", "--input", `{"number":7,"body":"замечание","path":"file.go","line":12}`})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute invoke: %v", err)
+	}
+	if provider.request.ObjectType != "review-remark" || provider.request.Operation != "create" {
+		t.Fatalf("review remark was routed as another object: %#v", provider.request)
+	}
+}
+
+func TestIntegrationReviewRemarkCreateCommandUsesReviewRemarkObject(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepo: "repo-system"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"repo-system": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}},
+		},
+	})
+	service.RegisterProvider("repo-system", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	cmd := NewRootCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "repo", "merge-request", "review-remark", "create", "--number", "7", "--body", "замечание", "--path", "file.go", "--line", "12"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute review remark create: %v", err)
+	}
+	if provider.request.Resource != "review-remark" || provider.request.ObjectType != "review-remark" {
+		t.Fatalf("review remark command was routed as ordinary comment: %#v", provider.request)
 	}
 }

@@ -131,6 +131,9 @@ type apiComment struct {
 		To   int    `json:"to"`
 		From int    `json:"from"`
 	} `json:"inline"`
+	Parent *struct {
+		ID int `json:"id"`
+	} `json:"parent"`
 }
 
 type apiUserResponse struct {
@@ -193,7 +196,9 @@ type serverPullRequest struct {
 }
 
 type serverActivityPage struct {
-	Values []serverActivity `json:"values"`
+	Values        []serverActivity `json:"values"`
+	IsLastPage    bool             `json:"isLastPage"`
+	NextPageStart int              `json:"nextPageStart"`
 }
 
 type serverPullRequestPage struct {
@@ -250,7 +255,7 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executePullRequestList(ctx, response, req)
 	case isMergeRequestObject(req) && req.Operation == "create":
 		return s.executePullRequestCreate(ctx, response, req)
-	case isMergeRequestObject(req) && req.Operation == "comments":
+	case (isMergeRequestObject(req) && req.Operation == "comments") || (isMergeRequestCommentObject(req) && (req.Operation == "list" || req.Operation == "comments")):
 		return s.executePullRequestComments(ctx, response, req)
 	case isMergeRequestCommentObject(req) && req.Operation == "create":
 		return s.executePullRequestCommentCreate(ctx, response, req)
@@ -590,15 +595,17 @@ func (s *Service) executePullRequestList(ctx context.Context, response model.Res
 }
 
 func (s *Service) executeServerPullRequestList(ctx context.Context, response model.Response, req model.ProviderRequest, repository repositoryRef, state string, scope string, limit int) (model.Response, error) {
-	if scope != "all" {
-		err := fmt.Errorf("Bitbucket Server pull request scope %s is not supported by current integration adapter", scope)
-		response.Status = model.ResponseStatusFailed
-		response.Failure = &model.Failure{Kind: model.FailureKindUnsupportedOperation, Message: err.Error()}
-		return response, err
-	}
 	query := url.Values{}
 	query.Set("state", bitbucketServerListState(state))
 	query.Set("limit", strconv.Itoa(limit))
+	if strings.TrimSpace(req.Query) != "" {
+		query.Set("filterText", strings.TrimSpace(req.Query))
+	}
+	if scope == "authored" {
+		query.Set("role", "AUTHOR")
+	} else if scope == "reviewer" {
+		query.Set("role", "REVIEWER")
+	}
 	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests?%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), query.Encode()))
 	items := make([]serverPullRequest, 0, limit)
 	for endpoint != "" && len(items) < limit {
@@ -629,6 +636,14 @@ func (s *Service) executeServerPullRequestList(ctx context.Context, response mod
 		nextQuery := url.Values{}
 		nextQuery.Set("state", bitbucketServerListState(state))
 		nextQuery.Set("limit", strconv.Itoa(limit))
+		if strings.TrimSpace(req.Query) != "" {
+			nextQuery.Set("filterText", strings.TrimSpace(req.Query))
+		}
+		if scope == "authored" {
+			nextQuery.Set("role", "AUTHOR")
+		} else if scope == "reviewer" {
+			nextQuery.Set("role", "REVIEWER")
+		}
 		nextQuery.Set("start", strconv.Itoa(raw.NextPageStart))
 		endpoint = s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests?%s", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), nextQuery.Encode()))
 	}
@@ -686,6 +701,9 @@ func (s *Service) executePullRequestCreate(ctx context.Context, response model.R
 			"branch": map[string]string{"name": strings.TrimSpace(req.Base)},
 		},
 	}
+	if req.Draft {
+		payload["draft"] = true
+	}
 	content, _ := json.Marshal(payload)
 	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests", url.PathEscape(repository.workspace), url.PathEscape(repository.slug))
 	status, body, err := s.do(ctx, http.MethodPost, endpoint, content)
@@ -740,6 +758,9 @@ func (s *Service) executeServerPullRequestCreate(ctx context.Context, response m
 			},
 		},
 	}
+	if req.Draft {
+		payload["draft"] = true
+	}
 	content, _ := json.Marshal(payload)
 	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests", url.PathEscape(repository.workspace), url.PathEscape(repository.slug)))
 	status, body, err := s.do(ctx, http.MethodPost, endpoint, content)
@@ -789,7 +810,7 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 	}
 
 	endpoint := fmt.Sprintf("repositories/%s/%s/pullrequests/%d/comments", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber)
-	response.ReviewRemarks = []model.ReviewRemark{}
+	comments := make([]apiComment, 0)
 	for endpoint != "" {
 		status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
@@ -803,13 +824,48 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 		if err := json.Unmarshal(body, &raw); err != nil {
 			return responseWithDecodeFailure(response, err)
 		}
-		for _, item := range raw.Values {
-			response.ReviewRemarks = append(response.ReviewRemarks, reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, item))
-		}
+		comments = append(comments, raw.Values...)
 		endpoint = strings.TrimSpace(raw.Next)
+	}
+	response.ReviewRemarks = []model.ReviewRemark{}
+	byID := make(map[int]apiComment, len(comments))
+	for _, item := range comments {
+		byID[item.ID] = item
+	}
+	for _, item := range comments {
+		inline := commentIsInline(item, byID)
+		if isFilteredCommentRequest(req) && isReviewRemarkRequest(req) != inline {
+			continue
+		}
+		remark := reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, item)
+		if item.Parent != nil {
+			remark.ReplyToID = strconv.Itoa(item.Parent.ID)
+		}
+		if inline && remark.Path == "" {
+			remark.Type = "inline-reply"
+		}
+		response.ReviewRemarks = append(response.ReviewRemarks, remark)
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
+}
+
+func commentIsInline(item apiComment, byID map[int]apiComment) bool {
+	seen := map[int]bool{}
+	for {
+		if item.Inline != nil {
+			return true
+		}
+		if item.Parent == nil || item.Parent.ID == 0 || seen[item.ID] {
+			return false
+		}
+		seen[item.ID] = true
+		parent, ok := byID[item.Parent.ID]
+		if !ok {
+			return false
+		}
+		item = parent
+	}
 }
 
 func (s *Service) executePullRequestCommentCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
@@ -901,27 +957,49 @@ func (s *Service) executeServerPullRequestComments(ctx context.Context, response
 		limit = 100
 	}
 	endpoint := s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d/activities?limit=%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber, limit))
-	status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		response.Status = model.ResponseStatusFailed
-		response.Failure = failureForHTTPStatus(status, err, string(body))
-		response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
-		return response, err
-	}
+	var pages []serverActivity
+	for endpoint != "" {
+		status, body, err := s.do(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			response.Status = model.ResponseStatusFailed
+			response.Failure = failureForHTTPStatus(status, err, string(body))
+			response.OperationResult = operationResult(req, status, http.MethodGet, repository.fullName, err, body)
+			return response, err
+		}
 
-	var raw serverActivityPage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return responseWithDecodeFailure(response, err)
+		var raw serverActivityPage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return responseWithDecodeFailure(response, err)
+		}
+		pages = append(pages, raw.Values...)
+		if raw.IsLastPage || raw.NextPageStart <= 0 {
+			break
+		}
+		endpoint = s.serverEndpoint(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d/activities?limit=%d&start=%d", url.PathEscape(repository.workspace), url.PathEscape(repository.slug), req.MergeRequestNumber, limit, raw.NextPageStart))
 	}
 	response.ReviewRemarks = []model.ReviewRemark{}
-	for _, item := range raw.Values {
+	for _, item := range pages {
 		if item.Comment == nil {
 			continue
 		}
-		response.ReviewRemarks = appendServerCommentRemarks(response.ReviewRemarks, repository.fullName, req.MergeRequestNumber, *item.Comment)
+		remarks := appendServerCommentRemarks(nil, repository.fullName, req.MergeRequestNumber, *item.Comment)
+		for _, remark := range remarks {
+			if !isFilteredCommentRequest(req) || isReviewRemarkRequest(req) == (strings.TrimSpace(remark.Path) != "") {
+				response.ReviewRemarks = append(response.ReviewRemarks, remark)
+			}
+		}
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
+}
+
+func isReviewRemarkRequest(req model.ProviderRequest) bool {
+	return strings.TrimSpace(req.ObjectType) == "review-remark"
+}
+
+func isFilteredCommentRequest(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(req.ObjectType)
+	return object == "review-remark" || object == "merge-request-comment"
 }
 
 func (s *Service) do(ctx context.Context, method string, endpoint string, payload []byte) (int, []byte, error) {
@@ -1199,6 +1277,10 @@ func userFromServerAPI(raw serverUser) model.User {
 }
 
 func appendServerCommentRemarks(remarks []model.ReviewRemark, repository string, number int, raw serverComment) []model.ReviewRemark {
+	return appendServerCommentRemarksWithAnchor(remarks, repository, number, raw, raw.Anchor)
+}
+
+func appendServerCommentRemarksWithAnchor(remarks []model.ReviewRemark, repository string, number int, raw serverComment, inherited *serverAnchor) []model.ReviewRemark {
 	remark := model.ReviewRemark{
 		System:             "bitbucket",
 		Repository:         repository,
@@ -1210,14 +1292,18 @@ func appendServerCommentRemarks(remarks []model.ReviewRemark, repository string,
 		CreatedAt:          timestampMillisToRFC3339(raw.CreatedDate),
 		UpdatedAt:          timestampMillisToRFC3339(raw.UpdatedDate),
 	}
-	if raw.Anchor != nil {
-		remark.Path = strings.TrimSpace(raw.Anchor.Path)
-		remark.Line = raw.Anchor.Line
-		remark.Side = strings.TrimSpace(raw.Anchor.LineType)
+	anchor := raw.Anchor
+	if anchor == nil {
+		anchor = inherited
+	}
+	if anchor != nil {
+		remark.Path = strings.TrimSpace(anchor.Path)
+		remark.Line = anchor.Line
+		remark.Side = strings.TrimSpace(anchor.LineType)
 	}
 	remarks = append(remarks, remark)
 	for _, child := range raw.Comments {
-		remarks = appendServerCommentRemarks(remarks, repository, number, child)
+		remarks = appendServerCommentRemarksWithAnchor(remarks, repository, number, child, anchor)
 	}
 	return remarks
 }
@@ -1335,7 +1421,7 @@ func isMergeRequestObject(req model.ProviderRequest) bool {
 
 func isMergeRequestCommentObject(req model.ProviderRequest) bool {
 	object := strings.TrimSpace(firstNonEmpty(req.ObjectType, req.Resource))
-	return object == "comment" && req.IntegrationType == model.IntegrationTypeRepository
+	return (object == "comment" || object == "review-remark" || object == "merge-request-comment") && req.IntegrationType == model.IntegrationTypeRepository
 }
 
 func firstNonEmpty(values ...string) string {

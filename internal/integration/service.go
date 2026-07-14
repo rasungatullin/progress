@@ -76,6 +76,8 @@ type systemState struct {
 	Registered       bool
 	Default          bool
 	Transport        string
+	APIVariant       string
+	BaseURL          string
 	TaskLabelMapping map[string]string
 	Operations       map[string]model.IntegrationOperationConfig
 }
@@ -135,6 +137,8 @@ func NewServiceFromConfigWithPrivateStore(logger *log.Logger, config model.Integ
 			Enabled:          systemEnabled(systemConfig),
 			Default:          systemConfig.Default,
 			Transport:        normalizeSystem(systemConfig.Transport),
+			APIVariant:       normalizeSystem(systemConfig.APIVariant),
+			BaseURL:          strings.TrimSpace(systemConfig.BaseURL),
 			TaskLabelMapping: normalizeLabelMapping(systemConfig.TaskLabelMapping),
 			Operations:       normalizeOperationConfigMap(systemConfig.Operations),
 		}
@@ -392,7 +396,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 
 	route, err := s.resolveRoute(req)
 	if err != nil {
-		return Response{}, err
+		return responseWithFailure(route, model.FailureKindUnsupportedOperation, false, err), err
 	}
 
 	normalized.Route = route
@@ -472,6 +476,9 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 			objectType = "repository"
 		}
 	}
+	if req.RepoProvided && strings.TrimSpace(req.Repository) == "" {
+		return ProviderRequest{}, fmt.Errorf("invalid integration request: repository is required when explicitly provided")
+	}
 
 	identifier := strings.TrimSpace(firstNonEmpty(req.ID, req.ExternalID))
 	normalized := ProviderRequest{
@@ -506,6 +513,7 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 		Fields:             trimStrings(req.Fields),
 		Labels:             trimStrings(req.Labels),
 		ExcludeLabels:      trimStrings(req.ExcludeLabels),
+		Extra:              cloneExtra(req.Extra),
 	}
 	if normalized.ObjectType == "" {
 		normalized.ObjectType = normalizeObjectType(normalized.Resource)
@@ -524,6 +532,17 @@ func (s *Service) normalizeRequest(req Request) (ProviderRequest, error) {
 	}
 
 	return normalized, nil
+}
+
+func cloneExtra(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 func (s *Service) errorRoute(req Request, err error) Route {
@@ -754,6 +773,7 @@ func systemSupportsOperation(state systemState, integrationType string, objectTy
 		return true
 	}
 	integrationType = normalizeIntegrationType(integrationType)
+	requestedObjectType := strings.TrimSpace(strings.ToLower(objectType))
 	objectType = canonicalObjectType(objectType)
 	operation = normalizeOperation(operation)
 	for _, template := range builtinOperationTemplates(state.Type) {
@@ -763,7 +783,30 @@ func systemSupportsOperation(state systemState, integrationType string, objectTy
 			return true
 		}
 	}
+	// Операции комментариев запроса на слияние публикуются как вложенные
+	// имена каталога, тогда как адаптеры принимают канонический объект
+	// merge-request-comment. Сопоставляем обе формы до вызова адаптера.
+	if integrationType == model.IntegrationTypeRepo && objectType == "comment" {
+		for _, template := range builtinOperationTemplates(state.Type) {
+			if strings.HasPrefix(template.Name, "repo.merge-request.comment.") && normalizeOperation(template.Operation) == operation {
+				return true
+			}
+		}
+	}
+	if integrationType == model.IntegrationTypeRepo && objectType == "review-remark" && operation == "create" {
+		for _, template := range builtinOperationTemplates(state.Type) {
+			if template.Name == "repo.review-remark.create" {
+				return true
+			}
+		}
+	}
 	for name := range state.Operations {
+		configuredName := canonicalConfiguredOperationName(name)
+		requestedName := canonicalConfiguredOperationName(integrationType + "." + objectType + "." + operation)
+		requestedNestedName := canonicalConfiguredOperationName(integrationType + "." + requestedObjectType + "." + operation)
+		if configuredName == requestedName || configuredName == requestedNestedName {
+			return true
+		}
 		configuredType, configuredObject, configuredOperation := parseOperationName(name)
 		if configuredType == integrationType && configuredObject == objectType && configuredOperation == operation {
 			return true
