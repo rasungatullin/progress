@@ -10,6 +10,7 @@
       "base_ref": {"type": "string", "required": true},
       "head_ref": {"type": "string", "required": true},
       "remote_head": {"type": "string", "required": true},
+      "git": {"type": "object", "required": true},
       "structured_output": {"type": "object", "required": true}
     },
     "out": {"resolution_summary": {"type": "string", "required": true}}

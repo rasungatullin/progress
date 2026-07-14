@@ -298,6 +298,12 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 		}
 	}
 	if mergeRequest != nil {
+		if !taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) {
+			if mergeRequestHasConflict(mergeRequest) {
+				return response.Issue, mergeRequest, &decision.MergeRequestExternalState{HasMergeConflict: true}, nil, nil
+			}
+			return response.Issue, mergeRequest, nil, nil, nil
+		}
 		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest)
 		if stateErr != nil {
 			return response.Issue, mergeRequest, nil, nil, stateErr
@@ -335,7 +341,10 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 		if state.HasMergeConflict {
 			return state, nil
 		}
-		return nil, err
+		// Ошибка чтения замечаний не должна блокировать маршруты, которым
+		// замечания не нужны. Само действие ревизии загрузит их отдельно.
+		s.logger.Printf("Замечания запроса на слияние не восстановлены: номер=%d ошибка=%v", mergeRequest.Number, err)
+		return nil, nil
 	}
 	state.ReviewRemarks = append([]integration.ReviewRemark(nil), response.ReviewRemarks...)
 	state.HasUnresolvedReviewRemarks = hasUnresolvedExternalReviewRemarks(response.ReviewRemarks)
@@ -606,6 +615,8 @@ func labelTransitionForAction(action string, result *execution.ExecutionResult) 
 	case execution.ActionStartImplementationPR:
 		return []string{LabelAwaitingReview}, []string{LabelNeedsRework, LabelReviewPassed}, nil
 	case execution.ActionApplyReviewComments:
+		return []string{LabelAwaitingReview}, []string{LabelNeedsRework, LabelReviewPassed}, nil
+	case execution.ActionResolveMergeConflict:
 		return []string{LabelAwaitingReview}, []string{LabelNeedsRework, LabelReviewPassed}, nil
 	case execution.ActionReviewPullRequest:
 		passed := reviewExecutionPassed(result)

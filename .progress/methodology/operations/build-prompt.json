@@ -33,6 +33,14 @@
       "review_remarks": {
         "type": "object_array",
         "description": "Канонические замечания ревизии."
+      },
+      "instruction": {
+        "type": "string",
+        "description": "Дополнительная обязательная исполнительная инструкция."
+      },
+      "conflict_context": {
+        "type": "object",
+        "description": "Контекст конфликтного перебазирования."
       }
     },
     "out": {
