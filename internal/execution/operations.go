@@ -986,6 +986,7 @@ type allocateResourcesInput struct {
 	modelBinding          string
 	runner                string
 	model                 string
+	reasoningEffort       string
 	environment           string
 	workplaceName         string
 	repositoryURL         string
@@ -997,7 +998,10 @@ func (input allocateResourcesInput) invocation() invocation {
 	result := input.invocationValue
 	result.Repository = model.RepositorySpec{URL: input.repositoryURL}
 	result.Workplace = model.WorkplaceSpec{Name: input.workplaceName, Environment: input.environment}
-	result.Launch = model.LaunchSpec{ModelBinding: input.modelBinding, Runner: input.runner, Model: input.model}
+	result.Launch.ModelBinding = input.modelBinding
+	result.Launch.Runner = input.runner
+	result.Launch.Model = input.model
+	result.Launch.ReasoningEffort = input.reasoningEffort
 	return result
 }
 
@@ -1015,6 +1019,7 @@ func allocateResourcesInputFromOperation(state *operationExecution, operation Op
 	input.modelBinding = stringValueFromAllocateResourcesMapping(state, operation.In["model_binding"])
 	input.runner = stringValueFromAllocateResourcesMapping(state, operation.In["runner"])
 	input.model = stringValueFromAllocateResourcesMapping(state, operation.In["model"])
+	input.reasoningEffort = stringValueFromAllocateResourcesMapping(state, operation.In["reasoning_effort"])
 	input.environment = stringValueFromAllocateResourcesMapping(state, operation.In["environment"])
 	input.workplaceName = stringValueFromAllocateResourcesMapping(state, operation.In["workplace_name"])
 	input.repositoryURL = stringValueFromAllocateResourcesMapping(state, operation.In["repository_url"])
@@ -1128,12 +1133,13 @@ func profileValueFromAllocateResourcesMapping(state *operationExecution, mapping
 
 func allocateResourcesInputSummary(input allocateResourcesInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
-		"model_binding":  input.modelBinding,
-		"runner":         input.runner,
-		"model":          input.model,
-		"environment":    input.environment,
-		"workplace_name": input.workplaceName,
-		"repository_url": input.repositoryURL,
+		"model_binding":    input.modelBinding,
+		"runner":           input.runner,
+		"model":            input.model,
+		"reasoning_effort": input.reasoningEffort,
+		"environment":      input.environment,
+		"workplace_name":   input.workplaceName,
+		"repository_url":   input.repositoryURL,
 	})
 }
 

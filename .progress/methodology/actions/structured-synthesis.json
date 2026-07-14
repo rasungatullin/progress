@@ -12,6 +12,7 @@
       "directory": {"type": "string", "required": true, "description": "Рабочий каталог исполнительного модуля."},
       "runner": {"type": "string", "required": true, "description": "Исполнительный модуль."},
       "model": {"type": "string", "required": true, "description": "Модель выполнения."},
+      "reasoning_effort": {"type": "string", "description": "Явно заданное усилие рассуждения модели."},
       "resume_session_id": {"type": "string", "description": "Идентификатор возобновляемого сеанса."}
     },
     "data": {
@@ -49,6 +50,7 @@
         "directory": {"ref": "in.directory"},
         "runner": {"ref": "in.runner"},
         "model": {"ref": "in.model"},
+        "reasoning_effort": {"ref": "in.reasoning_effort"},
         "resume_session_id": {"ref": "in.resume_session_id"}
       },
       "out": {
