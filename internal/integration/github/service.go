@@ -443,7 +443,7 @@ func (s *Service) executePRComments(ctx context.Context, response model.Response
 	}
 
 	var rawComments []ghIssueComment
-	if req.ObjectType != "review-remark" {
+	if req.ObjectType != "review-remark" || (req.Resource == "comment" && req.ObjectType == "review-remark") {
 		result, config, err := s.runner.RunIssueComments(ctx, repository, number)
 		repository = firstNonEmpty(repository, strings.TrimSpace(config.DefaultRepo))
 		if err != nil {

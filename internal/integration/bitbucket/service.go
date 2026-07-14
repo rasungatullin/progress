@@ -816,7 +816,7 @@ func (s *Service) executePullRequestComments(ctx context.Context, response model
 	}
 	for _, item := range comments {
 		inline := commentIsInline(item, byID)
-		if isReviewRemarkRequest(req) != inline {
+		if isFilteredCommentRequest(req) && isReviewRemarkRequest(req) != inline {
 			continue
 		}
 		remark := reviewRemarkFromAPIComment(repository.fullName, req.MergeRequestNumber, item)
@@ -958,7 +958,7 @@ func (s *Service) executeServerPullRequestComments(ctx context.Context, response
 		}
 		remarks := appendServerCommentRemarks(nil, repository.fullName, req.MergeRequestNumber, *item.Comment)
 		for _, remark := range remarks {
-			if isReviewRemarkRequest(req) == (strings.TrimSpace(remark.Path) != "") {
+			if !isFilteredCommentRequest(req) || isReviewRemarkRequest(req) == (strings.TrimSpace(remark.Path) != "") {
 				response.ReviewRemarks = append(response.ReviewRemarks, remark)
 			}
 		}
@@ -969,6 +969,11 @@ func (s *Service) executeServerPullRequestComments(ctx context.Context, response
 
 func isReviewRemarkRequest(req model.ProviderRequest) bool {
 	return strings.TrimSpace(req.ObjectType) == "review-remark"
+}
+
+func isFilteredCommentRequest(req model.ProviderRequest) bool {
+	object := strings.TrimSpace(req.ObjectType)
+	return object == "review-remark" || object == "merge-request-comment"
 }
 
 func (s *Service) do(ctx context.Context, method string, endpoint string, payload []byte) (int, []byte, error) {

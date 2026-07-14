@@ -398,9 +398,9 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
 	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
-	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.labelAliases, "label", nil, "Метка задачи")
 	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-labels", nil, "Метки, исключаемые из поиска")
-	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-label", nil, "Исключаемая метка задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabelAliases, "exclude-label", nil, "Исключаемая метка задачи")
 	return cmd
 }
 
@@ -512,6 +512,8 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 		Labels:          append([]string(nil), flags.labels...),
 		ExcludeLabels:   append([]string(nil), flags.excludeLabels...),
 	}
+	request.Labels = append(request.Labels, flags.labelAliases...)
+	request.ExcludeLabels = append(request.ExcludeLabels, flags.excludeLabelAliases...)
 	response, err := newIntegrationService(cmd).Execute(cmd.Context(), request)
 	if printErr := printIntegrationResponseOrJSON(cmd, response, format, printTypeOrientedIssueResponse); printErr != nil {
 		return printErr
@@ -1899,7 +1901,6 @@ func validateInvokeField(field integration.OperationField, value any) error {
 
 func requestFromInvokeInput(descriptor integration.OperationDescriptor, values map[string]any) integration.Request {
 	objectType := descriptor.ObjectType
-	objectType = strings.ReplaceAll(objectType, ".", "-")
 	operation := descriptor.Operation
 	switch descriptor.Name {
 	case "issue.issue.comment.list":
@@ -1912,6 +1913,12 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 		objectType, operation = "merge-request-comment", "list"
 	case "repo.merge-request.comment.create":
 		objectType = "merge-request-comment"
+		// Обычный комментарий не может стать inline-замечанием даже при
+		// диагностическом вызове с лишними координатами diff.
+		delete(values, "path")
+		delete(values, "line")
+		delete(values, "side")
+
 	case "repo.review-remark.list":
 		objectType, operation = "review-remark", "list"
 	case "repo.review-remark.unresolve":
