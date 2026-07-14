@@ -110,6 +110,9 @@
         "model": {
           "ref": "in.model"
         },
+        "reasoning_effort": {
+          "ref": "in.launch.reasoning_effort"
+        },
         "environment": {
           "ref": "in.environment"
         },
@@ -214,6 +217,9 @@
         },
         "model": {
           "ref": "data.allocation.model"
+        },
+        "reasoning_effort": {
+          "ref": "data.allocation.reasoning_effort"
         },
         "resume_session_id": {
           "ref": "in.launch.resume.runner_session_id"

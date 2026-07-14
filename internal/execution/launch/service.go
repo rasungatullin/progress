@@ -696,6 +696,10 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 		return fmt.Errorf("launch model is required")
 	}
 
+	if err := validateReasoningEffort(in.Launch); err != nil {
+		return err
+	}
+
 	if err := validateStructuredOutputSettings(in.Launch); err != nil {
 		return err
 	}
@@ -710,6 +714,10 @@ func validateLaunch(in model.Invocation, workplace model.Workplace) error {
 	}
 
 	return nil
+}
+
+func validateReasoningEffort(spec model.LaunchSpec) error {
+	return model.ValidateReasoningEffort(spec.Runner, spec.Model, spec.ReasoningEffort)
 }
 
 func isSupportedRunner(runner string) bool {
@@ -2135,6 +2143,9 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 			args = []string{"exec", "resume", sessionID, prompt}
 		} else {
 			args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
+		}
+		if effort := model.NormalizeReasoningEffort(spec.ReasoningEffort); effort != "" {
+			args = append([]string{args[0], "-c", `model_reasoning_effort="` + effort + `"`}, args[1:]...)
 		}
 	default:
 		if resume {

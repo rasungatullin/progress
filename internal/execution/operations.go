@@ -988,6 +988,7 @@ type allocateResourcesInput struct {
 	modelBinding          string
 	runner                string
 	model                 string
+	reasoningEffort       string
 	environment           string
 	workplaceName         string
 	repositoryURL         string
@@ -999,7 +1000,10 @@ func (input allocateResourcesInput) invocation() invocation {
 	result := input.invocationValue
 	result.Repository = model.RepositorySpec{URL: input.repositoryURL}
 	result.Workplace = model.WorkplaceSpec{Name: input.workplaceName, Environment: input.environment}
-	result.Launch = model.LaunchSpec{ModelBinding: input.modelBinding, Runner: input.runner, Model: input.model}
+	result.Launch.ModelBinding = input.modelBinding
+	result.Launch.Runner = input.runner
+	result.Launch.Model = input.model
+	result.Launch.ReasoningEffort = input.reasoningEffort
 	return result
 }
 
@@ -1017,6 +1021,7 @@ func allocateResourcesInputFromOperation(state *operationExecution, operation Op
 	input.modelBinding = stringValueFromAllocateResourcesMapping(state, operation.In["model_binding"])
 	input.runner = stringValueFromAllocateResourcesMapping(state, operation.In["runner"])
 	input.model = stringValueFromAllocateResourcesMapping(state, operation.In["model"])
+	input.reasoningEffort = stringValueFromAllocateResourcesMapping(state, operation.In["reasoning_effort"])
 	input.environment = stringValueFromAllocateResourcesMapping(state, operation.In["environment"])
 	input.workplaceName = stringValueFromAllocateResourcesMapping(state, operation.In["workplace_name"])
 	input.repositoryURL = stringValueFromAllocateResourcesMapping(state, operation.In["repository_url"])
@@ -1077,6 +1082,8 @@ func stringValueFromAllocateResourcesMapping(state *operationExecution, mapping 
 		return strings.TrimSpace(inv.Launch.Runner)
 	case "data.invocation.launch.model":
 		return strings.TrimSpace(inv.Launch.Model)
+	case "data.invocation.launch.reasoning_effort":
+		return strings.TrimSpace(inv.Launch.ReasoningEffort)
 	case "data.invocation.workplace.environment":
 		return strings.TrimSpace(inv.Workplace.Environment)
 	case "data.invocation.workplace.name":
@@ -1130,12 +1137,13 @@ func profileValueFromAllocateResourcesMapping(state *operationExecution, mapping
 
 func allocateResourcesInputSummary(input allocateResourcesInput, operation OperationSpec) string {
 	return operationIOSummary(operation.In, map[string]string{
-		"model_binding":  input.modelBinding,
-		"runner":         input.runner,
-		"model":          input.model,
-		"environment":    input.environment,
-		"workplace_name": input.workplaceName,
-		"repository_url": input.repositoryURL,
+		"model_binding":    input.modelBinding,
+		"runner":           input.runner,
+		"model":            input.model,
+		"reasoning_effort": input.reasoningEffort,
+		"environment":      input.environment,
+		"workplace_name":   input.workplaceName,
+		"repository_url":   input.repositoryURL,
 	})
 }
 
@@ -1494,6 +1502,7 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	directiveInvocation := input.invocation
 	directiveInvocation.Launch.Runner = input.allocation.Runner
 	directiveInvocation.Launch.Model = input.allocation.Model
+	directiveInvocation.Launch.ReasoningEffort = input.allocation.ReasoningEffort
 	if strings.TrimSpace(directiveInvocation.Launch.ModelBinding) == "" {
 		directiveInvocation.Launch.ModelBinding = input.allocation.ModelBinding
 	}
@@ -1767,11 +1776,12 @@ func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *op
 	input := launchSynthesisInputFromOperation(state, operation)
 	launchCtx := launch.WithHistoryHandle(ctx, state.historyHandle)
 	launchInvocation := invocation{Launch: launchSpec{Prompt: input.prompt, Directory: input.directory, Runner: input.runner, Model: input.model}}
+	launchInvocation.Launch.ReasoningEffort = input.reasoningEffort
 	if input.resumeSessionID != "" {
 		launchInvocation.Launch.Resume = &model.ResumeSpec{RunnerSessionID: input.resumeSessionID}
 	}
 	launchWorkplace := workplace{Name: input.directory, RepositoryRoot: input.directory, Ready: true}
-	launchAllocation := allocation{Runner: input.runner, Model: input.model}
+	launchAllocation := allocation{Runner: input.runner, Model: input.model, ReasoningEffort: input.reasoningEffort}
 	result, err := e.service.launch(launchCtx, launchInvocation, profile{}, launchAllocation, launchWorkplace)
 	writeLaunchSynthesisData(state, operation, result)
 	if err != nil {
@@ -1810,6 +1820,7 @@ type launchSynthesisInput struct {
 	directory       string
 	runner          string
 	model           string
+	reasoningEffort string
 	resumeSessionID string
 }
 
@@ -1822,6 +1833,7 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 	input.directory, _ = operationMappingValue[string](state, operation.In["directory"])
 	input.runner, _ = operationMappingValue[string](state, operation.In["runner"])
 	input.model, _ = operationMappingValue[string](state, operation.In["model"])
+	input.reasoningEffort, _ = operationMappingValue[string](state, operation.In["reasoning_effort"])
 	input.resumeSessionID, _ = operationMappingValue[string](state, operation.In["resume_session_id"])
 	if strings.TrimSpace(input.prompt) == "" {
 		if directive, ok := directiveValueFromLaunchSynthesisMapping(state, operation.In["directive"]); ok {
@@ -1829,6 +1841,7 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 			input.directory = directive.Directory
 			input.runner = directive.Runner
 			input.model = directive.Model
+			input.reasoningEffort = directive.ReasoningEffort
 			if directive.Resume != nil {
 				input.resumeSessionID = directive.Resume.RunnerSessionID
 			}
@@ -2051,6 +2064,7 @@ func launchSynthesisInputSummary(input launchSynthesisInput, operation Operation
 		"directory":         input.directory,
 		"runner":            input.runner,
 		"model":             input.model,
+		"reasoning_effort":  presenceSummary(input.reasoningEffort),
 		"resume_session_id": presenceSummary(input.resumeSessionID),
 	})
 }

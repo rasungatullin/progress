@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,6 +22,18 @@ const (
 type Service struct {
 	resolveRepoRoot func(context.Context) (string, error)
 	readFile        func(string) ([]byte, error)
+}
+
+type invalidBindingConfigurationError struct {
+	err error
+}
+
+func (e *invalidBindingConfigurationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *invalidBindingConfigurationError) Unwrap() error {
+	return e.err
 }
 
 type resourceConfig struct {
@@ -72,6 +85,9 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 		if _, ok := config.Config.Resources[modelName]; !ok {
 			return model.Allocation{}, fmt.Errorf("unknown execution model: %s", modelName)
 		}
+		if err := validateReasoningEffort(runner, modelName, in.Launch.ReasoningEffort); err != nil {
+			return model.Allocation{}, fmt.Errorf("explicit launch has invalid reasoning-effort: %w", err)
+		}
 		if err := ensureToolResourceAvailable(config, runner, modelName); err != nil {
 			return model.Allocation{}, err
 		}
@@ -84,6 +100,7 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			Reserved:         true,
 			Runner:           runner,
 			Model:            modelName,
+			ReasoningEffort:  model.NormalizeReasoningEffort(in.Launch.ReasoningEffort),
 			Environment:      environment,
 			EnvironmentType:  environmentType,
 			Source:           allocationSourceExplicitRunnerModel,
@@ -106,6 +123,10 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			allocation.PrivateStore = config.Config.PrivateStore
 			allocation.Git = config.Config.Git
 			return allocation, nil
+		}
+		var invalidConfigErr *invalidBindingConfigurationError
+		if errors.As(err, &invalidConfigErr) {
+			return model.Allocation{}, err
 		}
 		if !profile.AllowModelFallback {
 			return model.Allocation{}, err
@@ -181,6 +202,11 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 	}
 	tool := bindingTool(binding)
 	resource := bindingResource(binding)
+	if err := validateReasoningEffort(tool, resource, binding.ReasoningEffort); err != nil {
+		return model.Allocation{}, &invalidBindingConfigurationError{
+			err: fmt.Errorf("binding %q has invalid reasoning-effort: %w", bindingName, err),
+		}
+	}
 	if err := ensureToolResourceAvailable(config, tool, resource); err != nil {
 		return model.Allocation{}, err
 	}
@@ -195,6 +221,7 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 		Runner:          tool,
 		Model:           resource,
 		ModelBinding:    bindingName,
+		ReasoningEffort: binding.ReasoningEffort,
 		Environment:     environment,
 		EnvironmentType: environmentType,
 		Source:          source,
@@ -204,6 +231,10 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 		allocation.BindingSource = string(config.BindingSources[bindingName])
 	}
 	return allocation, nil
+}
+
+func validateReasoningEffort(runner, modelName, effort string) error {
+	return model.ValidateReasoningEffort(runner, modelName, effort)
 }
 
 func resolveDefaultBinding(config resourceConfig, in model.Invocation) (model.Allocation, error) {

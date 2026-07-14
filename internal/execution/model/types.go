@@ -7,6 +7,7 @@ type LaunchSpec struct {
 	Runner                   string           `json:"runner,omitempty"`
 	Model                    string           `json:"model,omitempty"`
 	ModelBinding             string           `json:"model_binding,omitempty"`
+	ReasoningEffort          string           `json:"reasoning_effort,omitempty"`
 	Resume                   *ResumeSpec      `json:"resume,omitempty"`
 	Prompt                   string           `json:"prompt,omitempty"`
 	PromptAdditions          []string         `json:"prompt_additions,omitempty"`
@@ -239,6 +240,7 @@ type Allocation struct {
 	Runner           string                     `json:"runner,omitempty"`
 	Model            string                     `json:"model,omitempty"`
 	ModelBinding     string                     `json:"model_binding,omitempty"`
+	ReasoningEffort  string                     `json:"reasoning_effort,omitempty"`
 	Environment      string                     `json:"environment,omitempty"`
 	EnvironmentType  string                     `json:"environment_type,omitempty"`
 	BindingSource    string                     `json:"binding_source,omitempty"`
@@ -320,11 +322,12 @@ type CommitPushInput struct {
 }
 
 type ResourceBindingConfig struct {
-	Runner      string `json:"runner,omitempty"`
-	Model       string `json:"model,omitempty"`
-	Tool        string `json:"tool,omitempty"`
-	Resource    string `json:"resource,omitempty"`
-	Environment string `json:"environment,omitempty"`
+	Runner          string `json:"runner,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Tool            string `json:"tool,omitempty"`
+	Resource        string `json:"resource,omitempty"`
+	Environment     string `json:"environment,omitempty"`
+	ReasoningEffort string `json:"reasoning-effort,omitempty"`
 }
 
 type EnvironmentConfig struct {

@@ -29,7 +29,7 @@ func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 			Model:     "ignored",
 			Prompt:    "ship it",
 		},
-	}, profile{Mode: "manual"}, allocation{Runner: "codex", Model: "gpt-5.3-codex", ModelBinding: "coder"}, workplace{})
+	}, profile{Mode: "manual"}, allocation{Runner: "codex", Model: "gpt-5.3-codex", ModelBinding: "coder", ReasoningEffort: "medium"}, workplace{})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -42,6 +42,26 @@ func TestServiceLaunchUsesResolvedAllocationRunnerAndModel(t *testing.T) {
 	}
 	if launcher.invocation.Launch.ModelBinding != "coder" {
 		t.Fatalf("expected model-binding from allocation, got %q", launcher.invocation.Launch.ModelBinding)
+	}
+	if launcher.invocation.Launch.ReasoningEffort != "medium" {
+		t.Fatalf("expected reasoning effort from allocation, got %q", launcher.invocation.Launch.ReasoningEffort)
+	}
+}
+
+func TestServiceLaunchPreservesExplicitReasoningEffortWhenAllocationOmitsIt(t *testing.T) {
+	t.Parallel()
+
+	launcher := &stubLauncher{}
+	service := &Service{logger: log.Default(), launcher: launcher}
+
+	_, err := service.launch(context.Background(), invocation{Launch: launchSpec{
+		Directory: "/tmp/work", Runner: "codex", Model: "gpt-5.3-codex-spark", ReasoningEffort: "medium", Prompt: "ship it",
+	}}, profile{}, allocation{Runner: "codex", Model: "gpt-5.3-codex-spark"}, workplace{})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if launcher.invocation.Launch.ReasoningEffort != "medium" {
+		t.Fatalf("expected explicit reasoning effort to be preserved, got %q", launcher.invocation.Launch.ReasoningEffort)
 	}
 }
 
@@ -915,6 +935,41 @@ func TestAllocateResourcesUsesResolvedProfileFields(t *testing.T) {
 	resolved := input.resolvedProfile()
 	if resolved.ModelBinding != "coder" || resolved.AllowModelFallback {
 		t.Fatalf("allocate-resources must receive resolved profile fields: %#v", resolved)
+	}
+}
+
+func TestAllocateResourcesPreservesExplicitReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{data: map[string]any{
+		"invocation": model.Invocation{Launch: model.LaunchSpec{ReasoningEffort: "medium"}},
+	}}
+	operation := model.OperationSpec{In: model.OperationMap{
+		"reasoning_effort": {Ref: "data.invocation.launch.reasoning_effort"},
+	}}
+
+	input := allocateResourcesInputFromOperation(state, operation)
+	if input.reasoningEffort != "medium" {
+		t.Fatalf("allocate-resources must preserve explicit reasoning effort: %q", input.reasoningEffort)
+	}
+}
+
+func TestLaunchSynthesisDoesNotReadImplicitAllocationReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{data: map[string]any{
+		"allocation": model.Allocation{ReasoningEffort: "medium"},
+	}}
+	operation := model.OperationSpec{In: model.OperationMap{
+		"prompt":    {Value: []byte(`"ship it"`)},
+		"directory": {Value: []byte(`"/tmp/work"`)},
+		"runner":    {Value: []byte(`"codex"`)},
+		"model":     {Value: []byte(`"gpt-5.3-codex-spark"`)},
+	}}
+
+	input := launchSynthesisInputFromOperation(state, operation)
+	if input.reasoningEffort != "" {
+		t.Fatalf("launch-synthesis must use only explicit input mappings: %q", input.reasoningEffort)
 	}
 }
 
@@ -4619,6 +4674,7 @@ func structuredSynthesisMethodologyAction() methodology.Action {
 				"directory":                {Type: "string", Required: required},
 				"runner":                   {Type: "string", Required: required},
 				"model":                    {Type: "string", Required: required},
+				"reasoning_effort":         {Type: "string"},
 				"resume_session_id":        {Type: "string"},
 			},
 			Data: map[string]methodology.ActionContractField{
@@ -4666,6 +4722,7 @@ func testExecutionOperationRegistry() []methodology.Operation {
 				"directory":                {Type: "string", Required: required},
 				"runner":                   {Type: "string", Required: required},
 				"model":                    {Type: "string", Required: required},
+				"reasoning_effort":         {Type: "string"},
 				"resume_session_id":        {Type: "string"},
 			},
 			Out: map[string]methodology.OperationContractField{
@@ -4900,6 +4957,7 @@ func structuredSynthesisActionOperation() methodology.ActionOperation {
 			"directory":                mappingRef("data.workplace.name"),
 			"runner":                   mappingRef("data.allocation.runner"),
 			"model":                    mappingRef("data.allocation.model"),
+			"reasoning_effort":         mappingRef("data.allocation.reasoning_effort"),
 			"resume_session_id":        mappingRef("in.launch.resume.runner_session_id"),
 		},
 		Out: map[string]methodology.ActionMapping{
@@ -4935,6 +4993,7 @@ func structuredSynthesisLaunchOperation() methodology.ActionOperation {
 			"directory":         mappingRef("in.directory"),
 			"runner":            mappingRef("in.runner"),
 			"model":             mappingRef("in.model"),
+			"reasoning_effort":  mappingRef("in.reasoning_effort"),
 			"resume_session_id": mappingRef("in.resume_session_id"),
 		},
 		Out: map[string]methodology.ActionMapping{
@@ -4965,10 +5024,11 @@ func launchSynthesisActionOperation() methodology.ActionOperation {
 
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"prompt":    mappingRef("data.prompt"),
-			"directory": mappingRef("data.workplace.name"),
-			"runner":    mappingRef("data.allocation.runner"),
-			"model":     mappingRef("data.allocation.model"),
+			"prompt":           mappingRef("data.prompt"),
+			"directory":        mappingRef("data.workplace.name"),
+			"runner":           mappingRef("data.allocation.runner"),
+			"model":            mappingRef("data.allocation.model"),
+			"reasoning_effort": mappingRef("data.allocation.reasoning_effort"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"raw_output": mappingRef("data.raw_output"),

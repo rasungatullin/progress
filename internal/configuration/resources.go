@@ -569,6 +569,7 @@ func normalizeBindings(values map[string]model.ResourceBindingConfig) map[string
 		binding.Tool = strings.TrimSpace(binding.Tool)
 		binding.Resource = strings.TrimSpace(binding.Resource)
 		binding.Environment = strings.TrimSpace(binding.Environment)
+		binding.ReasoningEffort = model.NormalizeReasoningEffort(binding.ReasoningEffort)
 		if binding.Tool == "" {
 			binding.Tool = binding.Runner
 		}

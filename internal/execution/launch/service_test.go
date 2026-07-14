@@ -2284,6 +2284,62 @@ func TestBuildRunnerCommandCodex(t *testing.T) {
 	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "ship it"})
 }
 
+func TestBuildRunnerCommandCodexReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildRunnerCommand(context.Background(), model.LaunchSpec{
+		Directory:       "/tmp/work",
+		Runner:          RunnerCodex,
+		Model:           "gpt-5.3-codex-spark",
+		ReasoningEffort: "medium",
+	}, "ship it")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-c", `model_reasoning_effort="medium"`, "-C", "/tmp/work", "-m", "gpt-5.3-codex-spark", "ship it"})
+}
+
+func TestValidateLaunchRejectsUnsupportedReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	invocation.Launch.Model = "gpt-5.3-codex-spark"
+	invocation.Launch.ReasoningEffort = "ultra"
+
+	err := validateLaunch(invocation, validWorkplace(t))
+	if err == nil || !strings.Contains(err.Error(), "unsupported reasoning-effort value") {
+		t.Fatalf("expected unsupported reasoning effort error, got %v", err)
+	}
+}
+
+func TestValidateLaunchRejectsReasoningEffortForOpenCode(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.ReasoningEffort = "medium"
+
+	err := validateLaunch(invocation, validWorkplace(t))
+	if err == nil || !strings.Contains(err.Error(), "does not support reasoning-effort") {
+		t.Fatalf("expected unsupported runner error, got %v", err)
+	}
+}
+
+func TestValidateLaunchRejectsReasoningEffortForUnknownCodexModel(t *testing.T) {
+	t.Parallel()
+
+	invocation := validInvocation(t, false)
+	invocation.Launch.Runner = RunnerCodex
+	invocation.Launch.Model = "gpt-5-future"
+	invocation.Launch.ReasoningEffort = "medium"
+
+	err := validateLaunch(invocation, validWorkplace(t))
+	if err == nil || !strings.Contains(err.Error(), "does not support reasoning-effort") {
+		t.Fatalf("expected unsupported model error, got %v", err)
+	}
+}
+
 func TestBuildRunnerCommandCodexResume(t *testing.T) {
 	t.Parallel()
 
