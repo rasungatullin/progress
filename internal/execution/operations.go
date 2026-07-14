@@ -2271,11 +2271,6 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 		}
 		remoteOID = strings.TrimSpace(remoteOID)
 	}
-	if input.AllowConflict {
-		if _, err := gitOutput(ctx, input.Directory, "reset", "--hard", "refs/remotes/origin/"+branch); err != nil {
-			return e.failRebase(state, operation, name, "Рабочая ветка не синхронизирована с удалённой вершиной.", "rebase_remote_sync_failed", err)
-		}
-	}
 	rebaseTarget := "FETCH_HEAD"
 	if input.AllowConflict {
 		rebaseTarget = "refs/remotes/origin/" + normalizeRebaseRef(input.BaseRef)

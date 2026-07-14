@@ -2,6 +2,7 @@ package workplace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,49 @@ import (
 
 	"github.com/rasungatullin/progress/internal/execution/model"
 )
+
+func TestRebaseWorkplaceBranchOnRemoteKeepsLocalCommitsWithoutConflict(t *testing.T) {
+	var calls []string
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "", nil
+	}}
+
+	if err := service.rebaseWorkplaceBranchOnRemote(context.Background(), "/tmp/work", "167"); err != nil {
+		t.Fatalf("synchronize workplace branch: %v", err)
+	}
+	if !reflect.DeepEqual(calls, []string{"rebase -- refs/remotes/origin/167"}) {
+		t.Fatalf("unexpected git calls: %v", calls)
+	}
+}
+
+func TestRebaseWorkplaceBranchOnRemoteDropsConflictingLocalCommits(t *testing.T) {
+	var calls []string
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		call := strings.Join(args, " ")
+		calls = append(calls, call)
+		switch call {
+		case "rebase -- refs/remotes/origin/167":
+			return "", errors.New("conflict")
+		case "diff --name-only --diff-filter=U":
+			return "file.txt\n", nil
+		default:
+			return "", nil
+		}
+	}}
+
+	if err := service.rebaseWorkplaceBranchOnRemote(context.Background(), "/tmp/work", "167"); err != nil {
+		t.Fatalf("synchronize workplace branch: %v", err)
+	}
+	if !reflect.DeepEqual(calls, []string{
+		"rebase -- refs/remotes/origin/167",
+		"diff --name-only --diff-filter=U",
+		"rebase --abort",
+		"reset --hard refs/remotes/origin/167",
+	}) {
+		t.Fatalf("unexpected git calls: %v", calls)
+	}
+}
 
 func TestPrepareUsesCurrentRepositoryWhenRepoIsOmitted(t *testing.T) {
 	t.Parallel()
@@ -108,8 +152,10 @@ func TestPrepareUsesFetchedRequestedHeadBranchWhenRemoteRefIsMissing(t *testing.
 	t.Parallel()
 
 	hostRepoRoot := t.TempDir()
+	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "feature-narrow")
 	responses := map[gitOutputKey]string{
-		{dir: hostRepoRoot, args: keyArgs("fetch", "origin", "feature/narrow")}: "fetched\n",
+		{dir: hostRepoRoot, args: keyArgs("fetch", "origin", "feature/narrow")}:                 "fetched\n",
+		{dir: expectedDir, args: keyArgs("rebase", "--", "refs/remotes/origin/feature/narrow")}: "\n",
 	}
 	service, gitCalls := newStubService(t, hostRepoRoot, responses)
 
@@ -124,7 +170,6 @@ func TestPrepareUsesFetchedRequestedHeadBranchWhenRemoteRefIsMissing(t *testing.
 		t.Fatalf("prepare workplace: %v", err)
 	}
 
-	expectedDir := filepath.Join(hostRepoRoot, ".progress", "workplaces", "feature-narrow")
 	if workplace.Name != expectedDir {
 		t.Fatalf("unexpected workplace path: %q", workplace.Name)
 	}

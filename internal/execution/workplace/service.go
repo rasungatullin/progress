@@ -134,6 +134,9 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 		if err := s.validateExistingWorkplace(ctx, targetDir, branchName, repoRoot); err != nil {
 			return model.Workplace{}, err
 		}
+		if err := s.synchronizeExistingWorkplace(ctx, targetDir, branchName); err != nil {
+			return model.Workplace{}, err
+		}
 
 		return model.Workplace{Name: targetDir, BaseRef: baseBranch, HeadRef: branchName, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
 	} else if !os.IsNotExist(err) {
@@ -162,8 +165,49 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 	if err := s.runGit(ctx, repoRoot, addArgs...); err != nil {
 		return model.Workplace{}, fmt.Errorf("create git worktree %q: %w", branchName, err)
 	}
+	if headFetched {
+		if err := s.rebaseWorkplaceBranchOnRemote(ctx, targetDir, branchName); err != nil {
+			return model.Workplace{}, fmt.Errorf("synchronize workplace branch %q: %w", branchName, err)
+		}
+	}
 
 	return model.Workplace{Name: targetDir, BaseRef: baseBranch, HeadRef: branchName, Environment: environment, EnvironmentType: environmentType, RepositoryURL: repositoryURL, RepositoryRoot: repoRoot, Ready: true}, nil
+}
+
+func (s *Service) synchronizeExistingWorkplace(ctx context.Context, directory, branch string) error {
+	if err := s.fetchRemoteBranch(ctx, directory, branch); err != nil {
+		return fmt.Errorf("fetch origin/%s: %w", branch, err)
+	}
+	if err := s.rebaseWorkplaceBranchOnRemote(ctx, directory, branch); err != nil {
+		return fmt.Errorf("rebase on origin/%s: %w", branch, err)
+	}
+	return nil
+}
+
+func (s *Service) rebaseWorkplaceBranchOnRemote(ctx context.Context, directory, branch string) error {
+	remoteRef := "refs/remotes/origin/" + branch
+	if _, err := s.runGitOutput(ctx, directory, "rebase", "--", remoteRef); err == nil {
+		return nil
+	} else {
+		paths, pathsErr := s.runGitOutput(ctx, directory, "diff", "--name-only", "--diff-filter=U")
+		if pathsErr != nil || strings.TrimSpace(paths) == "" {
+			_, abortErr := s.runGitOutput(ctx, directory, "rebase", "--abort")
+			if abortErr != nil {
+				err = fmt.Errorf("%w; additionally failed to abort rebase: %v", err, abortErr)
+			}
+			if pathsErr != nil {
+				err = fmt.Errorf("%w; additionally failed to inspect conflict paths: %v", err, pathsErr)
+			}
+			return err
+		}
+		if _, abortErr := s.runGitOutput(ctx, directory, "rebase", "--abort"); abortErr != nil {
+			return fmt.Errorf("%w; additionally failed to abort rebase: %v", err, abortErr)
+		}
+		if _, resetErr := s.runGitOutput(ctx, directory, "reset", "--hard", remoteRef); resetErr != nil {
+			return fmt.Errorf("%w; additionally failed to reset to remote branch: %v", err, resetErr)
+		}
+		return nil
+	}
 }
 
 func (s *Service) localBranchExists(ctx context.Context, dir string, name string) bool {
