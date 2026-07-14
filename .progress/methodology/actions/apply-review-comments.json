@@ -2,6 +2,14 @@
   "name": "apply-review-comments",
   "class": "engineering-synthesis",
   "profile": "review-rework",
+  "structured_output_fields": [
+    "commit_message",
+    "changes",
+    "remarks",
+    "review_responses",
+    "commands",
+    "conclusion"
+  ],
   "aliases": [
     "address-review-comments",
     "fix-review-comments",
@@ -246,7 +254,7 @@
           "ref": "data.profile.structured_output_required"
         },
         "structured_output_fields": {
-          "ref": "data.profile.structured_output_fields"
+          "ref": "action.structured_output_fields"
         },
         "structured_input": {
           "ref": "in.structured_input"
@@ -300,6 +308,9 @@
         },
         "session_id": {
           "ref": "data.session_id"
+        },
+        "structured_output_fields": {
+          "ref": "action.structured_output_fields"
         }
       },
       "out": {

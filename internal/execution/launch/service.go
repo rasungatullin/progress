@@ -143,7 +143,10 @@ func BuildPrompt(spec model.LaunchSpec) (string, error) {
 	return buildRunnerPrompt(spec)
 }
 
-func ParseOutput(output string) (string, string, *model.StructuredOutput, error) {
+func ParseOutput(output string, structuredOutputFields []string) (string, string, *model.StructuredOutput, error) {
+	if _, err := normalizeStructuredOutputInstructionFields(structuredOutputFields); err != nil {
+		return "", "", nil, fmt.Errorf("invalid structured output fields: %w", err)
+	}
 	plain, raw, structured, state, err := parseStructuredOutput(output)
 	if state == trailingStructuredBlockInvalid {
 		return plain, raw, nil, err
@@ -2346,9 +2349,6 @@ func applyProfileStructuredOutput(spec model.LaunchSpec, profile model.Profile) 
 		spec.StructuredOutput = spec.StructuredOutput || profile.StructuredOutput || profile.StructuredOutputRequired
 	}
 	spec.StructuredOutputRequired = spec.StructuredOutputRequired || profile.StructuredOutputRequired
-	if spec.StructuredOutputFields == nil && profile.StructuredOutputFields != nil {
-		spec.StructuredOutputFields = append([]string(nil), profile.StructuredOutputFields...)
-	}
 	if strings.TrimSpace(spec.Timeout) == "" {
 		spec.Timeout = profile.Timeout
 	}

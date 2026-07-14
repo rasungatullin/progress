@@ -2,6 +2,13 @@
   "name": "review-pull-request",
   "class": "review",
   "profile": "review",
+  "structured_output_fields": [
+    "summary",
+    "remarks",
+    "questions",
+    "follow_up_actions",
+    "conclusion"
+  ],
   "aliases": [
     "pr-review",
     "review",
@@ -242,7 +249,7 @@
           "ref": "data.profile.structured_output_required"
         },
         "structured_output_fields": {
-          "ref": "data.profile.structured_output_fields"
+          "ref": "action.structured_output_fields"
         },
         "structured_input": {
           "ref": "in.structured_input"
@@ -296,6 +303,9 @@
         },
         "session_id": {
           "ref": "data.session_id"
+        },
+        "structured_output_fields": {
+          "ref": "action.structured_output_fields"
         }
       },
       "out": {
