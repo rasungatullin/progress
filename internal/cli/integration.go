@@ -208,10 +208,10 @@ func newTypeOrientedMergeRequestCreateCommand() *cobra.Command {
 }
 
 func newTypeOrientedMergeRequestCommentListCommand() *cobra.Command {
-	return newTypeOrientedMergeRequestListLikeCommand("comment", "list", "merge-request-comment", printIntegrationReviewRemarks)
+	return newTypeOrientedMergeRequestListLikeCommand("list", "list", "merge-request-comment", printIntegrationReviewRemarks)
 }
 func newTypeOrientedReviewRemarkListCommand() *cobra.Command {
-	return newTypeOrientedMergeRequestListLikeCommand("review-remark", "list", "review-remark", printIntegrationReviewRemarks)
+	return newTypeOrientedMergeRequestListLikeCommand("list", "list", "review-remark", printIntegrationReviewRemarks)
 }
 func newTypeOrientedMergeRequestListLikeCommand(use, operation, object string, printer func(*cobra.Command, integration.Response)) *cobra.Command {
 	flags := &integrationFlags{}
@@ -397,9 +397,9 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние объектов: open, closed или all")
 	cmd.Flags().IntVar(&flags.limit, "limit", 30, "Предельное число объектов")
 	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
-	cmd.Flags().StringArrayVar(&flags.labelAliases, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
 	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-labels", nil, "Метки, исключаемые из поиска")
-	cmd.Flags().StringArrayVar(&flags.excludeLabelAliases, "exclude-label", nil, "Исключаемая метка задачи")
+	cmd.Flags().StringArrayVar(&flags.excludeLabels, "exclude-label", nil, "Исключаемая метка задачи")
 	return cmd
 }
 
@@ -473,7 +473,7 @@ func newTypeOrientedIssueCommentCreateCommand() *cobra.Command {
 func newTypeOrientedIssueLabelCommand(operation string) *cobra.Command {
 	flags := &integrationFlags{}
 	cmd := &cobra.Command{Use: operation, Short: "Изменение меток задачи", RunE: func(cmd *cobra.Command, _ []string) error {
-		if !cmd.Flags().Changed("id") {
+		if !cmd.Flags().Changed("id") || strings.TrimSpace(flags.externalID) == "" {
 			return fmt.Errorf("--id is required")
 		}
 		if len(flags.labels) == 0 {
@@ -1729,33 +1729,38 @@ func newIntegrationInvokeCommand() *cobra.Command {
 			}
 			return printInvokeAvailabilityFailure(cmd, flags, "operation is not available: "+flags.operation, kind)
 		}
+		if strings.TrimSpace(flags.system) == "" {
+			flags.system = descriptor.System
+		}
 		if !descriptor.Available {
-			if strings.TrimSpace(flags.system) == "" {
-				flags.system = descriptor.System
-			}
 			kind := "unsupported-operation"
 			if !descriptor.Enabled {
 				kind = "not-configured"
 			}
 			return printInvokeAvailabilityFailure(cmd, flags, "operation is not available: "+flags.operation, kind)
 		}
+		for _, field := range append(append([]integration.OperationField{}, descriptor.Input.Required...), descriptor.Input.Optional...) {
+			value, ok := values[field.Name]
+			if !ok && field.Default != "" {
+				value, ok = invokeDefaultValue(field)
+				if ok {
+					values[field.Name] = value
+				}
+			}
+			if !ok {
+				continue
+			}
+			if err := validateInvokeField(field, value); err != nil {
+				return printInvokeInputFailure(cmd, flags, err)
+			}
+		}
 		for _, field := range descriptor.Input.Required {
 			value, ok := values[field.Name]
 			if !ok {
-				return fmt.Errorf("input field is required: %s", field.Name)
-			}
-			if err := validateInvokeField(field, value); err != nil {
-				return err
+				return printInvokeInputFailure(cmd, flags, fmt.Errorf("input field is required: %s", field.Name))
 			}
 			if field.Type == "string" && strings.TrimSpace(value.(string)) == "" {
-				return fmt.Errorf("input field is required: %s", field.Name)
-			}
-		}
-		for _, field := range descriptor.Input.Optional {
-			if value, ok := values[field.Name]; ok {
-				if err := validateInvokeField(field, value); err != nil {
-					return err
-				}
+				return printInvokeInputFailure(cmd, flags, fmt.Errorf("input field is required: %s", field.Name))
 			}
 		}
 		request := requestFromInvokeInput(descriptor, values)
@@ -1768,6 +1773,31 @@ func newIntegrationInvokeCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.input, "input", "", "JSON структурированного ввода")
 	cmd.Flags().StringVar(&flags.inputFile, "input-file", "", "Путь к JSON-файлу структурированного ввода")
 	return cmd
+}
+
+func invokeDefaultValue(field integration.OperationField) (any, bool) {
+	switch field.Type {
+	case "integer":
+		value, err := strconv.ParseInt(strings.TrimSpace(field.Default), 10, 64)
+		return float64(value), err == nil
+	case "boolean":
+		value, err := strconv.ParseBool(strings.TrimSpace(field.Default))
+		return value, err == nil
+	case "string[]":
+		var values []string
+		if err := json.Unmarshal([]byte(field.Default), &values); err == nil {
+			items := make([]any, len(values))
+			for index, value := range values {
+				items[index] = value
+			}
+			return items, true
+		}
+	}
+	return field.Default, true
+}
+
+func printInvokeInputFailure(cmd *cobra.Command, flags *integrationFlags, err error) error {
+	return printInvokeAvailabilityFailure(cmd, flags, err.Error(), "invalid-request")
 }
 
 func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags, message, kind string) error {
@@ -1804,7 +1834,7 @@ func invokeRouteObjectType(name string) (string, string) {
 		return "", ""
 	}
 	operation := parts[len(parts)-1]
-	object := strings.Join(parts[1:len(parts)-1], "-")
+	object := strings.ReplaceAll(strings.Join(parts[1:len(parts)-1], "-"), ".", "-")
 	switch strings.Join(parts, ".") {
 	case "issue.issue.comment.list":
 		object, operation = "issue", "comments"
@@ -1854,6 +1884,7 @@ func validateInvokeField(field integration.OperationField, value any) error {
 
 func requestFromInvokeInput(descriptor integration.OperationDescriptor, values map[string]any) integration.Request {
 	objectType := descriptor.ObjectType
+	objectType = strings.ReplaceAll(objectType, ".", "-")
 	operation := descriptor.Operation
 	switch descriptor.Name {
 	case "issue.issue.comment.list":
@@ -1964,6 +1995,8 @@ func executeTypeRequestWithService(cmd *cobra.Command, flags *integrationFlags, 
 
 func printIntegrationResponse(cmd *cobra.Command, response integration.Response) {
 	switch {
+	case response.MergeRequests != nil:
+		printIntegrationMergeRequests(cmd, response)
 	case response.Task != nil || response.TaskComments != nil || response.SearchResults != nil:
 		printTypeOrientedIssueResponse(cmd, response)
 	case response.Repository != nil:
@@ -2367,8 +2400,9 @@ func printIntegrationReviewRemarkOperation(cmd *cobra.Command, response integrat
 
 func printIntegrationReviewRemarks(cmd *cobra.Command, response integration.Response) {
 	if len(response.ReviewRemarks) == 0 {
-		printFailure(cmd, response)
-		if response.Failure == nil {
+		if response.Failure != nil {
+			printFailure(cmd, response)
+		} else {
 			cmd.Printf("system=%s\nresource=%s\noperation=%s\nremark_count=0\n", response.System, response.Resource, response.Operation)
 		}
 		return
