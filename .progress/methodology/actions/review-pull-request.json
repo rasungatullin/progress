@@ -107,6 +107,12 @@
       "in": {
         "invocation": {
           "ref": "in.invocation"
+        },
+        "repository": {
+          "ref": "in.related_objects.0.repository"
+        },
+        "number": {
+          "ref": "in.related_objects.0.number"
         }
       },
       "out": {

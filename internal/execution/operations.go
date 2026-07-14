@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -329,6 +330,13 @@ func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
 		}
 		return reflectedPathValue(mapped, path[1:])
 	}
+	if value.Kind() == reflect.Slice || value.Kind() == reflect.Array {
+		index, err := strconv.Atoi(path[0])
+		if err != nil || index < 0 || index >= value.Len() {
+			return nil, false
+		}
+		return reflectedPathValue(value.Index(index), path[1:])
+	}
 	if value.Kind() != reflect.Struct {
 		return nil, false
 	}
@@ -381,8 +389,6 @@ func (e builtinOperationExecutor) execute(ctx context.Context, state *operationE
 	switch operationKind(operation) {
 	case OperationKindPrepareData:
 		return e.prepareData(ctx, state, operation, name)
-	case OperationKindLoadPullRequest:
-		return e.loadPullRequest(ctx, state, operation, name)
 	case OperationKindLoadReviewRemarks:
 		return e.loadReviewRemarks(ctx, state, operation, name, operation.Required)
 	case OperationKindResolveProfile:

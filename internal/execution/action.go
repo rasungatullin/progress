@@ -370,8 +370,6 @@ func defaultOperationSpec(kind string) model.OperationSpec {
 	switch strings.TrimSpace(kind) {
 	case OperationKindPrepareData:
 		return builtinOperation(OperationKindPrepareData, "Подготовка данных", true)
-	case OperationKindLoadPullRequest:
-		return builtinOperation(OperationKindLoadPullRequest, "Получение запроса на слияние", true)
 	case OperationKindLoadReviewRemarks:
 		return builtinOperation(OperationKindLoadReviewRemarks, "Получение замечаний ревизии", false)
 	case OperationKindResolveProfile:

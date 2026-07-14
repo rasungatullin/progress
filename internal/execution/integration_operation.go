@@ -249,6 +249,11 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 			values["merge_request"] = integration.MergeRequest{System: result.System, ExternalID: result.ExternalID, State: result.Status, URL: result.URL}
 		}
 	}
+	if mergeRequest, ok := values["merge_request"].(integration.MergeRequest); ok {
+		if current, exists := state.data["invocation"].(invocation); exists {
+			values["invocation"] = invocationWithPullRequest(current, mergeRequest)
+		}
+	}
 	for name, value := range response.Data {
 		values[name] = value
 	}
