@@ -2585,10 +2585,17 @@ func (e builtinOperationExecutor) abortActiveMergeConflictRebaseDirectory(direct
 	abortCtx, cancel := context.WithTimeout(context.Background(), rebaseAbortTimeout)
 	if _, abortErr := gitOutput(abortCtx, directory, "rebase", "--abort"); abortErr != nil {
 		cancel()
+		if isNoRebaseInProgressError(abortErr) {
+			return nil
+		}
 		return abortErr
 	}
 	cancel()
 	return nil
+}
+
+func isNoRebaseInProgressError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no rebase in progress")
 }
 
 func isSuccessfulConclusion(status string) bool {

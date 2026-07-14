@@ -56,6 +56,25 @@ func TestRebaseWorkplaceBranchOnRemoteDropsConflictingLocalCommits(t *testing.T)
 	}
 }
 
+func TestRebaseWorkplaceBranchOnRemoteIgnoresCompletedAbort(t *testing.T) {
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "rebase -- refs/remotes/origin/167":
+			return "", errors.New("conflict")
+		case "diff --name-only --diff-filter=U":
+			return "", nil
+		case "rebase --abort":
+			return "", errors.New("exit status 128: fatal: no rebase in progress")
+		default:
+			return "", nil
+		}
+	}}
+
+	if err := service.rebaseWorkplaceBranchOnRemote(context.Background(), "/tmp/work", "167"); err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("expected original rebase error, got %v", err)
+	}
+}
+
 func TestPrepareUsesCurrentRepositoryWhenRepoIsOmitted(t *testing.T) {
 	t.Parallel()
 

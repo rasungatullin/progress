@@ -192,7 +192,7 @@ func (s *Service) rebaseWorkplaceBranchOnRemote(ctx context.Context, directory, 
 		paths, pathsErr := s.runGitOutput(ctx, directory, "diff", "--name-only", "--diff-filter=U")
 		if pathsErr != nil || strings.TrimSpace(paths) == "" {
 			_, abortErr := s.runGitOutput(ctx, directory, "rebase", "--abort")
-			if abortErr != nil {
+			if abortErr != nil && !isNoRebaseInProgressError(abortErr) {
 				err = fmt.Errorf("%w; additionally failed to abort rebase: %v", err, abortErr)
 			}
 			if pathsErr != nil {
@@ -200,7 +200,7 @@ func (s *Service) rebaseWorkplaceBranchOnRemote(ctx context.Context, directory, 
 			}
 			return err
 		}
-		if _, abortErr := s.runGitOutput(ctx, directory, "rebase", "--abort"); abortErr != nil {
+		if _, abortErr := s.runGitOutput(ctx, directory, "rebase", "--abort"); abortErr != nil && !isNoRebaseInProgressError(abortErr) {
 			return fmt.Errorf("%w; additionally failed to abort rebase: %v", err, abortErr)
 		}
 		if _, resetErr := s.runGitOutput(ctx, directory, "reset", "--hard", remoteRef); resetErr != nil {
@@ -208,6 +208,10 @@ func (s *Service) rebaseWorkplaceBranchOnRemote(ctx context.Context, directory, 
 		}
 		return nil
 	}
+}
+
+func isNoRebaseInProgressError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no rebase in progress")
 }
 
 func (s *Service) localBranchExists(ctx context.Context, dir string, name string) bool {
