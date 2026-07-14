@@ -389,6 +389,8 @@ func newIntegrationIssueSearchCommand() *cobra.Command {
 		Use:   "search",
 		Short: "Поиск объектов типа issue",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			flags.labels = append(append([]string(nil), flags.labels...), flags.labelAliases...)
+			flags.excludeLabels = append(append([]string(nil), flags.excludeLabels...), flags.excludeLabelAliases...)
 			return executeTypeOrientedIssueCommand(cmd, flags, "search")
 		},
 	}
@@ -1703,22 +1705,22 @@ func newIntegrationInvokeCommand() *cobra.Command {
 		if (strings.TrimSpace(flags.input) == "") == (strings.TrimSpace(flags.inputFile) == "") {
 			return fmt.Errorf("exactly one of --input or --input-file is required")
 		}
+		service := newIntegrationService(cmd)
 		data := []byte(flags.input)
 		if flags.inputFile != "" {
 			var err error
 			data, err = os.ReadFile(flags.inputFile)
 			if err != nil {
-				return printInvokeInputFailure(cmd, flags, fmt.Errorf("read input file: %w", err))
+				return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("read input file: %w", err))
 			}
 		}
 		var values map[string]any
 		if err := json.Unmarshal(data, &values); err != nil {
-			return printInvokeInputFailure(cmd, flags, fmt.Errorf("parse input JSON: %w", err))
+			return printInvokeInputFailure(cmd, flags, nil, fmt.Errorf("parse input JSON: %w", err))
 		}
 		if values == nil {
-			return printInvokeInputFailure(cmd, flags, fmt.Errorf("input JSON must be an object"))
+			return printInvokeInputFailure(cmd, flags, nil, fmt.Errorf("input JSON must be an object"))
 		}
-		service := newIntegrationService(cmd)
 		descriptor, found := service.OperationDescriptor(cmd.Context(), flags.operation, flags.system)
 		if !found {
 			kind := "unsupported-operation"
@@ -1733,7 +1735,7 @@ func newIntegrationInvokeCommand() *cobra.Command {
 			if strings.TrimSpace(flags.system) == "" {
 				flags.system = defaultSystem
 			}
-			return printInvokeAvailabilityFailure(cmd, flags, "operation is not available: "+flags.operation, kind)
+			return printInvokeAvailabilityFailure(cmd, flags, service, "operation is not available: "+flags.operation, kind)
 		}
 		if strings.TrimSpace(flags.system) == "" {
 			flags.system = descriptor.System
@@ -1743,7 +1745,7 @@ func newIntegrationInvokeCommand() *cobra.Command {
 			if !descriptor.Enabled {
 				kind = "not-configured"
 			}
-			return printInvokeAvailabilityFailure(cmd, flags, "operation is not available: "+flags.operation, kind)
+			return printInvokeAvailabilityFailure(cmd, flags, service, "operation is not available: "+flags.operation, kind)
 		}
 		for _, field := range append(append([]integration.OperationField{}, descriptor.Input.Required...), descriptor.Input.Optional...) {
 			value, ok := values[field.Name]
@@ -1757,7 +1759,7 @@ func newIntegrationInvokeCommand() *cobra.Command {
 				continue
 			}
 			if err := validateInvokeField(field, value); err != nil {
-				return printInvokeInputFailure(cmd, flags, err)
+				return printInvokeInputFailure(cmd, flags, service, err)
 			}
 		}
 		for _, field := range descriptor.Input.Required {
@@ -1766,10 +1768,10 @@ func newIntegrationInvokeCommand() *cobra.Command {
 				if field.Default != "" {
 					continue
 				}
-				return printInvokeInputFailure(cmd, flags, fmt.Errorf("input field is required: %s", field.Name))
+				return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("input field is required: %s", field.Name))
 			}
 			if field.Type == "string" && strings.TrimSpace(value.(string)) == "" && field.Default == "" {
-				return printInvokeInputFailure(cmd, flags, fmt.Errorf("input field is required: %s", field.Name))
+				return printInvokeInputFailure(cmd, flags, service, fmt.Errorf("input field is required: %s", field.Name))
 			}
 		}
 		request := requestFromInvokeInput(descriptor, values)
@@ -1785,6 +1787,13 @@ func newIntegrationInvokeCommand() *cobra.Command {
 }
 
 func invokeDefaultValue(field integration.OperationField) (any, bool) {
+	// Значения ${system.*} разрешаются сценарным адаптером, у которого есть
+	// доступ к настройкам выбранной системы. Не подменяем их заглушками: это
+	// одновременно сохраняет типовую проверку и позволяет адаптеру применить
+	// динамическое значение по умолчанию.
+	if strings.HasPrefix(strings.TrimSpace(field.Default), "${") && strings.HasSuffix(strings.TrimSpace(field.Default), "}") {
+		return nil, false
+	}
 	switch field.Type {
 	case "integer":
 		value, err := strconv.ParseInt(strings.TrimSpace(field.Default), 10, 64)
@@ -1816,11 +1825,11 @@ func invokeDefaultValue(field integration.OperationField) (any, bool) {
 	return field.Default, true
 }
 
-func printInvokeInputFailure(cmd *cobra.Command, flags *integrationFlags, err error) error {
-	return printInvokeAvailabilityFailure(cmd, flags, err.Error(), "invalid-request")
+func printInvokeInputFailure(cmd *cobra.Command, flags *integrationFlags, service *integration.Service, err error) error {
+	return printInvokeAvailabilityFailure(cmd, flags, service, err.Error(), "invalid-request")
 }
 
-func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags, message, kind string) error {
+func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags, service *integration.Service, message, kind string) error {
 	format, err := integrationOutputFormat(cmd)
 	if err != nil {
 		return err
@@ -1832,11 +1841,21 @@ func printInvokeAvailabilityFailure(cmd *cobra.Command, flags *integrationFlags,
 		Status:          "failed",
 		Failure:         &integration.Failure{Kind: kind, Message: message},
 	}
-	if objectType, operation := invokeRouteObjectType(flags.operation); objectType != "" {
-		response.Resource = objectType
-		response.ObjectType = objectType
-		response.Operation = operation
-		response.Route = integration.Route{IntegrationType: response.IntegrationType, System: response.System, Provider: response.System, Resource: response.Resource, ObjectType: response.ObjectType, Operation: response.Operation}
+	if service != nil {
+		if route, ok := service.OperationRoute(cmd.Context(), flags.operation, flags.system); ok {
+			response.Route = route
+			response.Resource = route.Resource
+			response.ObjectType = route.ObjectType
+			response.Operation = route.Operation
+		}
+	}
+	if response.Route.Resource == "" {
+		if objectType, operation := invokeRouteObjectType(flags.operation); objectType != "" {
+			response.Resource = objectType
+			response.ObjectType = objectType
+			response.Operation = operation
+			response.Route = integration.Route{IntegrationType: response.IntegrationType, System: response.System, Provider: response.System, Resource: response.Resource, ObjectType: response.ObjectType, Operation: response.Operation}
+		}
 	}
 	if format == integrationOutputJSON {
 		if err := printIntegrationJSON(cmd, response); err != nil {

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"strings"
@@ -174,5 +176,68 @@ func TestLegacySystemCommandReportsTypeOrientedReplacement(t *testing.T) {
 	cmd.SetArgs([]string{"integration", "github", "issue", "get", "--id", "123"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("устаревшая команда по имени системы должна отсутствовать")
+	}
+}
+
+func TestIntegrationIssueSearchMergesLabelFlagAliases(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeIssue: "tracker"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"tracker": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeIssue}},
+		},
+	})
+	service.RegisterProvider("tracker", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	cmd := NewRootCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "issue", "search", "--labels", "one", "--label", "two", "--exclude-labels", "three", "--exclude-label", "four"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute issue search: %v", err)
+	}
+	if got, want := strings.Join(provider.request.Labels, ","), "one,two"; got != want {
+		t.Fatalf("labels = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(provider.request.ExcludeLabels, ","), "three,four"; got != want {
+		t.Fatalf("exclude labels = %q, want %q", got, want)
+	}
+}
+
+func TestIntegrationInvokeInputFailurePreservesCatalogRoute(t *testing.T) {
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepo: "repo-system"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"repo-system": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}, Operations: map[string]model.IntegrationOperationConfig{
+				"repo.custom.field.get": {Required: []string{"repository"}, Command: "unused"},
+			}},
+		},
+	})
+	provider := &contractCaptureProvider{}
+	service.RegisterProvider("repo-system", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand()
+	cmd.SetOut(stdout)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "invoke", "--name", "repo.custom.field.get", "--input", `{}`, "--format", "json"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("invoke must reject a missing required field")
+	}
+	var response integration.Response
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("decode invoke response: %v; output=%q", err, stdout.String())
+	}
+	if response.Failure == nil || response.Failure.Kind != "invalid-request" {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
+	}
+	if response.Route.ProviderType != "script" || !response.Route.ProviderAvailable || response.Route.ObjectType != "custom.field" {
+		t.Fatalf("incomplete invoke route: %#v", response.Route)
 	}
 }

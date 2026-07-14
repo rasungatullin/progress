@@ -73,6 +73,41 @@ func (s *Service) OperationDescriptor(ctx context.Context, name, system string) 
 	return descriptors[0], true
 }
 
+// OperationRoute возвращает маршрут каталога без выполнения операции. Он
+// используется диагностическими командами, которым нужно представить тот
+// же нормализованный маршрут при отказе до вызова провайдера.
+func (s *Service) OperationRoute(ctx context.Context, name, system string) (Route, bool) {
+	descriptor, ok := s.OperationDescriptor(ctx, name, system)
+	if !ok {
+		return Route{}, false
+	}
+	objectType, operation := descriptor.ObjectType, descriptor.Operation
+	switch descriptor.Name {
+	case "issue.issue.comment.list":
+		objectType, operation = "issue", "comments"
+	case "issue.issue.comment.create":
+		objectType = "comment"
+	case "issue.issue.label.add", "issue.issue.label.remove":
+		objectType = "label"
+	case "repo.merge-request.comment.list", "repo.merge-request.comment.create":
+		objectType = "merge-request-comment"
+	case "repo.review-remark.create":
+		objectType, operation = "merge-request-comment", "create"
+	}
+	route, err := s.resolveRoute(Request{
+		IntegrationType: descriptor.IntegrationType,
+		System:          descriptor.System,
+		SystemProvided:  true,
+		Resource:        objectType,
+		ObjectType:      objectType,
+		Operation:       operation,
+	})
+	if err != nil {
+		return route, false
+	}
+	return route, true
+}
+
 // IsSystemConfigured сообщает, существует ли система в загруженной
 // конфигурации или среди зарегистрированных провайдеров.
 func (s *Service) IsSystemConfigured(system string) bool {
