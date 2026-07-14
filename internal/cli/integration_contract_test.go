@@ -126,6 +126,34 @@ func TestIntegrationTypeOrientedTreeExcludesDispatcherAndPrivate(t *testing.T) {
 	}
 }
 
+func TestIntegrationIssueFlagsUseCatalogNames(t *testing.T) {
+	root := NewRootCommand()
+	for _, path := range [][]string{
+		{"integration", "issue", "create"},
+		{"integration", "issue", "update"},
+		{"integration", "issue", "search"},
+		{"integration", "issue", "label", "add"},
+	} {
+		cmd, _, err := root.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if cmd.Flags().Lookup("labels") == nil {
+			t.Fatalf("%v must publish --labels", path)
+		}
+		if cmd.Flags().Lookup("label") != nil {
+			t.Fatalf("%v must not publish parallel --label", path)
+		}
+	}
+	cmd, _, err := root.Find([]string{"integration", "issue", "create"})
+	if err != nil {
+		t.Fatalf("find issue create: %v", err)
+	}
+	if cmd.Flags().Lookup("external_id") == nil || cmd.Flags().Lookup("external-id") != nil {
+		t.Fatal("issue create must publish only --external_id")
+	}
+}
+
 func TestIntegrationTypeOrientedCommandsResolveConfiguredSystems(t *testing.T) {
 	provider := &contractCaptureProvider{}
 	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
@@ -266,5 +294,35 @@ func TestIntegrationInvokeOrdinaryCommentDropsInlineCoordinates(t *testing.T) {
 	}
 	if provider.request.Path != "" || provider.request.Line != 0 || provider.request.Side != "" {
 		t.Fatalf("ordinary comment retained inline coordinates: %#v", provider.request)
+	}
+	if provider.request.Extra["path"] != "file.go" || provider.request.Extra["line"] != float64(12) || provider.request.Extra["side"] != "RIGHT" {
+		t.Fatalf("ordinary comment lost contract fields for script: %#v", provider.request.Extra)
+	}
+}
+
+func TestIntegrationInvokeReviewRemarkUsesReviewRemarkObject(t *testing.T) {
+	provider := &contractCaptureProvider{}
+	service := integration.NewServiceFromConfig(log.New(io.Discard, "", 0), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepo: "repo-system"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"repo-system": {Type: "script", IntegrationTypes: []string{model.IntegrationTypeRepo}, Operations: map[string]model.IntegrationOperationConfig{
+				"repo.review-remark.create": {Required: []string{"number", "body", "path", "line"}, Command: "unused"},
+			}},
+		},
+	})
+	service.RegisterProvider("repo-system", provider)
+	original := integrationServiceFactory
+	integrationServiceFactory = func(*cobra.Command) *integration.Service { return service }
+	t.Cleanup(func() { integrationServiceFactory = original })
+
+	cmd := NewRootCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"integration", "invoke", "--name", "repo.review-remark.create", "--input", `{"number":7,"body":"замечание","path":"file.go","line":12}`})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute invoke: %v", err)
+	}
+	if provider.request.ObjectType != "review-remark" || provider.request.Operation != "create" {
+		t.Fatalf("review remark was routed as another object: %#v", provider.request)
 	}
 }

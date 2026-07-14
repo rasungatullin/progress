@@ -266,7 +266,7 @@ progress integration operations --name issue.issue.get
 ```bash
 progress integration issue get --id ABC-123 --fields title --format json
 progress integration issue search --query "готово" --labels backend --exclude_labels blocked
-progress integration issue create --title "Новая задача" --external_id EXT-123
+progress integration issue create --title "Новая задача" --external_id EXT-123 --labels backend
 progress integration issue comment list --id ABC-123
 progress integration issue label add --id ABC-123 --labels backend
 progress integration repo merge-request get --repo owner/name --number 456

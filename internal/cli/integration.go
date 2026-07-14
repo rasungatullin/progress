@@ -413,9 +413,8 @@ func newTypeOrientedIssueCreateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.title, "title", "", "Заголовок задачи")
 	cmd.Flags().StringVar(&flags.body, "body", "", "Описание задачи")
 	cmd.Flags().StringVar(&flags.state, "state", "open", "Состояние задачи")
-	cmd.Flags().StringVar(&flags.externalID, "external-id", "", "Внешний идентификатор задачи")
 	cmd.Flags().StringVar(&flags.externalID, "external_id", "", "Внешний идентификатор задачи")
-	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
 	return cmd
 }
 
@@ -433,7 +432,7 @@ func newTypeOrientedIssueUpdateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.title, "title", "", "Заголовок задачи")
 	cmd.Flags().StringVar(&flags.body, "body", "", "Описание задачи")
 	cmd.Flags().StringVar(&flags.state, "state", "", "Состояние задачи")
-	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Метка задачи")
+	cmd.Flags().StringArrayVar(&flags.labels, "labels", nil, "Метки задачи")
 	return cmd
 }
 
@@ -1928,13 +1927,8 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 		objectType, operation = "merge-request-comment", "list"
 	case "repo.merge-request.comment.create":
 		objectType = "merge-request-comment"
-		// Обычный комментарий не может стать inline-замечанием даже при
-		// диагностическом вызове с лишними координатами diff.
-		delete(requestValues, "path")
-		delete(requestValues, "line")
-		delete(requestValues, "side")
 	case "repo.review-remark.create":
-		objectType, operation = "merge-request-comment", "create"
+		objectType, operation = "review-remark", "create"
 
 	case "repo.review-remark.list":
 		objectType, operation = "review-remark", "list"
@@ -1960,16 +1954,23 @@ func requestFromInvokeInput(descriptor integration.OperationDescriptor, values m
 	request.Query = stringValue("query")
 	request.State = stringValue("state")
 	request.Scope = stringValue("scope")
-	request.Path = stringValueFrom(requestValues, "path")
-	request.Side = stringValueFrom(requestValues, "side")
+	// Координаты diff остаются в Extra для сценарных операций, если они
+	// опубликованы их входным контрактом, но встроенный обычный комментарий
+	// всегда выполняется без координат и не превращается в inline-замечание.
+	if descriptor.Name != "repo.merge-request.comment.create" {
+		request.Path = stringValueFrom(requestValues, "path")
+		request.Side = stringValueFrom(requestValues, "side")
+	}
 	request.ChannelID = stringValueFrom(requestValues, "channel")
 	request.ThreadID = stringValueFrom(requestValues, "thread")
 	request.MessageID = stringValueFrom(requestValues, "message")
 	if value, ok := requestValues["number"].(float64); ok {
 		request.MergeRequestNumber = int(value)
 	}
-	if value, ok := requestValues["line"].(float64); ok {
-		request.Line = int(value)
+	if descriptor.Name != "repo.merge-request.comment.create" {
+		if value, ok := requestValues["line"].(float64); ok {
+			request.Line = int(value)
+		}
 	}
 	if value, ok := requestValues["limit"].(float64); ok {
 		request.Limit = int(value)

@@ -773,6 +773,7 @@ func systemSupportsOperation(state systemState, integrationType string, objectTy
 		return true
 	}
 	integrationType = normalizeIntegrationType(integrationType)
+	requestedObjectType := strings.TrimSpace(strings.ToLower(objectType))
 	objectType = canonicalObjectType(objectType)
 	operation = normalizeOperation(operation)
 	for _, template := range builtinOperationTemplates(state.Type) {
@@ -802,7 +803,8 @@ func systemSupportsOperation(state systemState, integrationType string, objectTy
 	for name := range state.Operations {
 		configuredName := canonicalConfiguredOperationName(name)
 		requestedName := canonicalConfiguredOperationName(integrationType + "." + objectType + "." + operation)
-		if configuredName == requestedName {
+		requestedNestedName := canonicalConfiguredOperationName(integrationType + "." + requestedObjectType + "." + operation)
+		if configuredName == requestedName || configuredName == requestedNestedName {
 			return true
 		}
 		configuredType, configuredObject, configuredOperation := parseOperationName(name)
