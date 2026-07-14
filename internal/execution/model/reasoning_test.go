@@ -13,7 +13,9 @@ func TestValidateReasoningEffortUsesRunnerModelCapabilities(t *testing.T) {
 		want   bool
 	}{
 		{name: "supported model", runner: "codex", model: "gpt-5.3-codex-spark", effort: "medium", want: true},
+		{name: "supported model with provider prefix", runner: "codex", model: "openai/gpt-5.3-codex-spark", effort: "xhigh", want: true},
 		{name: "unknown codex model", runner: "codex", model: "gpt-5-future", effort: "medium"},
+		{name: "known model name without capability entry", runner: "codex", model: "gpt-5.4", effort: "xhigh"},
 		{name: "unsupported runner", runner: "opencode", model: "gpt-5.5", effort: "medium"},
 		{name: "unsupported value", runner: "codex", model: "gpt-5.3-codex", effort: "ultra"},
 	}

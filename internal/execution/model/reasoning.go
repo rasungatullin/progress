@@ -5,12 +5,15 @@ import (
 	"strings"
 )
 
-var reasoningEffortCapabilities = map[string]map[string][]string{
-	"codex": {
-		"gpt-5.3-codex":       {"none", "minimal", "low", "medium", "high", "xhigh"},
-		"gpt-5.3-codex-spark": {"none", "minimal", "low", "medium", "high", "xhigh"},
-		"gpt-5.5":             {"none", "minimal", "low", "medium", "high", "xhigh"},
-	},
+type reasoningEffortBinding struct {
+	runner string
+	model  string
+}
+
+var reasoningEffortCapabilities = map[reasoningEffortBinding][]string{
+	{runner: "codex", model: "gpt-5.3-codex"}:       {"none", "minimal", "low", "medium", "high", "xhigh"},
+	{runner: "codex", model: "gpt-5.3-codex-spark"}: {"none", "minimal", "low", "medium", "high", "xhigh"},
+	{runner: "codex", model: "gpt-5.5"}:             {"none", "minimal", "low", "medium", "high", "xhigh"},
 }
 
 // ReasoningEffortSupported определяет, поддерживает ли связка исполнительного
@@ -22,8 +25,10 @@ func ReasoningEffortSupported(runner, modelName string) bool {
 // ReasoningEffortValues возвращает допустимые значения reasoning-effort для
 // конкретной связки исполнительного модуля и модели.
 func ReasoningEffortValues(runner, modelName string) []string {
-	runnerCapabilities := reasoningEffortCapabilities[strings.TrimSpace(runner)]
-	values := runnerCapabilities[strings.TrimPrefix(strings.TrimSpace(modelName), "openai/")]
+	values := reasoningEffortCapabilities[reasoningEffortBinding{
+		runner: strings.TrimSpace(runner),
+		model:  strings.TrimPrefix(strings.TrimSpace(modelName), "openai/"),
+	}]
 	if len(values) == 0 {
 		return nil
 	}
