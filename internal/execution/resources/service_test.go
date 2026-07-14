@@ -95,6 +95,28 @@ func TestAllocateRejectsReasoningEffortForUnknownCodexModel(t *testing.T) {
 	}
 }
 
+func TestAllocateDoesNotFallbackForInvalidProfileReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(`{
+		"defaults": {"model-binding": "default"},
+		"runners": ["codex", "opencode"],
+		"models": ["gpt-5.3-codex-spark", "openai/gpt-5.4"],
+		"bindings": {
+			"default": {"runner": "opencode", "model": "openai/gpt-5.4"},
+			"spark": {"runner": "codex", "model": "gpt-5.3-codex-spark", "reasoning-effort": "ultra"}
+		}
+	}`)
+
+	_, err := service.Allocate(context.Background(), model.Invocation{}, model.Profile{
+		ModelBinding:       "spark",
+		AllowModelFallback: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), `binding "spark" has invalid reasoning-effort`) {
+		t.Fatalf("expected invalid profile binding error, got %v", err)
+	}
+}
+
 func TestAllocateUsesGlobalResourcesWhenLocalIsMissing(t *testing.T) {
 	t.Setenv("PROGRESS_CONFIG_HOME", "/global")
 	service := newTestServiceWithGlobalFallback(`{

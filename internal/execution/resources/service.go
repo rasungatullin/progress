@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,6 +22,18 @@ const (
 type Service struct {
 	resolveRepoRoot func(context.Context) (string, error)
 	readFile        func(string) ([]byte, error)
+}
+
+type invalidBindingConfigurationError struct {
+	err error
+}
+
+func (e *invalidBindingConfigurationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *invalidBindingConfigurationError) Unwrap() error {
+	return e.err
 }
 
 type resourceConfig struct {
@@ -107,6 +120,10 @@ func (s *Service) Allocate(ctx context.Context, in model.Invocation, profile mod
 			allocation.Git = config.Config.Git
 			return allocation, nil
 		}
+		var invalidConfigErr *invalidBindingConfigurationError
+		if errors.As(err, &invalidConfigErr) {
+			return model.Allocation{}, err
+		}
 		if !profile.AllowModelFallback {
 			return model.Allocation{}, err
 		}
@@ -185,7 +202,9 @@ func resolveBinding(config resourceConfig, bindingName string, source string, in
 		return model.Allocation{}, err
 	}
 	if err := validateReasoningEffort(tool, resource, binding.ReasoningEffort); err != nil {
-		return model.Allocation{}, fmt.Errorf("binding %q has invalid reasoning-effort: %w", bindingName, err)
+		return model.Allocation{}, &invalidBindingConfigurationError{
+			err: fmt.Errorf("binding %q has invalid reasoning-effort: %w", bindingName, err),
+		}
 	}
 	environment, environmentType, err := resolveAllocationEnvironment(config, in, binding.Environment)
 	if err != nil {
