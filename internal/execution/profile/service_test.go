@@ -172,6 +172,7 @@ func TestResolveProfileCoderPresetFromRepositoryConfig(t *testing.T) {
 	joined := strings.Join(profile.PromptAdditions, "\n")
 	for _, expected := range []string{
 		"Выполни задачу полностью",
+		"Не отправляй ветку и не публикуй запрос на слияние",
 		"Реализуй требование целостно",
 		"Найди и исправь первопричину",
 		"Добавь или обнови проверки",
@@ -181,7 +182,7 @@ func TestResolveProfileCoderPresetFromRepositoryConfig(t *testing.T) {
 			t.Fatalf("coder prompt must include %q, got %q", expected, joined)
 		}
 	}
-	for _, unexpected := range []string{"структурированный вывод", "commit_message", "conclusion.status"} {
+	for _, unexpected := range []string{"структурированный вывод", "commit_message", "conclusion.status", "операциями контура исполнения"} {
 		if strings.Contains(joined, unexpected) {
 			t.Fatalf("coder prompt must not duplicate structured output requirement %q: %q", unexpected, joined)
 		}
@@ -201,16 +202,19 @@ func TestResolveProfileReviewReworkPresetFromRepositoryConfig(t *testing.T) {
 	joined := strings.Join(profile.PromptAdditions, "\n")
 	for _, expected := range []string{
 		"Исправь все полученные замечания ревизии",
-		"Не останавливайся после первого замечания",
-		"весь доступный набор",
+		"Не отправляй ветку и не публикуй ответы на замечания",
+		"Ожидается исправление всех проблем",
+		"не завершай работу, пока не обработан весь доступный набор",
 		"Исправляй первопричину",
 		"не создали новых регрессий",
+		"Для каждого исходного замечания подготовь отдельный краткий ответ",
+		"что изменилось",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("review rework prompt must include %q, got %q", expected, joined)
 		}
 	}
-	for _, unexpected := range []string{"структурированный вывод", "review_responses", "conclusion.status"} {
+	for _, unexpected := range []string{"структурированный вывод", "review_responses", "conclusion.status", "операциями контура исполнения"} {
 		if strings.Contains(joined, unexpected) {
 			t.Fatalf("review rework prompt must not duplicate structured output requirement %q: %q", unexpected, joined)
 		}
