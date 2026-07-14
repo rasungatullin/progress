@@ -81,7 +81,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		MergeRequest: mergeRequest,
 	}
 	if mergeRequest != nil {
-		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest)
+		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest, taskLabelsRequireMergeRequest(response.Issue.Labels))
 		if stateErr != nil {
 			return StartResult{Context: decisionContext}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, stateErr)
 		}
@@ -98,7 +98,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 		}, err
 	}
 	if consideration.Status == ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil {
-		externalState, err := s.loadMergeRequestExternalState(ctx, mergeRequest)
+		externalState, err := s.loadMergeRequestExternalState(ctx, mergeRequest, true)
 		if err != nil {
 			return StartResult{Context: decisionContext, Consideration: &consideration}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, err)
 		}
@@ -174,12 +174,18 @@ func taskLabelsRequireMergeRequest(labels []string) bool {
 	return hasLabel(labels, "Ожидает экспертизы") || hasLabel(labels, "Требует доработки") || hasLabel(labels, "Экспертиза пройдена")
 }
 
-func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*MergeRequestExternalState, error) {
+func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest, loadRemarks bool) (*MergeRequestExternalState, error) {
 	if mergeRequest == nil {
 		return nil, nil
 	}
 
-	state := &MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest)}
+	state := &MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest), MergeStateUnknown: mergeRequestStateUnknown(mergeRequest)}
+	if !loadRemarks {
+		if !state.HasMergeConflict && !state.MergeStateUnknown {
+			return nil, nil
+		}
+		return state, nil
+	}
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType:    integrationmodel.IntegrationTypeRepository,
 		Resource:           "review-remark",
@@ -362,6 +368,31 @@ func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
 	return false
 }
 
+func mergeRequestStateUnknown(mergeRequest *integration.MergeRequest) bool {
+	if mergeRequest == nil {
+		return false
+	}
+	found := false
+	unknown := false
+	for key, value := range mergeRequest.Attributes {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "mergeable", "can_merge", "mergeable_state", "merge_state", "merge_state_status":
+			found = true
+			unknown = unknown || isUnknownMergeState(value)
+		}
+	}
+	return found && unknown
+}
+
+func isUnknownMergeState(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "unknown", "unstable", "queued", "checking":
+		return true
+	default:
+		return false
+	}
+}
+
 func isConflictMergeState(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "conflict", "conflicted", "conflicting", "dirty", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict":
@@ -409,6 +440,12 @@ func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (Consi
 	}
 	if strings.TrimSpace(result.Context.Task.ID) == "" {
 		result.Context.Task = canonicalTaskFromIssue(input.Context.Issue)
+	}
+	if isOpenMergeRequest(input.Context.MergeRequest) && input.Context.MergeRequestExternalState != nil && input.Context.MergeRequestExternalState.MergeStateUnknown {
+		err := fmt.Errorf("внешнее состояние запроса на слияние ещё не подтверждено")
+		result.Status = ConsiderationStatusAwaiting
+		result.Failure = decisionFailure("merge_request_state_unconfirmed", err, true, false)
+		return result, err
 	}
 	if isOpenMergeRequest(input.Context.MergeRequest) && input.Context.MergeRequestExternalState != nil && input.Context.MergeRequestExternalState.HasMergeConflict {
 		route := mergeConflictRoute()

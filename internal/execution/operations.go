@@ -2263,9 +2263,10 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 				}
 				return e.failRebase(state, operation, name, "Конфликт перебазирования не удалось диагностировать.", "rebase_conflict_context_failed", pathsErr)
 			}
+			conflictingPaths := splitGitPathList(paths)
 			contextValue := map[string]any{
 				"base_ref": input.BaseRef, "base_head": rebaseTarget, "head_ref": branch, "remote_head": remoteOID,
-				"conflicting_paths": strings.Fields(paths), "stage": "rebase-conflict",
+				"conflicting_paths": conflictingPaths, "stage": "rebase-conflict",
 				"directory": input.Directory,
 			}
 			out := operation.Out
@@ -2306,8 +2307,13 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 
 	out := operation.Out
 	if len(out) == 0 {
-		out = model.OperationMap{"rebase_summary": {Ref: "data.rebase_summary"}}
+		out = model.OperationMap{"rebase_summary": {Ref: "data.rebase_summary"}, "conflict_context": {Ref: "data.conflict_context"}}
 	}
+	writeOperationData(state, out, "conflict_context", map[string]any{
+		"base_ref": input.BaseRef, "base_head": rebaseTarget, "head_ref": branch,
+		"remote_head": remoteOID, "conflicting_paths": []string{}, "stage": "rebased",
+		"directory": input.Directory,
+	})
 	writeOperationData(state, out, "rebase_summary", summary)
 	state.tracker.completeIO(name, rebaseInputSummary(input, operation), operationIOSummary(operation.Out, map[string]string{"rebase_summary": summary}), summary)
 	return nil
@@ -2353,7 +2359,7 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 	if !allowForceWithLease(gitConfig) {
 		return e.failRebase(state, operation, name, "Безопасная принудительная отправка не разрешена настройкой Git.", "merge_conflict_force_with_lease_not_allowed", fmt.Errorf("git.push.allow-force-with-lease is not enabled"))
 	}
-	if output, ok := operationMappingValue[StructuredOutput](state, operation.In["structured_output"]); !ok || output.Conclusion == nil || !isSuccessfulConclusion(output.Conclusion.Status) {
+	if output, ok := operationMappingValue[StructuredOutput](state, operation.In["structured_output"]); !ok || !hasSuccessfulResolutionChecks(output) {
 		return e.failRebase(state, operation, name, "Исполнительный модуль не подтвердил разрешение конфликта.", "merge_conflict_resolution_failed", fmt.Errorf("successful structured conclusion is required"))
 	}
 	gitOutput := e.service.runGitOutput
@@ -2376,7 +2382,7 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 	if _, err := gitOutput(ctx, directory, "rev-parse", "--verify", "REBASE_HEAD"); err == nil {
 		return e.failResolveMergeConflict(state, operation, name, directory, "Перебазирование после разрешения конфликта не завершено.", "merge_conflict_rebase_incomplete", fmt.Errorf("git rebase is still in progress"))
 	}
-	baseHead, err := gitOutput(ctx, directory, "rev-parse", "--verify", base)
+	baseHead, err := gitOutput(ctx, directory, "rev-parse", "--verify", base+"^{commit}")
 	if err != nil || strings.TrimSpace(baseHead) == "" {
 		return e.failResolveMergeConflict(state, operation, name, directory, "Вершина базовой ветки не определена.", "merge_conflict_base_head_missing", err)
 	}
@@ -2511,6 +2517,36 @@ func isSuccessfulConclusion(status string) bool {
 	default:
 		return false
 	}
+}
+
+func hasSuccessfulResolutionChecks(output StructuredOutput) bool {
+	if output.Conclusion == nil || !isSuccessfulConclusion(output.Conclusion.Status) || len(output.Commands) == 0 {
+		return false
+	}
+	for _, command := range output.Commands {
+		if strings.TrimSpace(command.Name) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func splitGitPathList(value string) []string {
+	value = strings.TrimSuffix(value, "\x00")
+	if value == "" {
+		return nil
+	}
+	if strings.Contains(value, "\x00") {
+		parts := strings.Split(value, "\x00")
+		result := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if part != "" {
+				result = append(result, part)
+			}
+		}
+		return result
+	}
+	return strings.Split(strings.TrimSpace(value), "\n")
 }
 
 func rebaseInputSummary(input model.RebaseInput, operation OperationSpec) string {

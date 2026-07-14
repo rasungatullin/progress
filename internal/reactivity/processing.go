@@ -71,6 +71,9 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 	result := TaskProcessingResult{TaskNumber: input.TaskNumber}
 	var knownMergeRequest *integration.MergeRequest
 	resolvedConflictFingerprint := ""
+	s.fingerprintMu.Lock()
+	resolvedConflictFingerprint = s.resolvedConflictFingerprints[input.TaskNumber]
+	s.fingerprintMu.Unlock()
 	for index := 1; index <= maxCycles; index++ {
 		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index, knownMergeRequest, resolvedConflictFingerprint)
 		result.Cycles = append(result.Cycles, cycle)
@@ -83,6 +86,12 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 		}
 		if cycle.Action == execution.ActionResolveMergeConflict && cycle.ExecutionResult != nil && err == nil {
 			resolvedConflictFingerprint = mergeConflictFingerprint(cycle.MergeRequest, cycle.MergeRequestExternalState)
+			s.fingerprintMu.Lock()
+			if s.resolvedConflictFingerprints == nil {
+				s.resolvedConflictFingerprints = make(map[int]string)
+			}
+			s.resolvedConflictFingerprints[input.TaskNumber] = resolvedConflictFingerprint
+			s.fingerprintMu.Unlock()
 		}
 		if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil {
 			result.Completed = true
@@ -223,7 +232,7 @@ func mergeConflictFingerprint(mergeRequest *integration.MergeRequest, state *dec
 		return ""
 	}
 	values := []string{mergeRequest.Repository, strconv.Itoa(mergeRequest.Number), mergeRequest.BaseRef, mergeRequest.HeadRef}
-	for _, key := range []string{"base_sha", "head_sha", "mergeable", "merge_state_status", "updated_at"} {
+	for _, key := range []string{"base_sha", "head_sha"} {
 		values = append(values, key+"="+strings.TrimSpace(mergeRequest.Attributes[key]))
 	}
 	return strings.Join(values, "|")
@@ -323,8 +332,8 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 	}
 	if mergeRequest != nil {
 		if !taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) {
-			if mergeRequestHasConflict(mergeRequest) {
-				return response.Issue, mergeRequest, &decision.MergeRequestExternalState{HasMergeConflict: true}, nil, nil
+			if mergeRequestHasConflict(mergeRequest) || mergeRequestStateUnknown(mergeRequest) {
+				return response.Issue, mergeRequest, &decision.MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest), MergeStateUnknown: mergeRequestStateUnknown(mergeRequest)}, nil, nil
 			}
 			return response.Issue, mergeRequest, nil, nil, nil
 		}
@@ -350,7 +359,8 @@ func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeReques
 	}
 
 	state := &decision.MergeRequestExternalState{
-		HasMergeConflict: mergeRequestHasConflict(mergeRequest),
+		HasMergeConflict:  mergeRequestHasConflict(mergeRequest),
+		MergeStateUnknown: mergeRequestStateUnknown(mergeRequest),
 	}
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType:    integrationTypeRepository,
@@ -530,6 +540,21 @@ func mergeRequestHasConflict(mergeRequest *integration.MergeRequest) bool {
 			}
 		case "mergeable_state", "merge_state", "merge_state_status":
 			if isConflictMergeState(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func mergeRequestStateUnknown(mergeRequest *integration.MergeRequest) bool {
+	if mergeRequest == nil {
+		return false
+	}
+	for key, value := range mergeRequest.Attributes {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "mergeable", "can_merge", "mergeable_state", "merge_state", "merge_state_status":
+			if value == "" || strings.EqualFold(strings.TrimSpace(value), "unknown") || strings.EqualFold(strings.TrimSpace(value), "unstable") || strings.EqualFold(strings.TrimSpace(value), "queued") || strings.EqualFold(strings.TrimSpace(value), "checking") {
 				return true
 			}
 		}
