@@ -95,8 +95,8 @@ flowchart LR
 JWT, установочный токен и содержимое PEM не включаются в CLI-вывод, структурированный вывод, журналы или `CommandResult.Stdout`. Для живой проверки после заполнения `github_app_id` или `github_app_client_id` можно выполнить:
 
 ```bash
-progress integration github auth status --system github-app --format json
-progress integration github repo get --system github-app --repo rasungatullin/progress --format json
+progress integration status --system github-app --format json
+progress integration repo get --system github-app --repo rasungatullin/progress --format json
 ```
 
 ## 4. Внутренние модули реализации
@@ -192,48 +192,21 @@ type Provider interface {
 
 ## 6. Состав CLI-команд
 
-В текущей конфигурации поддерживаются следующие команды. Команды с именем
-внешней системы сохранены только как переходная форма: при запуске они выводят
-предупреждение и должны постепенно заменяться типо-ориентированными командами
-с флагом `--system`.
+Публичное дерево использует предметные типы и служебные команды. Система
+выбирается флагом `--system` либо настройкой `default_systems`.
 
 - `progress integration operations`;
+- `progress integration status --system github`;
+- `progress integration invoke --name issue.issue.get --input '{"id":"123"}'`;
 - `progress integration issue get --id 123`;
 - `progress integration issue search --query "текст"`;
-- `progress integration repo get --system github`;
-- `progress integration github auth status`;
-- `progress integration github repo get`;
-- `progress integration github issue get`;
-- `progress integration github issue comments`;
-- `progress integration github issue comment create`;
-- `progress integration github issue label add`;
-- `progress integration github issue label remove`;
-- `progress integration github pr get`;
-- `progress integration github pr list`;
-- `progress integration github pr search`;
-- `progress integration github pr create`;
-- `progress integration github pr comments`;
-- `progress integration github pr comment create`;
-- `progress integration github pr comment reply`;
-- `progress integration github pr comment resolve`;
-- `progress integration bitbucket auth status`;
-- `progress integration bitbucket repo get`;
-- `progress integration bitbucket pr get`;
-- `progress integration bitbucket pr list`;
-- `progress integration bitbucket pr search`;
-- `progress integration bitbucket pr create`;
-- `progress integration bitbucket pr comments`;
-- `progress integration bitbucket pr comment create`;
-- `progress integration bitbucket pr comment resolve`;
-- `progress integration mattermost auth status`;
-- `progress integration mattermost thread get`;
-- `progress integration mattermost message create`;
-- `progress integration telegram auth status`;
-- `progress integration telegram thread get`;
-- `progress integration telegram message create`;
-- `progress integration confluence auth status`;
-- `progress integration confluence page get`;
-- `progress integration confluence page search`.
+- `progress integration issue create`, `issue update`, `issue comment list`, `issue comment create`, `issue label add`, `issue label remove`;
+- `progress integration repo get`;
+- `progress integration repo merge-request get`, `search`, `create`;
+- `progress integration repo merge-request comment list`, `create`;
+- `progress integration repo merge-request review-remark list`, `create`, `reply`, `resolve`, `unresolve`;
+- `progress integration messenger thread get` и `messenger message create`;
+- `progress integration wiki page get` и `wiki page search`.
 
 ## 7. Назначение команд
 
@@ -246,7 +219,7 @@ progress integration issue get --id ABC-123
 progress integration issue search --query "готово к реализации" --system jira-main
 ```
 
-Флаг `--id` принимает непрозрачную строку: как числовое значение `123`, так и значение внешней системы `ABC-123`. Если `--system` не задан, контур выбирает систему по умолчанию для типа `issue`; явное значение выбирается по имени записи в конфигурации. Старые команды вида `integration github issue ...` сохраняются как совместимый переход.
+Флаг `--id` принимает непрозрачную строку: как числовое значение `123`, так и значение внешней системы `ABC-123`. Если `--system` не задан, контур выбирает систему по умолчанию для типа `issue`; явное значение выбирается по имени записи в конфигурации. Команды по именам внешних систем отсутствуют в публичной справке.
 
 ### 7.1 `progress integration operations`
 

@@ -763,6 +763,16 @@ func systemSupportsOperation(state systemState, integrationType string, objectTy
 			return true
 		}
 	}
+	// Операции комментариев запроса на слияние публикуются как вложенные
+	// имена каталога, тогда как адаптеры принимают канонический объект
+	// merge-request-comment. Сопоставляем обе формы до вызова адаптера.
+	if integrationType == model.IntegrationTypeRepo && objectType == "comment" {
+		for _, template := range builtinOperationTemplates(state.Type) {
+			if strings.HasPrefix(template.Name, "repo.merge-request.comment.") && normalizeOperation(template.Operation) == operation {
+				return true
+			}
+		}
+	}
 	for name := range state.Operations {
 		configuredType, configuredObject, configuredOperation := parseOperationName(name)
 		if configuredType == integrationType && configuredObject == objectType && configuredOperation == operation {
