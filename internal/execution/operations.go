@@ -1080,6 +1080,8 @@ func stringValueFromAllocateResourcesMapping(state *operationExecution, mapping 
 		return strings.TrimSpace(inv.Launch.Runner)
 	case "data.invocation.launch.model":
 		return strings.TrimSpace(inv.Launch.Model)
+	case "data.invocation.launch.reasoning_effort":
+		return strings.TrimSpace(inv.Launch.ReasoningEffort)
 	case "data.invocation.workplace.environment":
 		return strings.TrimSpace(inv.Workplace.Environment)
 	case "data.invocation.workplace.name":
@@ -1831,11 +1833,6 @@ func launchSynthesisInputFromOperation(state *operationExecution, operation Oper
 	input.model, _ = operationMappingValue[string](state, operation.In["model"])
 	input.reasoningEffort, _ = operationMappingValue[string](state, operation.In["reasoning_effort"])
 	input.resumeSessionID, _ = operationMappingValue[string](state, operation.In["resume_session_id"])
-	if strings.TrimSpace(input.reasoningEffort) == "" && state != nil {
-		if allocation, ok := state.data["allocation"].(allocation); ok {
-			input.reasoningEffort = allocation.ReasoningEffort
-		}
-	}
 	if strings.TrimSpace(input.prompt) == "" {
 		if directive, ok := directiveValueFromLaunchSynthesisMapping(state, operation.In["directive"]); ok {
 			input.prompt, _ = launch.BuildPrompt(directive)

@@ -24,6 +24,10 @@
         "type": "string",
         "description": "Модель выполнения."
       },
+      "reasoning_effort": {
+        "type": "string",
+        "description": "Явно заданное усилие рассуждения модели."
+      },
       "environment": {
         "type": "string",
         "description": "Среда выполнения."

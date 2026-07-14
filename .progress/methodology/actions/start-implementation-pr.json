@@ -125,6 +125,9 @@
         "model": {
           "ref": "in.model"
         },
+        "reasoning_effort": {
+          "ref": "in.launch.reasoning_effort"
+        },
         "environment": {
           "ref": "in.environment"
         },

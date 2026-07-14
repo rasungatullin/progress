@@ -938,6 +938,41 @@ func TestAllocateResourcesUsesResolvedProfileFields(t *testing.T) {
 	}
 }
 
+func TestAllocateResourcesPreservesExplicitReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{data: map[string]any{
+		"invocation": model.Invocation{Launch: model.LaunchSpec{ReasoningEffort: "medium"}},
+	}}
+	operation := model.OperationSpec{In: model.OperationMap{
+		"reasoning_effort": {Ref: "data.invocation.launch.reasoning_effort"},
+	}}
+
+	input := allocateResourcesInputFromOperation(state, operation)
+	if input.reasoningEffort != "medium" {
+		t.Fatalf("allocate-resources must preserve explicit reasoning effort: %q", input.reasoningEffort)
+	}
+}
+
+func TestLaunchSynthesisDoesNotReadImplicitAllocationReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	state := &operationExecution{data: map[string]any{
+		"allocation": model.Allocation{ReasoningEffort: "medium"},
+	}}
+	operation := model.OperationSpec{In: model.OperationMap{
+		"prompt":    {Value: []byte(`"ship it"`)},
+		"directory": {Value: []byte(`"/tmp/work"`)},
+		"runner":    {Value: []byte(`"codex"`)},
+		"model":     {Value: []byte(`"gpt-5.3-codex-spark"`)},
+	}}
+
+	input := launchSynthesisInputFromOperation(state, operation)
+	if input.reasoningEffort != "" {
+		t.Fatalf("launch-synthesis must use only explicit input mappings: %q", input.reasoningEffort)
+	}
+}
+
 func TestAllocateResourcesFailureDoesNotWriteStateResult(t *testing.T) {
 	t.Parallel()
 
