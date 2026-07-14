@@ -753,8 +753,8 @@ func TestServiceProcessTaskReworksReviewPassedTaskWithMergeConflict(t *testing.T
 		t.Fatalf("expected one cycle, got %#v", result.Cycles)
 	}
 	cycle := result.Cycles[0]
-	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
-		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionResolveMergeConflict {
+		t.Fatalf("expected resolve-merge-conflict route, got %#v", cycle.Consideration)
 	}
 	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasMergeConflict {
 		t.Fatalf("expected merge conflict state: %#v", cycle.MergeRequestExternalState)
@@ -782,8 +782,8 @@ func TestServiceProcessTaskKeepsMergeConflictWhenReviewRemarksFail(t *testing.T)
 	if cycle.MergeRequestExternalState == nil || !cycle.MergeRequestExternalState.HasMergeConflict {
 		t.Fatalf("expected merge conflict state: %#v", cycle.MergeRequestExternalState)
 	}
-	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionApplyReviewComments {
-		t.Fatalf("expected apply-review-comments route, got %#v", cycle.Consideration)
+	if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil || cycle.Consideration.ExecutionPlan.Action != execution.ActionResolveMergeConflict {
+		t.Fatalf("expected resolve-merge-conflict route, got %#v", cycle.Consideration)
 	}
 }
 

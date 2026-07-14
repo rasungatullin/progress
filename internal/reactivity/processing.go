@@ -70,8 +70,9 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 
 	result := TaskProcessingResult{TaskNumber: input.TaskNumber}
 	var knownMergeRequest *integration.MergeRequest
+	resolvedConflictFingerprint := ""
 	for index := 1; index <= maxCycles; index++ {
-		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index, knownMergeRequest)
+		cycle, err := s.runDecisionCycle(ctx, input.TaskNumber, input.Route, index, knownMergeRequest, resolvedConflictFingerprint)
 		result.Cycles = append(result.Cycles, cycle)
 		result.FinalIssue = cycle.Issue
 		if err != nil {
@@ -79,6 +80,9 @@ func (s *Service) ProcessTask(ctx context.Context, input TaskProcessingInput) (T
 		}
 		if cycle.ExecutionResult != nil && cycle.ExecutionResult.MergeRequest != nil {
 			knownMergeRequest = integrationMergeRequestFromExecutionResult(cycle.ExecutionResult.MergeRequest)
+		}
+		if cycle.Action == execution.ActionResolveMergeConflict && cycle.ExecutionResult != nil && err == nil {
+			resolvedConflictFingerprint = mergeConflictFingerprint(cycle.MergeRequest, cycle.MergeRequestExternalState)
 		}
 		if cycle.Consideration == nil || cycle.Consideration.ExecutionPlan == nil {
 			result.Completed = true
@@ -145,7 +149,7 @@ func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (Tas
 	return result, nil
 }
 
-func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route string, index int, knownMergeRequest *integration.MergeRequest) (TaskProcessingCycle, error) {
+func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route string, index int, knownMergeRequest *integration.MergeRequest, resolvedConflictFingerprint string) (TaskProcessingCycle, error) {
 	issue, mergeRequest, externalState, mergeRequestErr, err := s.loadTaskStateWithMergeRequestError(ctx, taskNumber, false, knownMergeRequest)
 	if err != nil {
 		return TaskProcessingCycle{Index: index}, err
@@ -156,6 +160,9 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route st
 		Issue:                     issue,
 		MergeRequest:              mergeRequest,
 		MergeRequestExternalState: externalState,
+	}
+	if resolvedConflictFingerprint != "" && externalState != nil && externalState.HasMergeConflict && mergeConflictFingerprint(mergeRequest, externalState) == resolvedConflictFingerprint {
+		return cycle, fmt.Errorf("конфликт запроса на слияние сохранился для того же отпечатка разрешения; требуется ручное вмешательство")
 	}
 	consideration, err := s.decision.Consider(ctx, decision.ConsiderationInput{Route: route, Context: decision.DecisionContext{
 		Signal:                    decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: taskNumber},
@@ -170,7 +177,7 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route st
 		}
 		return cycle, err
 	}
-	if consideration.Status == decision.ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil && externalState == nil {
+	if consideration.Status == decision.ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil && externalState == nil && taskLabelsRequireMergeRequest(issue.Labels) {
 		externalState, err = s.loadMergeRequestExternalState(ctx, mergeRequest)
 		if err != nil {
 			return cycle, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", taskNumber, err)
@@ -209,6 +216,17 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskNumber int, route st
 		return cycle, err
 	}
 	return cycle, nil
+}
+
+func mergeConflictFingerprint(mergeRequest *integration.MergeRequest, state *decision.MergeRequestExternalState) string {
+	if mergeRequest == nil || state == nil || !state.HasMergeConflict {
+		return ""
+	}
+	values := []string{mergeRequest.Repository, strconv.Itoa(mergeRequest.Number), mergeRequest.BaseRef, mergeRequest.HeadRef}
+	for _, key := range []string{"base_sha", "head_sha", "mergeable", "merge_state_status", "updated_at"} {
+		values = append(values, key+"="+strings.TrimSpace(mergeRequest.Attributes[key]))
+	}
+	return strings.Join(values, "|")
 }
 
 func assignmentWithMergeRequest(assignment *execution.ExecutionAssignment, mergeRequest *integration.MergeRequest) *execution.ExecutionAssignment {
@@ -280,12 +298,18 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskNu
 
 	mergeRequest := knownMergeRequest
 	if mergeRequest != nil {
+		if !taskLabelsRequireMergeRequest(response.Issue.Labels) {
+			return response.Issue, mergeRequest, nil, nil, nil
+		}
 		copyOfMergeRequest := *mergeRequest
 		fresh, refreshErr := s.integration.Execute(ctx, integration.Request{IntegrationType: integrationTypeRepository, Resource: "merge-request", ObjectType: "merge-request", Operation: "get", Repository: copyOfMergeRequest.Repository, RepoProvided: strings.TrimSpace(copyOfMergeRequest.Repository) != "", MergeRequestNumber: copyOfMergeRequest.Number})
-		if refreshErr == nil {
-			if refreshed, ok := integrationMergeRequestFromResponse(fresh); ok {
-				copyOfMergeRequest = refreshed
-			}
+		if refreshErr != nil {
+			return response.Issue, mergeRequest, nil, refreshErr, nil
+		}
+		if refreshed, ok := integrationMergeRequestFromResponse(fresh); ok {
+			copyOfMergeRequest = refreshed
+		} else {
+			return response.Issue, mergeRequest, nil, fmt.Errorf("контур интеграции не вернул актуальный запрос на слияние"), nil
 		}
 		mergeRequest = &copyOfMergeRequest
 	} else {

@@ -13,6 +13,7 @@ import (
 	"github.com/rasungatullin/progress/internal/execution/launch"
 	"github.com/rasungatullin/progress/internal/execution/model"
 	"github.com/rasungatullin/progress/internal/integration"
+	integrationmodel "github.com/rasungatullin/progress/internal/integration/model"
 )
 
 type operationExecution struct {
@@ -47,6 +48,11 @@ func (s *Service) runActionOperations(ctx context.Context, state *operationExecu
 	executor := builtinOperationExecutor{service: s}
 	for _, operation := range state.action.Operations {
 		if err := executor.Execute(ctx, state, operation); err != nil {
+			if state.action.Name == ActionResolveMergeConflict {
+				if cleanupErr := executor.abortActiveMergeConflictRebase(state); cleanupErr != nil {
+					return fmt.Errorf("%w; очистка незавершённого перебазирования завершилась отказом: %v", err, cleanupErr)
+				}
+			}
 			return err
 		}
 	}
@@ -2252,6 +2258,9 @@ func (e builtinOperationExecutor) rebase(ctx context.Context, state *operationEx
 				if pathsErr == nil {
 					pathsErr = fmt.Errorf("rebase conflict did not expose unmerged paths")
 				}
+				if cleanupErr := e.abortActiveMergeConflictRebaseDirectory(input.Directory); cleanupErr != nil {
+					pathsErr = fmt.Errorf("%w; очистка незавершённого перебазирования завершилась отказом: %v", pathsErr, cleanupErr)
+				}
 				return e.failRebase(state, operation, name, "Конфликт перебазирования не удалось диагностировать.", "rebase_conflict_context_failed", pathsErr)
 			}
 			contextValue := map[string]any{
@@ -2380,8 +2389,16 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 		}
 		return e.failResolveMergeConflict(state, operation, name, directory, "После разрешения конфликта рабочее место не чисто.", "merge_conflict_worktree_dirty", err)
 	}
+	sentHead, err := gitOutput(ctx, directory, "rev-parse", "--verify", "HEAD")
+	if err != nil || strings.TrimSpace(sentHead) == "" {
+		return e.failResolveMergeConflict(state, operation, name, directory, "Вершина отправляемой ветки не определена.", "merge_conflict_head_sha_missing", err)
+	}
+	sentHead = strings.TrimSpace(sentHead)
 	if _, err := gitOutput(ctx, directory, "push", "--force-with-lease=refs/heads/"+head+":"+remoteOID, "origin", "HEAD:"+head); err != nil {
 		return e.failRebase(state, operation, name, "Безопасная отправка разрешённого конфликта завершилась отказом.", "merge_conflict_push_failed", err)
+	}
+	if err := e.verifyMergeConflictPush(ctx, state, sentHead, base, head); err != nil {
+		return e.failRebase(state, operation, name, "GitHub не подтвердил устранение конфликта после отправки.", "merge_conflict_external_state_unconfirmed", err)
 	}
 	summary := fmt.Sprintf("resolved merge conflict branch=%s base=%s pushed=force-with-lease", head, base)
 	out := operation.Out
@@ -2393,17 +2410,98 @@ func (e builtinOperationExecutor) resolveMergeConflict(ctx context.Context, stat
 	return nil
 }
 
+const mergeConflictVerificationAttempts = 3
+
+func (e builtinOperationExecutor) verifyMergeConflictPush(ctx context.Context, state *operationExecution, sentHead, base, head string) error {
+	pr, ok := state.data["pull_request"].(integration.MergeRequest)
+	if !ok || pr.Number <= 0 {
+		return fmt.Errorf("связанный запрос на слияние не доступен для проверки")
+	}
+	executor, err := e.integrationExecutor()
+	if err != nil {
+		return err
+	}
+	var last string
+	for attempt := 0; attempt < mergeConflictVerificationAttempts; attempt++ {
+		response, getErr := executor.Execute(ctx, integration.Request{
+			IntegrationType: integrationmodel.IntegrationTypeRepository,
+			Resource:        "merge-request", ObjectType: "merge-request", Operation: "get",
+			Repository: pr.Repository, RepoProvided: strings.TrimSpace(pr.Repository) != "",
+			MergeRequestNumber: pr.Number,
+		})
+		if getErr != nil {
+			last = getErr.Error()
+		} else if refreshed, exists := mergeRequestFromIntegrationResponse(response); exists {
+			currentHead := strings.TrimSpace(refreshed.Attributes["head_sha"])
+			if currentHead == "" {
+				currentHead = strings.TrimSpace(refreshed.Attributes["head_ref_oid"])
+			}
+			if currentHead != sentHead {
+				last = fmt.Sprintf("GitHub head SHA %q does not match sent SHA %q", currentHead, sentHead)
+			} else if mergeState, known := mergeRequestState(refreshed); known && !mergeState {
+				return nil
+			} else {
+				last = "GitHub returned a transition or conflicting merge state"
+			}
+		}
+		if attempt+1 < mergeConflictVerificationAttempts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	return fmt.Errorf("%s (base=%s head=%s)", last, base, head)
+}
+
+func mergeRequestState(pr integration.MergeRequest) (conflicting bool, known bool) {
+	mergeable := strings.ToLower(strings.TrimSpace(pr.Attributes["mergeable"]))
+	mergeState := strings.ToLower(strings.TrimSpace(pr.Attributes["merge_state_status"]))
+	if mergeable == "" && mergeState == "" {
+		return false, false
+	}
+	for _, value := range []string{mergeable, mergeState} {
+		switch value {
+		case "unknown", "unstable", "queued", "":
+			return false, false
+		case "conflict", "conflicted", "conflicting", "dirty", "has-conflicts", "has_conflicts", "merge-conflict", "merge_conflict", "false":
+			return true, true
+		}
+	}
+	return false, true
+}
+
 func (e builtinOperationExecutor) failResolveMergeConflict(state *operationExecution, operation OperationSpec, name, directory, summary, code string, err error) error {
+	if cleanupErr := e.abortActiveMergeConflictRebaseDirectory(directory); cleanupErr != nil {
+		err = fmt.Errorf("%w; очистка незавершённого перебазирования завершилась отказом: %v", err, cleanupErr)
+	}
+	return e.failRebase(state, operation, name, summary, code, err)
+}
+
+func (e builtinOperationExecutor) abortActiveMergeConflictRebase(state *operationExecution) error {
+	workplace, ok := state.data["workplace"].(workplace)
+	if !ok || strings.TrimSpace(workplace.Name) == "" {
+		return nil
+	}
+	return e.abortActiveMergeConflictRebaseDirectory(workplace.Name)
+}
+
+func (e builtinOperationExecutor) abortActiveMergeConflictRebaseDirectory(directory string) error {
 	gitOutput := e.service.runGitOutput
 	if gitOutput == nil {
 		gitOutput = runGitOutput
 	}
+	if _, err := gitOutput(context.Background(), directory, "rev-parse", "--verify", "REBASE_HEAD"); err != nil {
+		return nil
+	}
 	abortCtx, cancel := context.WithTimeout(context.Background(), rebaseAbortTimeout)
 	if _, abortErr := gitOutput(abortCtx, directory, "rebase", "--abort"); abortErr != nil {
-		err = fmt.Errorf("%w; очистка незавершённого перебазирования завершилась отказом: %v", err, abortErr)
+		cancel()
+		return abortErr
 	}
 	cancel()
-	return e.failRebase(state, operation, name, summary, code, err)
+	return nil
 }
 
 func isSuccessfulConclusion(status string) bool {

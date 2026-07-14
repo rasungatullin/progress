@@ -43,6 +43,33 @@ func TestRebaseFetchesBaseRebasesAndUsesForceWithLeaseOnlyWhenAllowed(t *testing
 	}
 }
 
+func TestRebaseAllowsLeaseCaptureBeforeConflictResolution(t *testing.T) {
+	var calls []string
+	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
+		call := strings.Join(args, " ")
+		calls = append(calls, call)
+		switch call {
+		case "rev-parse --is-inside-work-tree":
+			return "true", nil
+		case "branch --show-current":
+			return "feature", nil
+		case "rev-parse --verify refs/remotes/origin/feature":
+			return "0123456789abcdef0123456789abcdef01234567", nil
+		case "rev-parse --verify FETCH_HEAD":
+			return "fedcba9876543210fedcba9876543210fedcba98", nil
+		default:
+			return "", nil
+		}
+	}}
+	input := model.RebaseInput{Directory: "/tmp/work", BaseRef: "main", HeadRef: "feature", ForceWithLease: true, AllowConflict: true, Git: &model.GitConfig{Push: &model.GitPushConfig{AllowForceWithLease: true}}}
+	if err := (builtinOperationExecutor{service: service}).rebase(context.Background(), rebaseTestState(service, input), rebaseTestOperation(input), "rebase"); err != nil {
+		t.Fatalf("rebase preparation: %v", err)
+	}
+	if strings.Contains(strings.Join(calls, "\n"), "push ") {
+		t.Fatalf("conflict preparation must not push: %v", calls)
+	}
+}
+
 func TestRebaseRejectsDirtyWorktreeAndDoesNotFetch(t *testing.T) {
 	var calls []string
 	service := &Service{runGitOutput: func(_ context.Context, _ string, args ...string) (string, error) {
@@ -337,7 +364,7 @@ func rebaseTestOperation(input model.RebaseInput) OperationSpec {
 			"directory": rebaseMapping(input.Directory), "base_ref": rebaseMapping(input.BaseRef),
 			"head_ref":      rebaseMapping(input.HeadRef),
 			"protected_ref": rebaseMapping(input.ProtectedRef),
-			"push":          rebaseMapping(input.Push), "force_with_lease": rebaseMapping(input.ForceWithLease), "git": rebaseMapping(input.Git),
+			"push":          rebaseMapping(input.Push), "force_with_lease": rebaseMapping(input.ForceWithLease), "allow_conflict": rebaseMapping(input.AllowConflict), "git": rebaseMapping(input.Git),
 		},
 		Out: model.OperationMap{"rebase_summary": {Ref: "data.rebase_summary"}},
 	}
