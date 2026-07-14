@@ -4,5 +4,5 @@
   "action": "review-pull-request",
   "target_contour": "execution",
   "title": "Ревизия запроса на слияние",
-  "body": "Проверить открытый запрос на слияние относительно базовой ветки. Не изменять файлы. Вернуть структурированный вывод с remarks и conclusion. Запись замечаний выполняется отдельной операцией контура исполнения через контур интеграции."
+  "body_file": "../instructions-texts/review-pull-request-directive.md"
 }
