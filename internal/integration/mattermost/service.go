@@ -81,10 +81,11 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 type messageListCursor struct {
 	Before string `json:"before,omitempty"`
 	After  string `json:"after,omitempty"`
+	Return string `json:"return,omitempty"`
 }
 
 func (s *Service) executeMessageList(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
-	channelID := strings.TrimSpace(req.ChannelID)
+	channelID := strings.TrimSpace(firstNonEmpty(req.ChannelID, s.config.ChannelID))
 	if channelID == "" {
 		err := fmt.Errorf("Mattermost channel id is required")
 		response.Status = model.ResponseStatusFailed
@@ -123,6 +124,12 @@ func (s *Service) executeMessageList(ctx context.Context, response model.Respons
 		response.Status = model.ResponseStatusFailed
 		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
 		return response, err
+	}
+	if cursor.Before != "" {
+		direction = "older"
+	}
+	if cursor.After != "" {
+		direction = "newer"
 	}
 	query := url.Values{}
 	query.Set("per_page", strconv.Itoa(limit))
@@ -168,20 +175,26 @@ func (s *Service) executeMessageList(ctx context.Context, response model.Respons
 	response.Messages = messages
 	response.Pagination = &model.Pagination{Direction: direction, HasMore: len(raw.Order) == limit}
 	if len(messages) > 0 {
-		boundary := messages[0]
+		oldest, newest := messages[0], messages[0]
 		for _, message := range messages[1:] {
-			if direction == "older" && message.CreatedAt < boundary.CreatedAt {
-				boundary = message
+			if message.CreatedAt < oldest.CreatedAt {
+				oldest = message
 			}
-			if direction == "newer" && message.CreatedAt > boundary.CreatedAt {
-				boundary = message
+			if message.CreatedAt > newest.CreatedAt {
+				newest = message
 			}
 		}
+		olderCursor := encodeMessageListCursor(messageListCursor{Before: oldest.MessageID, Return: encodeMessageListCursor(messageListCursor{After: newest.MessageID})})
+		newerCursor := encodeMessageListCursor(messageListCursor{After: newest.MessageID, Return: encodeMessageListCursor(messageListCursor{Before: oldest.MessageID})})
 		if direction == "older" {
-			response.Pagination.NextCursor = encodeMessageListCursor(messageListCursor{Before: boundary.MessageID})
+			response.Pagination.NextCursor = olderCursor
+			response.Pagination.PrevCursor = newerCursor
 		} else {
-			response.Pagination.NextCursor = encodeMessageListCursor(messageListCursor{After: boundary.MessageID})
+			response.Pagination.NextCursor = newerCursor
+			response.Pagination.PrevCursor = olderCursor
 		}
+	} else if cursor.Return != "" {
+		response.Pagination.PrevCursor = cursor.Return
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
