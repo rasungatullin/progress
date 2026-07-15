@@ -1,7 +1,8 @@
 {
   "default_systems": {
     "issue": "github",
-    "repo": "github"
+    "repo": "github",
+    "messenger": "telegram"
   },
   "systems": {
     "github": {
@@ -18,28 +19,6 @@
       "repository": "rasungatullin/progress",
       "default_repo": "rasungatullin/progress"
     },
-    "bitbucket": {
-      "type": "bitbucket",
-      "integration_types": [
-        "repo"
-      ],
-      "enabled": true,
-      "base_url": "https://stash.msk.avito.ru",
-      "api_variant": "server",
-      "token_env": "BITBUCKET_TOKEN",
-      "workspace": "workspace",
-      "repository": "workspace/repository"
-    },
-    "mattermost": {
-      "type": "mattermost",
-      "integration_types": [
-        "messenger"
-      ],
-      "enabled": true,
-      "base_url": "https://mattermost.example",
-      "token_env": "MATTERMOST_TOKEN",
-      "channel_id": "channel-id"
-    },
     "telegram": {
       "type": "telegram",
       "integration_types": [
@@ -47,7 +26,7 @@
       ],
       "enabled": true,
       "token_private": "tg_token",
-      "chat_id": "chat-id"
+      "chat_id": "1332534389"
     }
   }
 }
