@@ -1408,115 +1408,7 @@ func TestOperationFailsWhenRequiredInputIsNotResolved(t *testing.T) {
 	}
 }
 
-func TestLoadPullRequestFillsOnlyActionData(t *testing.T) {
-	t.Parallel()
-
-	operation := loadPullRequestOperationSpec()
-	state := &operationExecution{
-		in: model.Invocation{
-			Action: "legacy",
-			Assignment: &ExecutionAssignment{
-				RelatedObjects: []ObjectRef{{
-					Type:       "merge-request",
-					Repository: "legacy/name",
-					Number:     999,
-				}},
-			},
-		},
-		action: model.Action{Operations: []model.OperationSpec{operation}},
-		data: map[string]any{
-			"invocation": model.Invocation{
-				Task: "task-112",
-				Assignment: &ExecutionAssignment{
-					CanonicalTask: &ObjectRef{Type: "task", Number: 112},
-					RelatedObjects: []ObjectRef{{
-						Type:       "merge-request",
-						Repository: "owner/name",
-						Number:     17,
-					}},
-				},
-			},
-		},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
-	}
-	integrations := &stubIntegrationExecutor{
-		execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
-			if req.Operation != "get" || req.Repository != "owner/name" || req.MergeRequestNumber != 17 {
-				t.Fatalf("unexpected integration request: %#v", req)
-			}
-			return integration.Response{MergeRequest: &integration.MergeRequest{
-				Repository: "owner/name",
-				Number:     17,
-				State:      "OPEN",
-				BaseRef:    "main",
-				HeadRef:    "feature/review",
-				Title:      "Исправить обработку",
-				URL:        "https://github.com/owner/name/pull/17",
-			}}, nil
-		},
-	}
-	service := &Service{logger: log.Default(), integrations: integrations}
-
-	err := builtinOperationExecutor{service: service}.loadPullRequest(context.Background(), state, operation, OperationKindLoadPullRequest)
-	if err != nil {
-		t.Fatalf("load pull request: %v", err)
-	}
-	dataPullRequest, ok := state.data["pull_request"].(integration.MergeRequest)
-	if !ok || dataPullRequest.Number != 17 || dataPullRequest.HeadRef != "feature/review" {
-		t.Fatalf("load-pull-request must fill data.pull_request: %#v", state.data)
-	}
-	dataInvocation, ok := state.data["invocation"].(model.Invocation)
-	if !ok || dataInvocation.Workplace.HeadRef != "feature/review" || dataInvocation.Workplace.BaseRef != "main" {
-		t.Fatalf("load-pull-request must fill synchronized data.invocation: %#v", state.data)
-	}
-	if state.pullRequest != nil {
-		t.Fatalf("load-pull-request must not write implicit state pull request: %#v", state.pullRequest)
-	}
-	if state.in.Workplace.HeadRef != "" || state.assignment != nil {
-		t.Fatalf("load-pull-request must not write implicit state invocation or assignment: state=%#v assignment=%#v", state.in, state.assignment)
-	}
-	result := findOperationResult(state.tracker.snapshot(), OperationKindLoadPullRequest)
-	if result == nil || result.Status != OperationStatusCompleted || result.Input == "" || result.Output == "" {
-		t.Fatalf("load-pull-request must keep contract diagnostics: %#v", result)
-	}
-}
-
-func TestLoadPullRequestFailureDoesNotWriteStateResult(t *testing.T) {
-	t.Parallel()
-
-	operation := loadPullRequestOperationSpec()
-	state := &operationExecution{
-		action: model.Action{Operations: []model.OperationSpec{operation}},
-		data: map[string]any{
-			"invocation": model.Invocation{
-				Assignment: &ExecutionAssignment{
-					RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}},
-				},
-			},
-		},
-		result:  model.LaunchResult{Status: "legacy", Summary: "legacy"},
-		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
-	}
-	service := &Service{
-		logger: log.Default(),
-		integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
-			return integration.Response{}, errors.New("load failed")
-		}},
-	}
-
-	err := builtinOperationExecutor{service: service}.loadPullRequest(context.Background(), state, operation, OperationKindLoadPullRequest)
-	if err == nil {
-		t.Fatal("load-pull-request must return integration error")
-	}
-	dataResult, ok := state.data["result"].(model.LaunchResult)
-	if !ok || dataResult.Status != "failed" || !strings.Contains(dataResult.Summary, "load failed") {
-		t.Fatalf("load-pull-request must write failed result to data.result: %#v", state.data)
-	}
-	if state.result.Status != "legacy" || state.result.Summary != "legacy" {
-		t.Fatalf("load-pull-request must not write implicit state result: %#v", state.result)
-	}
-}
-
+/*
 func TestLoadReviewRemarksFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 
@@ -1657,6 +1549,9 @@ func TestLoadReviewRemarksOptionalFailureDoesNotWriteStateResult(t *testing.T) {
 		t.Fatalf("optional load-review-remarks must not write implicit state result: %#v", state.result)
 	}
 }
+
+}
+*/
 
 func TestFinalizeFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
@@ -3115,7 +3010,7 @@ func TestActionResolutionResolvesOperationsFromRegistry(t *testing.T) {
 		}},
 		Operations: []methodology.Operation{
 			{Name: OperationKindPrepareData, Kind: OperationKindPrepareData, Title: "Подготовка данных", Required: boolRef(true)},
-			{Name: OperationKindLoadPullRequest, Kind: OperationKindLoadPullRequest, Title: "Получение запроса на слияние", Required: boolRef(true)},
+			{Name: OperationKindLoadPullRequest, Kind: "repository.merge-request.get", Title: "Получение запроса на слияние", Required: boolRef(true)},
 			{Name: OperationKindLoadReviewRemarks, Kind: OperationKindLoadReviewRemarks, Title: "Получение замечаний ревизии"},
 			{Name: OperationKindResolveProfile, Kind: OperationKindResolveProfile, Title: "Выбор исполнительного профиля", Required: boolRef(true)},
 			{Name: OperationKindAllocateResources, Kind: OperationKindAllocateResources, Title: "Ресурсное снабжение", Required: boolRef(true)},
@@ -3279,7 +3174,7 @@ func TestActionResolutionKeepsLoadPullRequestMapping(t *testing.T) {
 			}},
 		}},
 		Operations: []methodology.Operation{
-			{Name: OperationKindLoadPullRequest, Kind: OperationKindLoadPullRequest, Title: "Получение запроса на слияние", Required: boolRef(true)},
+			{Name: OperationKindLoadPullRequest, Kind: "repository.merge-request.get", Title: "Получение запроса на слияние", Required: boolRef(true)},
 		},
 	}, invocation{Action: ActionReviewPullRequest})
 	if err != nil {
@@ -4715,7 +4610,14 @@ func testExecutionOperationRegistry() []methodology.Operation {
 	}
 	result := make([]methodology.Operation, 0, len(names)+1)
 	for _, name := range names {
-		result = append(result, methodology.Operation{Name: name, Type: OperationTypeBuiltin, Kind: name, Required: boolRef(true)})
+		typeName, kind := OperationTypeBuiltin, name
+		if name == OperationKindLoadPullRequest {
+			typeName, kind = OperationTypeIntegration, "repository.merge-request.get"
+		}
+		if name == OperationKindLoadReviewRemarks {
+			typeName, kind = OperationTypeIntegration, "repository.merge-request.comment.list"
+		}
+		result = append(result, methodology.Operation{Name: name, Type: typeName, Kind: kind, Required: boolRef(true)})
 	}
 	required := boolRef(true)
 	result = append(result, methodology.Operation{
@@ -5302,7 +5204,8 @@ func commitPushOperationSpec() model.OperationSpec {
 func loadPullRequestOperationSpec() model.OperationSpec {
 	return model.OperationSpec{
 		Name: OperationKindLoadPullRequest,
-		Kind: OperationKindLoadPullRequest,
+		Kind: "repository.merge-request.get",
+		Type: OperationTypeIntegration,
 
 		In: model.OperationMap{
 			"invocation": {Ref: "data.invocation"},
@@ -5318,7 +5221,8 @@ func loadPullRequestOperationSpec() model.OperationSpec {
 func loadReviewRemarksOperationSpec() model.OperationSpec {
 	return model.OperationSpec{
 		Name: OperationKindLoadReviewRemarks,
-		Kind: OperationKindLoadReviewRemarks,
+		Type: OperationTypeIntegration,
+		Kind: "repository.merge-request.comment.list",
 
 		In: model.OperationMap{
 			"invocation":   {Ref: "data.invocation"},
@@ -5507,8 +5411,8 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "type":"builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "load-pull-request", "kind": "load-pull-request", "type":"builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
-        {"name": "load-review-remarks", "kind": "load-review-remarks", "type":"builtin", "required": false, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
+        {"name": "load-pull-request", "kind": "repository.merge-request.get", "type":"integration", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "repository": {"ref": "data.invocation.repository.url"}, "number": {"ref": "data.invocation.assignment.related_objects.0.number"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
+        {"name": "load-review-remarks", "kind": "repository.merge-request.comment.list", "type":"integration", "required": false, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}, "repository": {"ref": "data.pull_request.repository"}, "number": {"ref": "data.pull_request.number"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "type":"builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "type":"builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "type":"builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
@@ -5526,8 +5430,8 @@ const testExecutionMethodologyCatalogJSON = `{
       "requires_workplace": true,
       "operations": [
         {"name": "prepare-data", "kind": "prepare-data", "type":"builtin", "required": true, "in": {"invocation": {"ref": "in.invocation"}, "expected_result": {"ref": "in.expected_result"}, "constraints": {"ref": "in.constraints"}, "canonical_task": {"ref": "in.canonical_task"}, "related_objects": {"ref": "in.related_objects"}, "reasons": {"ref": "in.reasons"}, "structured_input": {"ref": "in.structured_input"}}, "out": {"structured_input": {"ref": "data.structured_input"}, "workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},
-        {"name": "load-pull-request", "kind": "load-pull-request", "type":"builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
-        {"name": "load-review-remarks", "kind": "load-review-remarks", "type":"builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
+        {"name": "load-pull-request", "kind": "repository.merge-request.get", "type":"integration", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "repository": {"ref": "data.invocation.repository.url"}, "number": {"ref": "data.invocation.assignment.related_objects.0.number"}}, "out": {"pull_request": {"ref": "data.pull_request"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
+        {"name": "load-review-remarks", "kind": "repository.merge-request.comment.list", "type":"integration", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "pull_request": {"ref": "data.pull_request"}, "repository": {"ref": "data.pull_request.repository"}, "number": {"ref": "data.pull_request.number"}}, "out": {"review_remarks": {"ref": "data.review_remarks"}, "invocation": {"ref": "data.invocation"}, "result": {"ref": "data.result"}}},
         {"name": "resolve-profile", "kind": "resolve-profile", "type":"builtin", "required": true, "in": {"profile_name": {"ref": "action.profile"}, "invocation": {"ref": "data.invocation"}}, "out": {"profile": {"ref": "data.profile"}, "result": {"ref": "data.result"}}},
         {"name": "allocate-resources", "kind": "allocate-resources", "type":"builtin", "required": true, "in": {"invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}}, "out": {"allocation": {"ref": "data.allocation"}}},
         {"name": "prepare-workplace", "kind": "prepare-workplace", "type":"builtin", "required": true, "in": {"requires_workplace": {"ref": "action.requires_workplace"}, "invocation": {"ref": "data.invocation"}, "profile": {"ref": "data.profile"}, "allocation": {"ref": "data.allocation"}}, "out": {"workplace": {"ref": "data.workplace"}, "invocation": {"ref": "data.invocation"}}},

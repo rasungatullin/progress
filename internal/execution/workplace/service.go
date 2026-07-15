@@ -176,12 +176,27 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 
 func (s *Service) synchronizeExistingWorkplace(ctx context.Context, directory, branch string) error {
 	if err := s.fetchRemoteBranch(ctx, directory, branch); err != nil {
+		exists, probeErr := s.remoteBranchExistsOnOrigin(ctx, directory, branch)
+		if probeErr == nil && !exists {
+			return nil
+		}
+		if probeErr != nil {
+			return fmt.Errorf("fetch origin/%s: %w; verify remote branch: %v", branch, err, probeErr)
+		}
 		return fmt.Errorf("fetch origin/%s: %w", branch, err)
 	}
 	if err := s.rebaseWorkplaceBranchOnRemote(ctx, directory, branch); err != nil {
 		return fmt.Errorf("rebase on origin/%s: %w", branch, err)
 	}
 	return nil
+}
+
+func (s *Service) remoteBranchExistsOnOrigin(ctx context.Context, directory, branch string) (bool, error) {
+	output, err := s.runGitOutput(ctx, directory, "ls-remote", "origin", "refs/heads/"+branch)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(output) != "", nil
 }
 
 func (s *Service) rebaseWorkplaceBranchOnRemote(ctx context.Context, directory, branch string) error {

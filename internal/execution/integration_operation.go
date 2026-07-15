@@ -26,7 +26,14 @@ func (e builtinOperationExecutor) executeIntegration(ctx context.Context, state 
 	// исполнители без каталога сохраняют возможность проверить сборку запроса;
 	// реальный Service всегда публикует каталог.
 	var descriptor integration.OperationDescriptor
-	if catalog, ok := executor.(integrationOperationCatalog); ok {
+	if catalog, ok := executor.(integrationOperationDescriptor); ok {
+		var found bool
+		descriptor, found = catalog.OperationDescriptor(ctx, operationName, "")
+		if !found {
+			err := fmt.Errorf("integration operation %q is not available", operationName)
+			return e.failIntegrationOperation(state, operation, name, "Интеграционная операция не разрешена.", err, "integration_operation_unavailable")
+		}
+	} else if catalog, ok := executor.(integrationOperationCatalog); ok {
 		descriptors := catalog.Operations(ctx, integration.OperationFilter{Name: operationName})
 		if len(descriptors) == 0 {
 			err := fmt.Errorf("integration operation %q is not available", operationName)
@@ -52,7 +59,7 @@ func (e builtinOperationExecutor) executeIntegration(ctx context.Context, state 
 	}
 
 	response, err := executor.Execute(ctx, request)
-	if err != nil && !integrationResponseAlreadyAvailable(response) {
+	if err != nil && !integrationResponseAlreadyAvailable(operation, response) {
 		return e.failIntegrationOperation(state, operation, name, "Интеграционная операция завершилась отказом.", err, "integration_operation_failed")
 	}
 	writeIntegrationResponse(state, operation, response)
@@ -239,7 +246,16 @@ func addIntegrationExtra(extra map[string]any, name string, value any) map[strin
 }
 
 func writeIntegrationResponse(state *operationExecution, operation OperationSpec, response integration.Response) {
-	values := map[string]any{"response": response, "merge_request": response.MergeRequest, "operation_result": response.OperationResult, "failure": response.Failure}
+	values := map[string]any{"response": response, "merge_request": response.MergeRequest, "pull_request": response.MergeRequest, "review_remarks": response.ReviewRemarks, "operation_result": response.OperationResult, "failure": response.Failure}
+	if pointer, ok := values["merge_request"].(*integration.MergeRequest); ok {
+		if pointer != nil {
+			values["merge_request"] = *pointer
+			values["pull_request"] = *pointer
+		} else {
+			values["merge_request"] = nil
+			values["pull_request"] = nil
+		}
+	}
 	if values["merge_request"] == nil {
 		if response.PullRequestStatus != nil {
 			status := response.PullRequestStatus
@@ -247,6 +263,29 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 		} else if response.OperationResult != nil {
 			result := response.OperationResult
 			values["merge_request"] = integration.MergeRequest{System: result.System, ExternalID: result.ExternalID, State: result.Status, URL: result.URL}
+		}
+	}
+	if values["pull_request"] == nil {
+		values["pull_request"] = values["merge_request"]
+	}
+	mergeRequest, ok := values["merge_request"].(integration.MergeRequest)
+	if !ok {
+		if pointer, pointerOK := values["merge_request"].(*integration.MergeRequest); pointerOK && pointer != nil {
+			mergeRequest, ok = *pointer, true
+		}
+	}
+	if ok {
+		current, exists := state.data["invocation"].(invocation)
+		if !exists {
+			if mapping, mapped := operation.In["invocation"]; mapped {
+				current, exists = invocationValueFromLaunchSynthesisMapping(state, mapping)
+			}
+		}
+		if !exists {
+			current, exists = state.in, state != nil
+		}
+		if exists {
+			values["invocation"] = invocationWithPullRequest(current, mergeRequest)
 		}
 	}
 	for name, value := range response.Data {
@@ -265,11 +304,23 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 	}
 }
 
-func integrationResponseAlreadyAvailable(response integration.Response) bool {
+func integrationResponseAlreadyAvailable(operation OperationSpec, response integration.Response) bool {
+	if !strings.HasSuffix(strings.TrimSpace(string(operation.Kind)), ".create") {
+		return false
+	}
 	return response.PullRequestStatus != nil && (response.PullRequestStatus.Number > 0 || strings.TrimSpace(response.PullRequestStatus.URL) != "") || response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != ""
 }
 
 func (e builtinOperationExecutor) failIntegrationOperation(state *operationExecution, operation OperationSpec, name, summary string, err error, code string) error {
+	if !operation.Required {
+		for field, mapping := range operation.Out {
+			if field == "review_remarks" {
+				writeOperationData(state, model.OperationMap{field: mapping}, field, []integration.ReviewRemark(nil))
+			}
+		}
+		state.tracker.skip(name, joinExecutionSummaries(summary, strings.TrimSpace(err.Error())))
+		return nil
+	}
 	result := resultFromExecutionData(state)
 	if strings.TrimSpace(result.Status) == "" {
 		result = failedStartResult(err)

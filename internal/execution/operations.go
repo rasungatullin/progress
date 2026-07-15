@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -266,6 +267,9 @@ func operationInputValue(inputs map[string]any, path []string) (any, bool) {
 }
 
 func invocationInputValue(in invocation, path []string) (any, bool) {
+	if len(path) > 0 && path[0] == "invocation" {
+		return invocationInputValue(in, path[1:])
+	}
 	if len(path) == 1 {
 		switch path[0] {
 		case "invocation":
@@ -329,6 +333,23 @@ func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
 		}
 		return reflectedPathValue(mapped, path[1:])
 	}
+	if value.Kind() == reflect.Slice || value.Kind() == reflect.Array {
+		index, err := strconv.Atoi(path[0])
+		if err == nil {
+			if index < 0 || index >= value.Len() {
+				return nil, false
+			}
+			return reflectedPathValue(value.Index(index), path[1:])
+		}
+		for index := 0; index < value.Len(); index++ {
+			item := value.Index(index)
+			kind, ok := reflectedPathValue(item, []string{"type"})
+			if ok && strings.EqualFold(fmt.Sprint(kind), path[0]) {
+				return reflectedPathValue(item, path[1:])
+			}
+		}
+		return nil, false
+	}
 	if value.Kind() != reflect.Struct {
 		return nil, false
 	}
@@ -338,7 +359,7 @@ func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
 		if jsonName == "" {
 			jsonName = fieldType.Name
 		}
-		if jsonName == path[0] {
+		if jsonName == path[0] || strings.EqualFold(fieldType.Name, path[0]) {
 			return reflectedPathValue(value.Field(index), path[1:])
 		}
 	}
@@ -368,7 +389,7 @@ func reflectedPathResolved(value reflect.Value, path []string) bool {
 		if jsonName == "" {
 			jsonName = fieldType.Name
 		}
-		if jsonName != name {
+		if jsonName != name && !strings.EqualFold(fieldType.Name, name) {
 			continue
 		}
 		return reflectedPathResolved(value.Field(index), path[1:])
@@ -381,10 +402,6 @@ func (e builtinOperationExecutor) execute(ctx context.Context, state *operationE
 	switch operationKind(operation) {
 	case OperationKindPrepareData:
 		return e.prepareData(ctx, state, operation, name)
-	case OperationKindLoadPullRequest:
-		return e.loadPullRequest(ctx, state, operation, name)
-	case OperationKindLoadReviewRemarks:
-		return e.loadReviewRemarks(ctx, state, operation, name, operation.Required)
 	case OperationKindResolveProfile:
 		return e.resolveProfile(ctx, state, operation, name)
 	case OperationKindAllocateResources:
@@ -2683,10 +2700,10 @@ func hasSuccessfulResolutionChecks(output StructuredOutput) bool {
 
 func isSuccessfulCommand(command StructuredCommand) bool {
 	status := strings.ToLower(strings.TrimSpace(command.Status))
-	if status != "" && status != "ok" && status != "success" && status != "passed" && status != "completed" {
+	if status == "" || status != "ok" && status != "success" && status != "passed" && status != "completed" {
 		return false
 	}
-	return command.ExitCode == nil || *command.ExitCode == 0
+	return command.ExitCode != nil && *command.ExitCode == 0
 }
 
 func confirmedMergeConflict(pr integration.MergeRequest) bool {

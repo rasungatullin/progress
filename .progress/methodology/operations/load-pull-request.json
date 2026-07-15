@@ -1,8 +1,8 @@
 {
   "name": "load-pull-request",
-  "kind": "load-pull-request",
+  "kind": "repository.merge-request.get",
   "title": "Получение запроса на слияние",
-  "type": "builtin",
+  "type": "integration",
   "required": true,
   "contract": {
     "in": {

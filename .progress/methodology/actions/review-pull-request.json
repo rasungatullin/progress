@@ -107,6 +107,12 @@
       "in": {
         "invocation": {
           "ref": "in.invocation"
+        },
+        "repository": {
+          "ref": "in.invocation.assignment.related_objects.merge-request.repository"
+        },
+        "number": {
+          "ref": "in.invocation.assignment.related_objects.merge-request.number"
         }
       },
       "out": {
@@ -129,6 +135,12 @@
         },
         "pull_request": {
           "ref": "data.pull_request"
+        },
+        "repository": {
+          "ref": "data.pull_request.repository"
+        },
+        "number": {
+          "ref": "data.pull_request.number"
         }
       },
       "out": {
