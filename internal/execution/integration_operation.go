@@ -26,7 +26,14 @@ func (e builtinOperationExecutor) executeIntegration(ctx context.Context, state 
 	// исполнители без каталога сохраняют возможность проверить сборку запроса;
 	// реальный Service всегда публикует каталог.
 	var descriptor integration.OperationDescriptor
-	if catalog, ok := executor.(integrationOperationCatalog); ok {
+	if catalog, ok := executor.(integrationOperationDescriptor); ok {
+		var found bool
+		descriptor, found = catalog.OperationDescriptor(ctx, operationName, "")
+		if !found {
+			err := fmt.Errorf("integration operation %q is not available", operationName)
+			return e.failIntegrationOperation(state, operation, name, "Интеграционная операция не разрешена.", err, "integration_operation_unavailable")
+		}
+	} else if catalog, ok := executor.(integrationOperationCatalog); ok {
 		descriptors := catalog.Operations(ctx, integration.OperationFilter{Name: operationName})
 		if len(descriptors) == 0 {
 			err := fmt.Errorf("integration operation %q is not available", operationName)
@@ -239,7 +246,7 @@ func addIntegrationExtra(extra map[string]any, name string, value any) map[strin
 }
 
 func writeIntegrationResponse(state *operationExecution, operation OperationSpec, response integration.Response) {
-	values := map[string]any{"response": response, "merge_request": response.MergeRequest, "review_remarks": response.ReviewRemarks, "operation_result": response.OperationResult, "failure": response.Failure}
+	values := map[string]any{"response": response, "merge_request": response.MergeRequest, "pull_request": response.MergeRequest, "review_remarks": response.ReviewRemarks, "operation_result": response.OperationResult, "failure": response.Failure}
 	if values["merge_request"] == nil {
 		if response.PullRequestStatus != nil {
 			status := response.PullRequestStatus
@@ -248,6 +255,9 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 			result := response.OperationResult
 			values["merge_request"] = integration.MergeRequest{System: result.System, ExternalID: result.ExternalID, State: result.Status, URL: result.URL}
 		}
+	}
+	if values["pull_request"] == nil {
+		values["pull_request"] = values["merge_request"]
 	}
 	mergeRequest, ok := values["merge_request"].(integration.MergeRequest)
 	if !ok {

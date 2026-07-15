@@ -114,10 +114,10 @@
           "ref": "in.invocation"
         },
         "repository": {
-          "ref": "in.related_objects.0.repository"
+          "ref": "data.invocation.assignment.related_objects.0.repository"
         },
         "number": {
-          "ref": "in.related_objects.0.number"
+          "ref": "data.invocation.assignment.related_objects.0.number"
         }
       },
       "out": {

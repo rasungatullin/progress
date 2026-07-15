@@ -642,6 +642,8 @@ func normalizeObjectType(objectType string) string {
 		return "issue"
 	case "pull-request", "pr", "merge-request", "mr":
 		return "merge-request"
+	case "merge-request.comment", "merge-request-comment", "review-remark":
+		return "review-remark"
 	case "repo":
 		return "repository"
 	case "comment":

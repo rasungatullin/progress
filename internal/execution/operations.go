@@ -2687,10 +2687,10 @@ func hasSuccessfulResolutionChecks(output StructuredOutput) bool {
 
 func isSuccessfulCommand(command StructuredCommand) bool {
 	status := strings.ToLower(strings.TrimSpace(command.Status))
-	if status != "" && status != "ok" && status != "success" && status != "passed" && status != "completed" {
+	if status == "" || status != "ok" && status != "success" && status != "passed" && status != "completed" {
 		return false
 	}
-	return command.ExitCode == nil || *command.ExitCode == 0
+	return command.ExitCode != nil && *command.ExitCode == 0
 }
 
 func confirmedMergeConflict(pr integration.MergeRequest) bool {

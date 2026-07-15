@@ -80,6 +80,10 @@ type integrationOperationCatalog interface {
 	Operations(context.Context, integration.OperationFilter) []integration.OperationDescriptor
 }
 
+type integrationOperationDescriptor interface {
+	OperationDescriptor(context.Context, string, string) (integration.OperationDescriptor, bool)
+}
+
 type Service struct {
 	logger       *log.Logger
 	actions      actionResolver
