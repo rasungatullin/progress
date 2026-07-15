@@ -173,7 +173,8 @@ func (s *Service) executeMessageList(ctx context.Context, response model.Respons
 		sort.SliceStable(messages, func(i, j int) bool { return messages[i].CreatedAt > messages[j].CreatedAt })
 	}
 	response.Messages = messages
-	response.Pagination = &model.Pagination{Direction: direction, HasMore: len(raw.Order) == limit}
+	hasMore := len(raw.Order) == limit
+	response.Pagination = &model.Pagination{Direction: direction, HasMore: hasMore}
 	if len(messages) > 0 {
 		oldest, newest := messages[0], messages[0]
 		for _, message := range messages[1:] {
@@ -184,17 +185,23 @@ func (s *Service) executeMessageList(ctx context.Context, response model.Respons
 				newest = message
 			}
 		}
-		olderCursor := encodeMessageListCursor(messageListCursor{Before: oldest.MessageID, Return: encodeMessageListCursor(messageListCursor{After: newest.MessageID})})
-		newerCursor := encodeMessageListCursor(messageListCursor{After: newest.MessageID, Return: encodeMessageListCursor(messageListCursor{Before: oldest.MessageID})})
+		olderCursor := encodeMessageListCursor(messageListCursor{Before: oldest.MessageID})
+		newerCursor := encodeMessageListCursor(messageListCursor{After: newest.MessageID})
 		if direction == "older" {
-			response.Pagination.NextCursor = olderCursor
-			response.Pagination.PrevCursor = newerCursor
+			if hasMore {
+				response.Pagination.NextCursor = olderCursor
+			}
+			response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{After: oldest.MessageID})
 		} else {
-			response.Pagination.NextCursor = newerCursor
-			response.Pagination.PrevCursor = olderCursor
+			if hasMore {
+				response.Pagination.NextCursor = newerCursor
+			}
+			response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{Before: newest.MessageID})
 		}
-	} else if cursor.Return != "" {
-		response.Pagination.PrevCursor = cursor.Return
+	} else if cursor.Before != "" {
+		response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{After: cursor.Before})
+	} else if cursor.After != "" {
+		response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{Before: cursor.After})
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
