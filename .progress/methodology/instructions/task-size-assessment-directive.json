@@ -1,0 +1,7 @@
+{
+  "name": "task-size-assessment-directive",
+  "target_contour": "execution",
+  "title": "Оценка размера задачи",
+  "description": "Оценить, требует ли задача декомпозиции по объёму работ и контролируемости исполнения.",
+  "body_file": "task-size-assessment-directive.md"
+}

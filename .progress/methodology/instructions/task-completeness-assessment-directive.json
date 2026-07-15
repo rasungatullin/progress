@@ -1,0 +1,7 @@
+{
+  "name": "task-completeness-assessment-directive",
+  "target_contour": "execution",
+  "title": "Оценка полноты задачи",
+  "description": "Оценить, достаточно ли оформлена задача для исполнения по заданному типу и границе изменения.",
+  "body_file": "task-completeness-assessment-directive.md"
+}
