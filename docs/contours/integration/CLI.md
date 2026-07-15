@@ -205,7 +205,7 @@ type Provider interface {
 - `progress integration repo merge-request get`, `search`, `create`;
 - `progress integration repo merge-request comment list`, `create`;
 - `progress integration repo merge-request review-remark list`, `create`, `reply`, `resolve`, `unresolve`;
-- `progress integration messenger thread get` и `messenger message create`;
+- `progress integration messenger thread get`, `messenger message list` и `messenger message create`;
 - `progress integration wiki page get` и `wiki page search`.
 
 ## 7. Назначение команд
@@ -273,6 +273,7 @@ progress integration repo merge-request get --repo owner/name --number 456
 progress integration repo merge-request comment list --repo owner/name --number 456
 progress integration repo merge-request review-remark create --repo owner/name --number 456 --path internal/service.go --line 42 --body "Проверить обработку"
 progress integration messenger thread get --thread THREAD-1 --system mattermost
+progress integration messenger message list --channel CHANNEL-1 --limit 100 --direction older --order asc --format json
 progress integration messenger message create --channel CHANNEL-1 --thread THREAD-1 --text "Состояние обновлено"
 progress integration wiki page get --id 12345 --system confluence
 progress integration wiki page search --query "интеграция"

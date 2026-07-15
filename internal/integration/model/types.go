@@ -57,6 +57,12 @@ type Request struct {
 	ChannelID          string
 	ThreadID           string
 	MessageID          string
+	Cursor             string
+	Direction          string
+	Order              string
+	From               string
+	To                 string
+	IncludeReplies     *bool
 	Reaction           string
 	Fields             []string
 	Labels             []string
@@ -92,6 +98,12 @@ type ProviderRequest struct {
 	ChannelID          string
 	ThreadID           string
 	MessageID          string
+	Cursor             string
+	Direction          string
+	Order              string
+	From               string
+	To                 string
+	IncludeReplies     *bool
 	Reaction           string
 	Fields             []string
 	Labels             []string
@@ -183,6 +195,7 @@ type Response struct {
 	ReviewRemarks     []ReviewRemark
 	Conversation      *MessageThread
 	Messages          []Message
+	Pagination        *Pagination
 	Message           *Message
 	WikiPage          *WikiPage
 	WikiPages         []WikiPage
@@ -207,6 +220,13 @@ type Failure struct {
 	Retryable   bool
 	Message     string
 	Diagnostics []string
+}
+
+type Pagination struct {
+	NextCursor string
+	PrevCursor string
+	HasMore    bool
+	Direction  string
 }
 
 type OperationResult struct {
