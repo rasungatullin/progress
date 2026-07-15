@@ -130,9 +130,6 @@ func newIntegrationMessengerCommand() *cobra.Command {
 func newTypeOrientedMessengerMessageListCommand() *cobra.Command {
 	flags := &integrationFlags{direction: "older", order: "asc"}
 	cmd := &cobra.Command{Use: "list", Short: "Получение сообщений канала или чата", RunE: func(cmd *cobra.Command, _ []string) error {
-		if strings.TrimSpace(flags.channelID) == "" {
-			return fmt.Errorf("--channel is required")
-		}
 		includeReplies := cmd.Flags().Lookup("include-replies").Value.String() == "true"
 		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "messenger", Resource: "message", ObjectType: "message", Operation: "list", ChannelID: flags.channelID, Limit: flags.limit, Cursor: flags.cursor, Direction: flags.direction, Order: flags.order, From: flags.from, To: flags.to, IncludeReplies: &includeReplies}, printIntegrationMessages)
 	}}

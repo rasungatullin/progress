@@ -761,7 +761,7 @@ func messengerThreadGetOperation() operationTemplate {
 func messengerMessageListOperation() operationTemplate {
 	return operationTemplate{
 		Name: "messenger.message.list", IntegrationType: model.IntegrationTypeMessenger, ObjectType: "message", Operation: "list",
-		Input:  input(requiredField("channel", "string"), optionalField("limit", "integer"), optionalField("cursor", "string"), optionalField("direction", "string"), optionalField("order", "string"), optionalField("from", "string"), optionalField("to", "string"), optionalField("include-replies", "boolean")),
+		Input:  input(optionalField("channel", "string"), optionalField("limit", "integer"), optionalField("cursor", "string"), optionalField("direction", "string"), optionalField("order", "string"), optionalField("from", "string"), optionalField("to", "string"), optionalField("include-replies", "boolean")),
 		Output: output("messages", "[]Message"), FailureKinds: defaultFailureKinds(),
 	}
 }
