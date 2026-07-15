@@ -335,10 +335,20 @@ func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
 	}
 	if value.Kind() == reflect.Slice || value.Kind() == reflect.Array {
 		index, err := strconv.Atoi(path[0])
-		if err != nil || index < 0 || index >= value.Len() {
-			return nil, false
+		if err == nil {
+			if index < 0 || index >= value.Len() {
+				return nil, false
+			}
+			return reflectedPathValue(value.Index(index), path[1:])
 		}
-		return reflectedPathValue(value.Index(index), path[1:])
+		for index := 0; index < value.Len(); index++ {
+			item := value.Index(index)
+			kind, ok := reflectedPathValue(item, []string{"type"})
+			if ok && strings.EqualFold(fmt.Sprint(kind), path[0]) {
+				return reflectedPathValue(item, path[1:])
+			}
+		}
+		return nil, false
 	}
 	if value.Kind() != reflect.Struct {
 		return nil, false

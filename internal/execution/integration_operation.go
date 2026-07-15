@@ -275,7 +275,16 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 		}
 	}
 	if ok {
-		if current, exists := state.data["invocation"].(invocation); exists {
+		current, exists := state.data["invocation"].(invocation)
+		if !exists {
+			if mapping, mapped := operation.In["invocation"]; mapped {
+				current, exists = invocationValueFromLaunchSynthesisMapping(state, mapping)
+			}
+		}
+		if !exists {
+			current, exists = state.in, state != nil
+		}
+		if exists {
 			values["invocation"] = invocationWithPullRequest(current, mergeRequest)
 		}
 	}

@@ -109,10 +109,10 @@
           "ref": "in.invocation"
         },
         "repository": {
-          "ref": "in.invocation.assignment.related_objects.0.repository"
+          "ref": "in.invocation.assignment.related_objects.merge-request.repository"
         },
         "number": {
-          "ref": "in.invocation.assignment.related_objects.0.number"
+          "ref": "in.invocation.assignment.related_objects.merge-request.number"
         }
       },
       "out": {
