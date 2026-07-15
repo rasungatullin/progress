@@ -62,7 +62,8 @@
       "name": "parse-result",
       "in": {
         "raw_output": {"ref": "data.raw_output"},
-        "session_id": {"ref": "data.session_id"}
+        "session_id": {"ref": "data.session_id"},
+        "structured_output_fields": {"ref": "in.structured_output_fields"}
       },
       "out": {
         "result": {"ref": "data.result"},

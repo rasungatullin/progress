@@ -66,12 +66,6 @@ func (s *Service) Resolve(ctx context.Context, in model.Invocation) (model.Profi
 		StructuredOutputTimeout:  firstNonEmpty(entry.StructuredOutputTimeout, config.Defaults.StructuredOutputTimeout),
 	}
 
-	fields, err := resolveStructuredOutputFields(config.Defaults.StructuredOutputFields, entry.StructuredOutputFields)
-	if err != nil {
-		return model.Profile{}, fmt.Errorf("execution profile %q has invalid structured-output-fields: %w", name, err)
-	}
-	profile.StructuredOutputFields = fields
-
 	if profile.Mode == "" {
 		return model.Profile{}, fmt.Errorf("execution profile %q has empty mode", name)
 	}
@@ -215,19 +209,6 @@ func resolveBool(defaultValue, overrideValue *bool) bool {
 	return false
 }
 
-func resolveStructuredOutputFields(defaultValue, overrideValue *[]string) ([]string, error) {
-	selected := defaultValue
-	if overrideValue != nil {
-		selected = overrideValue
-	}
-	if selected == nil {
-		return nil, nil
-	}
-
-	fields := append([]string(nil), (*selected)...)
-	return normalizeStructuredOutputFields(fields)
-}
-
 func normalizePromptAdditions(values []string) []string {
 	if len(values) == 0 {
 		return nil
@@ -247,43 +228,4 @@ func normalizePromptAdditions(values []string) []string {
 	}
 
 	return normalized
-}
-
-func normalizeStructuredOutputFields(fields []string) ([]string, error) {
-	if fields == nil {
-		return nil, nil
-	}
-
-	allowed := map[string]struct{}{
-		"summary":           {},
-		"commit_message":    {},
-		"remarks":           {},
-		"review_responses":  {},
-		"questions":         {},
-		"follow_up_actions": {},
-		"changes":           {},
-		"commands":          {},
-		"conclusion":        {},
-		"extensions":        {},
-	}
-
-	normalized := make([]string, 0, len(fields))
-	seen := make(map[string]struct{}, len(fields))
-	for index, field := range fields {
-		field = strings.TrimSpace(field)
-		if field == "" {
-			return nil, fmt.Errorf("field at index %d must be non-empty", index)
-		}
-		if _, ok := allowed[field]; !ok {
-			return nil, fmt.Errorf("unsupported field %q", field)
-		}
-		if _, ok := seen[field]; ok {
-			continue
-		}
-
-		seen[field] = struct{}{}
-		normalized = append(normalized, field)
-	}
-
-	return normalized, nil
 }

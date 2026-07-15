@@ -285,7 +285,7 @@ func TestRunOpenCodeRunnerNormalizesStructuredJSONOutput(t *testing.T) {
 	}
 
 	plainWithBlock, metadata := stripTrailingRunnerMetadata(output)
-	plain, raw, structured, err := ParseOutput(plainWithBlock)
+	plain, raw, structured, err := ParseOutput(plainWithBlock, nil)
 	if err != nil {
 		t.Fatalf("parse normalized opencode structured output: %v", err)
 	}
@@ -297,6 +297,15 @@ func TestRunOpenCodeRunnerNormalizesStructuredJSONOutput(t *testing.T) {
 	}
 	if metadata == nil || metadata.RunnerSessionID != "session-structured" {
 		t.Fatalf("opencode session id must be kept in runner metadata: %#v", metadata)
+	}
+}
+
+func TestParseOutputRejectsUnsupportedActionField(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, err := ParseOutput("done", []string{"unsupported"})
+	if err == nil || !strings.Contains(err.Error(), `unsupported field "unsupported"`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -3634,10 +3643,11 @@ func TestLaunchAppliesProfileStructuredOutputFieldSelectionToPromptOnly(t *testi
 		},
 	}
 
-	result, err := service.Launch(context.Background(), validInvocation(t, false), model.Profile{
-		Name:                   "review",
-		StructuredOutput:       true,
-		StructuredOutputFields: []string{"remarks", "commands"},
+	invocation := validInvocation(t, false)
+	invocation.Launch.StructuredOutputFields = []string{"remarks", "commands"}
+	result, err := service.Launch(context.Background(), invocation, model.Profile{
+		Name:             "review",
+		StructuredOutput: true,
 	}, validAllocation(), validWorkplace(t))
 	if err != nil {
 		t.Fatalf("launch: %v", err)

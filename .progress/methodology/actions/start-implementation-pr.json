@@ -2,6 +2,14 @@
   "name": "start-implementation-pr",
   "class": "engineering-synthesis",
   "profile": "coder",
+  "structured_output_fields": [
+    "commit_message",
+    "changes",
+    "remarks",
+    "review_responses",
+    "commands",
+    "conclusion"
+  ],
   "aliases": [
     "code",
     "code-commit",
@@ -209,7 +217,7 @@
           "ref": "in.structured_input"
         },
         "structured_output_fields": {
-          "ref": "data.profile.structured_output_fields"
+          "ref": "action.structured_output_fields"
         },
         "directory": {
           "ref": "data.workplace.name"

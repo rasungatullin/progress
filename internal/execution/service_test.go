@@ -1163,7 +1163,8 @@ func TestBuildDirectiveFillsOnlyActionData(t *testing.T) {
 			},
 		},
 		action: model.Action{
-			Operations: []model.OperationSpec{operation},
+			StructuredOutputFields: []string{"remarks", "conclusion"},
+			Operations:             []model.OperationSpec{operation},
 		},
 		data: map[string]any{
 			"invocation": model.Invocation{Task: "task-42", Launch: model.LaunchSpec{StructuredInput: &StructuredInput{Task: "Ship it."}}},
@@ -1188,6 +1189,9 @@ func TestBuildDirectiveFillsOnlyActionData(t *testing.T) {
 	}
 	if directive.Runner != "opencode" || directive.Model != "openai/gpt-5.5" || directive.ModelBinding != "coder" {
 		t.Fatalf("unexpected directive: %#v", directive)
+	}
+	if strings.Join(directive.StructuredOutputFields, ",") != "remarks,conclusion" {
+		t.Fatalf("build-directive must transfer action structured output fields: %#v", directive.StructuredOutputFields)
 	}
 	if state.in.Launch.Runner != "" || state.in.Launch.Model != "" || state.in.Launch.ModelBinding != "" {
 		t.Fatalf("build-directive must not write implicit state launch: %#v", state.in.Launch)
@@ -4645,17 +4649,21 @@ func writeTestMethodologyCatalog(t *testing.T, root string) {
 func testExecutionMethodologyCatalog() methodology.Catalog {
 	return methodology.Catalog{
 		Actions: []methodology.Action{
-			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
-			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
-			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindStructuredSynthesis, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
+			{Name: ActionClassEngineeringSynthesis, Class: ActionClassEngineeringSynthesis, Profile: "default", StructuredOutputFields: testStructuredOutputFields(), Aliases: []string{"implement"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: "engineering-synthesis-commit", Class: ActionClassEngineeringSynthesis, Profile: "default", StructuredOutputFields: testStructuredOutputFields(), Aliases: []string{"implement-commit"}, RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindFinalize)},
+			{Name: ActionStartImplementationPR, Class: ActionClassEngineeringSynthesis, Profile: "coder", StructuredOutputFields: testStructuredOutputFields(), RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindStructuredSynthesis, OperationKindCommitPush, OperationKindPublishMergeRequest, OperationKindFinalize)},
 			structuredSynthesisMethodologyAction(),
-			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
-			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
-			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
+			{Name: ActionClassReview, Class: ActionClassReview, Profile: "review", StructuredOutputFields: testStructuredOutputFields(), RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindFinalize)},
+			{Name: ActionReviewPullRequest, Class: ActionClassReview, Profile: "review", StructuredOutputFields: testStructuredOutputFields(), RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, optionalExecutionOperation(OperationKindLoadReviewRemarks), OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindPublishReviewRemarks, OperationKindFinalize)},
+			{Name: ActionApplyReviewComments, Class: ActionClassEngineeringSynthesis, Profile: "coder", StructuredOutputFields: testStructuredOutputFields(), RequiresWorkplace: boolRef(true), Operations: testExecutionOperations(OperationKindPrepareData, OperationKindLoadPullRequest, OperationKindLoadReviewRemarks, OperationKindResolveProfile, OperationKindAllocateResources, OperationKindPrepareWorkplace, OperationKindBuildPrompt, OperationKindLaunchSynthesis, OperationKindParseResult, OperationKindCommitPush, OperationKindPublishReviewResponses, OperationKindFinalize)},
 			{Name: ActionClassIntegrationChange, Class: ActionClassIntegrationChange, Profile: "default", RequiresWorkplace: boolRef(false), Operations: testExecutionOperations(OperationKindFinalize)},
 		},
 		Operations: testExecutionOperationRegistry(),
 	}
+}
+
+func testStructuredOutputFields() []string {
+	return []string{"summary", "commit_message", "remarks", "review_responses", "questions", "follow_up_actions", "changes", "commands", "conclusion", "extensions"}
 }
 
 func structuredSynthesisMethodologyAction() methodology.Action {
@@ -4919,10 +4927,11 @@ func buildDirectiveActionOperation() methodology.ActionOperation {
 
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"invocation": mappingRef("data.invocation"),
-			"profile":    mappingRef("data.profile"),
-			"allocation": mappingRef("data.allocation"),
-			"workplace":  mappingRef("data.workplace"),
+			"invocation":               mappingRef("data.invocation"),
+			"profile":                  mappingRef("data.profile"),
+			"allocation":               mappingRef("data.allocation"),
+			"workplace":                mappingRef("data.workplace"),
+			"structured_output_fields": mappingRef("action.structured_output_fields"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"directive": mappingRef("data.directive"),
@@ -4937,7 +4946,7 @@ func buildPromptActionOperation() methodology.ActionOperation {
 			"prompt_additions":           mappingRef("data.profile.prompt_additions"),
 			"structured_output":          mappingRef("data.profile.structured_output"),
 			"structured_output_required": mappingRef("data.profile.structured_output_required"),
-			"structured_output_fields":   mappingRef("data.profile.structured_output_fields"),
+			"structured_output_fields":   mappingRef("action.structured_output_fields"),
 			"structured_input":           mappingRef("data.invocation.launch.structured_input"),
 			"review_remarks":             mappingRef("data.review_remarks"),
 		},
@@ -4953,7 +4962,7 @@ func structuredSynthesisActionOperation() methodology.ActionOperation {
 			"prompt":                   mappingRef("in.launch.prompt"),
 			"prompt_additions":         mappingRef("data.profile.prompt_additions"),
 			"structured_input":         mappingRef("in.structured_input"),
-			"structured_output_fields": mappingRef("data.profile.structured_output_fields"),
+			"structured_output_fields": mappingRef("action.structured_output_fields"),
 			"directory":                mappingRef("data.workplace.name"),
 			"runner":                   mappingRef("data.allocation.runner"),
 			"model":                    mappingRef("data.allocation.model"),
@@ -5008,8 +5017,9 @@ func structuredSynthesisParseOperation() methodology.ActionOperation {
 		Name:     OperationKindParseResult,
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"raw_output": mappingRef("data.raw_output"),
-			"session_id": mappingRef("data.session_id"),
+			"raw_output":               mappingRef("data.raw_output"),
+			"session_id":               mappingRef("data.session_id"),
+			"structured_output_fields": mappingRef("in.structured_output_fields"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"result":            mappingRef("data.result"),
@@ -5043,8 +5053,9 @@ func parseResultActionOperation() methodology.ActionOperation {
 
 		Required: boolRef(true),
 		In: map[string]methodology.ActionMapping{
-			"raw_output": mappingRef("data.raw_output"),
-			"session_id": mappingRef("data.session_id"),
+			"raw_output":               mappingRef("data.raw_output"),
+			"session_id":               mappingRef("data.session_id"),
+			"structured_output_fields": mappingRef("action.structured_output_fields"),
 		},
 		Out: map[string]methodology.ActionMapping{
 			"structured_output": mappingRef("data.structured_output"),
@@ -5224,10 +5235,11 @@ func buildDirectiveOperationSpec() model.OperationSpec {
 		Kind: OperationKindBuildDirective,
 
 		In: model.OperationMap{
-			"invocation": {Ref: "data.invocation"},
-			"profile":    {Ref: "data.profile"},
-			"allocation": {Ref: "data.allocation"},
-			"workplace":  {Ref: "data.workplace"},
+			"invocation":               {Ref: "data.invocation"},
+			"profile":                  {Ref: "data.profile"},
+			"allocation":               {Ref: "data.allocation"},
+			"workplace":                {Ref: "data.workplace"},
+			"structured_output_fields": {Ref: "action.structured_output_fields"},
 		},
 		Out: model.OperationMap{
 			"directive": {Ref: "data.directive"},
@@ -5259,7 +5271,8 @@ func parseResultOperationSpec() model.OperationSpec {
 		Kind: OperationKindParseResult,
 
 		In: model.OperationMap{
-			"result": {Ref: "data.result"},
+			"result":                   {Ref: "data.result"},
+			"structured_output_fields": {Ref: "action.structured_output_fields"},
 		},
 		Out: model.OperationMap{
 			"structured_output": {Ref: "data.structured_output"},

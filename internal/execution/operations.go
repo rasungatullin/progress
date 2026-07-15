@@ -1506,6 +1506,7 @@ func (e builtinOperationExecutor) buildDirective(ctx context.Context, state *ope
 	directiveInvocation.Launch.Runner = input.allocation.Runner
 	directiveInvocation.Launch.Model = input.allocation.Model
 	directiveInvocation.Launch.ReasoningEffort = input.allocation.ReasoningEffort
+	directiveInvocation.Launch.StructuredOutputFields = append([]string(nil), input.structuredOutputFields...)
 	if strings.TrimSpace(directiveInvocation.Launch.ModelBinding) == "" {
 		directiveInvocation.Launch.ModelBinding = input.allocation.ModelBinding
 	}
@@ -1523,14 +1524,15 @@ func writeBuildDirectiveData(state *operationExecution, operation OperationSpec,
 }
 
 type buildDirectiveInput struct {
-	invocation   invocation
-	profile      profile
-	allocation   allocation
-	workplace    workplace
-	directory    string
-	runner       string
-	model        string
-	modelBinding string
+	invocation             invocation
+	profile                profile
+	allocation             allocation
+	workplace              workplace
+	directory              string
+	runner                 string
+	model                  string
+	modelBinding           string
+	structuredOutputFields []string
 }
 
 func buildDirectiveInputFromOperation(state *operationExecution, operation OperationSpec) buildDirectiveInput {
@@ -1562,6 +1564,7 @@ func buildDirectiveInputFromOperation(state *operationExecution, operation Opera
 	input.runner = stringValueFromBuildDirectiveMapping(state, operation.In["runner"])
 	input.model = stringValueFromBuildDirectiveMapping(state, operation.In["model"])
 	input.modelBinding = stringValueFromBuildDirectiveMapping(state, operation.In["model_binding"])
+	input.structuredOutputFields, _ = operationMappingValue[[]string](state, operation.In["structured_output_fields"])
 	if _, ok := operation.In["invocation"]; !ok {
 		input.invocation = invocation{Launch: model.LaunchSpec{Directory: input.directory}}
 		input.allocation = allocation{Runner: input.runner, Model: input.model, ModelBinding: input.modelBinding}
@@ -1938,8 +1941,6 @@ func launchStringSliceValue(state *operationExecution, mapping model.OperationMa
 	switch strings.TrimSpace(mapping.Ref) {
 	case "data.profile.prompt_additions":
 		return append([]string(nil), value.PromptAdditions...), true
-	case "data.profile.structured_output_fields":
-		return append([]string(nil), value.StructuredOutputFields...), true
 	default:
 		return nil, false
 	}
@@ -2122,7 +2123,7 @@ func (e builtinOperationExecutor) parseResult(state *operationExecution, operati
 		state.tracker.completeIO(name, parseResultInputSummary(input, operation), parseResultOutputSummary(input.legacyResult.StructuredOutput, operation), "Результат выполнения нормализован.")
 		return nil
 	}
-	plain, rawStructured, structured, err := launch.ParseOutput(input.rawOutput)
+	plain, rawStructured, structured, err := launch.ParseOutput(input.rawOutput, input.structuredOutputFields)
 	if err != nil {
 		state.tracker.fail(name, "Результат выполнения не приведён к нормализованной форме.", err, "result_not_parsed", false, true)
 		return err
@@ -2135,9 +2136,10 @@ func (e builtinOperationExecutor) parseResult(state *operationExecution, operati
 }
 
 type parseResultInput struct {
-	rawOutput    string
-	sessionID    string
-	legacyResult *LaunchResult
+	rawOutput              string
+	sessionID              string
+	structuredOutputFields []string
+	legacyResult           *LaunchResult
 }
 
 func parseResultInputFromOperation(state *operationExecution, operation OperationSpec) parseResultInput {
@@ -2147,6 +2149,7 @@ func parseResultInputFromOperation(state *operationExecution, operation Operatio
 	}
 	input.rawOutput, _ = operationMappingValue[string](state, operation.In["raw_output"])
 	input.sessionID, _ = operationMappingValue[string](state, operation.In["session_id"])
+	input.structuredOutputFields, _ = operationMappingValue[[]string](state, operation.In["structured_output_fields"])
 	if mapping, ok := operation.In["result"]; ok {
 		if value, ok := resultValueFromParseResultMapping(state, mapping); ok {
 			input.legacyResult = &value

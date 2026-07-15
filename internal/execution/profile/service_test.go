@@ -22,8 +22,7 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 			"structured-output-timeout": "900ms",
 			"prompt-additions": ["Default context.", "Always verify the result."],
 			"structured-output": true,
-			"structured-output-required": false,
-			"structured-output-fields": ["remarks", "commands", "remarks"]
+			"structured-output-required": false
 		},
 		"profiles": {
 			"default": {
@@ -35,13 +34,11 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 				"allow-model-fallback": false,
 				"startup-timeout": "300ms",
 				"prompt-additions": ["Implement the requested change."],
-				"structured-output-required": true,
-				"structured-output-fields": ["commit_message", "changes"]
+				"structured-output-required": true
 			},
 			"review": {
 				"description": "Review profile",
-				"model-binding": "review",
-				"structured-output-fields": ["summary"]
+				"model-binding": "review"
 			}
 		}
 	}`)
@@ -65,9 +62,6 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	if !defaultProfile.StructuredOutput || defaultProfile.StructuredOutputRequired {
 		t.Fatalf("unexpected default structured output flags: %#v", defaultProfile)
 	}
-	if !equalStrings(defaultProfile.StructuredOutputFields, []string{"remarks", "commands"}) {
-		t.Fatalf("unexpected default structured-output-fields: %#v", defaultProfile.StructuredOutputFields)
-	}
 	if !equalStrings(defaultProfile.PromptAdditions, []string{"Default context.", "Always verify the result."}) {
 		t.Fatalf("unexpected default prompt-additions: %#v", defaultProfile.PromptAdditions)
 	}
@@ -85,9 +79,6 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	if !coderProfile.StructuredOutput || !coderProfile.StructuredOutputRequired {
 		t.Fatalf("unexpected coder structured flags: %#v", coderProfile)
 	}
-	if !equalStrings(coderProfile.StructuredOutputFields, []string{"commit_message", "changes"}) {
-		t.Fatalf("unexpected coder structured-output-fields: %#v", coderProfile.StructuredOutputFields)
-	}
 	if !equalStrings(coderProfile.PromptAdditions, []string{"Default context.", "Always verify the result.", "Implement the requested change."}) {
 		t.Fatalf("unexpected coder prompt-additions: %#v", coderProfile.PromptAdditions)
 	}
@@ -98,9 +89,6 @@ func TestResolveProfileAppliesModelBindingAndFallbackDefaults(t *testing.T) {
 	}
 	if reviewProfile.ModelBinding != "review" || !reviewProfile.AllowModelFallback {
 		t.Fatalf("unexpected review binding config: %#v", reviewProfile)
-	}
-	if !equalStrings(reviewProfile.StructuredOutputFields, []string{"summary"}) {
-		t.Fatalf("unexpected review structured-output-fields: %#v", reviewProfile.StructuredOutputFields)
 	}
 }
 
@@ -263,28 +251,6 @@ func TestResolveProfileRejectsPromptAdditionsFileOutsideRepository(t *testing.T)
 	_, err := service.Resolve(context.Background(), model.Invocation{Profile: "review"})
 	if err == nil || !strings.Contains(err.Error(), "escapes repository root") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestResolveProfileAllowsSummaryInStructuredOutputFields(t *testing.T) {
-	t.Parallel()
-
-	service := newTestService(`{
-		"defaults": {"mode": "manual", "model-binding": "default"},
-		"profiles": {
-			"default": {
-				"description": "Cloud profile",
-				"structured-output-fields": ["summary", "review_responses"]
-			}
-		}
-	}`)
-
-	profile, err := service.Resolve(context.Background(), model.Invocation{})
-	if err != nil {
-		t.Fatalf("resolve profile: %v", err)
-	}
-	if !equalStrings(profile.StructuredOutputFields, []string{"summary", "review_responses"}) {
-		t.Fatalf("unexpected structured-output-fields: %#v", profile.StructuredOutputFields)
 	}
 }
 

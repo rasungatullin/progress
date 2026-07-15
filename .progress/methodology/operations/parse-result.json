@@ -7,7 +7,8 @@
   "contract": {
     "in": {
       "raw_output": {"type": "string", "required": true, "description": "Фактический вывод исполнительного модуля."},
-      "session_id": {"type": "string", "description": "Идентификатор сеанса исполнительного модуля."}
+      "session_id": {"type": "string", "description": "Идентификатор сеанса исполнительного модуля."},
+      "structured_output_fields": {"type": "string_array", "description": "Поля структурированного вывода."}
     },
     "out": {
       "structured_output": {"type": "object", "description": "Нормализованный структурированный результат выполнения."},

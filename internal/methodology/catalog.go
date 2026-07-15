@@ -89,15 +89,16 @@ func (c *RouteCheck) UnmarshalJSON(data []byte) error {
 }
 
 type Action struct {
-	Name              string            `json:"name"`
-	Class             string            `json:"class,omitempty"`
-	Profile           string            `json:"profile,omitempty"`
-	Aliases           []string          `json:"aliases,omitempty"`
-	RequiresWorkplace *bool             `json:"requires_workplace,omitempty"`
-	Contract          ActionContract    `json:"contract,omitempty"`
-	Operations        []ActionOperation `json:"operations,omitempty"`
-	Description       string            `json:"description,omitempty"`
-	ExpectedResult    string            `json:"expected_result,omitempty"`
+	Name                   string            `json:"name"`
+	Class                  string            `json:"class,omitempty"`
+	Profile                string            `json:"profile,omitempty"`
+	StructuredOutputFields []string          `json:"structured_output_fields,omitempty"`
+	Aliases                []string          `json:"aliases,omitempty"`
+	RequiresWorkplace      *bool             `json:"requires_workplace,omitempty"`
+	Contract               ActionContract    `json:"contract,omitempty"`
+	Operations             []ActionOperation `json:"operations,omitempty"`
+	Description            string            `json:"description,omitempty"`
+	ExpectedResult         string            `json:"expected_result,omitempty"`
 }
 
 type ActionOperation struct {
@@ -882,12 +883,24 @@ func normalizeAction(action Action) Action {
 	action.Name = normalizeName(action.Name)
 	action.Class = strings.TrimSpace(action.Class)
 	action.Profile = strings.TrimSpace(action.Profile)
+	action.StructuredOutputFields = normalizeOptionalStringList(action.StructuredOutputFields)
 	action.Aliases = normalizeNameList(action.Aliases)
 	action.Contract = normalizeActionContract(action.Contract)
 	action.Operations = normalizeActionOperations(action.Operations)
 	action.Description = strings.TrimSpace(action.Description)
 	action.ExpectedResult = strings.TrimSpace(action.ExpectedResult)
 	return action
+}
+
+func normalizeOptionalStringList(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	normalized := normalizeStringList(values)
+	if normalized == nil {
+		return []string{}
+	}
+	return normalized
 }
 
 func normalizeActionOperations(operations []ActionOperation) []ActionOperation {

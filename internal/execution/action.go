@@ -196,6 +196,10 @@ func findMethodologyAction(actions []methodology.Action, name string) (*methodol
 }
 
 func executionActionFromMethodology(action methodology.Action, operationsByName map[string]methodology.Operation) (model.Action, error) {
+	structuredOutputFields, err := normalizeStructuredOutputFields(action.StructuredOutputFields)
+	if err != nil {
+		return model.Action{}, fmt.Errorf("некорректные structured_output_fields: %w", err)
+	}
 	operations := make([]model.OperationSpec, 0, len(action.Operations))
 	seenOperations := map[string]struct{}{}
 	for _, operation := range action.Operations {
@@ -215,15 +219,45 @@ func executionActionFromMethodology(action methodology.Action, operationsByName 
 	}
 
 	return model.Action{
-		Name:              strings.TrimSpace(action.Name),
-		Class:             model.ActionClass(strings.TrimSpace(action.Class)),
-		Profile:           strings.TrimSpace(action.Profile),
-		ExpectedResult:    strings.TrimSpace(action.ExpectedResult),
-		RequiresWorkplace: actionRequiresWorkplace(action, operations),
-		Operations:        operations,
-		OutputFields:      actionContractFieldNames(action.Contract.Out),
-		RequiredOut:       requiredActionContractFields(action.Contract.Out),
+		Name:                   strings.TrimSpace(action.Name),
+		Class:                  model.ActionClass(strings.TrimSpace(action.Class)),
+		Profile:                strings.TrimSpace(action.Profile),
+		StructuredOutputFields: structuredOutputFields,
+		ExpectedResult:         strings.TrimSpace(action.ExpectedResult),
+		RequiresWorkplace:      actionRequiresWorkplace(action, operations),
+		Operations:             operations,
+		OutputFields:           actionContractFieldNames(action.Contract.Out),
+		RequiredOut:            requiredActionContractFields(action.Contract.Out),
 	}, nil
+}
+
+func normalizeStructuredOutputFields(fields []string) ([]string, error) {
+	if fields == nil {
+		return nil, nil
+	}
+
+	allowed := map[string]struct{}{
+		"summary": {}, "commit_message": {}, "remarks": {}, "review_responses": {},
+		"questions": {}, "follow_up_actions": {}, "changes": {}, "commands": {},
+		"conclusion": {}, "extensions": {},
+	}
+	normalized := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for index, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			return nil, fmt.Errorf("поле с индексом %d должно быть непустым", index)
+		}
+		if _, ok := allowed[field]; !ok {
+			return nil, fmt.Errorf("поле %q не поддерживается", field)
+		}
+		if _, ok := seen[field]; ok {
+			continue
+		}
+		seen[field] = struct{}{}
+		normalized = append(normalized, field)
+	}
+	return normalized, nil
 }
 
 func operationSpecFromMethodology(action methodology.Action, operation methodology.ActionOperation, operationsByName map[string]methodology.Operation) (model.OperationSpec, error) {

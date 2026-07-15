@@ -4,19 +4,7 @@
     "model-binding": "default",
     "allow-model-fallback": false,
     "structured-output": true,
-    "structured-output-required": true,
-    "structured-output-fields": [
-      "summary",
-      "commit_message",
-      "remarks",
-      "review_responses",
-      "questions",
-      "follow_up_actions",
-      "changes",
-      "commands",
-      "conclusion",
-      "extensions"
-    ]
+    "structured-output-required": true
   },
   "profiles": {
     "default": {
@@ -26,43 +14,20 @@
       "description": "Профиль инженерного синтеза с binding для реализации",
       "model-binding": "coder",
       "prompt-additions-file": ".progress/methodology/instructions/start-implementation-pr-directive.md",
-      "structured-output": true,
-      "structured-output-fields": [
-        "commit_message",
-        "changes",
-        "remarks",
-        "review_responses",
-        "commands",
-        "conclusion"
-      ]
+      "structured-output": true
     },
     "review-rework": {
       "description": "Профиль доработки по замечаниям ревизии с binding для реализации",
       "model-binding": "coder",
       "prompt-additions-file": ".progress/methodology/instructions/apply-review-comments-directive.md",
-      "structured-output": true,
-      "structured-output-fields": [
-        "commit_message",
-        "changes",
-        "remarks",
-        "review_responses",
-        "commands",
-        "conclusion"
-      ]
+      "structured-output": true
     },
     "review": {
       "description": "Профиль ревизии без изменения файлов",
       "model-binding": "review",
       "prompt-additions-file": ".progress/methodology/instructions/review-pull-request-directive.md",
       "structured-output": true,
-      "structured-output-required": true,
-      "structured-output-fields": [
-        "summary",
-        "remarks",
-        "questions",
-        "follow_up_actions",
-        "conclusion"
-      ]
+      "structured-output-required": true
     },
     "task-description-assessor": {
       "description": "Профиль оценки достаточности описания задачи",
@@ -77,12 +42,7 @@
         "Верни структурированный вывод с полями summary, follow_up_actions и conclusion. Поле summary обязательно и не должно быть пустым."
       ],
       "structured-output": true,
-      "structured-output-required": true,
-      "structured-output-fields": [
-        "summary",
-        "follow_up_actions",
-        "conclusion"
-      ]
+      "structured-output-required": true
     }
   }
 }

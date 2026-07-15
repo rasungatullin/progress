@@ -191,7 +191,6 @@ type Profile struct {
 	PromptAdditions          []string `json:"prompt_additions,omitempty"`
 	StructuredOutput         bool     `json:"structured_output,omitempty"`
 	StructuredOutputRequired bool     `json:"structured_output_required,omitempty"`
-	StructuredOutputFields   []string `json:"structured_output_fields,omitempty"`
 	Timeout                  string   `json:"timeout,omitempty"`
 	StartupTimeout           string   `json:"startup_timeout,omitempty"`
 	NoOutputTimeout          string   `json:"no_output_timeout,omitempty"`
@@ -211,7 +210,6 @@ type ProfileOptions struct {
 	PromptAdditionsFile      string    `json:"prompt-additions-file"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
-	StructuredOutputFields   *[]string `json:"structured-output-fields"`
 	Timeout                  string    `json:"timeout"`
 	StartupTimeout           string    `json:"startup-timeout"`
 	NoOutputTimeout          string    `json:"no-output-timeout"`
@@ -227,7 +225,6 @@ type ProfileConfig struct {
 	PromptAdditionsFile      string    `json:"prompt-additions-file"`
 	StructuredOutput         *bool     `json:"structured-output"`
 	StructuredOutputRequired *bool     `json:"structured-output-required"`
-	StructuredOutputFields   *[]string `json:"structured-output-fields"`
 	Timeout                  string    `json:"timeout"`
 	StartupTimeout           string    `json:"startup-timeout"`
 	NoOutputTimeout          string    `json:"no-output-timeout"`
@@ -402,14 +399,15 @@ type Failure struct {
 }
 
 type Action struct {
-	Name              string          `json:"name,omitempty"`
-	Class             ActionClass     `json:"class,omitempty"`
-	Profile           string          `json:"profile,omitempty"`
-	ExpectedResult    string          `json:"expected_result,omitempty"`
-	RequiresWorkplace bool            `json:"requires_workplace,omitempty"`
-	Operations        []OperationSpec `json:"operations,omitempty"`
-	OutputFields      []string        `json:"output_fields,omitempty"`
-	RequiredOut       []string        `json:"required_out,omitempty"`
+	Name                   string          `json:"name,omitempty"`
+	Class                  ActionClass     `json:"class,omitempty"`
+	Profile                string          `json:"profile,omitempty"`
+	StructuredOutputFields []string        `json:"structured_output_fields,omitempty"`
+	ExpectedResult         string          `json:"expected_result,omitempty"`
+	RequiresWorkplace      bool            `json:"requires_workplace,omitempty"`
+	Operations             []OperationSpec `json:"operations,omitempty"`
+	OutputFields           []string        `json:"output_fields,omitempty"`
+	RequiredOut            []string        `json:"required_out,omitempty"`
 }
 
 type OperationSpec struct {
