@@ -267,6 +267,9 @@ func operationInputValue(inputs map[string]any, path []string) (any, bool) {
 }
 
 func invocationInputValue(in invocation, path []string) (any, bool) {
+	if len(path) > 0 && path[0] == "invocation" {
+		return invocationInputValue(in, path[1:])
+	}
 	if len(path) == 1 {
 		switch path[0] {
 		case "invocation":

@@ -175,10 +175,10 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 }
 
 func (s *Service) synchronizeExistingWorkplace(ctx context.Context, directory, branch string) error {
-	if !s.remoteBranchExists(ctx, directory, branch) {
-		return nil
-	}
 	if err := s.fetchRemoteBranch(ctx, directory, branch); err != nil {
+		if !s.remoteBranchExists(ctx, directory, branch) {
+			return nil
+		}
 		return fmt.Errorf("fetch origin/%s: %w", branch, err)
 	}
 	if err := s.rebaseWorkplaceBranchOnRemote(ctx, directory, branch); err != nil {

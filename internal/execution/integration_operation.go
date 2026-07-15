@@ -59,7 +59,7 @@ func (e builtinOperationExecutor) executeIntegration(ctx context.Context, state 
 	}
 
 	response, err := executor.Execute(ctx, request)
-	if err != nil && !integrationResponseAlreadyAvailable(response) {
+	if err != nil && !integrationResponseAlreadyAvailable(operation, response) {
 		return e.failIntegrationOperation(state, operation, name, "Интеграционная операция завершилась отказом.", err, "integration_operation_failed")
 	}
 	writeIntegrationResponse(state, operation, response)
@@ -247,6 +247,15 @@ func addIntegrationExtra(extra map[string]any, name string, value any) map[strin
 
 func writeIntegrationResponse(state *operationExecution, operation OperationSpec, response integration.Response) {
 	values := map[string]any{"response": response, "merge_request": response.MergeRequest, "pull_request": response.MergeRequest, "review_remarks": response.ReviewRemarks, "operation_result": response.OperationResult, "failure": response.Failure}
+	if pointer, ok := values["merge_request"].(*integration.MergeRequest); ok {
+		if pointer != nil {
+			values["merge_request"] = *pointer
+			values["pull_request"] = *pointer
+		} else {
+			values["merge_request"] = nil
+			values["pull_request"] = nil
+		}
+	}
 	if values["merge_request"] == nil {
 		if response.PullRequestStatus != nil {
 			status := response.PullRequestStatus
@@ -286,7 +295,10 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 	}
 }
 
-func integrationResponseAlreadyAvailable(response integration.Response) bool {
+func integrationResponseAlreadyAvailable(operation OperationSpec, response integration.Response) bool {
+	if !strings.HasSuffix(strings.TrimSpace(string(operation.Kind)), ".create") {
+		return false
+	}
 	return response.PullRequestStatus != nil && (response.PullRequestStatus.Number > 0 || strings.TrimSpace(response.PullRequestStatus.URL) != "") || response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != ""
 }
 
