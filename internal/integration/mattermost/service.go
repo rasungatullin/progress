@@ -191,7 +191,7 @@ func (s *Service) executeMessageList(ctx context.Context, response model.Respons
 			if hasMore {
 				response.Pagination.NextCursor = olderCursor
 			}
-			response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{After: oldest.MessageID})
+			response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{After: newest.MessageID})
 		} else {
 			if hasMore {
 				response.Pagination.NextCursor = newerCursor
