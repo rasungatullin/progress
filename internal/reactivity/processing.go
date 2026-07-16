@@ -142,7 +142,7 @@ func (s *Service) RunTaskAction(ctx context.Context, input TaskActionInput) (Tas
 
 	cycle := TaskProcessingCycle{
 		Index:  1,
-		Action: canonicalProcessingAction(action),
+		Action: strings.TrimSpace(action),
 	}
 	if cycle.Action == "" {
 		cycle.Action = action
@@ -697,7 +697,7 @@ func (s *Service) changeTaskLabels(ctx context.Context, issue *integration.Track
 }
 
 func labelTransitionForAction(action string, result *execution.ExecutionResult) ([]string, []string, *bool) {
-	switch canonicalProcessingAction(action) {
+	switch strings.TrimSpace(action) {
 	case execution.ActionStartImplementationPR:
 		return []string{LabelAwaitingReview}, []string{LabelNeedsRework, LabelReviewPassed}, nil
 	case execution.ActionApplyReviewComments:
@@ -791,23 +791,8 @@ func isResolvedReviewRemark(remark execution.StructuredRemark) bool {
 	}
 }
 
-func canonicalProcessingAction(action string) string {
-	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "implement-pr", "implementation-pr", "open-pr", "start-implementation", execution.ActionStartImplementationPR:
-		return execution.ActionStartImplementationPR
-	case "pr-review", "review-pr", execution.ActionReviewPullRequest:
-		return execution.ActionReviewPullRequest
-	case "address-review-comments", "fix-review-comments", "reply-review-comments", execution.ActionApplyReviewComments:
-		return execution.ActionApplyReviewComments
-	case "resolve-conflict", execution.ActionResolveMergeConflict:
-		return execution.ActionResolveMergeConflict
-	default:
-		return strings.TrimSpace(action)
-	}
-}
-
 func requiresMergeRequest(action string) bool {
-	switch canonicalProcessingAction(action) {
+	switch strings.TrimSpace(action) {
 	case execution.ActionReviewPullRequest, execution.ActionApplyReviewComments, execution.ActionResolveMergeConflict:
 		return true
 	default:
@@ -903,7 +888,7 @@ func numericIssueID(id string) int {
 }
 
 func expectedResultForAction(action string) string {
-	switch canonicalProcessingAction(action) {
+	switch strings.TrimSpace(action) {
 	case execution.ActionStartImplementationPR:
 		return "Выполнить реализацию задачи, отправить ветку и открыть запрос на слияние."
 	case execution.ActionReviewPullRequest:
