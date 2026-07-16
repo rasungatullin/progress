@@ -146,11 +146,16 @@ func (s *Service) Prepare(ctx context.Context, in model.Invocation, profile mode
 	if err := s.runGit(ctx, repoRoot, "fetch", "origin", baseBranch); err != nil {
 		return model.Workplace{}, fmt.Errorf("fetch origin/%s: %w", baseBranch, err)
 	}
-	headFetchErr := s.fetchRemoteBranch(ctx, repoRoot, branchName)
-	headFetched := headFetchErr == nil
+	localBranch := s.localBranchExists(ctx, repoRoot, branchName)
+	var headFetchErr error
+	headFetched := false
+	if !localBranch {
+		headFetchErr = s.fetchRemoteBranch(ctx, repoRoot, branchName)
+		headFetched = headFetchErr == nil
+	}
 
 	addArgs := []string{"worktree", "add", "-b", branchName, targetDir, "origin/" + baseBranch}
-	if s.localBranchExists(ctx, repoRoot, branchName) {
+	if localBranch {
 		addArgs = []string{"worktree", "add", targetDir, branchName}
 	} else if s.remoteBranchExists(ctx, repoRoot, branchName) {
 		addArgs = []string{"worktree", "add", "-b", branchName, targetDir, "origin/" + branchName}
