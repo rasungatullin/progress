@@ -2781,10 +2781,23 @@ func commitPushInputFromOperation(state *operationExecution, operation Operation
 	input.request.Directory, _ = stringValueFromCommitPushMapping(state, operation.In["directory"])
 	input.request.CommitMessage, _ = stringValueFromCommitPushMapping(state, operation.In["commit_message"])
 	input.request.FallbackName, _ = stringValueFromCommitPushMapping(state, operation.In["fallback_name"])
+	if strings.TrimSpace(operation.In["fallback_name"].Ref) == "data.invocation.workplace.name" {
+		if taskID := originalTaskIdentifier(state); taskID != "" {
+			input.request.FallbackName = taskID
+		}
+	}
 	input.request.Git, _ = gitConfigValueFromCommitPushMapping(state, operation.In["git"])
 	input.request.PrivateStore, _ = privateStoreValueFromCommitPushMapping(state, operation.In["private_store"])
 	input.request.ConfigHome, _ = stringValueFromCommitPushMapping(state, operation.In["config_home"])
 	return input
+}
+
+func originalTaskIdentifier(state *operationExecution) string {
+	if state == nil || state.in.Assignment == nil || state.in.Assignment.CanonicalTask == nil {
+		return ""
+	}
+	task := state.in.Assignment.CanonicalTask
+	return firstNonEmptyTrimmed(task.ID, task.ExternalID)
 }
 
 func stringValueFromCommitPushMapping(state *operationExecution, mapping model.OperationMapping) (string, bool) {
