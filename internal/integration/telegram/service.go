@@ -71,6 +71,11 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executeAuthStatus(ctx, response)
 	case isMessageObject(req) && req.Operation == "create":
 		return s.executeMessageCreate(ctx, response, req)
+	case isMessageObject(req) && req.Operation == "list":
+		err := fmt.Errorf("Telegram Bot API does not support reading arbitrary chat history")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindUnsupportedOperation, Message: err.Error()}
+		return response, err
 	case isThreadObject(req) && req.Operation == "get":
 		err := fmt.Errorf("Telegram Bot API does not support reading arbitrary message threads")
 		response.Status = model.ResponseStatusFailed

@@ -37,6 +37,11 @@ type integrationFlags struct {
 	channelID       string
 	threadID        string
 	messageID       string
+	cursor          string
+	direction       string
+	order           string
+	from            string
+	to              string
 	input           string
 	inputFile       string
 	externalID      string
@@ -117,8 +122,26 @@ func newIntegrationMessengerCommand() *cobra.Command {
 	thread.AddCommand(newTypeOrientedMessengerThreadGetCommand())
 	cmd.AddCommand(thread)
 	message := &cobra.Command{Use: "message", Short: "Сообщения"}
-	message.AddCommand(newTypeOrientedMessengerMessageCreateCommand())
+	message.AddCommand(newTypeOrientedMessengerMessageListCommand(), newTypeOrientedMessengerMessageCreateCommand())
 	cmd.AddCommand(message)
+	return cmd
+}
+
+func newTypeOrientedMessengerMessageListCommand() *cobra.Command {
+	flags := &integrationFlags{direction: "older", order: "asc"}
+	cmd := &cobra.Command{Use: "list", Short: "Получение сообщений канала или чата", RunE: func(cmd *cobra.Command, _ []string) error {
+		includeReplies := cmd.Flags().Lookup("include-replies").Value.String() == "true"
+		return executeTypeRequest(cmd, flags, integration.Request{IntegrationType: "messenger", Resource: "message", ObjectType: "message", Operation: "list", ChannelID: flags.channelID, Limit: flags.limit, Cursor: flags.cursor, Direction: flags.direction, Order: flags.order, From: flags.from, To: flags.to, IncludeReplies: &includeReplies}, printIntegrationMessages)
+	}}
+	bindTypeSystem(cmd, flags)
+	cmd.Flags().StringVar(&flags.channelID, "channel", "", "Идентификатор канала или чата")
+	cmd.Flags().IntVar(&flags.limit, "limit", 100, "Предельное число сообщений")
+	cmd.Flags().StringVar(&flags.cursor, "cursor", "", "Курсор продолжения чтения")
+	cmd.Flags().StringVar(&flags.direction, "direction", flags.direction, "Направление чтения: older или newer")
+	cmd.Flags().StringVar(&flags.order, "order", flags.order, "Порядок сообщений: asc или desc")
+	cmd.Flags().StringVar(&flags.from, "from", "", "Нижняя временная граница в формате RFC3339")
+	cmd.Flags().StringVar(&flags.to, "to", "", "Верхняя временная граница в формате RFC3339")
+	cmd.Flags().Bool("include-replies", false, "Включить ответы из цепочек обсуждения")
 	return cmd
 }
 
@@ -2467,6 +2490,16 @@ func printIntegrationThread(cmd *cobra.Command, response integration.Response) {
 	cmd.Printf("system=%s\nresource=%s\noperation=%s\nspace_id=%s\nthread_id=%s\nroot_id=%s\nmessage_count=%d\n", thread.System, response.Resource, response.Operation, thread.SpaceID, thread.ThreadID, thread.RootID, len(thread.Messages))
 	for _, message := range thread.Messages {
 		printMessage(cmd, message)
+	}
+}
+
+func printIntegrationMessages(cmd *cobra.Command, response integration.Response) {
+	cmd.Printf("system=%s\nresource=%s\noperation=%s\nmessage_count=%d\n", response.System, response.Resource, response.Operation, len(response.Messages))
+	for _, message := range response.Messages {
+		printMessage(cmd, message)
+	}
+	if response.Pagination != nil {
+		cmd.Printf("next_cursor=%s\nprev_cursor=%s\nhas_more=%t\ndirection=%s\n", response.Pagination.NextCursor, response.Pagination.PrevCursor, response.Pagination.HasMore, response.Pagination.Direction)
 	}
 }
 

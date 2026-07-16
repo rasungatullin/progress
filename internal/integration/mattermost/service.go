@@ -3,12 +3,15 @@ package mattermost
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +66,8 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		return s.executeAuthStatus(ctx, response)
 	case isThreadObject(req) && req.Operation == "get":
 		return s.executeThreadGet(ctx, response, req)
+	case isMessageObject(req) && req.Operation == "list":
+		return s.executeMessageList(ctx, response, req)
 	case isMessageObject(req) && req.Operation == "create":
 		return s.executeMessageCreate(ctx, response, req)
 	default:
@@ -71,6 +76,158 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 		response.Failure = &model.Failure{Kind: model.FailureKindUnsupportedOperation, Message: err.Error()}
 		return response, err
 	}
+}
+
+type messageListCursor struct {
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+	Return string `json:"return,omitempty"`
+}
+
+func (s *Service) executeMessageList(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
+	channelID := strings.TrimSpace(firstNonEmpty(req.ChannelID, s.config.ChannelID))
+	if channelID == "" {
+		err := fmt.Errorf("Mattermost channel id is required")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	direction := strings.ToLower(strings.TrimSpace(req.Direction))
+	if direction == "" {
+		direction = "older"
+	}
+	if direction != "older" && direction != "newer" {
+		err := fmt.Errorf("Mattermost message list direction must be older or newer")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	order := strings.ToLower(strings.TrimSpace(req.Order))
+	if order == "" {
+		order = "asc"
+	}
+	if order != "asc" && order != "desc" {
+		err := fmt.Errorf("Mattermost message list order must be asc or desc")
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	cursor, err := decodeMessageListCursor(req.Cursor)
+	if err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindInvalidRequest, Message: err.Error()}
+		return response, err
+	}
+	if cursor.Before != "" {
+		direction = "older"
+	}
+	if cursor.After != "" {
+		direction = "newer"
+	}
+	query := url.Values{}
+	query.Set("per_page", strconv.Itoa(limit))
+	if direction == "older" && cursor.Before != "" {
+		query.Set("before", cursor.Before)
+	}
+	if direction == "newer" && cursor.After != "" {
+		query.Set("after", cursor.After)
+	}
+	endpoint := "api/v4/channels/" + channelID + "/posts?" + query.Encode()
+	status, body, requestErr := s.do(ctx, http.MethodGet, endpoint, nil)
+	if requestErr != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = failureForHTTPStatus(status, requestErr, string(body))
+		return response, requestErr
+	}
+	var raw struct {
+		Order []string           `json:"order"`
+		Posts map[string]apiPost `json:"posts"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		response.Status = model.ResponseStatusFailed
+		response.Failure = &model.Failure{Kind: model.FailureKindPartialResponse, Retryable: true, Message: fmt.Sprintf("decode Mattermost message list response: %v", err)}
+		return response, err
+	}
+	messages := make([]model.Message, 0, len(raw.Order))
+	for _, id := range raw.Order {
+		post, ok := raw.Posts[id]
+		if !ok {
+			continue
+		}
+		if req.IncludeReplies != nil && !*req.IncludeReplies && post.RootID != "" {
+			continue
+		}
+		messages = append(messages, messageFromPost(post))
+	}
+	if order == "asc" {
+		sort.SliceStable(messages, func(i, j int) bool { return messages[i].CreatedAt < messages[j].CreatedAt })
+	}
+	if order == "desc" {
+		sort.SliceStable(messages, func(i, j int) bool { return messages[i].CreatedAt > messages[j].CreatedAt })
+	}
+	response.Messages = messages
+	hasMore := len(raw.Order) == limit
+	response.Pagination = &model.Pagination{Direction: direction, HasMore: hasMore}
+	if len(messages) > 0 {
+		oldest, newest := messages[0], messages[0]
+		for _, message := range messages[1:] {
+			if message.CreatedAt < oldest.CreatedAt {
+				oldest = message
+			}
+			if message.CreatedAt > newest.CreatedAt {
+				newest = message
+			}
+		}
+		olderCursor := encodeMessageListCursor(messageListCursor{Before: oldest.MessageID})
+		newerCursor := encodeMessageListCursor(messageListCursor{After: newest.MessageID})
+		if direction == "older" {
+			if hasMore {
+				response.Pagination.NextCursor = olderCursor
+			}
+			response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{After: newest.MessageID})
+		} else {
+			if hasMore {
+				response.Pagination.NextCursor = newerCursor
+			}
+			response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{Before: newest.MessageID})
+		}
+	} else if cursor.Before != "" {
+		response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{After: cursor.Before})
+	} else if cursor.After != "" {
+		response.Pagination.PrevCursor = encodeMessageListCursor(messageListCursor{Before: cursor.After})
+	}
+	response.Status = model.ResponseStatusOK
+	return response, nil
+}
+
+func encodeMessageListCursor(cursor messageListCursor) string {
+	b, _ := json.Marshal(cursor)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func decodeMessageListCursor(value string) (messageListCursor, error) {
+	if strings.TrimSpace(value) == "" {
+		return messageListCursor{}, nil
+	}
+	b, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return messageListCursor{}, fmt.Errorf("decode message list cursor: %w", err)
+	}
+	var cursor messageListCursor
+	if err := json.Unmarshal(b, &cursor); err != nil {
+		return messageListCursor{}, fmt.Errorf("decode message list cursor: %w", err)
+	}
+	if cursor.Before != "" && cursor.After != "" {
+		return messageListCursor{}, fmt.Errorf("message list cursor contains both before and after")
+	}
+	return cursor, nil
 }
 
 func (s *Service) executeAuthStatus(ctx context.Context, response model.Response) (model.Response, error) {

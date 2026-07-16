@@ -210,10 +210,12 @@ func builtinOperationTemplates(adapterType string) []operationTemplate {
 	case "mattermost":
 		return []operationTemplate{
 			messengerThreadGetOperation(),
+			messengerMessageListOperation(),
 			messengerMessageCreateOperation(),
 		}
 	case "telegram":
 		return []operationTemplate{
+			messengerMessageListOperation(),
 			messengerMessageCreateOperation(),
 		}
 	case "confluence":
@@ -753,6 +755,14 @@ func messengerThreadGetOperation() operationTemplate {
 		Input:           input(requiredField("thread", "string")),
 		Output:          output("thread", "MessageThread"),
 		FailureKinds:    defaultFailureKinds(),
+	}
+}
+
+func messengerMessageListOperation() operationTemplate {
+	return operationTemplate{
+		Name: "messenger.message.list", IntegrationType: model.IntegrationTypeMessenger, ObjectType: "message", Operation: "list",
+		Input:  input(optionalField("channel", "string"), optionalField("limit", "integer"), optionalField("cursor", "string"), optionalField("direction", "string"), optionalField("order", "string"), optionalField("from", "string"), optionalField("to", "string"), optionalField("include-replies", "boolean")),
+		Output: output("messages", "[]Message"), FailureKinds: defaultFailureKinds(),
 	}
 }
 
