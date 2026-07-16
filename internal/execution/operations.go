@@ -344,7 +344,7 @@ func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
 		for index := 0; index < value.Len(); index++ {
 			item := value.Index(index)
 			kind, ok := reflectedPathValue(item, []string{"type"})
-			if ok && strings.EqualFold(fmt.Sprint(kind), path[0]) {
+			if ok && relatedObjectTypeMatches(fmt.Sprint(kind), path[0]) {
 				return reflectedPathValue(item, path[1:])
 			}
 		}
@@ -364,6 +364,18 @@ func reflectedPathValue(value reflect.Value, path []string) (any, bool) {
 		}
 	}
 	return nil, false
+}
+
+func relatedObjectTypeMatches(actual, expected string) bool {
+	actual = strings.ToLower(strings.TrimSpace(actual))
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	if actual == expected {
+		return true
+	}
+	if expected == "merge-request" {
+		return actual == "pull-request" || actual == "pr" || actual == "mr"
+	}
+	return false
 }
 
 func reflectedPathResolved(value reflect.Value, path []string) bool {

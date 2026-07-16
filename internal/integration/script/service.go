@@ -407,6 +407,9 @@ func operationNameForRequest(req model.ProviderRequest) string {
 	objectType := normalizeObjectType(firstNonEmpty(req.ObjectType, req.Resource))
 	rawOperation := strings.TrimSpace(strings.ToLower(req.Operation))
 	operation := normalizeOperation(req.Operation)
+	if integrationType == model.IntegrationTypeRepo && (objectType == "review-remark" || objectType == "merge-request.comment") {
+		return integrationType + ".merge-request.comment." + operation
+	}
 	switch integrationType {
 	case model.IntegrationTypeTracker:
 		switch objectType {

@@ -30,8 +30,17 @@ func (e builtinOperationExecutor) executeIntegration(ctx context.Context, state 
 		var found bool
 		descriptor, found = catalog.OperationDescriptor(ctx, operationName, "")
 		if !found {
-			err := fmt.Errorf("integration operation %q is not available", operationName)
-			return e.failIntegrationOperation(state, operation, name, "Интеграционная операция не разрешена.", err, "integration_operation_unavailable")
+			if catalog, catalogOK := executor.(integrationOperationCatalog); catalogOK {
+				descriptors := catalog.Operations(ctx, integration.OperationFilter{Name: operationName})
+				if len(descriptors) > 0 {
+					descriptor = descriptors[0]
+					found = true
+				}
+			}
+			if !found {
+				err := fmt.Errorf("integration operation %q is not available", operationName)
+				return e.failIntegrationOperation(state, operation, name, "Интеграционная операция не разрешена.", err, "integration_operation_unavailable")
+			}
 		}
 	} else if catalog, ok := executor.(integrationOperationCatalog); ok {
 		descriptors := catalog.Operations(ctx, integration.OperationFilter{Name: operationName})
@@ -59,6 +68,9 @@ func (e builtinOperationExecutor) executeIntegration(ctx context.Context, state 
 	}
 
 	response, err := executor.Execute(ctx, request)
+	if err == nil && strings.HasSuffix(strings.TrimSpace(string(operation.Kind)), ".get") && response.MergeRequest == nil {
+		err = fmt.Errorf("integration operation %q returned no merge request", operationName)
+	}
 	if err != nil && !integrationResponseAlreadyAvailable(operation, response) {
 		return e.failIntegrationOperation(state, operation, name, "Интеграционная операция завершилась отказом.", err, "integration_operation_failed")
 	}
