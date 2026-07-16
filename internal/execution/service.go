@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -275,10 +276,13 @@ func invocationFromActionInvocation(request ActionInvocation) invocation {
 }
 
 func taskNameFromAssignment(assignment *ExecutionAssignment) string {
-	if assignment == nil || assignment.CanonicalTask == nil || assignment.CanonicalTask.Number == 0 {
+	if assignment == nil || assignment.CanonicalTask == nil {
 		return ""
 	}
-	return fmt.Sprintf("task-%d", assignment.CanonicalTask.Number)
+	if ref := taskBranchRef(assignment.CanonicalTask); ref != "" {
+		return "task-" + ref
+	}
+	return ""
 }
 
 func repositoryFromAssignment(assignment *ExecutionAssignment) string {
@@ -289,8 +293,10 @@ func repositoryFromAssignment(assignment *ExecutionAssignment) string {
 }
 
 func workplaceNameFromAssignment(assignment *ExecutionAssignment) string {
-	if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
-		return fmt.Sprintf("%d", assignment.CanonicalTask.Number)
+	if assignment != nil && assignment.CanonicalTask != nil {
+		if ref := taskBranchRef(assignment.CanonicalTask); ref != "" {
+			return ref
+		}
 	}
 	if assignment != nil {
 		if name := stableIdentifier(strings.TrimSpace(assignment.Action)); name != "" {
@@ -298,6 +304,16 @@ func workplaceNameFromAssignment(assignment *ExecutionAssignment) string {
 		}
 	}
 	return stableIdentifier(defaultActionName())
+}
+
+func taskBranchRef(task *ObjectRef) string {
+	if task == nil {
+		return ""
+	}
+	if task.Number > 0 {
+		return strconv.Itoa(task.Number)
+	}
+	return stableIdentifier(firstNonEmptyTrimmed(task.ID, task.ExternalID))
 }
 
 func stableIdentifier(value string) string {
