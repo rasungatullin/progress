@@ -2737,7 +2737,7 @@ func TestBuildRunnerCommandCodex(t *testing.T) {
 		t.Fatalf("build command: %v", err)
 	}
 
-	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-C", "/tmp/work", "-m", "gpt-5.4", "ship it"})
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "-C", "/tmp/work", "-m", "gpt-5.4", "ship it"})
 }
 
 func TestBuildRunnerCommandCodexReasoningEffort(t *testing.T) {
@@ -2753,7 +2753,7 @@ func TestBuildRunnerCommandCodexReasoningEffort(t *testing.T) {
 		t.Fatalf("build command: %v", err)
 	}
 
-	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-c", `model_reasoning_effort="medium"`, "-C", "/tmp/work", "-m", "gpt-5.3-codex-spark", "ship it"})
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "-c", `model_reasoning_effort="medium"`, "--dangerously-bypass-approvals-and-sandbox", "-C", "/tmp/work", "-m", "gpt-5.3-codex-spark", "ship it"})
 }
 
 func TestValidateLaunchRejectsUnsupportedReasoningEffort(t *testing.T) {
@@ -2809,7 +2809,7 @@ func TestBuildRunnerCommandCodexResume(t *testing.T) {
 		t.Fatalf("build command: %v", err)
 	}
 
-	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "resume", "session-42", "ship it"})
+	assertRunnerCommand(t, cmd, RunnerCodex, []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "resume", "session-42", "ship it"})
 }
 
 func TestBuildRunnerCommandResumeUnsupportedRunner(t *testing.T) {

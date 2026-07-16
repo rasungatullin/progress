@@ -2464,9 +2464,9 @@ func buildRunnerCommand(ctx context.Context, spec model.LaunchSpec, prompt strin
 			if sessionID == "" {
 				return nil, fmt.Errorf("%w: runner %s requires runner session id", errResumeUnsupported, runner)
 			}
-			args = []string{"exec", "resume", sessionID, prompt}
+			args = []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "resume", sessionID, prompt}
 		} else {
-			args = []string{"exec", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
+			args = []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "-C", spec.Directory, "-m", codexModelName(spec.Model), prompt}
 		}
 		if effort := model.NormalizeReasoningEffort(spec.ReasoningEffort); effort != "" {
 			args = append([]string{args[0], "-c", `model_reasoning_effort="` + effort + `"`}, args[1:]...)
