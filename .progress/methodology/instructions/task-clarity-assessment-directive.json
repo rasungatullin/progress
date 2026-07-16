@@ -1,0 +1,7 @@
+{
+  "name": "task-clarity-assessment-directive",
+  "target_contour": "execution",
+  "title": "Оценка понятности задачи",
+  "description": "Проверить, достаточно ли формулировки задачи и доступного контекста для однозначного исполнения без внешних предположений.",
+  "body_file": "task-clarity-assessment-directive.md"
+}
