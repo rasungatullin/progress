@@ -836,6 +836,8 @@ func executionObjectRefFromCanonicalTask(task integration.CanonicalTask) *execut
 		System:     strings.TrimSpace(task.System),
 		Repository: strings.TrimSpace(task.Repository),
 		Number:     numericIssueID(task.ID),
+		ID:         strings.TrimSpace(task.ID),
+		ExternalID: strings.TrimSpace(task.ExternalID),
 		Title:      strings.TrimSpace(task.Title),
 		URL:        strings.TrimSpace(task.URL),
 		Attributes: cloneStringMap(task.Attributes),

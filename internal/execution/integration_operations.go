@@ -896,8 +896,8 @@ func pullRequestRefFromPublishMergeRequestInput(input publishMergeRequestInput) 
 	ref = mergePullRequestRefs(ref, input.ref)
 	if strings.TrimSpace(ref.Head) == "" {
 		assignment := publishMergeRequestAssignment(input)
-		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
-			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
+		if assignment != nil && assignment.CanonicalTask != nil {
+			ref.Head = taskBranchRef(assignment.CanonicalTask)
 		}
 	}
 	return ref
@@ -915,8 +915,8 @@ func pullRequestRefFromPublishReviewRemarksInput(input publishMergeRequestInput)
 	ref = mergePullRequestRefs(ref, input.ref)
 	if strings.TrimSpace(ref.Head) == "" {
 		assignment := publishReviewRemarksAssignment(input)
-		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
-			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
+		if assignment != nil && assignment.CanonicalTask != nil {
+			ref.Head = taskBranchRef(assignment.CanonicalTask)
 		}
 	}
 	return ref
@@ -934,8 +934,8 @@ func pullRequestRefFromPublishReviewResponsesInput(input publishReviewResponsesI
 	ref = mergePullRequestRefs(ref, input.ref)
 	if strings.TrimSpace(ref.Head) == "" {
 		assignment := publishReviewResponsesAssignment(input)
-		if assignment != nil && assignment.CanonicalTask != nil && assignment.CanonicalTask.Number > 0 {
-			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
+		if assignment != nil && assignment.CanonicalTask != nil {
+			ref.Head = taskBranchRef(assignment.CanonicalTask)
 		}
 	}
 	return ref
@@ -990,9 +990,7 @@ func pullRequestRefFromAssignment(assignment *ExecutionAssignment) pullRequestRe
 	}
 	if assignment.CanonicalTask != nil {
 		ref.Repository = strings.TrimSpace(assignment.CanonicalTask.Repository)
-		if assignment.CanonicalTask.Number > 0 {
-			ref.Head = strconv.Itoa(assignment.CanonicalTask.Number)
-		}
+		ref.Head = taskBranchRef(assignment.CanonicalTask)
 		ref.Title = strings.TrimSpace(assignment.CanonicalTask.Title)
 		if assignment.CanonicalTask.Attributes != nil {
 			ref.Body = strings.TrimSpace(assignment.CanonicalTask.Attributes["body"])

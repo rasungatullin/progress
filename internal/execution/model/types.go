@@ -148,6 +148,7 @@ type ObjectRef struct {
 	Repository string            `json:"repository,omitempty"`
 	Number     int               `json:"number,omitempty"`
 	ID         string            `json:"id,omitempty"`
+	ExternalID string            `json:"external_id,omitempty"`
 	Title      string            `json:"title,omitempty"`
 	URL        string            `json:"url,omitempty"`
 	Attributes map[string]string `json:"attributes,omitempty"`
