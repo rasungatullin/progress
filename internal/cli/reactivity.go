@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/rasungatullin/progress/internal/logging"
@@ -10,7 +12,7 @@ import (
 )
 
 type reactivityFlags struct {
-	task      int
+	task      string
 	route     string
 	action    string
 	once      bool
@@ -60,8 +62,10 @@ func newReactivityProcessCommand() *cobra.Command {
 		Short: "Обработка указанной задачи",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newReactivityService(cmd)
+			taskNumber, _ := strconv.Atoi(strings.TrimSpace(flags.task))
 			result, err := service.ProcessTask(cmd.Context(), reactivity.TaskProcessingInput{
-				TaskNumber: flags.task,
+				TaskNumber: taskNumber,
+				TaskID:     flags.task,
 				Route:      flags.route,
 				Once:       flags.once,
 				MaxCycles:  flags.maxCycles,
@@ -75,7 +79,7 @@ func newReactivityProcessCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVar(&flags.task, "task", 0, "Номер задачи для обработки")
+	cmd.Flags().StringVar(&flags.task, "task", "", "Идентификатор задачи для обработки")
 	cmd.Flags().StringVar(&flags.route, "route", "", "Имя маршрута обработки")
 	cmd.Flags().BoolVar(&flags.once, "once", false, "Выполнить только один цикл обработки")
 	cmd.Flags().IntVar(&flags.maxCycles, "max-cycles", 0, "Максимальное число циклов обработки")
@@ -91,8 +95,12 @@ func newReactivityActionCommand() *cobra.Command {
 		Short: "Запуск указанного действия для задачи",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service := newReactivityService(cmd)
+			task, err := strconv.Atoi(strings.TrimSpace(flags.task))
+			if err != nil {
+				return fmt.Errorf("идентификатор задачи должен быть целым числом: %q", flags.task)
+			}
 			result, err := service.RunTaskAction(cmd.Context(), reactivity.TaskActionInput{
-				TaskNumber: flags.task,
+				TaskNumber: task,
 				Action:     flags.action,
 			})
 			if err != nil {
@@ -104,7 +112,7 @@ func newReactivityActionCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVar(&flags.task, "task", 0, "Номер задачи для запуска действия")
+	cmd.Flags().StringVar(&flags.task, "task", "", "Идентификатор задачи для запуска действия")
 	cmd.Flags().StringVar(&flags.action, "action", "", "Действие контура исполнения")
 	_ = cmd.MarkFlagRequired("task")
 	_ = cmd.MarkFlagRequired("action")
