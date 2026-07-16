@@ -419,7 +419,7 @@ func (s *Service) executeServerRepositoryGet(ctx context.Context, response model
 		Name:          name,
 		Description:   strings.TrimSpace(raw.Description),
 		DefaultBranch: defaultBranch,
-		URL:           firstServerSelfLink(raw.Links),
+		URL:           firstServerCloneURL(raw.Links),
 		Traits:        []string{"server"},
 		Attributes: map[string]string{
 			"api_variant": apiVariantServer,
@@ -430,6 +430,20 @@ func (s *Service) executeServerRepositoryGet(ctx context.Context, response model
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
+}
+
+func firstServerCloneURL(links serverLinks) string {
+	for _, link := range links.Clone {
+		if strings.EqualFold(strings.TrimSpace(link.Name), "ssh") && strings.TrimSpace(link.Href) != "" {
+			return strings.TrimSpace(link.Href)
+		}
+	}
+	for _, link := range links.Clone {
+		if strings.TrimSpace(link.Href) != "" {
+			return strings.TrimSpace(link.Href)
+		}
+	}
+	return firstServerSelfLink(links)
 }
 
 func (s *Service) executePullRequestGet(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {

@@ -423,19 +423,31 @@ func normalizeRepositoryRef(raw string) (*repositoryRef, error) {
 	if err != nil {
 		return nil, fmt.Errorf("repository ref is invalid: %w", err)
 	}
-	if !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Host, "github.com") {
+	if parsed.Host == "" || parsed.Path == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, fmt.Errorf("repository ref is invalid: %q", raw)
 	}
-	if parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+	if strings.EqualFold(parsed.Scheme, "https") && strings.EqualFold(parsed.Host, "github.com") {
+		if parsed.User != nil {
+			return nil, fmt.Errorf("repository ref is invalid: %q", raw)
+		}
+		owner, name, ok := parseRepositoryPath(parsed.EscapedPath())
+		if !ok {
+			return nil, fmt.Errorf("repository ref is invalid: %q", raw)
+		}
+		return &repositoryRef{CloneURL: githubCloneURL(owner, name), CacheKey: repositoryCacheKey(owner, name)}, nil
+	}
+	if !strings.EqualFold(parsed.Scheme, "ssh") && !strings.EqualFold(parsed.Scheme, "https") && !strings.EqualFold(parsed.Scheme, "http") {
 		return nil, fmt.Errorf("repository ref is invalid: %q", raw)
 	}
-
-	owner, name, ok := parseRepositoryPath(parsed.EscapedPath())
-	if !ok {
+	if parsed.User == nil && strings.EqualFold(parsed.Scheme, "ssh") {
 		return nil, fmt.Errorf("repository ref is invalid: %q", raw)
 	}
-
-	return &repositoryRef{CloneURL: githubCloneURL(owner, name), CacheKey: repositoryCacheKey(owner, name)}, nil
+	cloneURL := strings.TrimSuffix(raw, "/")
+	path := strings.Trim(strings.TrimSuffix(parsed.EscapedPath(), ".git"), "/")
+	if path == "" {
+		return nil, fmt.Errorf("repository ref is invalid: %q", raw)
+	}
+	return &repositoryRef{CloneURL: cloneURL, CacheKey: genericRepositoryCacheKey(parsed.Host, path)}, nil
 }
 
 func parseRepositoryShorthand(raw string) (string, string, bool) {
@@ -478,6 +490,19 @@ func repositoryCacheKey(owner, name string) string {
 	owner = strings.ToLower(owner)
 	name = strings.ToLower(name)
 	return fmt.Sprintf("github-%d-%s-%s", len(owner), owner, name)
+}
+
+func genericRepositoryCacheKey(host, path string) string {
+	value := strings.ToLower(host + "-" + path)
+	var b strings.Builder
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return "git-" + strings.Trim(b.String(), "-")
 }
 
 func runGit(ctx context.Context, dir string, args ...string) error {
