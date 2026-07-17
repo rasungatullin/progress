@@ -126,6 +126,32 @@ func TestIntegrationTypeOrientedTreeExcludesDispatcherAndPrivate(t *testing.T) {
 	}
 }
 
+func TestIntegrationLegacySystemRootCommandsAreRemoved(t *testing.T) {
+	root := NewRootCommand()
+	integration, _, err := root.Find([]string{"integration"})
+	if err != nil {
+		t.Fatalf("find integration command: %v", err)
+	}
+	published := make(map[string]struct{})
+	for _, child := range integration.Commands() {
+		published[child.Name()] = struct{}{}
+		for _, alias := range child.Aliases {
+			published[alias] = struct{}{}
+		}
+	}
+	for _, path := range [][]string{
+		{"integration", "github"},
+		{"integration", "bitbucket"},
+		{"integration", "mattermost"},
+		{"integration", "telegram"},
+		{"integration", "confluence"},
+	} {
+		if _, ok := published[path[1]]; ok {
+			t.Fatalf("legacy command %q is still present", path[1])
+		}
+	}
+}
+
 func TestIntegrationTypeOrientedTreeContainsPublishedOperationCommands(t *testing.T) {
 	root := NewRootCommand()
 	paths := [][]string{

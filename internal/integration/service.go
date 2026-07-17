@@ -800,6 +800,12 @@ func systemSupportsOperation(state systemState, integrationType string, objectTy
 				return true
 			}
 		}
+		for configuredName := range state.Operations {
+			configuredType, configuredObject, configuredOperation := parseOperationName(configuredName)
+			if configuredType == integrationType && (configuredObject == "comment" || configuredObject == "review-remark") && configuredOperation == operation {
+				return true
+			}
+		}
 	}
 	if integrationType == model.IntegrationTypeRepo && objectType == "review-remark" && operation == "create" {
 		for _, template := range builtinOperationTemplates(state.Type) {
