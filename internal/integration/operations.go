@@ -432,10 +432,6 @@ func operationOutputShape(integrationType string, objectType string, operation s
 	return "Response"
 }
 
-func canonicalOperationName(integrationType, objectType, operation string) string {
-	return normalizeIntegrationType(integrationType) + "." + canonicalObjectType(objectType) + "." + normalizeOperation(operation)
-}
-
 func canonicalConfiguredOperationName(name string) string {
 	parts := strings.Split(strings.TrimSpace(strings.ToLower(name)), ".")
 	if len(parts) < 3 {
