@@ -95,8 +95,8 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list comments: %v", err)
 	}
-	if len(comments.TaskComments) != 1 || comments.Comments[0].Body != "Комментарий" {
-		t.Fatalf("unexpected comments: %#v %#v", comments.TaskComments, comments.Comments)
+	if len(comments.TaskComments) != 1 || comments.TaskComments[0].Body != "Комментарий" {
+		t.Fatalf("unexpected comments: %#v", comments.TaskComments)
 	}
 
 	search, err := service.Execute(context.Background(), model.ProviderRequest{
@@ -110,8 +110,8 @@ func TestServiceSupportsTaskCommentAndLabelOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search tasks: %v", err)
 	}
-	if len(search.SearchResults) != 1 || search.SearchResults[0].ID != create.Task.ID {
-		t.Fatalf("unexpected search results: %#v", search.SearchResults)
+	if len(search.Tasks) != 1 || search.Tasks[0].ID != create.Task.ID {
+		t.Fatalf("unexpected tasks: %#v", search.Tasks)
 	}
 }
 
@@ -156,8 +156,8 @@ func TestSearchAppliesLimitAfterLabelFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search tasks: %v", err)
 	}
-	if len(search.SearchResults) != 1 || search.SearchResults[0].ID != matching.Task.ID {
-		t.Fatalf("unexpected search results: %#v", search.SearchResults)
+	if len(search.Tasks) != 1 || search.Tasks[0].ID != matching.Task.ID {
+		t.Fatalf("unexpected tasks: %#v", search.Tasks)
 	}
 }
 

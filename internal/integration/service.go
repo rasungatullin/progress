@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
@@ -877,18 +878,18 @@ func expectedResult(integrationType string, objectType string, resource string, 
 		switch normalizeObjectType(firstNonEmpty(objectType, resource)) {
 		case "issue":
 			if operation == "comments" {
-				return "issue-comment[]"
+				return "task-comment[]"
 			}
 			if operation == "search" {
-				return "issue-search-result[]"
+				return "canonical-task[]"
 			}
-			return "issue"
+			return "canonical-task"
 		case "task":
 			if operation == "comments" {
 				return "task-comment[]"
 			}
 			if operation == "search" || operation == "list" {
-				return "tracker-search-result[]"
+				return "canonical-task[]"
 			}
 			return "canonical-task"
 		case "comment":
@@ -953,12 +954,12 @@ func expectedResult(integrationType string, objectType string, resource string, 
 			return "tracker-comment[]"
 		}
 		if operation == "search" {
-			return "tracker-search-result[]"
+			return "canonical-task[]"
 		}
 		return "tracker-issue"
 	case "pull-request", "pr":
 		if operation == "search" {
-			return "tracker-search-result[]"
+			return "merge-request[]"
 		}
 		if operation == "create" {
 			return "integration-pull-request-status"
@@ -1001,6 +1002,13 @@ func applyResponseSystem(result *Response, system string) {
 			result.Task.Assignees[i].System = system
 		}
 	}
+	for i := range result.Tasks {
+		result.Tasks[i].System = system
+		result.Tasks[i].Author.System = system
+		for j := range result.Tasks[i].Assignees {
+			result.Tasks[i].Assignees[j].System = system
+		}
+	}
 	for i := range result.TaskComments {
 		result.TaskComments[i].System = system
 		result.TaskComments[i].Author.System = system
@@ -1011,6 +1019,10 @@ func applyResponseSystem(result *Response, system string) {
 	if result.MergeRequest != nil {
 		result.MergeRequest.System = system
 		result.MergeRequest.Author.System = system
+	}
+	for i := range result.MergeRequests {
+		result.MergeRequests[i].System = system
+		result.MergeRequests[i].Author.System = system
 	}
 	for i := range result.ReviewRemarks {
 		result.ReviewRemarks[i].System = system
@@ -1103,6 +1115,24 @@ func normalizeDerivedObjects(result *Response) {
 		issue := trackerIssueFromCanonicalTask(*result.Task)
 		result.Issue = &issue
 	}
+	if result.Tasks == nil && result.SearchResults != nil && result.MergeRequests == nil {
+		result.Tasks = make([]CanonicalTask, 0, len(result.SearchResults))
+		for _, item := range result.SearchResults {
+			result.Tasks = append(result.Tasks, canonicalTaskFromTrackerSearchResult(item))
+		}
+	}
+	if result.SearchResults == nil && result.Tasks != nil {
+		result.SearchResults = make([]TrackerSearchResult, 0, len(result.Tasks))
+		for _, task := range result.Tasks {
+			result.SearchResults = append(result.SearchResults, trackerSearchResultFromCanonicalTask(task))
+		}
+	}
+	if result.SearchResults == nil && result.MergeRequests != nil {
+		result.SearchResults = make([]TrackerSearchResult, 0, len(result.MergeRequests))
+		for _, mergeRequest := range result.MergeRequests {
+			result.SearchResults = append(result.SearchResults, trackerSearchResultFromMergeRequest(mergeRequest))
+		}
+	}
 	if len(result.TaskComments) == 0 && len(result.Comments) > 0 {
 		result.TaskComments = make([]TaskComment, 0, len(result.Comments))
 		for _, comment := range result.Comments {
@@ -1147,8 +1177,61 @@ func applyTaskLabelMapping(result *Response, mapping map[string]string) {
 	if result.Task != nil {
 		result.Task.Traits = mapExternalLabelsToCanonical(result.Task.Traits, mapping)
 	}
+	for i := range result.Tasks {
+		result.Tasks[i].Traits = mapExternalLabelsToCanonical(result.Tasks[i].Traits, mapping)
+	}
 	for i := range result.SearchResults {
 		result.SearchResults[i].Labels = mapExternalLabelsToCanonical(result.SearchResults[i].Labels, mapping)
+	}
+}
+
+func canonicalTaskFromTrackerSearchResult(item TrackerSearchResult) CanonicalTask {
+	return CanonicalTask{
+		System:     item.System,
+		Repository: item.Repository,
+		ID:         item.ID,
+		ExternalID: item.ID,
+		Title:      item.Title,
+		State:      item.State,
+		Traits:     append([]string(nil), item.Labels...),
+		Author:     userFromTrackerUser(item.Author),
+		Assignees:  usersFromTrackerUsers(item.Assignees),
+		URL:        item.URL,
+		CreatedAt:  item.CreatedAt,
+		UpdatedAt:  item.UpdatedAt,
+	}
+}
+
+func trackerSearchResultFromCanonicalTask(task CanonicalTask) TrackerSearchResult {
+	return TrackerSearchResult{
+		System:     task.System,
+		Repository: task.Repository,
+		Kind:       "issue",
+		ID:         task.ID,
+		Title:      task.Title,
+		State:      task.State,
+		Labels:     append([]string(nil), task.Traits...),
+		Author:     trackerUserFromUser(task.Author),
+		Assignees:  trackerUsersFromUsers(task.Assignees),
+		URL:        task.URL,
+		CreatedAt:  task.CreatedAt,
+		UpdatedAt:  task.UpdatedAt,
+	}
+}
+
+func trackerSearchResultFromMergeRequest(mergeRequest MergeRequest) TrackerSearchResult {
+	return TrackerSearchResult{
+		System:     mergeRequest.System,
+		Repository: mergeRequest.Repository,
+		Kind:       "merge-request",
+		ID:         strconv.Itoa(mergeRequest.Number),
+		Title:      mergeRequest.Title,
+		State:      mergeRequest.State,
+		Labels:     append([]string(nil), mergeRequest.Traits...),
+		Author:     trackerUserFromUser(mergeRequest.Author),
+		URL:        mergeRequest.URL,
+		CreatedAt:  mergeRequest.CreatedAt,
+		UpdatedAt:  mergeRequest.UpdatedAt,
 	}
 }
 

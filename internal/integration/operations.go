@@ -382,7 +382,7 @@ func operationOutputShape(integrationType string, objectType string, operation s
 		switch objectType {
 		case "issue":
 			if operation == "search" || operation == "list" {
-				return "TrackerSearchResult[]"
+				return "CanonicalTask[]"
 			}
 			return "CanonicalTask"
 		case "issue-comment", "comment":
@@ -541,7 +541,7 @@ func trackerTaskSearchOperation(includeExcludeLabels bool) operationTemplate {
 		ObjectType:      "issue",
 		Operation:       "search",
 		Input:           model.OperationInputContract{Optional: optional},
-		Output:          output("tracker-search-result", "TrackerSearchResult[]"),
+		Output:          output("task", "CanonicalTask[]"),
 		FailureKinds:    defaultFailureKinds(),
 	}
 }

@@ -583,20 +583,9 @@ func (s *Service) executePullRequestList(ctx context.Context, response model.Res
 	}
 
 	response.MergeRequests = make([]model.MergeRequest, 0, len(items))
-	response.SearchResults = make([]model.TrackerSearchResult, 0, len(items))
 	for _, item := range items {
 		pr := *mergeRequestFromAPI(repository.fullName, item)
 		response.MergeRequests = append(response.MergeRequests, pr)
-		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
-			System:     "bitbucket",
-			Repository: repository.fullName,
-			Kind:       "merge-request",
-			ID:         strconv.Itoa(pr.Number),
-			Title:      pr.Title,
-			State:      pr.State,
-			URL:        pr.URL,
-			UpdatedAt:  pr.UpdatedAt,
-		})
 	}
 	response.Metadata = map[string]string{
 		"repository": repository.fullName,
@@ -663,20 +652,9 @@ func (s *Service) executeServerPullRequestList(ctx context.Context, response mod
 	}
 
 	response.MergeRequests = make([]model.MergeRequest, 0, len(items))
-	response.SearchResults = make([]model.TrackerSearchResult, 0, len(items))
 	for _, item := range items {
 		pr := *mergeRequestFromServerAPI(repository.fullName, item)
 		response.MergeRequests = append(response.MergeRequests, pr)
-		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
-			System:     "bitbucket",
-			Repository: repository.fullName,
-			Kind:       "merge-request",
-			ID:         strconv.Itoa(pr.Number),
-			Title:      pr.Title,
-			State:      pr.State,
-			URL:        pr.URL,
-			UpdatedAt:  pr.UpdatedAt,
-		})
 	}
 	response.Metadata = map[string]string{
 		"repository": repository.fullName,

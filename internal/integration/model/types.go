@@ -188,6 +188,7 @@ type Response struct {
 	Failure           *Failure
 	Route             Route
 	Task              *CanonicalTask
+	Tasks             []CanonicalTask
 	TaskComments      []TaskComment
 	Repository        *Repository
 	MergeRequest      *MergeRequest

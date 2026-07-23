@@ -451,3 +451,66 @@ func TestServiceCloudPullRequestListDefaultsToClosed(t *testing.T) {
 		t.Fatalf("unexpected state: %#v", response.MergeRequests[0])
 	}
 }
+
+func TestServiceCloudPullRequestListFollowsPagination(t *testing.T) {
+	t.Parallel()
+
+	var seenPages []string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		seenPages = append(seenPages, page)
+		w.Header().Set("Content-Type", "application/json")
+		if page == "2" {
+			_, _ = w.Write([]byte(`{
+				"values": [{
+					"id": 6,
+					"title": "Second page",
+					"state": "OPEN",
+					"author": {"display_name": "Bob", "nickname": "bob"},
+					"source": {"branch": {"name": "second"}},
+					"destination": {"branch": {"name": "main"}}
+				}]
+			}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"values": [{
+				"id": 5,
+				"title": "First page",
+				"state": "OPEN",
+				"author": {"display_name": "Alice", "nickname": "alice"},
+				"source": {"branch": {"name": "first"}},
+				"destination": {"branch": {"name": "main"}}
+			}],
+			"next": "` + server.URL + `/repositories/workspace/repo/pullrequests?page=2"
+		}`))
+	}))
+	defer server.Close()
+
+	service := NewService(model.IntegrationSystemConfig{
+		BaseURL:    server.URL,
+		Token:      "token",
+		Repository: "workspace/repo",
+	})
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "bitbucket",
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "search",
+		State:           "open",
+		Limit:           3,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if len(seenPages) != 2 || seenPages[0] != "" || seenPages[1] != "2" {
+		t.Fatalf("unexpected pagination requests: %#v", seenPages)
+	}
+	if len(response.MergeRequests) != 2 || response.MergeRequests[0].Number != 5 || response.MergeRequests[1].Number != 6 {
+		t.Fatalf("unexpected merge requests: %#v", response.MergeRequests)
+	}
+}
