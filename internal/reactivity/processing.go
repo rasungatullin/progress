@@ -340,16 +340,17 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskID
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if response.Issue == nil {
+	if response.Task == nil {
 		return nil, nil, nil, nil, fmt.Errorf("контур интеграции не вернул задачу %s", taskID)
 	}
+	issue := trackerIssueFromCanonicalTask(*response.Task)
 
 	mergeRequest := knownMergeRequest
 	if mergeRequest != nil {
 		copyOfMergeRequest := *mergeRequest
 		fresh, refreshErr := s.integration.Execute(ctx, integration.Request{IntegrationType: integrationTypeRepository, Resource: "merge-request", ObjectType: "merge-request", Operation: "get", Repository: copyOfMergeRequest.Repository, RepoProvided: strings.TrimSpace(copyOfMergeRequest.Repository) != "", MergeRequestNumber: copyOfMergeRequest.Number})
 		if refreshErr != nil {
-			return response.Issue, mergeRequest, nil, refreshErr, nil
+			return issue, mergeRequest, nil, refreshErr, nil
 		}
 		if refreshed, ok := integrationMergeRequestFromResponse(fresh); ok {
 			copyOfMergeRequest = refreshed
@@ -358,32 +359,32 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskID
 			// повторном чтении, хотя не сообщают ошибку. Сохраняем известный
 			// объект для несвязанных маршрутов; явная ошибка чтения передаётся
 			// вызывающему контуру выше.
-			return response.Issue, mergeRequest, nil, nil, nil
+			return issue, mergeRequest, nil, nil, nil
 		}
 		mergeRequest = &copyOfMergeRequest
 	} else {
-		mergeRequest, err = s.findTaskMergeRequest(ctx, response.Issue)
+		mergeRequest, err = s.findTaskMergeRequest(ctx, issue)
 		if err != nil {
-			if requireMergeRequest || taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) {
+			if requireMergeRequest || taskLabelsRequireCompletionMergeRequest(issue.Labels) {
 				return nil, nil, nil, err, fmt.Errorf("восстановить связанный запрос на слияние для задачи %s: %w", taskID, err)
 			}
 			s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%s ошибка=%v", taskID, err)
 		}
 	}
 	if mergeRequest != nil {
-		if !taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) {
+		if !taskLabelsRequireCompletionMergeRequest(issue.Labels) {
 			if mergeRequestHasConflict(mergeRequest) || mergeRequestStateUnknown(mergeRequest) {
-				return response.Issue, mergeRequest, &decision.MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest), MergeStateUnknown: mergeRequestStateUnknown(mergeRequest)}, nil, nil
+				return issue, mergeRequest, &decision.MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest), MergeStateUnknown: mergeRequestStateUnknown(mergeRequest)}, nil, nil
 			}
-			return response.Issue, mergeRequest, nil, nil, nil
+			return issue, mergeRequest, nil, nil, nil
 		}
 		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest)
 		if stateErr != nil {
-			return response.Issue, mergeRequest, nil, nil, stateErr
+			return issue, mergeRequest, nil, nil, stateErr
 		}
-		return response.Issue, mergeRequest, externalState, nil, nil
+		return issue, mergeRequest, externalState, nil, nil
 	}
-	return response.Issue, mergeRequest, nil, err, nil
+	return issue, mergeRequest, nil, err, nil
 }
 
 func integrationMergeRequestFromResponse(response integration.Response) (integration.MergeRequest, bool) {
@@ -391,6 +392,47 @@ func integrationMergeRequestFromResponse(response integration.Response) (integra
 		return integration.MergeRequest{}, false
 	}
 	return *response.MergeRequest, true
+}
+
+func trackerIssueFromCanonicalTask(task integration.CanonicalTask) *integration.TrackerIssue {
+	return &integration.TrackerIssue{
+		System:     task.System,
+		Repository: task.Repository,
+		ID:         task.ID,
+		ExternalID: task.ExternalID,
+		Title:      task.Title,
+		Body:       task.Body,
+		State:      task.State,
+		Labels:     append([]string(nil), task.Traits...),
+		Assignees:  trackerUsersFromCanonicalUsers(task.Assignees),
+		Author:     trackerUserFromCanonicalUser(task.Author),
+		URL:        task.URL,
+		CreatedAt:  task.CreatedAt,
+		UpdatedAt:  task.UpdatedAt,
+	}
+}
+
+func trackerUsersFromCanonicalUsers(users []integration.User) []integration.TrackerUser {
+	if users == nil {
+		return nil
+	}
+	result := make([]integration.TrackerUser, 0, len(users))
+	for _, user := range users {
+		result = append(result, trackerUserFromCanonicalUser(user))
+	}
+	return result
+}
+
+func trackerUserFromCanonicalUser(user integration.User) integration.TrackerUser {
+	return integration.TrackerUser{
+		System:   user.System,
+		Login:    user.Login,
+		Name:     user.Name,
+		Email:    user.Email,
+		URL:      user.URL,
+		IsBot:    user.IsBot,
+		IsActive: user.IsActive,
+	}
 }
 
 func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*decision.MergeRequestExternalState, error) {

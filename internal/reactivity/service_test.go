@@ -229,6 +229,117 @@ func TestServiceProcessTaskOnceStopsAfterFirstCycle(t *testing.T) {
 	}
 }
 
+func TestServiceProcessTaskAcceptsPartialCanonicalTaskResponse(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub([]string{})
+	integrations.taskPartial = true
+	integrations.searchReturnsEmpty = true
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{results: []decision.ConsiderationResult{{
+		Status: decision.ConsiderationStatusCompleted,
+	}}}
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process partial task response: %v", err)
+	}
+	if len(result.Cycles) != 1 || result.FinalIssue == nil || result.FinalIssue.ID != "123" {
+		t.Fatalf("partial canonical task was not restored: %#v", result)
+	}
+}
+
+func TestServiceProcessTaskRejectsEmptyCanonicalTaskResponse(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub(nil)
+	integrations.taskMissing = true
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{}
+	service.execution = &processingExecutionStub{}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err == nil || !strings.Contains(err.Error(), "контур интеграции не вернул задачу 123") {
+		t.Fatalf("unexpected empty task response error: %v", err)
+	}
+}
+
+func TestServiceProcessTaskPreservesCanonicalTaskFailure(t *testing.T) {
+	t.Parallel()
+
+	expected := errors.New("task source unavailable")
+	integrations := newProcessingIntegrationStub(nil)
+	integrations.taskErr = expected
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{}
+	service.execution = &processingExecutionStub{}
+
+	_, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if !errors.Is(err, expected) {
+		t.Fatalf("canonical task failure was not preserved: %v", err)
+	}
+}
+
+func TestServiceProcessTaskHandlesMissingOptionalCanonicalTaskData(t *testing.T) {
+	t.Parallel()
+
+	integrations := newProcessingIntegrationStub(nil)
+	integrations.task = integration.CanonicalTask{
+		Repository: "owner/name",
+		ID:         "123",
+	}
+	integrations.searchReturnsEmpty = true
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = &processingDecisionStub{results: []decision.ConsiderationResult{{
+		Status: decision.ConsiderationStatusCompleted,
+	}}}
+	service.execution = &processingExecutionStub{}
+
+	result, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true})
+	if err != nil {
+		t.Fatalf("process task without optional data: %v", err)
+	}
+	if result.FinalIssue == nil || result.FinalIssue.ID != "123" || result.FinalIssue.Labels != nil {
+		t.Fatalf("unexpected restored task state: %#v", result.FinalIssue)
+	}
+}
+
+func TestTrackerIssueFromCanonicalTaskPreservesTaskState(t *testing.T) {
+	t.Parallel()
+
+	task := integration.CanonicalTask{
+		System:     "github",
+		Repository: "owner/name",
+		ID:         "123",
+		ExternalID: "node-123",
+		Title:      "Task",
+		Body:       "Description",
+		State:      "OPEN",
+		Traits:     []string{"Ожидает экспертизы"},
+		Assignees:  []integration.User{{System: "github", Login: "engineer"}},
+		Author:     integration.User{System: "github", Login: "author"},
+		URL:        "https://github.com/owner/name/issues/123",
+		CreatedAt:  "2026-07-22T10:00:00Z",
+		UpdatedAt:  "2026-07-23T10:00:00Z",
+	}
+
+	issue := trackerIssueFromCanonicalTask(task)
+	if issue.ID != task.ID || issue.ExternalID != task.ExternalID || issue.Repository != task.Repository {
+		t.Fatalf("canonical identity was not preserved: %#v", issue)
+	}
+	if !containsLabel(issue.Labels, "Ожидает экспертизы") {
+		t.Fatalf("canonical task traits were not restored as labels: %#v", issue.Labels)
+	}
+	if issue.Author.Login != "author" || len(issue.Assignees) != 1 || issue.Assignees[0].Login != "engineer" {
+		t.Fatalf("canonical users were not preserved: %#v", issue)
+	}
+}
+
 func TestServiceProcessTaskPassesExplicitRouteToDecision(t *testing.T) {
 	t.Parallel()
 
@@ -1070,11 +1181,14 @@ func processingConsideration(action string) decision.ConsiderationResult {
 }
 
 type processingIntegrationStub struct {
-	issue              integration.TrackerIssue
+	task               integration.CanonicalTask
 	mergeRequest       integration.MergeRequest
 	reviewRemarks      []integration.ReviewRemark
 	labels             []string
 	requests           []integration.Request
+	taskErr            error
+	taskPartial        bool
+	taskMissing        bool
 	searchErr          error
 	commentsErr        error
 	searchReturnsEmpty bool
@@ -1082,13 +1196,13 @@ type processingIntegrationStub struct {
 
 func newProcessingIntegrationStub(labels []string) *processingIntegrationStub {
 	return &processingIntegrationStub{
-		issue: integration.TrackerIssue{
+		task: integration.CanonicalTask{
 			System:     "github",
 			Repository: "owner/name",
 			ID:         "123",
 			Title:      "Task",
 			State:      "OPEN",
-			Labels:     append([]string(nil), labels...),
+			Traits:     append([]string(nil), labels...),
 		},
 		mergeRequest: integration.MergeRequest{
 			System:     "github",
@@ -1106,9 +1220,15 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 	s.requests = append(s.requests, request)
 	switch {
 	case request.IntegrationType == integrationmodel.IntegrationTypeTracker && request.Operation == "get":
-		issue := s.issue
-		issue.Labels = append([]string(nil), s.issue.Labels...)
-		return integration.Response{Issue: &issue}, nil
+		if s.taskErr != nil {
+			return integration.Response{}, s.taskErr
+		}
+		if s.taskMissing {
+			return integration.Response{Partial: s.taskPartial}, nil
+		}
+		task := s.task
+		task.Traits = append([]string(nil), s.task.Traits...)
+		return integration.Response{Task: &task, Partial: s.taskPartial}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeRepository && request.Operation == "search":
 		if s.searchErr != nil {
 			return integration.Response{}, s.searchErr
@@ -1132,11 +1252,11 @@ func (s *processingIntegrationStub) Execute(_ context.Context, request integrati
 		return integration.Response{ReviewRemarks: append([]integration.ReviewRemark(nil), s.reviewRemarks...)}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeTracker && request.Operation == "add":
 		s.labels = append(s.labels, "add:"+strings.Join(request.Labels, ","))
-		s.issue.Labels = append(s.issue.Labels, request.Labels...)
+		s.task.Traits = append(s.task.Traits, request.Labels...)
 		return integration.Response{OperationResult: &integration.OperationResult{Status: "ok"}}, nil
 	case request.IntegrationType == integrationmodel.IntegrationTypeTracker && request.Operation == "remove":
 		s.labels = append(s.labels, "remove:"+strings.Join(request.Labels, ","))
-		s.issue.Labels = removeLabels(s.issue.Labels, request.Labels)
+		s.task.Traits = removeLabels(s.task.Traits, request.Labels)
 		return integration.Response{OperationResult: &integration.OperationResult{Status: "ok"}}, nil
 	default:
 		return integration.Response{}, nil
