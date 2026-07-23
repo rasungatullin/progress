@@ -413,3 +413,213 @@ func TestIntegrationReviewRemarkCreateCommandUsesReviewRemarkObject(t *testing.T
 		t.Fatalf("review remark command was routed as ordinary comment: %#v", provider.request)
 	}
 }
+
+func TestIntegrationTextOutputUsesCanonicalResponseFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		response integration.Response
+		want     []string
+		notWant  []string
+	}{
+		{
+			name: "single task",
+			response: integration.Response{
+				System: "tracker", Resource: "issue", Operation: "get", Status: model.ResponseStatusOK,
+				Task:  &integration.CanonicalTask{ID: "canonical-task", Title: "Каноническая задача", State: "open"},
+				Issue: &integration.TrackerIssue{ID: "legacy-task", Title: "Переходная задача", State: "closed"},
+			},
+			want:    []string{"id=canonical-task\n", "title=Каноническая задача\n", "state=open\n"},
+			notWant: []string{"legacy-task", "Переходная задача"},
+		},
+		{
+			name: "task collection",
+			response: integration.Response{
+				System: "tracker", Resource: "issue", Operation: "search", Status: model.ResponseStatusOK,
+				Tasks:         []integration.CanonicalTask{{ID: "canonical-task", Title: "Каноническая задача", State: "open", URL: "https://example.test/tasks/canonical-task"}},
+				SearchResults: []integration.TrackerSearchResult{{ID: "legacy-task", Title: "Переходная задача"}},
+			},
+			want:    []string{"issue_count=1\n", "id=canonical-task\n", "url=https://example.test/tasks/canonical-task\n"},
+			notWant: []string{"legacy-task", "Переходная задача"},
+		},
+		{
+			name: "task comments",
+			response: integration.Response{
+				System: "tracker", Resource: "issue", Operation: "comments", Status: model.ResponseStatusOK,
+				TaskComments: []integration.TaskComment{{ExternalID: "canonical-comment", Body: "Канонический комментарий"}},
+				Comments:     []integration.TrackerComment{{TaskID: "legacy-comment", Body: "Переходный комментарий"}},
+			},
+			want:    []string{"comment_count=1\n", "comment_id=canonical-comment\n", "comment_body=Канонический комментарий\n"},
+			notWant: []string{"legacy-comment", "Переходный комментарий"},
+		},
+		{
+			name: "repository",
+			response: integration.Response{
+				Resource: "repo", Operation: "get", Status: model.ResponseStatusOK,
+				Repository:    &integration.Repository{System: "repo-system", FullName: "canonical/repository"},
+				RepositoryRef: &integration.TrackerRepository{System: "repo-system", FullName: "legacy/repository"},
+			},
+			want:    []string{"system=repo-system\n", "full_name=canonical/repository\n"},
+			notWant: []string{"legacy/repository"},
+		},
+		{
+			name: "merge request",
+			response: integration.Response{
+				Resource: "merge-request", Operation: "get", Status: model.ResponseStatusOK,
+				MergeRequest: &integration.MergeRequest{System: "repo-system", Repository: "owner/repository", Number: 17, Title: "Канонический запрос"},
+				PullRequest:  &integration.TrackerPullRequest{System: "repo-system", Repository: "owner/repository", Number: 18, Title: "Переходный запрос"},
+			},
+			want:    []string{"number=17\n", "title=Канонический запрос\n"},
+			notWant: []string{"number=18", "Переходный запрос"},
+		},
+		{
+			name: "merge request collection",
+			response: integration.Response{
+				System: "repo-system", Resource: "merge-request", Operation: "search", Status: model.ResponseStatusOK,
+				MergeRequests: []integration.MergeRequest{{Number: 17, Title: "Канонический запрос", State: "open"}},
+			},
+			want: []string{"merge_request_count=1\n", "merge_request_number=17\n", "merge_request_title=Канонический запрос\n"},
+		},
+		{
+			name: "review remarks",
+			response: integration.Response{
+				System: "repo-system", Resource: "review-remark", Operation: "list", Status: model.ResponseStatusOK,
+				ReviewRemarks: []integration.ReviewRemark{{ExternalID: "canonical-remark", Body: "Каноническое замечание"}},
+				Reviews:       []integration.TrackerReview{{Body: "Переходная ревизия"}},
+			},
+			want:    []string{"remark_count=1\n", "remark_id=canonical-remark\n", "remark_body=Каноническое замечание\n"},
+			notWant: []string{"Переходная ревизия"},
+		},
+		{
+			name: "operation result",
+			response: integration.Response{
+				OperationResult: &integration.OperationResult{System: "repo-system", ObjectType: "comment", Operation: "create", Status: model.ResponseStatusOK, ExternalID: "comment-1"},
+			},
+			want: []string{"system=repo-system\n", "object=comment\n", "status=ok\n", "external_id=comment-1\n"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			output := printIntegrationResponseForTest(test.response)
+			for _, fragment := range test.want {
+				if !strings.Contains(output, fragment) {
+					t.Errorf("output does not contain %q:\n%s", fragment, output)
+				}
+			}
+			for _, fragment := range test.notWant {
+				if strings.Contains(output, fragment) {
+					t.Errorf("output contains transition value %q:\n%s", fragment, output)
+				}
+			}
+		})
+	}
+}
+
+func TestIntegrationTextOutputHandlesCanonicalCollectionsAndFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		printer  func(*cobra.Command, integration.Response)
+		response integration.Response
+		want     []string
+	}{
+		{
+			name:     "empty tasks",
+			printer:  printIntegrationResponse,
+			response: integration.Response{System: "tracker", Operation: "search", Status: model.ResponseStatusOK, Tasks: []integration.CanonicalTask{}},
+			want:     []string{"issue_count=0\n"},
+		},
+		{
+			name:     "empty task comments",
+			printer:  printIntegrationResponse,
+			response: integration.Response{System: "tracker", Operation: "comments", Status: model.ResponseStatusOK, TaskComments: []integration.TaskComment{}},
+			want:     []string{"comment_count=0\n"},
+		},
+		{
+			name:     "empty merge requests",
+			printer:  printIntegrationResponse,
+			response: integration.Response{System: "repo-system", Resource: "merge-request", Operation: "search", Status: model.ResponseStatusOK, MergeRequests: []integration.MergeRequest{}},
+			want:     []string{"merge_request_count=0\n"},
+		},
+		{
+			name:     "empty review remarks",
+			printer:  printIntegrationResponse,
+			response: integration.Response{System: "repo-system", Resource: "review-remark", Operation: "list", Status: model.ResponseStatusOK, ReviewRemarks: []integration.ReviewRemark{}},
+			want:     []string{"remark_count=0\n"},
+		},
+		{
+			name:    "pagination",
+			printer: printIntegrationMessages,
+			response: integration.Response{
+				System: "messenger-system", Resource: "message", Operation: "list", Status: model.ResponseStatusOK,
+				Messages:   []integration.Message{{MessageID: "message-1"}},
+				Pagination: &model.Pagination{NextCursor: "next", PrevCursor: "previous", HasMore: true, Direction: "older"},
+			},
+			want: []string{"message_count=1\n", "next_cursor=next\n", "prev_cursor=previous\n", "has_more=true\n", "direction=older\n"},
+		},
+		{
+			name:    "normalized failure",
+			printer: printIntegrationResponse,
+			response: integration.Response{
+				System: "tracker", Resource: "issue", Operation: "get", Status: model.ResponseStatusFailed,
+				Failure: &integration.Failure{Kind: model.FailureKindNotFound, Message: "Задача не найдена"},
+			},
+			want: []string{"status=failed\n", "failure_kind=not-found\n", "failure_message=Задача не найдена\n"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			output := &bytes.Buffer{}
+			cmd.SetOut(output)
+			test.printer(cmd, test.response)
+			for _, fragment := range test.want {
+				if !strings.Contains(output.String(), fragment) {
+					t.Errorf("output does not contain %q:\n%s", fragment, output.String())
+				}
+			}
+		})
+	}
+}
+
+func TestIntegrationJSONOutputPreservesCanonicalResponseObjects(t *testing.T) {
+	response := integration.Response{
+		Task:            &integration.CanonicalTask{ID: "task-1"},
+		Tasks:           []integration.CanonicalTask{{ID: "task-2"}},
+		TaskComments:    []integration.TaskComment{{ExternalID: "comment-1"}},
+		Repository:      &integration.Repository{FullName: "owner/repository"},
+		MergeRequest:    &integration.MergeRequest{Number: 17},
+		MergeRequests:   []integration.MergeRequest{{Number: 18}},
+		ReviewRemarks:   []integration.ReviewRemark{{ExternalID: "remark-1"}},
+		OperationResult: &integration.OperationResult{ExternalID: "result-1"},
+	}
+	cmd := &cobra.Command{}
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	if err := printIntegrationResponseOrJSON(cmd, response, integrationOutputJSON, nil); err != nil {
+		t.Fatalf("print JSON response: %v", err)
+	}
+
+	var decoded integration.Response
+	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode JSON response: %v", err)
+	}
+	if decoded.Task == nil || decoded.Task.ID != "task-1" ||
+		len(decoded.Tasks) != 1 || decoded.Tasks[0].ID != "task-2" ||
+		len(decoded.TaskComments) != 1 || decoded.TaskComments[0].ExternalID != "comment-1" ||
+		decoded.Repository == nil || decoded.Repository.FullName != "owner/repository" ||
+		decoded.MergeRequest == nil || decoded.MergeRequest.Number != 17 ||
+		len(decoded.MergeRequests) != 1 || decoded.MergeRequests[0].Number != 18 ||
+		len(decoded.ReviewRemarks) != 1 || decoded.ReviewRemarks[0].ExternalID != "remark-1" ||
+		decoded.OperationResult == nil || decoded.OperationResult.ExternalID != "result-1" {
+		t.Fatalf("JSON response lost canonical objects: %#v", decoded)
+	}
+}
+
+func printIntegrationResponseForTest(response integration.Response) string {
+	cmd := &cobra.Command{}
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	printIntegrationResponse(cmd, response)
+	return output.String()
+}
