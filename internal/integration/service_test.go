@@ -417,6 +417,116 @@ func TestExecuteDerivesTransitionalSearchResultsFromCanonicalTasks(t *testing.T)
 	}
 }
 
+func TestNormalizeDerivedObjectsPreservesEmptyCollections(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                  string
+		response              Response
+		wantTasks             bool
+		wantMergeRequests     bool
+		wantSearchResults     bool
+		wantTaskCount         int
+		wantMergeRequestCount int
+		wantSearchResultCount int
+	}{
+		{
+			name:              "canonical tasks",
+			response:          Response{Tasks: []CanonicalTask{}},
+			wantTasks:         true,
+			wantSearchResults: true,
+		},
+		{
+			name:                  "canonical merge requests",
+			response:              Response{MergeRequests: []MergeRequest{}},
+			wantMergeRequests:     true,
+			wantSearchResults:     true,
+			wantMergeRequestCount: 0,
+		},
+		{
+			name:              "transitional search results",
+			response:          Response{SearchResults: []TrackerSearchResult{}},
+			wantTasks:         true,
+			wantSearchResults: true,
+		},
+		{
+			name:                  "explicit empty transitional results",
+			response:              Response{Tasks: []CanonicalTask{{ID: "42"}}, SearchResults: []TrackerSearchResult{}},
+			wantTasks:             true,
+			wantSearchResults:     true,
+			wantTaskCount:         1,
+			wantSearchResultCount: 0,
+		},
+		{
+			name:     "absent collections",
+			response: Response{},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			normalizeDerivedObjects(&tt.response)
+
+			if (tt.response.Tasks != nil) != tt.wantTasks || len(tt.response.Tasks) != tt.wantTaskCount {
+				t.Fatalf("unexpected tasks: %#v", tt.response.Tasks)
+			}
+			if (tt.response.MergeRequests != nil) != tt.wantMergeRequests || len(tt.response.MergeRequests) != tt.wantMergeRequestCount {
+				t.Fatalf("unexpected merge requests: %#v", tt.response.MergeRequests)
+			}
+			if (tt.response.SearchResults != nil) != tt.wantSearchResults || len(tt.response.SearchResults) != tt.wantSearchResultCount {
+				t.Fatalf("unexpected transitional search results: %#v", tt.response.SearchResults)
+			}
+		})
+	}
+}
+
+func TestExecuteAppliesRouteSystemToMergeRequestList(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"enterprise": {Type: "github"},
+		},
+	})
+	service.RegisterProvider("enterprise", stubProvider{
+		response: Response{
+			MergeRequests: []MergeRequest{
+				{System: "github", Number: 41, Author: User{System: "github", Login: "alice"}},
+				{System: "github", Number: 42, Author: User{System: "github", Login: "bob"}},
+			},
+		},
+	})
+
+	result, err := service.Execute(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "enterprise",
+		ObjectType:      "merge-request",
+		Operation:       "search",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(result.MergeRequests) != 2 {
+		t.Fatalf("unexpected merge requests: %#v", result.MergeRequests)
+	}
+	for _, mergeRequest := range result.MergeRequests {
+		if mergeRequest.System != "enterprise" || mergeRequest.Author.System != "enterprise" {
+			t.Fatalf("expected merge request to use route name: %#v", mergeRequest)
+		}
+	}
+	if len(result.SearchResults) != 2 {
+		t.Fatalf("unexpected transitional search results: %#v", result.SearchResults)
+	}
+	for _, searchResult := range result.SearchResults {
+		if searchResult.System != "enterprise" || searchResult.Author.System != "enterprise" {
+			t.Fatalf("expected transitional result to use route name: %#v", searchResult)
+		}
+	}
+}
+
 func TestExecuteMapsExternalTaskLabelsToCanonical(t *testing.T) {
 	t.Parallel()
 

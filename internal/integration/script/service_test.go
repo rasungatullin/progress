@@ -141,6 +141,45 @@ func TestOperationNameForTaskListRequest(t *testing.T) {
 	}
 }
 
+func TestServicePreservesEmptyTaskCollections(t *testing.T) {
+	t.Parallel()
+
+	for _, stdout := range []string{
+		`{"status":"ok","tasks":[]}`,
+		`{"status":"ok","search_results":[]}`,
+	} {
+		stdout := stdout
+		t.Run(stdout, func(t *testing.T) {
+			t.Parallel()
+
+			service := NewService(model.IntegrationSystemConfig{
+				IntegrationType: model.IntegrationTypeTracker,
+				Operations: map[string]model.IntegrationOperationConfig{
+					"issue.issue.search": {Script: "task-search.sh"},
+				},
+			})
+			service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
+			service.runCommand = func(context.Context, string, []string, []string, string) commandResult {
+				return commandResult{stdout: stdout}
+			}
+
+			response, err := service.Execute(context.Background(), model.ProviderRequest{
+				IntegrationType: model.IntegrationTypeTracker,
+				System:          "work-tracker",
+				Resource:        "task",
+				ObjectType:      "task",
+				Operation:       "search",
+			})
+			if err != nil {
+				t.Fatalf("execute script operation: %v", err)
+			}
+			if response.Tasks == nil || len(response.Tasks) != 0 {
+				t.Fatalf("expected empty canonical task list, got %#v", response.Tasks)
+			}
+		})
+	}
+}
+
 func TestOperationNameForTaskCommentCreateRequest(t *testing.T) {
 	t.Parallel()
 

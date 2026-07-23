@@ -1020,6 +1020,10 @@ func applyResponseSystem(result *Response, system string) {
 		result.MergeRequest.System = system
 		result.MergeRequest.Author.System = system
 	}
+	for i := range result.MergeRequests {
+		result.MergeRequests[i].System = system
+		result.MergeRequests[i].Author.System = system
+	}
 	for i := range result.ReviewRemarks {
 		result.ReviewRemarks[i].System = system
 		result.ReviewRemarks[i].Author.System = system
@@ -1111,19 +1115,19 @@ func normalizeDerivedObjects(result *Response) {
 		issue := trackerIssueFromCanonicalTask(*result.Task)
 		result.Issue = &issue
 	}
-	if len(result.Tasks) == 0 && len(result.SearchResults) > 0 && len(result.MergeRequests) == 0 {
+	if result.Tasks == nil && result.SearchResults != nil && result.MergeRequests == nil {
 		result.Tasks = make([]CanonicalTask, 0, len(result.SearchResults))
 		for _, item := range result.SearchResults {
 			result.Tasks = append(result.Tasks, canonicalTaskFromTrackerSearchResult(item))
 		}
 	}
-	if len(result.SearchResults) == 0 && len(result.Tasks) > 0 {
+	if result.SearchResults == nil && result.Tasks != nil {
 		result.SearchResults = make([]TrackerSearchResult, 0, len(result.Tasks))
 		for _, task := range result.Tasks {
 			result.SearchResults = append(result.SearchResults, trackerSearchResultFromCanonicalTask(task))
 		}
 	}
-	if len(result.SearchResults) == 0 && len(result.MergeRequests) > 0 {
+	if result.SearchResults == nil && result.MergeRequests != nil {
 		result.SearchResults = make([]TrackerSearchResult, 0, len(result.MergeRequests))
 		for _, mergeRequest := range result.MergeRequests {
 			result.SearchResults = append(result.SearchResults, trackerSearchResultFromMergeRequest(mergeRequest))

@@ -334,6 +334,9 @@ func decodeScriptResponse(response model.Response, stdout string) (model.Respons
 		task := raw.Task.toCanonicalTask()
 		response.Task = &task
 	}
+	if raw.Tasks != nil || raw.SearchResults != nil {
+		response.Tasks = make([]model.CanonicalTask, 0, len(raw.Tasks)+len(raw.SearchResults))
+	}
 	for _, task := range raw.Tasks {
 		response.Tasks = append(response.Tasks, task.toCanonicalTask())
 	}
