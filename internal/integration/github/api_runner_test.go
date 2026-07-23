@@ -63,11 +63,8 @@ func TestServiceUsesAPITransportForIssueGet(t *testing.T) {
 	if seenAuth != "Bearer secret" {
 		t.Fatalf("unexpected auth header: %q", seenAuth)
 	}
-	if response.Issue == nil || response.Issue.Title != "API issue" || response.Issue.Labels[0] != "bug" {
-		t.Fatalf("unexpected issue response: %#v", response.Issue)
-	}
-	if response.Task == nil || response.Task.Title != "API issue" {
-		t.Fatalf("expected compatible canonical task: %#v", response.Task)
+	if response.Task == nil || response.Task.Title != "API issue" || response.Task.Traits[0] != "bug" {
+		t.Fatalf("unexpected task response: %#v", response.Task)
 	}
 }
 
@@ -648,9 +645,6 @@ func TestAPITransportPRGetEnrichesLabelsAndReviewDecision(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("execute pr get through api transport: %v", err)
-	}
-	if response.PullRequest == nil || response.PullRequest.ReviewDecision != "APPROVED" || len(response.PullRequest.Labels) != 1 || response.PullRequest.Labels[0] != "backend" {
-		t.Fatalf("unexpected pull request response: %#v", response.PullRequest)
 	}
 	if response.MergeRequest == nil || response.MergeRequest.ReviewDecision != "APPROVED" || len(response.MergeRequest.Traits) != 1 || response.MergeRequest.Traits[0] != "backend" {
 		t.Fatalf("unexpected merge request response: %#v", response.MergeRequest)

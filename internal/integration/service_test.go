@@ -35,7 +35,7 @@ func TestDispatchWithoutRegisteredProvider(t *testing.T) {
 	if route.ProviderAvailable {
 		t.Fatal("provider must be unavailable")
 	}
-	if route.ExpectedResult != "issue" {
+	if route.ExpectedResult != "canonical-task" {
 		t.Fatalf("unexpected expected result: %q", route.ExpectedResult)
 	}
 	if len(route.Diagnostics) < 3 {
@@ -336,10 +336,10 @@ func TestDispatchRepositoryReviewRemarkListUsesTypedRegistryOperation(t *testing
 	service := NewService(logging.New(io.Discard))
 	route, err := service.resolveRoute(Request{
 		IntegrationType: "repo",
-		System:           "github",
-		Resource:         "review-remark",
-		ObjectType:       "review-remark",
-		Operation:        "list",
+		System:          "github",
+		Resource:        "review-remark",
+		ObjectType:      "review-remark",
+		Operation:       "list",
 	})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -380,6 +380,40 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	}
 	if result.Operation != "get" {
 		t.Fatalf("unexpected result operation: %q", result.Operation)
+	}
+}
+
+func TestExecuteDerivesTransitionalSearchResultsFromCanonicalTasks(t *testing.T) {
+	t.Parallel()
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {
+				Type:             "github",
+				TaskLabelMapping: map[string]string{"external-ready": "ready"},
+			},
+		},
+	})
+	service.RegisterProvider("github", stubProvider{
+		response: Response{
+			Tasks: []CanonicalTask{{
+				ID:     "42",
+				Title:  "Каноническая задача",
+				Traits: []string{"external-ready"},
+				Author: User{Login: "alice"},
+			}},
+		},
+	})
+
+	result, err := service.Execute(context.Background(), Request{System: "github", Resource: "issue", Operation: "search"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(result.Tasks) != 1 || result.Tasks[0].System != "github" || result.Tasks[0].Traits[0] != "ready" {
+		t.Fatalf("unexpected canonical tasks: %#v", result.Tasks)
+	}
+	if len(result.SearchResults) != 1 || result.SearchResults[0].ID != "42" || result.SearchResults[0].Labels[0] != "ready" {
+		t.Fatalf("unexpected transitional search results: %#v", result.SearchResults)
 	}
 }
 
@@ -713,7 +747,7 @@ func TestOperationsCatalogPublishesGitHubTaskSearch(t *testing.T) {
 		t.Fatalf("expected one operation, got %#v", operations)
 	}
 	operation := operations[0]
-	if operation.Output.Shape != "TrackerSearchResult[]" {
+	if operation.Output.Resource != "task" || operation.Output.Shape != "CanonicalTask[]" {
 		t.Fatalf("unexpected search output contract: %#v", operation.Output)
 	}
 	optional := map[string]model.OperationField{}
@@ -839,7 +873,7 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 		t.Fatalf("expected available local tracker operation, got %#v", operations)
 	}
 	searchOperations := service.Operations(context.Background(), OperationFilter{System: "local", Name: "tracker.task.search"})
-	if len(searchOperations) != 1 || searchOperations[0].Output.Shape != "TrackerSearchResult[]" {
+	if len(searchOperations) != 1 || searchOperations[0].Output.Shape != "CanonicalTask[]" {
 		t.Fatalf("expected local tracker search result contract, got %#v", searchOperations)
 	}
 	searchRoute, err := service.resolveRoute(Request{
@@ -852,7 +886,7 @@ func TestNewServiceFromConfigRegistersLocalTrackerProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch local tracker search: %v", err)
 	}
-	if searchRoute.ExpectedResult != "tracker-search-result[]" {
+	if searchRoute.ExpectedResult != "canonical-task[]" {
 		t.Fatalf("expected local tracker search route contract, got %q", searchRoute.ExpectedResult)
 	}
 
@@ -946,7 +980,7 @@ func TestOperationsCatalogUsesSearchResultContractForTaskSearch(t *testing.T) {
 	if len(operations) != 1 {
 		t.Fatalf("expected one script search operation, got %#v", operations)
 	}
-	if operations[0].Output.Shape != "TrackerSearchResult[]" {
+	if operations[0].Output.Shape != "CanonicalTask[]" {
 		t.Fatalf("unexpected search output shape: %#v", operations[0].Output)
 	}
 	route, err := service.resolveRoute(Request{
@@ -959,7 +993,7 @@ func TestOperationsCatalogUsesSearchResultContractForTaskSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch task search: %v", err)
 	}
-	if route.ExpectedResult != "tracker-search-result[]" {
+	if route.ExpectedResult != "canonical-task[]" {
 		t.Fatalf("unexpected task search result contract: %q", route.ExpectedResult)
 	}
 }

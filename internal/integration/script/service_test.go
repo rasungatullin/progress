@@ -72,9 +72,6 @@ func TestServiceExecutesConfiguredOperation(t *testing.T) {
 	if response.Task == nil || response.Task.ID != "ABC-123" || response.Task.Title != "Задача" {
 		t.Fatalf("unexpected task response: %#v", response.Task)
 	}
-	if response.Issue == nil || response.Issue.ID != "ABC-123" || response.Issue.Labels[0] != "backend" {
-		t.Fatalf("unexpected compatible issue response: %#v", response.Issue)
-	}
 }
 
 func TestServiceRunsConfiguredCommandWithoutJoiningWorkdir(t *testing.T) {

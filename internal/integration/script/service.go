@@ -333,20 +333,16 @@ func decodeScriptResponse(response model.Response, stdout string) (model.Respons
 	if raw.Task != nil {
 		task := raw.Task.toCanonicalTask()
 		response.Task = &task
-		issue := trackerIssueFromTask(task)
-		response.Issue = &issue
 	}
 	for _, task := range raw.Tasks {
-		canonical := task.toCanonicalTask()
-		response.SearchResults = append(response.SearchResults, searchResultFromTask(canonical))
+		response.Tasks = append(response.Tasks, task.toCanonicalTask())
 	}
 	for _, item := range raw.SearchResults {
-		response.SearchResults = append(response.SearchResults, item.toTrackerSearchResult())
+		response.Tasks = append(response.Tasks, item.toCanonicalTask())
 	}
 	for _, item := range append(raw.TaskComments, raw.Comments...) {
 		comment := item.toTaskComment()
 		response.TaskComments = append(response.TaskComments, comment)
-		response.Comments = append(response.Comments, trackerCommentFromTaskComment(comment))
 	}
 	if raw.OperationResult != nil {
 		response.OperationResult = raw.OperationResult.toOperationResult(response)
@@ -385,12 +381,12 @@ func validateSuccessfulResponsePayload(response model.Response) error {
 		case "task":
 			switch operation {
 			case "create", "get", "update":
-				if response.Task == nil && response.Issue == nil {
+				if response.Task == nil {
 					return fmt.Errorf("script operation %s.%s.%s returned ok without task payload", integrationType, objectType, operation)
 				}
 			}
 		case "comment":
-			if operation == "create" && response.OperationResult == nil && len(response.TaskComments) == 0 && len(response.Comments) == 0 {
+			if operation == "create" && response.OperationResult == nil && len(response.TaskComments) == 0 {
 				return fmt.Errorf("script operation %s.%s.%s returned ok without comment payload", integrationType, objectType, operation)
 			}
 		case "label":
@@ -577,12 +573,12 @@ func (user scriptUser) toUser() model.User {
 	}
 }
 
-func (result scriptSearchResult) toTrackerSearchResult() model.TrackerSearchResult {
-	return model.TrackerSearchResult{
+func (result scriptSearchResult) toCanonicalTask() model.CanonicalTask {
+	return model.CanonicalTask{
 		System:     result.System,
 		Repository: result.Repository,
-		Kind:       firstNonEmpty(result.Kind, "task"),
 		ID:         firstNonEmpty(result.ID, result.ExternalID, positiveIntString(result.Number)),
+		ExternalID: result.ExternalID,
 		Title:      result.Title,
 		State:      result.State,
 		URL:        result.URL,
@@ -606,73 +602,6 @@ func (result scriptOperationResult) toOperationResult(response model.Response) *
 		Message:     result.Message,
 		Diagnostics: result.Diagnostics,
 		Failure:     result.Failure,
-	}
-}
-
-func trackerIssueFromTask(task model.CanonicalTask) model.TrackerIssue {
-	return model.TrackerIssue{
-		System:     task.System,
-		Repository: task.Repository,
-		ID:         task.ID,
-		ExternalID: task.ExternalID,
-		Title:      task.Title,
-		Body:       task.Body,
-		State:      task.State,
-		Labels:     append([]string(nil), task.Traits...),
-		Assignees:  trackerUsersFromUsers(task.Assignees),
-		Author:     trackerUserFromUser(task.Author),
-		URL:        task.URL,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-	}
-}
-
-func trackerCommentFromTaskComment(comment model.TaskComment) model.TrackerComment {
-	return model.TrackerComment{
-		System:     comment.System,
-		Repository: comment.Repository,
-		TaskID:     comment.TaskID,
-		Author:     trackerUserFromUser(comment.Author),
-		Body:       comment.Body,
-		URL:        comment.URL,
-		CreatedAt:  comment.CreatedAt,
-		UpdatedAt:  comment.UpdatedAt,
-	}
-}
-
-func searchResultFromTask(task model.CanonicalTask) model.TrackerSearchResult {
-	return model.TrackerSearchResult{
-		System:     task.System,
-		Repository: task.Repository,
-		Kind:       "task",
-		ID:         task.ID,
-		Title:      task.Title,
-		State:      task.State,
-		URL:        task.URL,
-		UpdatedAt:  task.UpdatedAt,
-	}
-}
-
-func trackerUsersFromUsers(users []model.User) []model.TrackerUser {
-	if len(users) == 0 {
-		return nil
-	}
-	result := make([]model.TrackerUser, 0, len(users))
-	for _, user := range users {
-		result = append(result, trackerUserFromUser(user))
-	}
-	return result
-}
-
-func trackerUserFromUser(user model.User) model.TrackerUser {
-	return model.TrackerUser{
-		System:   user.System,
-		Login:    user.Login,
-		Name:     user.Name,
-		Email:    user.Email,
-		URL:      user.URL,
-		IsBot:    user.IsBot,
-		IsActive: user.IsActive,
 	}
 }
 

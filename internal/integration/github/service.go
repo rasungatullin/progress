@@ -405,20 +405,9 @@ func (s *Service) executePRList(ctx context.Context, response model.Response, re
 	}
 
 	response.MergeRequests = make([]model.MergeRequest, 0, len(raw))
-	response.SearchResults = make([]model.TrackerSearchResult, 0, len(raw))
 	for _, item := range raw {
 		pr := mergeRequestFromGHPR(repository, item)
 		response.MergeRequests = append(response.MergeRequests, pr)
-		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
-			System:     "github",
-			Repository: repository,
-			Kind:       "merge-request",
-			ID:         strconv.Itoa(pr.Number),
-			Title:      pr.Title,
-			State:      pr.State,
-			URL:        pr.URL,
-			UpdatedAt:  pr.UpdatedAt,
-		})
 	}
 	response.Metadata = map[string]string{
 		"repository": repository,
@@ -748,7 +737,7 @@ func reviewRemarkFromRESTComment(repository string, number int, comment ghPRRevi
 		UpdatedAt:          comment.UpdatedAt,
 	}
 	if comment.User != nil {
-		remark.Author = userFromTrackerUser(normalizeTrackerUser(*comment.User))
+		remark.Author = normalizeUser(*comment.User)
 	}
 	return remark
 }
@@ -934,26 +923,26 @@ func (s *Service) executeIssueList(ctx context.Context, response model.Response,
 		return responseWithGitHubFailure(response, result, &Error{Code: ErrorCodeExternalFailure, Message: fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err), Result: result, Err: err}, "gh issue list returned malformed JSON")
 	}
 
-	response.SearchResults = make([]model.TrackerSearchResult, 0, len(raw))
+	response.Tasks = make([]model.CanonicalTask, 0, len(raw))
 	for _, item := range raw {
-		assignees := make([]model.TrackerUser, 0, len(item.Assignees))
+		assignees := make([]model.User, 0, len(item.Assignees))
 		for _, assignee := range item.Assignees {
-			assignees = append(assignees, normalizeTrackerUser(assignee))
+			assignees = append(assignees, normalizeUser(assignee))
 		}
 
-		author := model.TrackerUser{System: "github"}
+		author := model.User{System: "github"}
 		if item.Author != nil {
-			author = normalizeTrackerUser(*item.Author)
+			author = normalizeUser(*item.Author)
 		}
 
-		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
+		response.Tasks = append(response.Tasks, model.CanonicalTask{
 			System:     "github",
 			Repository: repository,
-			Kind:       "issue",
 			ID:         strconv.Itoa(item.Number),
+			ExternalID: strconv.Itoa(item.Number),
 			Title:      strings.TrimSpace(item.Title),
 			State:      strings.TrimSpace(item.State),
-			Labels:     normalizeTrackerLabels(item.Labels),
+			Traits:     normalizeIssueTraits(item.Labels),
 			Author:     author,
 			Assignees:  assignees,
 			URL:        strings.TrimSpace(item.URL),
@@ -1090,19 +1079,19 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
 	}
 
-	labels := normalizeTrackerLabels(raw.Labels)
+	labels := normalizeIssueTraits(raw.Labels)
 
-	assignees := make([]model.TrackerUser, 0, len(raw.Assignees))
+	assignees := make([]model.User, 0, len(raw.Assignees))
 	for _, assignee := range raw.Assignees {
-		assignees = append(assignees, normalizeTrackerUser(assignee))
+		assignees = append(assignees, normalizeUser(assignee))
 	}
 
-	author := model.TrackerUser{System: "github"}
+	author := model.User{System: "github"}
 	if raw.Author != nil {
-		author = normalizeTrackerUser(*raw.Author)
+		author = normalizeUser(*raw.Author)
 	}
 
-	response.Issue = &model.TrackerIssue{
+	response.Task = &model.CanonicalTask{
 		System:     "github",
 		Repository: repository,
 		ID:         identifier,
@@ -1110,27 +1099,12 @@ func (s *Service) executeIssueGet(ctx context.Context, response model.Response, 
 		Title:      strings.TrimSpace(raw.Title),
 		Body:       raw.Body,
 		State:      strings.TrimSpace(raw.State),
-		Labels:     labels,
+		Traits:     labels,
 		Assignees:  assignees,
 		Author:     author,
 		URL:        strings.TrimSpace(raw.URL),
 		CreatedAt:  strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:  strings.TrimSpace(raw.UpdatedAt),
-	}
-	response.Task = &model.CanonicalTask{
-		System:     "github",
-		Repository: response.Issue.Repository,
-		ID:         identifier,
-		ExternalID: identifier,
-		Title:      response.Issue.Title,
-		Body:       response.Issue.Body,
-		State:      response.Issue.State,
-		Traits:     append([]string(nil), response.Issue.Labels...),
-		Author:     userFromTrackerUser(response.Issue.Author),
-		Assignees:  usersFromTrackerUsers(response.Issue.Assignees),
-		URL:        response.Issue.URL,
-		CreatedAt:  response.Issue.CreatedAt,
-		UpdatedAt:  response.Issue.UpdatedAt,
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
@@ -1228,13 +1202,13 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
 	}
 
-	comments := make([]model.TrackerComment, 0, len(raw))
+	comments := make([]model.TaskComment, 0, len(raw))
 	for _, item := range raw {
-		author := model.TrackerUser{System: "github"}
+		author := model.User{System: "github"}
 		if item.User != nil {
-			author = normalizeTrackerUser(*item.User)
+			author = normalizeUser(*item.User)
 		}
-		comments = append(comments, model.TrackerComment{
+		comments = append(comments, model.TaskComment{
 			System:     "github",
 			Repository: repository,
 			TaskID:     strconv.Itoa(number),
@@ -1246,28 +1220,7 @@ func (s *Service) executeIssueComments(ctx context.Context, response model.Respo
 		})
 	}
 
-	response.Comments = comments
-	response.TaskComments = make([]model.TaskComment, 0, len(comments))
-	for _, comment := range comments {
-		response.TaskComments = append(response.TaskComments, model.TaskComment{
-			System:     "github",
-			Repository: comment.Repository,
-			TaskID:     comment.TaskID,
-			Author: model.User{
-				System:   "github",
-				Login:    comment.Author.Login,
-				Name:     comment.Author.Name,
-				Email:    comment.Author.Email,
-				URL:      comment.Author.URL,
-				IsBot:    comment.Author.IsBot,
-				IsActive: comment.Author.IsActive,
-			},
-			Body:      comment.Body,
-			URL:       comment.URL,
-			CreatedAt: comment.CreatedAt,
-			UpdatedAt: comment.UpdatedAt,
-		})
-	}
+	response.TaskComments = comments
 	response.Metadata = map[string]string{
 		"repository": repository,
 		"number":     strconv.Itoa(number),
@@ -1380,11 +1333,11 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
 	}
 
-	author := model.TrackerUser{System: "github"}
+	author := model.User{System: "github"}
 	if raw.User != nil {
-		author = normalizeTrackerUser(*raw.User)
+		author = normalizeUser(*raw.User)
 	}
-	comment := model.TrackerComment{
+	comment := model.TaskComment{
 		System:     "github",
 		Repository: repository,
 		TaskID:     strconv.Itoa(number),
@@ -1394,25 +1347,7 @@ func (s *Service) executeIssueCommentCreate(ctx context.Context, response model.
 		CreatedAt:  strings.TrimSpace(raw.CreatedAt),
 		UpdatedAt:  strings.TrimSpace(raw.UpdatedAt),
 	}
-	response.Comments = []model.TrackerComment{comment}
-	response.TaskComments = []model.TaskComment{{
-		System:     "github",
-		Repository: repository,
-		TaskID:     strconv.Itoa(number),
-		Author: model.User{
-			System:   "github",
-			Login:    author.Login,
-			Name:     author.Name,
-			Email:    author.Email,
-			URL:      author.URL,
-			IsBot:    author.IsBot,
-			IsActive: author.IsActive,
-		},
-		Body:      comment.Body,
-		URL:       comment.URL,
-		CreatedAt: comment.CreatedAt,
-		UpdatedAt: comment.UpdatedAt,
-	}}
+	response.TaskComments = []model.TaskComment{comment}
 	response.OperationResult = &model.OperationResult{
 		System:     "github",
 		ObjectType: "comment",
@@ -1662,27 +1597,6 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
 	}
 
-	author := model.TrackerUser{System: "github"}
-	if raw.Author != nil {
-		author = normalizeTrackerUser(*raw.Author)
-	}
-
-	response.PullRequest = &model.TrackerPullRequest{
-		System:         "github",
-		Repository:     repository,
-		Number:         raw.Number,
-		Title:          strings.TrimSpace(raw.Title),
-		Body:           raw.Body,
-		State:          strings.TrimSpace(raw.State),
-		Author:         author,
-		ReviewDecision: strings.TrimSpace(raw.ReviewDecision),
-		BaseRef:        strings.TrimSpace(raw.BaseRefName),
-		HeadRef:        strings.TrimSpace(raw.HeadRefName),
-		Labels:         normalizeTrackerLabels(raw.Labels),
-		URL:            strings.TrimSpace(raw.URL),
-		CreatedAt:      strings.TrimSpace(raw.CreatedAt),
-		UpdatedAt:      strings.TrimSpace(raw.UpdatedAt),
-	}
 	mergeRequest := mergeRequestFromGHPR(repository, raw)
 	response.MergeRequest = &mergeRequest
 	response.Status = model.ResponseStatusOK
@@ -1798,7 +1712,7 @@ func (s *Service) executeAuthStatus(ctx context.Context, response model.Response
 func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {
 	author := model.User{System: "github"}
 	if raw.Author != nil {
-		author = userFromTrackerUser(normalizeTrackerUser(*raw.Author))
+		author = normalizeUser(*raw.Author)
 	}
 	attributes := mergeRequestAttributesFromGHPR(raw)
 	return model.MergeRequest{
@@ -1809,7 +1723,7 @@ func mergeRequestFromGHPR(repository string, raw ghPRView) model.MergeRequest {
 		Title:          strings.TrimSpace(raw.Title),
 		Body:           raw.Body,
 		State:          strings.TrimSpace(raw.State),
-		Traits:         normalizeTrackerLabels(raw.Labels),
+		Traits:         normalizeIssueTraits(raw.Labels),
 		Attributes:     attributes,
 		Author:         author,
 		ReviewDecision: strings.TrimSpace(raw.ReviewDecision),
@@ -1860,7 +1774,7 @@ func normalizedExternalValue(value any) string {
 func reviewRemarkFromIssueComment(repository string, number int, raw ghIssueComment) model.ReviewRemark {
 	author := model.User{System: "github"}
 	if raw.User != nil {
-		author = userFromTrackerUser(normalizeTrackerUser(*raw.User))
+		author = normalizeUser(*raw.User)
 	}
 	externalID := ""
 	if raw.ID > 0 {
@@ -1906,7 +1820,7 @@ func reviewRemarksFromThreads(repository string, number int, threads []ghPRRevie
 		for _, comment := range thread.Comments.Nodes {
 			author := model.User{System: "github"}
 			if comment.Author != nil {
-				author = userFromTrackerUser(normalizeTrackerUser(*comment.Author))
+				author = normalizeUser(*comment.Author)
 			}
 			path := strings.TrimSpace(firstNonEmpty(comment.Path, thread.Path))
 			line := comment.Line
@@ -1937,7 +1851,7 @@ func reviewRemarksFromThreads(repository string, number int, threads []ghPRRevie
 func reviewRemarkFromThreadReply(threadID string, comment ghPRReviewComment) model.ReviewRemark {
 	author := model.User{System: "github"}
 	if comment.Author != nil {
-		author = userFromTrackerUser(normalizeTrackerUser(*comment.Author))
+		author = normalizeUser(*comment.Author)
 	}
 	return model.ReviewRemark{
 		System:     "github",
@@ -2102,7 +2016,7 @@ func (s *Service) executeRepoGet(ctx context.Context, response model.Response, r
 		defaultBranch = strings.TrimSpace(raw.DefaultBranchRef.Name)
 	}
 
-	response.RepositoryRef = &model.TrackerRepository{
+	response.Repository = &model.Repository{
 		System:        "github",
 		FullName:      owner + "/" + name,
 		Owner:         owner,
@@ -2110,15 +2024,6 @@ func (s *Service) executeRepoGet(ctx context.Context, response model.Response, r
 		Description:   strings.TrimSpace(raw.Description),
 		DefaultBranch: defaultBranch,
 		URL:           strings.TrimSpace(raw.URL),
-	}
-	response.Repository = &model.Repository{
-		System:        "github",
-		FullName:      response.RepositoryRef.FullName,
-		Owner:         response.RepositoryRef.Owner,
-		Name:          response.RepositoryRef.Name,
-		Description:   response.RepositoryRef.Description,
-		DefaultBranch: response.RepositoryRef.DefaultBranch,
-		URL:           response.RepositoryRef.URL,
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
@@ -2388,8 +2293,8 @@ func prErrorStatus(config resolvedConfig, result CommandResult, repository strin
 	return status
 }
 
-func normalizeTrackerUser(raw ghIssueUser) model.TrackerUser {
-	return model.TrackerUser{
+func normalizeUser(raw ghIssueUser) model.User {
+	return model.User{
 		System:   "github",
 		Login:    strings.TrimSpace(raw.Login),
 		Name:     strings.TrimSpace(raw.Name),
@@ -2400,7 +2305,7 @@ func normalizeTrackerUser(raw ghIssueUser) model.TrackerUser {
 	}
 }
 
-func normalizeTrackerLabels(labels []ghIssueLabel) []string {
+func normalizeIssueTraits(labels []ghIssueLabel) []string {
 	result := make([]string, 0, len(labels))
 	for _, label := range labels {
 		name := strings.TrimSpace(label.Name)
@@ -2587,27 +2492,4 @@ func methodFromConfig(config resolvedConfig) string {
 		return defaultCommand
 	}
 	return strings.TrimSpace(config.Command)
-}
-
-func userFromTrackerUser(user model.TrackerUser) model.User {
-	return model.User{
-		System:   user.System,
-		Login:    user.Login,
-		Name:     user.Name,
-		Email:    user.Email,
-		URL:      user.URL,
-		IsBot:    user.IsBot,
-		IsActive: user.IsActive,
-	}
-}
-
-func usersFromTrackerUsers(users []model.TrackerUser) []model.User {
-	if len(users) == 0 {
-		return nil
-	}
-	result := make([]model.User, 0, len(users))
-	for _, user := range users {
-		result = append(result, userFromTrackerUser(user))
-	}
-	return result
 }

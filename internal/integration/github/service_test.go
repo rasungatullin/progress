@@ -169,15 +169,44 @@ func TestServiceIssueSearchReturnsNormalizedResults(t *testing.T) {
 	if stub.issueListRequest.Query != "author:@me" || fmt.Sprint(stub.issueListRequest.Labels) != "[ready]" || fmt.Sprint(stub.issueListRequest.ExcludeLabels) != "[blocked]" {
 		t.Fatalf("unexpected issue list request: %#v", stub.issueListRequest)
 	}
-	if len(response.SearchResults) != 1 {
-		t.Fatalf("unexpected search results: %#v", response.SearchResults)
+	if len(response.Tasks) != 1 {
+		t.Fatalf("unexpected tasks: %#v", response.Tasks)
 	}
-	result := response.SearchResults[0]
-	if result.Kind != "issue" || result.ID != "123" || result.Title != "Fix integration" || result.Labels[0] != "ready" {
-		t.Fatalf("unexpected search result: %#v", result)
+	result := response.Tasks[0]
+	if result.ID != "123" || result.Title != "Fix integration" || result.Traits[0] != "ready" {
+		t.Fatalf("unexpected task: %#v", result)
 	}
 	if result.Author.Login != "bob" || len(result.Assignees) != 1 || result.Assignees[0].Login != "alice" {
 		t.Fatalf("unexpected users: %#v", result)
+	}
+}
+
+func TestServiceIssueSearchReturnsEmptyCanonicalTaskList(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubRunner{
+		result: CommandResult{
+			Command:  "gh",
+			Path:     "/usr/bin/gh",
+			ExitCode: 0,
+			Stdout:   `[]`,
+		},
+		config: resolvedConfig{Command: "gh", Timeout: 30 * time.Second, DefaultRepo: "owner/name"},
+	}
+	service := NewService()
+	service.runner = stub
+
+	response, err := service.Execute(context.Background(), model.ProviderRequest{
+		System:     "github",
+		Resource:   "issue",
+		Operation:  "search",
+		Repository: "owner/name",
+	})
+	if err != nil {
+		t.Fatalf("execute issue search: %v", err)
+	}
+	if response.Tasks == nil || len(response.Tasks) != 0 {
+		t.Fatalf("expected empty canonical task list, got %#v", response.Tasks)
 	}
 }
 
@@ -200,23 +229,23 @@ func TestServiceIssueGetSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.Issue == nil {
-		t.Fatal("expected issue")
+	if response.Task == nil {
+		t.Fatal("expected task")
 	}
-	if response.Issue.Repository != "owner/name" {
-		t.Fatalf("unexpected repository: %q", response.Issue.Repository)
+	if response.Task.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", response.Task.Repository)
 	}
-	if response.Issue.ID != "123" {
-		t.Fatalf("unexpected id: %s", response.Issue.ID)
+	if response.Task.ID != "123" {
+		t.Fatalf("unexpected id: %s", response.Task.ID)
 	}
-	if len(response.Issue.Labels) != 2 || response.Issue.Labels[0] != "bug" || response.Issue.Labels[1] != "integration" {
-		t.Fatalf("unexpected labels: %#v", response.Issue.Labels)
+	if len(response.Task.Traits) != 2 || response.Task.Traits[0] != "bug" || response.Task.Traits[1] != "integration" {
+		t.Fatalf("unexpected traits: %#v", response.Task.Traits)
 	}
-	if len(response.Issue.Assignees) != 1 || response.Issue.Assignees[0].Login != "alice" {
-		t.Fatalf("unexpected assignees: %#v", response.Issue.Assignees)
+	if len(response.Task.Assignees) != 1 || response.Task.Assignees[0].Login != "alice" {
+		t.Fatalf("unexpected assignees: %#v", response.Task.Assignees)
 	}
-	if response.Issue.Author.Login != "bob" {
-		t.Fatalf("unexpected author: %#v", response.Issue.Author)
+	if response.Task.Author.Login != "bob" {
+		t.Fatalf("unexpected author: %#v", response.Task.Author)
 	}
 	if stub.repo != "owner/name" || stub.number != 123 {
 		t.Fatalf("unexpected requested issue: repo=%q number=%d", stub.repo, stub.number)
@@ -368,7 +397,7 @@ func TestServiceIssueGetMapsMalformedJSONToNormalizedError(t *testing.T) {
 	if !strings.Contains(response.IssueStatus.Message, "unexpected GitHub CLI JSON response") {
 		t.Fatalf("unexpected message: %q", response.IssueStatus.Message)
 	}
-	if response.Issue != nil {
+	if response.Task != nil {
 		t.Fatal("did not expect issue")
 	}
 }
@@ -392,11 +421,11 @@ func TestServiceIssueGetUsesConfiguredDefaultRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.Issue == nil {
-		t.Fatal("expected issue")
+	if response.Task == nil {
+		t.Fatal("expected task")
 	}
-	if response.Issue.Repository != "owner/name" {
-		t.Fatalf("unexpected repository: %q", response.Issue.Repository)
+	if response.Task.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", response.Task.Repository)
 	}
 	if stub.repo != "" {
 		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
@@ -447,14 +476,14 @@ func TestServiceIssueGetAllowsNilAuthor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.Issue == nil {
-		t.Fatal("expected issue")
+	if response.Task == nil {
+		t.Fatal("expected task")
 	}
-	if response.Issue.Author.System != "github" {
-		t.Fatalf("unexpected author system: %#v", response.Issue.Author)
+	if response.Task.Author.System != "github" {
+		t.Fatalf("unexpected author system: %#v", response.Task.Author)
 	}
-	if response.Issue.Author.Login != "" || response.Issue.Author.Name != "" || response.Issue.Author.URL != "" {
-		t.Fatalf("expected empty author fields for nil author payload, got %#v", response.Issue.Author)
+	if response.Task.Author.Login != "" || response.Task.Author.Name != "" || response.Task.Author.URL != "" {
+		t.Fatalf("expected empty author fields for nil author payload, got %#v", response.Task.Author)
 	}
 	if response.IssueStatus != nil {
 		t.Fatal("did not expect issue status on success")
@@ -480,10 +509,10 @@ func TestServiceIssueCommentsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if len(response.Comments) != 1 {
-		t.Fatalf("expected one comment, got %#v", response.Comments)
+	if len(response.TaskComments) != 1 {
+		t.Fatalf("expected one comment, got %#v", response.TaskComments)
 	}
-	comment := response.Comments[0]
+	comment := response.TaskComments[0]
 	if comment.Repository != "owner/name" || comment.TaskID != "123" {
 		t.Fatalf("unexpected target: %#v", comment)
 	}
@@ -526,14 +555,14 @@ func TestServiceIssueCommentsFlattensPaginatedSlurpPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if len(response.Comments) != 2 {
-		t.Fatalf("expected two comments, got %#v", response.Comments)
+	if len(response.TaskComments) != 2 {
+		t.Fatalf("expected two comments, got %#v", response.TaskComments)
 	}
-	if response.Comments[0].Body != "page one" || response.Comments[1].Body != "page two" {
-		t.Fatalf("unexpected comment bodies: %#v", response.Comments)
+	if response.TaskComments[0].Body != "page one" || response.TaskComments[1].Body != "page two" {
+		t.Fatalf("unexpected comment bodies: %#v", response.TaskComments)
 	}
-	if response.Comments[1].Author.Login != "bob" {
-		t.Fatalf("unexpected second author: %#v", response.Comments[1].Author)
+	if response.TaskComments[1].Author.Login != "bob" {
+		t.Fatalf("unexpected second author: %#v", response.TaskComments[1].Author)
 	}
 }
 
@@ -556,8 +585,8 @@ func TestServiceIssueCommentsUsesConfiguredDefaultRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.Comments == nil || len(response.Comments) != 0 {
-		t.Fatalf("expected empty comments slice, got %#v", response.Comments)
+	if response.TaskComments == nil || len(response.TaskComments) != 0 {
+		t.Fatalf("expected empty comments slice, got %#v", response.TaskComments)
 	}
 	if response.Metadata["repository"] != "owner/name" {
 		t.Fatalf("unexpected metadata: %#v", response.Metadata)
@@ -618,7 +647,7 @@ func TestServiceIssueCommentsMapsMalformedJSONToNormalizedError(t *testing.T) {
 	if !strings.Contains(response.IssueStatus.Message, "unexpected GitHub CLI JSON response") {
 		t.Fatalf("unexpected message: %q", response.IssueStatus.Message)
 	}
-	if response.Comments != nil {
+	if response.TaskComments != nil {
 		t.Fatal("did not expect comments")
 	}
 }
@@ -737,23 +766,23 @@ func TestServicePRGetSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.PullRequest == nil {
-		t.Fatal("expected pull request")
+	if response.MergeRequest == nil {
+		t.Fatal("expected merge request")
 	}
-	if response.PullRequest.Repository != "owner/name" {
-		t.Fatalf("unexpected repository: %q", response.PullRequest.Repository)
+	if response.MergeRequest.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", response.MergeRequest.Repository)
 	}
-	if response.PullRequest.Number != 321 {
-		t.Fatalf("unexpected number: %d", response.PullRequest.Number)
+	if response.MergeRequest.Number != 321 {
+		t.Fatalf("unexpected number: %d", response.MergeRequest.Number)
 	}
-	if response.PullRequest.BaseRef != "main" || response.PullRequest.HeadRef != "feature/pr-get" {
-		t.Fatalf("unexpected refs: %#v", response.PullRequest)
+	if response.MergeRequest.BaseRef != "main" || response.MergeRequest.HeadRef != "feature/pr-get" {
+		t.Fatalf("unexpected refs: %#v", response.MergeRequest)
 	}
-	if response.PullRequest.Author.Login != "bob" {
-		t.Fatalf("unexpected author: %#v", response.PullRequest.Author)
+	if response.MergeRequest.Author.Login != "bob" {
+		t.Fatalf("unexpected author: %#v", response.MergeRequest.Author)
 	}
-	if len(response.PullRequest.Labels) != 1 || response.PullRequest.Labels[0] != "enhancement" {
-		t.Fatalf("unexpected labels: %#v", response.PullRequest.Labels)
+	if len(response.MergeRequest.Traits) != 1 || response.MergeRequest.Traits[0] != "enhancement" {
+		t.Fatalf("unexpected traits: %#v", response.MergeRequest.Traits)
 	}
 	if stub.repo != "owner/name" || stub.number != 321 {
 		t.Fatalf("unexpected requested pull request: repo=%q number=%d", stub.repo, stub.number)
@@ -782,11 +811,11 @@ func TestServicePRGetUsesConfiguredDefaultRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.PullRequest == nil {
-		t.Fatal("expected pull request")
+	if response.MergeRequest == nil {
+		t.Fatal("expected merge request")
 	}
-	if response.PullRequest.Repository != "owner/name" {
-		t.Fatalf("unexpected repository: %q", response.PullRequest.Repository)
+	if response.MergeRequest.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", response.MergeRequest.Repository)
 	}
 	if stub.repo != "" {
 		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
@@ -868,8 +897,8 @@ func TestServicePullRequestGetAliasUsesPRHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.PullRequest == nil || response.PullRequest.Number != 321 {
-		t.Fatalf("expected pull request, got %#v", response.PullRequest)
+	if response.MergeRequest == nil || response.MergeRequest.Number != 321 {
+		t.Fatalf("expected merge request, got %#v", response.MergeRequest)
 	}
 	if stub.prViewCalls != 1 {
 		t.Fatalf("expected one pr view call, got %d", stub.prViewCalls)
@@ -895,17 +924,17 @@ func TestServiceRepoGetSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.RepositoryRef == nil {
+	if response.Repository == nil {
 		t.Fatal("expected repository")
 	}
-	if response.RepositoryRef.System != "github" {
-		t.Fatalf("unexpected system: %q", response.RepositoryRef.System)
+	if response.Repository.System != "github" {
+		t.Fatalf("unexpected system: %q", response.Repository.System)
 	}
-	if response.RepositoryRef.FullName != "rasungatullin/progress" {
-		t.Fatalf("unexpected full name: %q", response.RepositoryRef.FullName)
+	if response.Repository.FullName != "rasungatullin/progress" {
+		t.Fatalf("unexpected full name: %q", response.Repository.FullName)
 	}
-	if response.RepositoryRef.DefaultBranch != "main" {
-		t.Fatalf("unexpected default branch: %q", response.RepositoryRef.DefaultBranch)
+	if response.Repository.DefaultBranch != "main" {
+		t.Fatalf("unexpected default branch: %q", response.Repository.DefaultBranch)
 	}
 	if stub.repo != "rasungatullin/progress" {
 		t.Fatalf("unexpected requested repo: %q", stub.repo)
@@ -931,11 +960,11 @@ func TestServiceRepoGetUsesConfiguredDefaultRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.RepositoryRef == nil {
+	if response.Repository == nil {
 		t.Fatal("expected repository")
 	}
-	if response.RepositoryRef.FullName != "rasungatullin/progress" {
-		t.Fatalf("unexpected full name: %q", response.RepositoryRef.FullName)
+	if response.Repository.FullName != "rasungatullin/progress" {
+		t.Fatalf("unexpected full name: %q", response.Repository.FullName)
 	}
 	if stub.repo != "" {
 		t.Fatalf("expected service to pass through empty repo and let runner resolve default, got %q", stub.repo)
@@ -1081,7 +1110,7 @@ func TestServiceRepoGetMapsNotInstalled(t *testing.T) {
 	if response.RepositoryStatus.ExitCode != -1 {
 		t.Fatalf("unexpected exit code: %d", response.RepositoryStatus.ExitCode)
 	}
-	if response.RepositoryRef != nil {
+	if response.Repository != nil {
 		t.Fatal("did not expect repository ref")
 	}
 	if stub.repo != "owner/name" {
@@ -1118,7 +1147,7 @@ func TestServiceRepoGetMapsMalformedJSONToNormalizedError(t *testing.T) {
 	if response.RepositoryStatus.Stdout != `{"name":` {
 		t.Fatalf("unexpected stdout: %q", response.RepositoryStatus.Stdout)
 	}
-	if response.RepositoryRef != nil {
+	if response.Repository != nil {
 		t.Fatal("did not expect repository ref")
 	}
 }
@@ -1180,8 +1209,8 @@ func TestServicePRCreateSuccess(t *testing.T) {
 	if response.PullRequestStatus.Draft != true {
 		t.Fatal("expected draft status")
 	}
-	if response.PullRequest != nil {
-		t.Fatalf("did not expect pull request payload: %#v", response.PullRequest)
+	if response.MergeRequest != nil {
+		t.Fatalf("did not expect merge request payload: %#v", response.MergeRequest)
 	}
 	if stub.repo != "owner/name" || stub.base != "main" || stub.head != "feature/branch" || stub.title != "Add integration" || stub.body != "Implements pr create" || !stub.draft {
 		t.Fatalf("unexpected pr create request: %#v", stub)
@@ -1451,9 +1480,6 @@ func TestServicePRListDefaultsToClosedScopeAll(t *testing.T) {
 	}
 	if response.MergeRequests[0].Attributes["mergeable"] != "CONFLICTING" || response.MergeRequests[0].Attributes["merge_state_status"] != "DIRTY" {
 		t.Fatalf("merge state attributes were not copied: %#v", response.MergeRequests[0].Attributes)
-	}
-	if len(response.SearchResults) != 1 || response.SearchResults[0].Kind != "merge-request" {
-		t.Fatalf("unexpected search results: %#v", response.SearchResults)
 	}
 }
 

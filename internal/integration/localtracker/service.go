@@ -156,20 +156,11 @@ func (s *Service) searchTasks(ctx context.Context, db *sql.DB, response model.Re
 	if err != nil {
 		return failureResponse(response, model.FailureKindExternalFailure, err)
 	}
-	response.SearchResults = make([]model.TrackerSearchResult, 0, len(records))
+	response.Tasks = make([]model.CanonicalTask, 0, len(records))
 	for _, record := range records {
-		task := canonicalTask(req.System, record)
-		response.SearchResults = append(response.SearchResults, model.TrackerSearchResult{
-			System:    req.System,
-			Kind:      "task",
-			ID:        task.ID,
-			Title:     task.Title,
-			State:     task.State,
-			URL:       task.URL,
-			UpdatedAt: task.UpdatedAt,
-		})
+		response.Tasks = append(response.Tasks, canonicalTask(req.System, record))
 	}
-	response.Metadata = map[string]string{"count": strconv.Itoa(len(response.SearchResults))}
+	response.Metadata = map[string]string{"count": strconv.Itoa(len(response.Tasks))}
 	response.Status = model.ResponseStatusOK
 	return response, nil
 }
@@ -222,7 +213,6 @@ func (s *Service) listComments(ctx context.Context, db *sql.DB, response model.R
 		record.ExternalID = externalID.String
 		comment := taskComment(req.System, firstNonEmpty(task.ExternalID, strconv.Itoa(task.Number)), record)
 		response.TaskComments = append(response.TaskComments, comment)
-		response.Comments = append(response.Comments, trackerComment(comment))
 	}
 	if err := rows.Err(); err != nil {
 		return failureResponse(response, model.FailureKindExternalFailure, fmt.Errorf("list local tracker comments: %w", err))
@@ -250,7 +240,6 @@ func (s *Service) createComment(ctx context.Context, db *sql.DB, response model.
 	record := commentRecord{ID: int(id), TaskNumber: task.Number, Body: body, CreatedAt: now, UpdatedAt: now}
 	comment := taskComment(req.System, firstNonEmpty(task.ExternalID, strconv.Itoa(task.Number)), record)
 	response.TaskComments = []model.TaskComment{comment}
-	response.Comments = []model.TrackerComment{trackerComment(comment)}
 	response.OperationResult = operationResult(req.System, "comment", "create", strconv.Itoa(record.ID), "", "local tracker comment created")
 	response.Status = model.ResponseStatusOK
 	return response, nil
@@ -451,8 +440,6 @@ func scanTask(scanner taskScanner) (taskRecord, error) {
 func applyTask(response *model.Response, system string, record taskRecord) {
 	task := canonicalTask(system, record)
 	response.Task = &task
-	issue := trackerIssue(task)
-	response.Issue = &issue
 }
 
 func canonicalTask(system string, record taskRecord) model.CanonicalTask {
@@ -472,22 +459,6 @@ func canonicalTask(system string, record taskRecord) model.CanonicalTask {
 	}
 }
 
-func trackerIssue(task model.CanonicalTask) model.TrackerIssue {
-	return model.TrackerIssue{
-		System:     task.System,
-		ID:         task.ID,
-		ExternalID: task.ExternalID,
-		Title:      task.Title,
-		Body:       task.Body,
-		State:      task.State,
-		Labels:     append([]string(nil), task.Traits...),
-		Author:     model.TrackerUser{System: task.System, Login: task.Author.Login},
-		URL:        task.URL,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-	}
-}
-
 func taskComment(system string, taskID string, record commentRecord) model.TaskComment {
 	return model.TaskComment{
 		System:     system,
@@ -498,18 +469,6 @@ func taskComment(system string, taskID string, record commentRecord) model.TaskC
 		URL:        localCommentURL(system, record.TaskNumber, record.ID),
 		CreatedAt:  record.CreatedAt,
 		UpdatedAt:  record.UpdatedAt,
-	}
-}
-
-func trackerComment(comment model.TaskComment) model.TrackerComment {
-	return model.TrackerComment{
-		System:    comment.System,
-		TaskID:    comment.TaskID,
-		Author:    model.TrackerUser{System: comment.System, Login: comment.Author.Login},
-		Body:      comment.Body,
-		URL:       comment.URL,
-		CreatedAt: comment.CreatedAt,
-		UpdatedAt: comment.UpdatedAt,
 	}
 }
 
