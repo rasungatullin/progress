@@ -520,9 +520,9 @@ func executeTypeOrientedIssueCommand(cmd *cobra.Command, flags *integrationFlags
 
 func printTypeOrientedIssueResponse(cmd *cobra.Command, response integration.Response) {
 	cmd.Printf("system=%s\nresource=issue\nobject=issue\noperation=%s\nstatus=%s\n", response.System, response.Operation, response.Status)
-	if response.SearchResults != nil {
-		cmd.Printf("issue_count=%d\n", len(response.SearchResults))
-		for _, issue := range response.SearchResults {
+	if response.Tasks != nil {
+		cmd.Printf("issue_count=%d\n", len(response.Tasks))
+		for _, issue := range response.Tasks {
 			cmd.Printf("id=%s\ntitle=%s\nstate=%s\nurl=%s\n", issue.ID, issue.Title, issue.State, issue.URL)
 		}
 	}
@@ -936,7 +936,7 @@ func printIntegrationResponse(cmd *cobra.Command, response integration.Response)
 	switch {
 	case response.MergeRequests != nil:
 		printIntegrationMergeRequests(cmd, response)
-	case response.Task != nil || response.TaskComments != nil || response.SearchResults != nil:
+	case response.Task != nil || response.Tasks != nil || response.TaskComments != nil:
 		printTypeOrientedIssueResponse(cmd, response)
 	case response.Repository != nil:
 		printIntegrationRepository(cmd, response)
@@ -1035,17 +1035,6 @@ func printIntegrationAuthStatus(cmd *cobra.Command, response integration.Respons
 
 func printIntegrationRepository(cmd *cobra.Command, response integration.Response) {
 	repository := response.Repository
-	if repository == nil && response.RepositoryRef != nil {
-		repository = &integration.Repository{
-			System:        response.RepositoryRef.System,
-			FullName:      response.RepositoryRef.FullName,
-			Owner:         response.RepositoryRef.Owner,
-			Name:          response.RepositoryRef.Name,
-			Description:   response.RepositoryRef.Description,
-			DefaultBranch: response.RepositoryRef.DefaultBranch,
-			URL:           response.RepositoryRef.URL,
-		}
-	}
 	if repository == nil {
 		printFailure(cmd, response)
 		return
@@ -1057,23 +1046,6 @@ func printIntegrationRepository(cmd *cobra.Command, response integration.Respons
 
 func printIntegrationMergeRequest(cmd *cobra.Command, response integration.Response) {
 	pr := response.MergeRequest
-	if pr == nil && response.PullRequest != nil {
-		pr = &integration.MergeRequest{
-			System:         response.PullRequest.System,
-			Repository:     response.PullRequest.Repository,
-			Number:         response.PullRequest.Number,
-			Title:          response.PullRequest.Title,
-			Body:           response.PullRequest.Body,
-			State:          response.PullRequest.State,
-			Author:         integration.User{System: response.PullRequest.Author.System, Login: response.PullRequest.Author.Login, Name: response.PullRequest.Author.Name, URL: response.PullRequest.Author.URL},
-			ReviewDecision: response.PullRequest.ReviewDecision,
-			BaseRef:        response.PullRequest.BaseRef,
-			HeadRef:        response.PullRequest.HeadRef,
-			URL:            response.PullRequest.URL,
-			CreatedAt:      response.PullRequest.CreatedAt,
-			UpdatedAt:      response.PullRequest.UpdatedAt,
-		}
-	}
 	if pr == nil {
 		printFailure(cmd, response)
 		return
