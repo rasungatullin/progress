@@ -36,7 +36,7 @@ type LabelChange struct {
 
 type TaskProcessingCycle struct {
 	Index                     int
-	Issue                     *integration.TrackerIssue
+	Issue                     *integration.CanonicalTask
 	MergeRequest              *integration.MergeRequest
 	MergeRequestExternalState *decision.MergeRequestExternalState
 	Consideration             *decision.ConsiderationResult
@@ -52,7 +52,7 @@ type TaskProcessingResult struct {
 	Cycles     []TaskProcessingCycle
 	Completed  bool
 	StopReason string
-	FinalIssue *integration.TrackerIssue
+	FinalIssue *integration.CanonicalTask
 }
 
 func numericTaskID(taskID string) int {
@@ -184,7 +184,7 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskID string, route str
 	if err != nil {
 		return TaskProcessingCycle{Index: index}, err
 	}
-	_, hasReviewPassedLabel := findLabel(issue.Labels, LabelReviewPassed)
+	_, hasReviewPassedLabel := findLabel(issue.Traits, LabelReviewPassed)
 	if mergeRequestErr != nil && mergeRequest != nil && (processingRouteNeedsReviewRemarks(route) || hasReviewPassedLabel) {
 		return TaskProcessingCycle{Index: index, Issue: issue, MergeRequest: mergeRequest}, fmt.Errorf("восстановить актуальное состояние запроса на слияние для задачи %s: %w", taskID, mergeRequestErr)
 	}
@@ -200,7 +200,7 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskID string, route str
 	}
 	consideration, err := s.decision.Consider(ctx, decision.ConsiderationInput{Route: route, Context: decision.DecisionContext{
 		Signal:                    decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: numericTaskID(taskID)},
-		Issue:                     issue,
+		Task:                      *issue,
 		MergeRequest:              mergeRequest,
 		MergeRequestExternalState: externalState,
 	}})
@@ -214,7 +214,7 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskID string, route str
 	if mergeRequestErr != nil && (processingRouteNeedsReviewRemarks(route) || (consideration.ExecutionPlan != nil && requiresMergeRequest(consideration.ExecutionPlan.Action))) {
 		return cycle, fmt.Errorf("восстановить связанный запрос на слияние для задачи %s: %w", taskID, mergeRequestErr)
 	}
-	if consideration.Status == decision.ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil && externalState == nil && taskLabelsRequireMergeRequest(issue.Labels) {
+	if consideration.Status == decision.ConsiderationStatusCompleted && consideration.ExecutionPlan == nil && mergeRequest != nil && externalState == nil && taskLabelsRequireMergeRequest(issue.Traits) {
 		externalState, err = s.loadMergeRequestExternalState(ctx, mergeRequest)
 		if err != nil {
 			return cycle, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %s: %w", taskID, err)
@@ -223,7 +223,7 @@ func (s *Service) runDecisionCycle(ctx context.Context, taskID string, route str
 			cycle.MergeRequestExternalState = externalState
 			consideration, err = s.decision.Consider(ctx, decision.ConsiderationInput{Route: route, Context: decision.DecisionContext{
 				Signal:                    decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: numericTaskID(taskID)},
-				Issue:                     issue,
+				Task:                      *issue,
 				MergeRequest:              mergeRequest,
 				MergeRequestExternalState: externalState,
 			}})
@@ -318,7 +318,7 @@ func integrationMergeRequestFromExecutionResult(value *execution.MergeRequest) *
 	}
 }
 
-func (s *Service) loadTaskState(ctx context.Context, taskID string, requireMergeRequest bool) (*integration.TrackerIssue, *integration.MergeRequest, *decision.MergeRequestExternalState, error) {
+func (s *Service) loadTaskState(ctx context.Context, taskID string, requireMergeRequest bool) (*integration.CanonicalTask, *integration.MergeRequest, *decision.MergeRequestExternalState, error) {
 	issue, mergeRequest, externalState, mergeRequestErr, err := s.loadTaskStateWithMergeRequestError(ctx, taskID, requireMergeRequest, nil)
 	if err != nil {
 		return nil, nil, nil, err
@@ -329,7 +329,7 @@ func (s *Service) loadTaskState(ctx context.Context, taskID string, requireMerge
 	return issue, mergeRequest, externalState, nil
 }
 
-func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskID string, requireMergeRequest bool, knownMergeRequest *integration.MergeRequest) (*integration.TrackerIssue, *integration.MergeRequest, *decision.MergeRequestExternalState, error, error) {
+func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskID string, requireMergeRequest bool, knownMergeRequest *integration.MergeRequest) (*integration.CanonicalTask, *integration.MergeRequest, *decision.MergeRequestExternalState, error, error) {
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType: integrationTypeTracker,
 		Resource:        "issue",
@@ -343,14 +343,14 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskID
 	if response.Task == nil {
 		return nil, nil, nil, nil, fmt.Errorf("контур интеграции не вернул задачу %s", taskID)
 	}
-	issue := trackerIssueFromCanonicalTask(*response.Task)
+	task := *response.Task
 
 	mergeRequest := knownMergeRequest
 	if mergeRequest != nil {
 		copyOfMergeRequest := *mergeRequest
 		fresh, refreshErr := s.integration.Execute(ctx, integration.Request{IntegrationType: integrationTypeRepository, Resource: "merge-request", ObjectType: "merge-request", Operation: "get", Repository: copyOfMergeRequest.Repository, RepoProvided: strings.TrimSpace(copyOfMergeRequest.Repository) != "", MergeRequestNumber: copyOfMergeRequest.Number})
 		if refreshErr != nil {
-			return issue, mergeRequest, nil, refreshErr, nil
+			return &task, mergeRequest, nil, refreshErr, nil
 		}
 		if refreshed, ok := integrationMergeRequestFromResponse(fresh); ok {
 			copyOfMergeRequest = refreshed
@@ -359,32 +359,32 @@ func (s *Service) loadTaskStateWithMergeRequestError(ctx context.Context, taskID
 			// повторном чтении, хотя не сообщают ошибку. Сохраняем известный
 			// объект для несвязанных маршрутов; явная ошибка чтения передаётся
 			// вызывающему контуру выше.
-			return issue, mergeRequest, nil, nil, nil
+			return &task, mergeRequest, nil, nil, nil
 		}
 		mergeRequest = &copyOfMergeRequest
 	} else {
-		mergeRequest, err = s.findTaskMergeRequest(ctx, issue)
+		mergeRequest, err = s.findTaskMergeRequest(ctx, &task)
 		if err != nil {
-			if requireMergeRequest || taskLabelsRequireCompletionMergeRequest(issue.Labels) {
+			if requireMergeRequest || taskLabelsRequireCompletionMergeRequest(task.Traits) {
 				return nil, nil, nil, err, fmt.Errorf("восстановить связанный запрос на слияние для задачи %s: %w", taskID, err)
 			}
 			s.logger.Printf("Связанный запрос на слияние не восстановлен: задача=%s ошибка=%v", taskID, err)
 		}
 	}
 	if mergeRequest != nil {
-		if !taskLabelsRequireCompletionMergeRequest(issue.Labels) {
+		if !taskLabelsRequireCompletionMergeRequest(task.Traits) {
 			if mergeRequestHasConflict(mergeRequest) || mergeRequestStateUnknown(mergeRequest) {
-				return issue, mergeRequest, &decision.MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest), MergeStateUnknown: mergeRequestStateUnknown(mergeRequest)}, nil, nil
+				return &task, mergeRequest, &decision.MergeRequestExternalState{HasMergeConflict: mergeRequestHasConflict(mergeRequest), MergeStateUnknown: mergeRequestStateUnknown(mergeRequest)}, nil, nil
 			}
-			return issue, mergeRequest, nil, nil, nil
+			return &task, mergeRequest, nil, nil, nil
 		}
 		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest)
 		if stateErr != nil {
-			return issue, mergeRequest, nil, nil, stateErr
+			return &task, mergeRequest, nil, nil, stateErr
 		}
-		return issue, mergeRequest, externalState, nil, nil
+		return &task, mergeRequest, externalState, nil, nil
 	}
-	return issue, mergeRequest, nil, err, nil
+	return &task, mergeRequest, nil, err, nil
 }
 
 func integrationMergeRequestFromResponse(response integration.Response) (integration.MergeRequest, bool) {
@@ -392,47 +392,6 @@ func integrationMergeRequestFromResponse(response integration.Response) (integra
 		return integration.MergeRequest{}, false
 	}
 	return *response.MergeRequest, true
-}
-
-func trackerIssueFromCanonicalTask(task integration.CanonicalTask) *integration.TrackerIssue {
-	return &integration.TrackerIssue{
-		System:     task.System,
-		Repository: task.Repository,
-		ID:         task.ID,
-		ExternalID: task.ExternalID,
-		Title:      task.Title,
-		Body:       task.Body,
-		State:      task.State,
-		Labels:     append([]string(nil), task.Traits...),
-		Assignees:  trackerUsersFromCanonicalUsers(task.Assignees),
-		Author:     trackerUserFromCanonicalUser(task.Author),
-		URL:        task.URL,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-	}
-}
-
-func trackerUsersFromCanonicalUsers(users []integration.User) []integration.TrackerUser {
-	if users == nil {
-		return nil
-	}
-	result := make([]integration.TrackerUser, 0, len(users))
-	for _, user := range users {
-		result = append(result, trackerUserFromCanonicalUser(user))
-	}
-	return result
-}
-
-func trackerUserFromCanonicalUser(user integration.User) integration.TrackerUser {
-	return integration.TrackerUser{
-		System:   user.System,
-		Login:    user.Login,
-		Name:     user.Name,
-		Email:    user.Email,
-		URL:      user.URL,
-		IsBot:    user.IsBot,
-		IsActive: user.IsActive,
-	}
 }
 
 func (s *Service) loadMergeRequestExternalState(ctx context.Context, mergeRequest *integration.MergeRequest) (*decision.MergeRequestExternalState, error) {
@@ -668,18 +627,18 @@ func isFalsyExternalState(value string) bool {
 	}
 }
 
-func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.TrackerIssue) (*integration.MergeRequest, error) {
-	if issue == nil || strings.TrimSpace(issue.ID) == "" || strings.TrimSpace(issue.Repository) == "" {
+func (s *Service) findTaskMergeRequest(ctx context.Context, task *integration.CanonicalTask) (*integration.MergeRequest, error) {
+	if task == nil || strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.Repository) == "" {
 		return nil, nil
 	}
 
-	head := issue.ID
+	head := task.ID
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType: integrationTypeRepository,
 		Resource:        "merge-request",
 		ObjectType:      "merge-request",
 		Operation:       "search",
-		Repository:      issue.Repository,
+		Repository:      task.Repository,
 		RepoProvided:    true,
 		Query:           "head:" + head,
 		State:           "open",
@@ -699,40 +658,40 @@ func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.T
 	return nil, nil
 }
 
-func (s *Service) applyTaskLabelsAfterAction(ctx context.Context, issue *integration.TrackerIssue, action string, result *execution.ExecutionResult) ([]LabelChange, *bool, error) {
+func (s *Service) applyTaskLabelsAfterAction(ctx context.Context, task *integration.CanonicalTask, action string, result *execution.ExecutionResult) ([]LabelChange, *bool, error) {
 	add, remove, reviewPassed := labelTransitionForAction(action, result)
 	changes := make([]LabelChange, 0, 2)
 
-	add = labelsMissing(issue.Labels, add)
+	add = labelsMissing(task.Traits, add)
 	if len(add) != 0 {
-		if err := s.changeTaskLabels(ctx, issue, "add", add); err != nil {
+		if err := s.changeTaskLabels(ctx, task, "add", add); err != nil {
 			return changes, reviewPassed, err
 		}
-		issue.Labels = append(issue.Labels, add...)
+		task.Traits = append(task.Traits, add...)
 		changes = append(changes, LabelChange{Operation: "add", Labels: add})
 	}
 
-	remove = labelsPresent(issue.Labels, remove)
+	remove = labelsPresent(task.Traits, remove)
 	if len(remove) != 0 {
-		if err := s.changeTaskLabels(ctx, issue, "remove", remove); err != nil {
+		if err := s.changeTaskLabels(ctx, task, "remove", remove); err != nil {
 			return changes, reviewPassed, err
 		}
-		issue.Labels = removeLabels(issue.Labels, remove)
+		task.Traits = removeLabels(task.Traits, remove)
 		changes = append(changes, LabelChange{Operation: "remove", Labels: remove})
 	}
 
 	return changes, reviewPassed, nil
 }
 
-func (s *Service) changeTaskLabels(ctx context.Context, issue *integration.TrackerIssue, operation string, labels []string) error {
+func (s *Service) changeTaskLabels(ctx context.Context, task *integration.CanonicalTask, operation string, labels []string) error {
 	_, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType: integrationTypeTracker,
 		Resource:        "label",
 		ObjectType:      "label",
 		Operation:       operation,
-		Repository:      issue.Repository,
-		RepoProvided:    strings.TrimSpace(issue.Repository) != "",
-		ID:              issue.ID,
+		Repository:      task.Repository,
+		RepoProvided:    strings.TrimSpace(task.Repository) != "",
+		ID:              task.ID,
 		Labels:          append([]string(nil), labels...),
 	})
 	return err
@@ -842,12 +801,12 @@ func requiresMergeRequest(action string) bool {
 	}
 }
 
-func actionInvocationFromTaskState(action string, issue *integration.TrackerIssue, mergeRequest *integration.MergeRequest) execution.ActionInvocation {
+func actionInvocationFromTaskState(action string, task *integration.CanonicalTask, mergeRequest *integration.MergeRequest) execution.ActionInvocation {
 	assignment := &execution.ExecutionAssignment{
 		Action:          action,
 		ExpectedResult:  expectedResultForAction(action),
-		CanonicalTask:   executionObjectRefFromIssue(issue),
-		StructuredInput: structuredInputFromIssue(issue),
+		CanonicalTask:   executionObjectRefFromTask(task),
+		StructuredInput: structuredInputFromTask(task),
 	}
 	if mergeRequest != nil {
 		assignment.RelatedObjects = []execution.ObjectRef{executionObjectRefFromMergeRequest(mergeRequest)}
@@ -855,12 +814,12 @@ func actionInvocationFromTaskState(action string, issue *integration.TrackerIssu
 	return execution.ActionInvocation{Assignment: assignment}
 }
 
-func executionObjectRefFromIssue(issue *integration.TrackerIssue) *execution.ObjectRef {
-	if issue == nil {
+func executionObjectRefFromTask(task *integration.CanonicalTask) *execution.ObjectRef {
+	if task == nil {
 		return nil
 	}
 	attributes := map[string]string{}
-	if body := strings.TrimSpace(issue.Body); body != "" {
+	if body := strings.TrimSpace(task.Body); body != "" {
 		attributes["body"] = body
 	}
 	if len(attributes) == 0 {
@@ -868,11 +827,13 @@ func executionObjectRefFromIssue(issue *integration.TrackerIssue) *execution.Obj
 	}
 	return &execution.ObjectRef{
 		Type:       "task",
-		System:     issue.System,
-		Repository: issue.Repository,
-		Number:     numericIssueID(issue.ID),
-		Title:      issue.Title,
-		URL:        issue.URL,
+		System:     task.System,
+		Repository: task.Repository,
+		Number:     numericIssueID(task.ID),
+		ID:         task.ID,
+		ExternalID: task.ExternalID,
+		Title:      task.Title,
+		URL:        task.URL,
 		Attributes: attributes,
 	}
 }
@@ -902,23 +863,23 @@ func executionObjectRefFromMergeRequest(mergeRequest *integration.MergeRequest) 
 	}
 }
 
-func structuredInputFromIssue(issue *integration.TrackerIssue) *execution.StructuredInput {
-	if issue == nil {
+func structuredInputFromTask(task *integration.CanonicalTask) *execution.StructuredInput {
+	if task == nil {
 		return nil
 	}
-	return &execution.StructuredInput{Task: taskTextFromIssue(issue)}
+	return &execution.StructuredInput{Task: taskTextFromTask(task)}
 }
 
-func taskTextFromIssue(issue *integration.TrackerIssue) string {
-	if issue == nil {
+func taskTextFromTask(task *integration.CanonicalTask) string {
+	if task == nil {
 		return ""
 	}
-	title := strings.TrimSpace(issue.Title)
+	title := strings.TrimSpace(task.Title)
 	if title == "" {
 		title = "Без названия"
 	}
-	parts := []string{fmt.Sprintf("Task #%s: %s", issue.ID, title)}
-	if body := strings.TrimSpace(issue.Body); body != "" {
+	parts := []string{fmt.Sprintf("Task #%s: %s", task.ID, title)}
+	if body := strings.TrimSpace(task.Body); body != "" {
 		parts = append(parts, body)
 	}
 	return strings.Join(parts, "\n\n")

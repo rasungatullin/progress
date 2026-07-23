@@ -28,11 +28,11 @@ func TestReactivityProcessCommandPrintsCycles(t *testing.T) {
 			StopReason: reactivity.StopReasonSingleCycle,
 			Cycles: []reactivity.TaskProcessingCycle{{
 				Index: 1,
-				Issue: &integration.TrackerIssue{
+				Issue: &integration.CanonicalTask{
 					ID:     "123",
 					Title:  "Task",
 					State:  "OPEN",
-					Labels: []string{"Тестовая задача"},
+					Traits: []string{"Тестовая задача"},
 				},
 				Action: execution.ActionStartImplementationPR,
 				ExecutionResult: &execution.ExecutionResult{
@@ -42,7 +42,7 @@ func TestReactivityProcessCommandPrintsCycles(t *testing.T) {
 				Execution:    &execution.LaunchResult{Status: "completed"},
 				LabelChanges: []reactivity.LabelChange{{Operation: "add", Labels: []string{reactivity.LabelAwaitingReview}}},
 			}},
-			FinalIssue: &integration.TrackerIssue{ID: "123", Labels: []string{"Тестовая задача", reactivity.LabelAwaitingReview}},
+			FinalIssue: &integration.CanonicalTask{ID: "123", Traits: []string{"Тестовая задача", reactivity.LabelAwaitingReview}},
 		}}
 	})
 
