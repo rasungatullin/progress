@@ -362,20 +362,38 @@ func decodeScriptResponse(response model.Response, stdout string) (model.Respons
 func validateSuccessfulResponsePayload(response model.Response) error {
 	integrationType := normalizeIntegrationType(firstNonEmpty(response.IntegrationType, model.IntegrationTypeTracker))
 	objectType := normalizeObjectType(firstNonEmpty(response.ObjectType, response.Resource))
+	rawOperation := strings.TrimSpace(strings.ToLower(response.Operation))
 	operation := normalizeOperation(response.Operation)
 	switch integrationType {
 	case model.IntegrationTypeTracker:
 		switch objectType {
 		case "task":
+			if rawOperation == "comments" || rawOperation == "list-comments" {
+				if response.TaskComments == nil {
+					return fmt.Errorf("script operation %s.%s.%s returned ok without task comments payload", integrationType, objectType, operation)
+				}
+				return nil
+			}
 			switch operation {
 			case "create", "get", "update":
 				if response.Task == nil {
 					return fmt.Errorf("script operation %s.%s.%s returned ok without task payload", integrationType, objectType, operation)
 				}
+			case "list", "search":
+				if response.Tasks == nil {
+					return fmt.Errorf("script operation %s.%s.%s returned ok without tasks payload", integrationType, objectType, operation)
+				}
 			}
 		case "comment":
-			if operation == "create" && response.OperationResult == nil && len(response.TaskComments) == 0 {
-				return fmt.Errorf("script operation %s.%s.%s returned ok without comment payload", integrationType, objectType, operation)
+			switch operation {
+			case "create":
+				if response.OperationResult == nil && len(response.TaskComments) == 0 {
+					return fmt.Errorf("script operation %s.%s.%s returned ok without comment payload", integrationType, objectType, operation)
+				}
+			case "list":
+				if response.TaskComments == nil {
+					return fmt.Errorf("script operation %s.%s.%s returned ok without task comments payload", integrationType, objectType, operation)
+				}
 			}
 		case "label":
 			if (operation == "add" || operation == "remove") && response.OperationResult == nil {
