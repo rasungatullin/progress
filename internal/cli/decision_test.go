@@ -27,7 +27,7 @@ func TestDecisionStartCommandPrintsContext(t *testing.T) {
 			Ready: true,
 			Context: decision.DecisionContext{
 				Signal: decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: 123},
-				Issue: &integration.TrackerIssue{
+				Task: integration.CanonicalTask{
 					ID:    "123",
 					Title: "Implement stage 1",
 					State: "OPEN",
@@ -199,7 +199,7 @@ func TestDecisionStartCommandPrintsPartialResultOnError(t *testing.T) {
 			result: decision.StartResult{
 				Context: decision.DecisionContext{
 					Signal: decision.Signal{Source: decision.SignalSourceTask, Kind: decision.SignalKindTask, TaskNumber: 77},
-					Issue:  &integration.TrackerIssue{ID: "77", Title: "Fix execution handoff", State: "OPEN"},
+					Task:   integration.CanonicalTask{ID: "77", Title: "Fix execution handoff", State: "OPEN"},
 				},
 				Ready: true,
 				Decision: &decision.Decision{

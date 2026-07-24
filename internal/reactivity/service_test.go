@@ -159,7 +159,7 @@ func TestServiceProcessTaskRepeatsUntilDecisionHasNoNextOperation(t *testing.T) 
 	if len(decisions.inputs) < 2 || decisions.inputs[1].Context.MergeRequest == nil || decisions.inputs[1].Context.MergeRequest.Number != 184 {
 		t.Fatalf("next decision cycle must receive published merge request: %#v", decisions.inputs)
 	}
-	if result.FinalIssue == nil || !containsLabel(result.FinalIssue.Labels, LabelReviewPassed) {
+	if result.FinalIssue == nil || !containsLabel(result.FinalIssue.Traits, LabelReviewPassed) {
 		t.Fatalf("final issue must include passed label: %#v", result.FinalIssue)
 	}
 }
@@ -196,8 +196,8 @@ func TestServiceProcessTaskKeepsOpenMergeRequestAfterReviewLabelsAreRemoved(t *t
 	if len(executions.requests) != 2 || executions.requests[1].Assignment.Action != execution.ActionReviewPullRequest {
 		t.Fatalf("second cycle must review the existing merge request: %#v", executions.requests)
 	}
-	if containsLabel(result.FinalIssue.Labels, LabelAwaitingReview) || !containsLabel(result.FinalIssue.Labels, LabelReviewPassed) {
-		t.Fatalf("review labels were not transitioned: %#v", result.FinalIssue.Labels)
+	if containsLabel(result.FinalIssue.Traits, LabelAwaitingReview) || !containsLabel(result.FinalIssue.Traits, LabelReviewPassed) {
+		t.Fatalf("review labels were not transitioned: %#v", result.FinalIssue.Traits)
 	}
 }
 
@@ -304,15 +304,16 @@ func TestServiceProcessTaskHandlesMissingOptionalCanonicalTaskData(t *testing.T)
 	if err != nil {
 		t.Fatalf("process task without optional data: %v", err)
 	}
-	if result.FinalIssue == nil || result.FinalIssue.ID != "123" || result.FinalIssue.Labels != nil {
+	if result.FinalIssue == nil || result.FinalIssue.ID != "123" || result.FinalIssue.Traits != nil {
 		t.Fatalf("unexpected restored task state: %#v", result.FinalIssue)
 	}
 }
 
-func TestTrackerIssueFromCanonicalTaskPreservesTaskState(t *testing.T) {
+func TestServiceProcessTaskPassesCanonicalTaskStateToDecision(t *testing.T) {
 	t.Parallel()
 
-	task := integration.CanonicalTask{
+	integrations := newProcessingIntegrationStub(nil)
+	integrations.task = integration.CanonicalTask{
 		System:     "github",
 		Repository: "owner/name",
 		ID:         "123",
@@ -327,16 +328,30 @@ func TestTrackerIssueFromCanonicalTaskPreservesTaskState(t *testing.T) {
 		CreatedAt:  "2026-07-22T10:00:00Z",
 		UpdatedAt:  "2026-07-23T10:00:00Z",
 	}
+	integrations.searchReturnsEmpty = true
+	decisions := &processingDecisionStub{results: []decision.ConsiderationResult{{
+		Status: decision.ConsiderationStatusCompleted,
+	}}}
+	service := NewService(nil)
+	service.integration = integrations
+	service.decision = decisions
+	service.execution = &processingExecutionStub{}
 
-	issue := trackerIssueFromCanonicalTask(task)
-	if issue.ID != task.ID || issue.ExternalID != task.ExternalID || issue.Repository != task.Repository {
-		t.Fatalf("canonical identity was not preserved: %#v", issue)
+	if _, err := service.ProcessTask(context.Background(), TaskProcessingInput{TaskNumber: 123, Once: true}); err != nil {
+		t.Fatalf("process task: %v", err)
 	}
-	if !containsLabel(issue.Labels, "Ожидает экспертизы") {
-		t.Fatalf("canonical task traits were not restored as labels: %#v", issue.Labels)
+	if len(decisions.inputs) != 1 {
+		t.Fatalf("expected one decision input: %#v", decisions.inputs)
 	}
-	if issue.Author.Login != "author" || len(issue.Assignees) != 1 || issue.Assignees[0].Login != "engineer" {
-		t.Fatalf("canonical users were not preserved: %#v", issue)
+	task := decisions.inputs[0].Context.Task
+	if task.ID != integrations.task.ID || task.ExternalID != integrations.task.ExternalID || task.Repository != integrations.task.Repository {
+		t.Fatalf("canonical identity was not preserved: %#v", task)
+	}
+	if !containsLabel(task.Traits, "Ожидает экспертизы") {
+		t.Fatalf("canonical task traits were not preserved: %#v", task.Traits)
+	}
+	if task.Author.Login != "author" || len(task.Assignees) != 1 || task.Assignees[0].Login != "engineer" {
+		t.Fatalf("canonical users were not preserved: %#v", task)
 	}
 }
 

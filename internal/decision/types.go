@@ -37,7 +37,6 @@ type StartInput struct {
 type DecisionContext struct {
 	Signal                    Signal
 	Task                      integration.CanonicalTask
-	Issue                     *integration.TrackerIssue
 	MergeRequest              *integration.MergeRequest
 	MergeRequestExternalState *MergeRequestExternalState
 }

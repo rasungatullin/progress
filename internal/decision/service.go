@@ -65,20 +65,20 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 	if err != nil {
 		return StartResult{}, err
 	}
-	if response.Issue == nil {
+	if response.Task == nil {
 		return StartResult{}, fmt.Errorf("integration did not return issue for task %d", input.TaskNumber)
 	}
 
-	mergeRequest, mergeRequestErr := s.findTaskMergeRequest(ctx, response.Issue)
+	task := *response.Task
+	mergeRequest, mergeRequestErr := s.findTaskMergeRequest(ctx, &task)
 
 	decisionContext := DecisionContext{
 		Signal:       signal,
-		Task:         canonicalTaskFromIssue(response.Issue),
-		Issue:        response.Issue,
+		Task:         task,
 		MergeRequest: mergeRequest,
 	}
 	if mergeRequest != nil {
-		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest, taskLabelsRequireCompletionMergeRequest(response.Issue.Labels) || routeNeedsReviewRemarks(input.Route))
+		externalState, stateErr := s.loadMergeRequestExternalState(ctx, mergeRequest, taskLabelsRequireCompletionMergeRequest(task.Traits) || routeNeedsReviewRemarks(input.Route))
 		if stateErr != nil {
 			return StartResult{Context: decisionContext}, fmt.Errorf("восстановить внешнее состояние запроса на слияние для задачи %d: %w", input.TaskNumber, stateErr)
 		}
@@ -154,18 +154,18 @@ func (s *Service) Start(ctx context.Context, input StartInput) (StartResult, err
 	return result, nil
 }
 
-func (s *Service) findTaskMergeRequest(ctx context.Context, issue *integration.TrackerIssue) (*integration.MergeRequest, error) {
-	if issue == nil || strings.TrimSpace(issue.ID) == "" || strings.TrimSpace(issue.Repository) == "" {
+func (s *Service) findTaskMergeRequest(ctx context.Context, task *integration.CanonicalTask) (*integration.MergeRequest, error) {
+	if task == nil || strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.Repository) == "" {
 		return nil, nil
 	}
 
-	head := issue.ID
+	head := task.ID
 	response, err := s.integration.Execute(ctx, integration.Request{
 		IntegrationType: integrationmodel.IntegrationTypeRepository,
 		Resource:        "merge-request",
 		ObjectType:      "merge-request",
 		Operation:       "search",
-		Repository:      issue.Repository,
+		Repository:      task.Repository,
 		RepoProvided:    true,
 		Query:           "head:" + head,
 		State:           "open",
@@ -458,14 +458,11 @@ func hasLabel(labels []string, candidate string) bool {
 
 func (s *Service) Consider(ctx context.Context, input ConsiderationInput) (ConsiderationResult, error) {
 	result := ConsiderationResult{Context: input.Context}
-	if input.Context.Issue == nil {
-		err := fmt.Errorf("decision context issue is required")
+	if strings.TrimSpace(input.Context.Task.ID) == "" {
+		err := fmt.Errorf("decision context task is required")
 		result.Status = ConsiderationStatusFailed
 		result.Failure = decisionFailure("missing_issue", err, false, true)
 		return result, err
-	}
-	if strings.TrimSpace(result.Context.Task.ID) == "" {
-		result.Context.Task = canonicalTaskFromIssue(input.Context.Issue)
 	}
 	if isOpenMergeRequest(input.Context.MergeRequest) && input.Context.MergeRequestExternalState != nil && input.Context.MergeRequestExternalState.MergeStateUnknown {
 		err := fmt.Errorf("внешнее состояние запроса на слияние ещё не подтверждено")
@@ -623,12 +620,12 @@ func externalMergeRequestStateCheck(previous selectedWorkflowRoute, state *Merge
 	}
 }
 
-func (s *Service) validateIssueRepository(ctx context.Context, issue *integration.TrackerIssue) error {
-	if issue == nil {
+func (s *Service) validateIssueRepository(ctx context.Context, task *integration.CanonicalTask) error {
+	if task == nil {
 		return nil
 	}
 
-	issueRepository, err := normalizeGitHubRepository(issue.Repository)
+	issueRepository, err := normalizeGitHubRepository(task.Repository)
 	if err != nil {
 		return fmt.Errorf("issue repository must use owner/name format: %w", err)
 	}
@@ -664,8 +661,7 @@ func (s *Service) resolveCurrentRepository(ctx context.Context) (string, error) 
 
 func buildExecuteDecision(context DecisionContext, route selectedWorkflowRoute) Decision {
 	task := context.Task
-	issue := context.Issue
-	prompt := buildExecutionTask(issue)
+	prompt := buildExecutionTask(&task)
 	if strings.TrimSpace(route.Action) == "" {
 		route.Action = execution.ActionStartImplementationPR
 	}
@@ -711,8 +707,8 @@ func buildExecuteDecision(context DecisionContext, route selectedWorkflowRoute) 
 		Checks:  append([]RouteCheckResult(nil), route.Checks...),
 		Reasons: reasons,
 		ExecutionPlan: &ExecutionPlan{
-			TaskNumber:      numericIssueID(issue.ID),
-			TaskTitle:       issue.Title,
+			TaskNumber:      numericIssueID(task.ID),
+			TaskTitle:       task.Title,
 			Action:          route.Action,
 			ExpectedResult:  route.ExpectedResult,
 			Constraints:     append([]string(nil), route.Constraints...),
@@ -747,36 +743,6 @@ func executionActionInvocationFromDecisionPlan(plan *ExecutionPlan) execution.Ac
 	}
 
 	return execution.ActionInvocation{Assignment: plan.Assignment}
-}
-
-func canonicalTaskFromIssue(issue *integration.TrackerIssue) integration.CanonicalTask {
-	if issue == nil {
-		return integration.CanonicalTask{}
-	}
-
-	attributes := make(map[string]string)
-	if state := strings.TrimSpace(issue.State); state != "" {
-		attributes["state"] = state
-	}
-	if repository := strings.TrimSpace(issue.Repository); repository != "" {
-		attributes["repository"] = repository
-	}
-	if body := strings.TrimSpace(issue.Body); body != "" {
-		attributes["body"] = body
-	}
-
-	return integration.CanonicalTask{
-		System:     strings.TrimSpace(issue.System),
-		Repository: strings.TrimSpace(issue.Repository),
-		ID:         issue.ID,
-		ExternalID: issue.ExternalID,
-		Title:      strings.TrimSpace(issue.Title),
-		Body:       strings.TrimSpace(issue.Body),
-		State:      strings.TrimSpace(issue.State),
-		URL:        strings.TrimSpace(issue.URL),
-		Traits:     normalizeFeatures(issue.Labels),
-		Attributes: attributes,
-	}
 }
 
 func decisionReasonFromRoute(route selectedWorkflowRoute, defaultCode string, defaultMessage string) DecisionReason {
@@ -831,6 +797,26 @@ func executionObjectRefFromCanonicalTask(task integration.CanonicalTask) *execut
 		return nil
 	}
 
+	attributes := cloneStringMap(task.Attributes)
+	if attributes == nil {
+		attributes = map[string]string{}
+	}
+	delete(attributes, "state")
+	delete(attributes, "repository")
+	delete(attributes, "body")
+	if state := strings.TrimSpace(task.State); state != "" {
+		attributes["state"] = state
+	}
+	if repository := strings.TrimSpace(task.Repository); repository != "" {
+		attributes["repository"] = repository
+	}
+	if body := strings.TrimSpace(task.Body); body != "" {
+		attributes["body"] = body
+	}
+	if len(attributes) == 0 {
+		attributes = nil
+	}
+
 	return &execution.ObjectRef{
 		Type:       "task",
 		System:     strings.TrimSpace(task.System),
@@ -840,7 +826,7 @@ func executionObjectRefFromCanonicalTask(task integration.CanonicalTask) *execut
 		ExternalID: strings.TrimSpace(task.ExternalID),
 		Title:      strings.TrimSpace(task.Title),
 		URL:        strings.TrimSpace(task.URL),
-		Attributes: cloneStringMap(task.Attributes),
+		Attributes: attributes,
 	}
 }
 
@@ -896,22 +882,22 @@ func decisionFailure(code string, err error, retryable bool, manualIntervention 
 	}
 }
 
-func buildExecutionTask(issue *integration.TrackerIssue) string {
+func buildExecutionTask(task *integration.CanonicalTask) string {
 	lines := []string{
-		fmt.Sprintf("Task #%s: %s", issue.ID, strings.TrimSpace(issue.Title)),
+		fmt.Sprintf("Task #%s: %s", task.ID, strings.TrimSpace(task.Title)),
 	}
 
-	if repository := strings.TrimSpace(issue.Repository); repository != "" {
+	if repository := strings.TrimSpace(task.Repository); repository != "" {
 		lines = append(lines, fmt.Sprintf("Repository: %s", repository))
 	}
-	if issueURL := strings.TrimSpace(issue.URL); issueURL != "" {
+	if issueURL := strings.TrimSpace(task.URL); issueURL != "" {
 		lines = append(lines, fmt.Sprintf("Issue: %s", issueURL))
 	}
-	if state := strings.TrimSpace(issue.State); state != "" {
+	if state := strings.TrimSpace(task.State); state != "" {
 		lines = append(lines, fmt.Sprintf("State: %s", state))
 	}
 
-	body := strings.TrimSpace(issue.Body)
+	body := strings.TrimSpace(task.Body)
 	if body == "" {
 		body = "No additional issue description was provided."
 	}

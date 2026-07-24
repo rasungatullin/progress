@@ -79,7 +79,7 @@ func newDecisionService(cmd *cobra.Command) decisionStarter {
 }
 
 func printDecisionStartResultOnError(cmd *cobra.Command, result decision.StartResult) {
-	if result.Context.Signal.TaskNumber == 0 && result.Context.Signal.Source == "" && result.Context.Signal.Kind == "" && !result.Ready && result.Decision == nil && result.Execution == nil && result.Context.Issue == nil {
+	if result.Context.Signal.TaskNumber == 0 && result.Context.Signal.Source == "" && result.Context.Signal.Kind == "" && !result.Ready && result.Decision == nil && result.Execution == nil && result.Context.Task.ID == "" {
 		return
 	}
 
@@ -87,7 +87,7 @@ func printDecisionStartResultOnError(cmd *cobra.Command, result decision.StartRe
 }
 
 func printDecisionStartResult(cmd *cobra.Command, result decision.StartResult) {
-	issue := result.Context.Issue
+	task := result.Context.Task
 	cmd.Printf("task=%d\nsignal-source=%s\nsignal-kind=%s\ncontext-ready=%t\n", result.Context.Signal.TaskNumber, result.Context.Signal.Source, result.Context.Signal.Kind, result.Ready)
 	if result.Consideration != nil {
 		if result.Consideration.Status != "" {
@@ -143,12 +143,12 @@ func printDecisionStartResult(cmd *cobra.Command, result decision.StartResult) {
 		}
 		printLaunchStructuredOutput(cmd, *result.Execution)
 	}
-	if issue == nil {
+	if task.ID == "" && task.Title == "" && task.State == "" && task.URL == "" {
 		return
 	}
 
-	cmd.Printf("issue-id=%s\nissue-title=%s\nissue-state=%s\n", issue.ID, issue.Title, issue.State)
-	if issue.URL != "" {
-		cmd.Printf("issue-url=%s\n", issue.URL)
+	cmd.Printf("issue-id=%s\nissue-title=%s\nissue-state=%s\n", task.ID, task.Title, task.State)
+	if task.URL != "" {
+		cmd.Printf("issue-url=%s\n", task.URL)
 	}
 }
