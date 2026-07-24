@@ -615,9 +615,9 @@ func normalizeObjectType(value string) string {
 	switch value {
 	case "issue":
 		return "task"
-	case "task-comment":
+	case "task-comment", "issue.comment", "issue-comment":
 		return "comment"
-	case "task-label":
+	case "task-label", "issue.label", "issue-label":
 		return "label"
 	default:
 		return value

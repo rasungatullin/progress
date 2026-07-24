@@ -1268,6 +1268,112 @@ func TestNewServiceFromConfigRegistersScriptProvider(t *testing.T) {
 	}
 }
 
+func TestExecuteScriptCatalogValidatesNestedIssuePayloads(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		operationName string
+		stdout        string
+		wantFailure   bool
+	}{
+		{
+			name:          "явно пустой список комментариев",
+			operationName: "issue.issue.comment.list",
+			stdout:        `{"status":"ok","task_comments":[]}`,
+		},
+		{
+			name:          "переходный список комментариев",
+			operationName: "issue.issue.comment.list",
+			stdout:        `{"status":"ok","comments":[{"body":"устаревший ответ"}]}`,
+			wantFailure:   true,
+		},
+		{
+			name:          "создание комментария без результата",
+			operationName: "issue.issue.comment.create",
+			stdout:        `{"status":"ok"}`,
+			wantFailure:   true,
+		},
+		{
+			name:          "добавление метки без результата",
+			operationName: "issue.issue.label.add",
+			stdout:        `{"status":"ok"}`,
+			wantFailure:   true,
+		},
+		{
+			name:          "удаление метки без результата",
+			operationName: "issue.issue.label.remove",
+			stdout:        `{"status":"ok"}`,
+			wantFailure:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			scriptPath := filepath.Join(root, "operation.sh")
+			content := "#!/bin/sh\nprintf '%s\\n' '" + tt.stdout + "'\n"
+			if err := os.WriteFile(scriptPath, []byte(content), 0o755); err != nil {
+				t.Fatalf("write script fixture: %v", err)
+			}
+
+			service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+				DefaultSystems: map[string]string{model.IntegrationTypeTracker: "work-tracker"},
+				Systems: map[string]model.IntegrationSystemConfig{
+					"work-tracker": {
+						Type:            "script",
+						IntegrationType: model.IntegrationTypeTracker,
+						Path:            root,
+						Operations: map[string]model.IntegrationOperationConfig{
+							tt.operationName: {Script: "operation.sh"},
+						},
+					},
+				},
+			})
+			operations := service.Operations(context.Background(), OperationFilter{
+				System: "work-tracker",
+				Name:   tt.operationName,
+			})
+			if len(operations) != 1 {
+				t.Fatalf("expected one catalog operation, got %#v", operations)
+			}
+			descriptor := operations[0]
+			if descriptor.ObjectType != "issue.comment" && descriptor.ObjectType != "issue.label" {
+				t.Fatalf("expected nested issue object type, got %#v", descriptor)
+			}
+
+			response, err := service.Execute(context.Background(), Request{
+				IntegrationType: descriptor.IntegrationType,
+				System:          descriptor.System,
+				SystemProvided:  true,
+				Resource:        descriptor.ObjectType,
+				ObjectType:      descriptor.ObjectType,
+				Operation:       descriptor.Operation,
+				ID:              "ABC-123",
+				Labels:          []string{"defect"},
+			})
+			if tt.wantFailure {
+				if err == nil {
+					t.Fatal("expected missing canonical payload error")
+				}
+				if response.Failure == nil || response.Failure.Kind != model.FailureKindExternalFailure || response.Status != model.ResponseStatusFailed {
+					t.Fatalf("unexpected failure response: %#v", response)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("execute script catalog operation: %v", err)
+			}
+			if response.TaskComments == nil || len(response.TaskComments) != 0 {
+				t.Fatalf("expected explicit empty task comments, got %#v", response.TaskComments)
+			}
+		})
+	}
+}
+
 func TestExecutePropagatesProviderError(t *testing.T) {
 	t.Parallel()
 
