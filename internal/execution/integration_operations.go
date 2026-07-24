@@ -1032,32 +1032,22 @@ func mergeRequestFromIntegrationResponse(response integration.Response) (integra
 	if response.MergeRequest != nil {
 		return *response.MergeRequest, true
 	}
-	if response.PullRequest != nil {
-		return integration.MergeRequest{
-			System:         response.PullRequest.System,
-			Repository:     response.PullRequest.Repository,
-			Number:         response.PullRequest.Number,
-			Title:          response.PullRequest.Title,
-			Body:           response.PullRequest.Body,
-			State:          response.PullRequest.State,
-			BaseRef:        response.PullRequest.BaseRef,
-			HeadRef:        response.PullRequest.HeadRef,
-			ReviewDecision: response.PullRequest.ReviewDecision,
-			URL:            response.PullRequest.URL,
-			CreatedAt:      response.PullRequest.CreatedAt,
-			UpdatedAt:      response.PullRequest.UpdatedAt,
-		}, true
-	}
 	return integration.MergeRequest{}, false
 }
 
 func mergeRequestFromPublishResponse(response integration.Response, ref pullRequestRef) integration.MergeRequest {
-	if mergeRequest, ok := mergeRequestFromIntegrationResponse(response); ok {
-		return mergeRequest
+	fallback := mergeRequestFromRef(ref)
+	if response.MergeRequest != nil {
+		return mergeMergeRequest(fallback, *response.MergeRequest)
 	}
-	mergeRequest := mergeRequestFromRef(ref)
+	if response.OperationResult != nil {
+		return mergeRequestFromOperationResult(*response.OperationResult, fallback)
+	}
+	// Старый статус остаётся только резервом для отказа already-exists,
+	// в котором канонический результат пока отсутствует.
 	if response.PullRequestStatus != nil {
 		status := response.PullRequestStatus
+		mergeRequest := fallback
 		mergeRequest.System = strings.TrimSpace(status.System)
 		mergeRequest.Repository = firstNonEmptyTrimmed(status.Repository, mergeRequest.Repository)
 		if status.Number > 0 {
@@ -1070,18 +1060,7 @@ func mergeRequestFromPublishResponse(response integration.Response, ref pullRequ
 		mergeRequest.URL = strings.TrimSpace(status.URL)
 		return mergeRequest
 	}
-	if response.OperationResult != nil {
-		result := response.OperationResult
-		mergeRequest.System = strings.TrimSpace(result.System)
-		mergeRequest.ExternalID = strings.TrimSpace(result.ExternalID)
-		if number, err := strconv.Atoi(strings.TrimSpace(result.ExternalID)); err == nil && number > 0 {
-			mergeRequest.Number = number
-		}
-		mergeRequest.State = strings.TrimSpace(result.Status)
-		mergeRequest.URL = strings.TrimSpace(result.URL)
-		return mergeRequest
-	}
-	return mergeRequest
+	return fallback
 }
 
 func mergeRequestFromRef(ref pullRequestRef) integration.MergeRequest {
@@ -1093,6 +1072,38 @@ func mergeRequestFromRef(ref pullRequestRef) integration.MergeRequest {
 		BaseRef:    strings.TrimSpace(ref.Base),
 		HeadRef:    strings.TrimSpace(ref.Head),
 	}
+}
+
+func mergeRequestFromOperationResult(result integration.OperationResult, fallback integration.MergeRequest) integration.MergeRequest {
+	mergeRequest := fallback
+	mergeRequest.System = firstNonEmptyTrimmed(result.System, mergeRequest.System)
+	mergeRequest.ExternalID = strings.TrimSpace(result.ExternalID)
+	if number, err := strconv.Atoi(mergeRequest.ExternalID); err == nil && number > 0 {
+		mergeRequest.Number = number
+	}
+	if strings.EqualFold(strings.TrimSpace(result.Status), "ok") {
+		mergeRequest.State = "OPEN"
+	} else {
+		mergeRequest.State = strings.TrimSpace(result.Status)
+	}
+	mergeRequest.URL = strings.TrimSpace(result.URL)
+	return mergeRequest
+}
+
+func mergeMergeRequest(fallback integration.MergeRequest, value integration.MergeRequest) integration.MergeRequest {
+	result := value
+	result.System = firstNonEmptyTrimmed(result.System, fallback.System)
+	result.Repository = firstNonEmptyTrimmed(result.Repository, fallback.Repository)
+	if result.Number == 0 {
+		result.Number = fallback.Number
+	}
+	result.Title = firstNonEmptyTrimmed(result.Title, fallback.Title)
+	result.Body = firstNonEmptyTrimmed(result.Body, fallback.Body)
+	result.State = firstNonEmptyTrimmed(result.State, fallback.State)
+	result.BaseRef = firstNonEmptyTrimmed(result.BaseRef, fallback.BaseRef)
+	result.HeadRef = firstNonEmptyTrimmed(result.HeadRef, fallback.HeadRef)
+	result.URL = firstNonEmptyTrimmed(result.URL, fallback.URL)
+	return result
 }
 
 func invocationWithPullRequest(in invocation, pr integration.MergeRequest) invocation {
@@ -1242,21 +1253,24 @@ func pullRequestBodyFromPublishMergeRequestInput(input publishMergeRequestInput)
 }
 
 func pullRequestAlreadyAvailable(response integration.Response) bool {
-	if response.PullRequestStatus != nil && response.PullRequestStatus.Number > 0 && strings.TrimSpace(response.PullRequestStatus.URL) != "" {
+	if response.MergeRequest != nil && response.MergeRequest.Number > 0 && strings.TrimSpace(response.MergeRequest.URL) != "" {
 		return true
 	}
 	if response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != "" {
 		return true
 	}
-	return false
+	return response.PullRequestStatus != nil && response.PullRequestStatus.Number > 0 && strings.TrimSpace(response.PullRequestStatus.URL) != ""
 }
 
 func pullRequestPublishSummary(response integration.Response) string {
-	if response.PullRequestStatus != nil {
-		return fmt.Sprintf("pull-request=%d url=%s state=%s", response.PullRequestStatus.Number, response.PullRequestStatus.URL, response.PullRequestStatus.State)
+	if response.MergeRequest != nil {
+		return fmt.Sprintf("pull-request=%d url=%s state=%s", response.MergeRequest.Number, response.MergeRequest.URL, response.MergeRequest.State)
 	}
 	if response.OperationResult != nil {
 		return fmt.Sprintf("pull-request=%s url=%s status=%s", response.OperationResult.ExternalID, response.OperationResult.URL, response.OperationResult.Status)
+	}
+	if response.PullRequestStatus != nil {
+		return fmt.Sprintf("pull-request=%d url=%s state=%s", response.PullRequestStatus.Number, response.PullRequestStatus.URL, response.PullRequestStatus.State)
 	}
 	return "pull-request=published"
 }

@@ -1712,8 +1712,7 @@ func TestPublishMergeRequestFillsOnlyActionData(t *testing.T) {
 				t.Fatalf("unexpected integration request: %#v", req)
 			}
 			return integration.Response{
-				PullRequestStatus: &integration.PullRequestStatus{Repository: req.Repository, Number: 17, State: "OPEN", URL: "https://github.com/owner/name/pull/17", Base: req.Base, Head: req.Head, Title: req.Title},
-				OperationResult:   &integration.OperationResult{Status: "ok", ExternalID: "17", URL: "https://github.com/owner/name/pull/17"},
+				OperationResult: &integration.OperationResult{System: "github", ObjectType: "merge-request", Operation: "create", Status: "ok", ExternalID: "17", URL: "https://github.com/owner/name/pull/17"},
 			}, nil
 		},
 	}
@@ -3541,8 +3540,7 @@ func TestServiceExecuteStartImplementationPublishesPullRequest(t *testing.T) {
 				t.Fatalf("unexpected integration operation: %#v", req)
 			}
 			return integration.Response{
-				PullRequestStatus: &integration.PullRequestStatus{Repository: req.Repository, Number: 17, State: "OPEN", URL: "https://github.com/owner/name/pull/17"},
-				OperationResult:   &integration.OperationResult{Status: "ok", ExternalID: "17", URL: "https://github.com/owner/name/pull/17"},
+				OperationResult: &integration.OperationResult{System: "github", ObjectType: "merge-request", Operation: "create", Status: "ok", ExternalID: "17", URL: "https://github.com/owner/name/pull/17"},
 			}, nil
 		},
 	}
@@ -3629,8 +3627,7 @@ func TestServiceExecuteStartImplementationUsesPullRequestBaseForWorkplace(t *tes
 				t.Fatalf("unexpected integration request: %#v", req)
 			}
 			return integration.Response{
-				PullRequestStatus: &integration.PullRequestStatus{Repository: req.Repository, Number: 18, State: "OPEN", URL: "https://github.com/owner/name/pull/18"},
-				OperationResult:   &integration.OperationResult{Status: "ok", ExternalID: "18", URL: "https://github.com/owner/name/pull/18"},
+				OperationResult: &integration.OperationResult{System: "github", ObjectType: "merge-request", Operation: "create", Status: "ok", ExternalID: "18", URL: "https://github.com/owner/name/pull/18"},
 			}, nil
 		},
 	}
