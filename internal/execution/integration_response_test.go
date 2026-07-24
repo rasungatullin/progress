@@ -1,11 +1,222 @@
 package execution
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution/model"
 	"github.com/rasungatullin/progress/internal/integration"
 )
+
+func TestExecuteIntegrationPreservesMergeRequestCreateInput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		response integration.Response
+		number   int
+		url      string
+	}{
+		{
+			name: "результат операции",
+			response: integration.Response{OperationResult: &integration.OperationResult{
+				System:     "github",
+				ObjectType: "merge-request",
+				Operation:  "create",
+				Status:     "ok",
+				ExternalID: "41",
+				URL:        "https://github.com/owner/name/pull/41",
+			}},
+			number: 41,
+			url:    "https://github.com/owner/name/pull/41",
+		},
+		{
+			name: "частичный канонический объект",
+			response: integration.Response{MergeRequest: &integration.MergeRequest{
+				System: "github",
+				Number: 42,
+				State:  "OPEN",
+				URL:    "https://github.com/owner/name/pull/42",
+			}},
+			number: 42,
+			url:    "https://github.com/owner/name/pull/42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			operation := mergeRequestCreateIntegrationOperation()
+			state := mergeRequestCreateIntegrationState(operation)
+			service := &Service{integrations: &stubIntegrationExecutor{execute: func(_ context.Context, request integration.Request) (integration.Response, error) {
+				if request.Repository != "owner/name" || request.Base != "main" || request.Head != "feature/canonical" ||
+					request.Title != "Канонический запрос" || request.Body != "Описание запроса" {
+					t.Fatalf("unexpected create request: %#v", request)
+				}
+				return tt.response, nil
+			}}}
+
+			if err := (builtinOperationExecutor{service: service}).executeIntegration(context.Background(), state, operation); err != nil {
+				t.Fatalf("execute integration: %v", err)
+			}
+
+			mergeRequest, ok := state.data["merge_request"].(integration.MergeRequest)
+			if !ok {
+				t.Fatalf("merge request output is missing: %#v", state.data["merge_request"])
+			}
+			if mergeRequest.Repository != "owner/name" || mergeRequest.BaseRef != "main" ||
+				mergeRequest.HeadRef != "feature/canonical" || mergeRequest.Title != "Канонический запрос" ||
+				mergeRequest.Body != "Описание запроса" || mergeRequest.Number != tt.number || mergeRequest.URL != tt.url {
+				t.Fatalf("create input must complete the integration response: %#v", mergeRequest)
+			}
+
+			invocation, ok := state.data["invocation"].(model.Invocation)
+			if !ok || invocation.Assignment == nil || len(invocation.Assignment.RelatedObjects) != 1 {
+				t.Fatalf("updated invocation is missing: %#v", state.data["invocation"])
+			}
+			object := invocation.Assignment.RelatedObjects[0]
+			if object.Repository != "owner/name" || object.Number != tt.number || object.Title != "Канонический запрос" ||
+				object.URL != tt.url || object.Attributes["base_ref"] != "main" ||
+				object.Attributes["head_ref"] != "feature/canonical" || object.Attributes["body"] != "Описание запроса" ||
+				object.Attributes["custom"] != "сохранить" {
+				t.Fatalf("invocation must preserve complete merge request data: %#v", object)
+			}
+		})
+	}
+}
+
+func TestExecuteIntegrationAcceptsOnlyCompleteAlreadyExistsStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		response integration.Response
+		accepted bool
+	}{
+		{
+			name: "полный already-exists",
+			response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{
+				State:  "already-exists",
+				Number: 17,
+				URL:    "https://github.com/owner/name/pull/17",
+			}},
+			accepted: true,
+		},
+		{
+			name: "внешний отказ только с URL",
+			response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{
+				State: "external-failure",
+				URL:   "https://github.com/owner/name/pull/17",
+			}},
+		},
+		{
+			name: "already-exists только с номером",
+			response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{
+				State:  "already-exists",
+				Number: 17,
+			}},
+		},
+		{
+			name: "другое состояние",
+			response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{
+				State:  "external-failure",
+				Number: 17,
+				URL:    "https://github.com/owner/name/pull/17",
+			}},
+		},
+		{
+			name: "нормализованный отказ",
+			response: integration.Response{
+				Failure: &integration.Failure{Kind: "external-failure", Message: "GitHub отказал в операции"},
+				PullRequestStatus: &integration.PullRequestStatus{
+					State:  "already-exists",
+					Number: 17,
+					URL:    "https://github.com/owner/name/pull/17",
+				},
+			},
+		},
+		{
+			name: "частичный ответ",
+			response: integration.Response{
+				Partial: true,
+				PullRequestStatus: &integration.PullRequestStatus{
+					State:  "already-exists",
+					Number: 17,
+					URL:    "https://github.com/owner/name/pull/17",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			operation := mergeRequestCreateIntegrationOperation()
+			state := mergeRequestCreateIntegrationState(operation)
+			service := &Service{integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+				return tt.response, errors.New("GitHub merge request create failed")
+			}}}
+
+			err := (builtinOperationExecutor{service: service}).executeIntegration(context.Background(), state, operation)
+			if tt.accepted {
+				if err != nil {
+					t.Fatalf("complete already-exists status must be accepted: %v", err)
+				}
+				mergeRequest, ok := state.data["merge_request"].(integration.MergeRequest)
+				if !ok || mergeRequest.Number != 17 || mergeRequest.URL != "https://github.com/owner/name/pull/17" {
+					t.Fatalf("unexpected accepted merge request: %#v", state.data["merge_request"])
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("invalid fallback must preserve integration failure: %#v", tt.response)
+			}
+			if _, exists := state.data["merge_request"]; exists {
+				t.Fatalf("failed integration must not publish a merge request: %#v", state.data["merge_request"])
+			}
+		})
+	}
+}
+
+func mergeRequestCreateIntegrationOperation() model.OperationSpec {
+	return model.OperationSpec{
+		Name:     "publish-merge-request",
+		Type:     model.OperationType(OperationTypeIntegration),
+		Kind:     "repo.merge-request.create",
+		Required: true,
+		In: model.OperationMap{
+			"repository": {Ref: "data.repository_name"},
+			"base_ref":   {Ref: "data.base_ref"},
+			"head_ref":   {Ref: "data.head_ref"},
+			"title":      {Ref: "data.title"},
+			"body":       {Ref: "data.body"},
+		},
+		Out: model.OperationMap{
+			"merge_request": {Ref: "data.merge_request"},
+			"invocation":    {Ref: "data.invocation"},
+		},
+	}
+}
+
+func mergeRequestCreateIntegrationState(operation model.OperationSpec) *operationExecution {
+	return &operationExecution{
+		in: model.Invocation{Assignment: &model.ExecutionAssignment{RelatedObjects: []model.ObjectRef{{
+			Type:       "merge-request",
+			Attributes: map[string]string{"custom": "сохранить"},
+		}}}},
+		data: map[string]any{
+			"repository_name": "owner/name",
+			"base_ref":        "main",
+			"head_ref":        "feature/canonical",
+			"title":           "Канонический запрос",
+			"body":            "Описание запроса",
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+}
 
 func TestWriteIntegrationResponsePublishesCanonicalFields(t *testing.T) {
 	t.Parallel()

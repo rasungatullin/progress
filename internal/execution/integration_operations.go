@@ -1045,7 +1045,7 @@ func mergeRequestFromPublishResponse(response integration.Response, ref pullRequ
 	}
 	// Старый статус остаётся только резервом для отказа already-exists,
 	// в котором канонический результат пока отсутствует.
-	if response.PullRequestStatus != nil {
+	if pullRequestStatusAlreadyExists(response) {
 		status := response.PullRequestStatus
 		mergeRequest := fallback
 		mergeRequest.System = strings.TrimSpace(status.System)
@@ -1151,11 +1151,26 @@ func upsertPullRequestObject(assignment *ExecutionAssignment, pr integration.Mer
 		Attributes: map[string]string{
 			"base_ref": strings.TrimSpace(pr.BaseRef),
 			"head_ref": strings.TrimSpace(pr.HeadRef),
+			"body":     strings.TrimSpace(pr.Body),
 		},
 	}
 	for index, existing := range assignment.RelatedObjects {
 		if !isPullRequestObject(existing.Type) {
 			continue
+		}
+		object.System = firstNonEmptyTrimmed(object.System, existing.System)
+		object.Repository = firstNonEmptyTrimmed(object.Repository, existing.Repository)
+		if object.Number == 0 {
+			object.Number = existing.Number
+		}
+		object.ID = firstNonEmptyTrimmed(object.ID, existing.ID)
+		object.ExternalID = firstNonEmptyTrimmed(object.ExternalID, existing.ExternalID)
+		object.Title = firstNonEmptyTrimmed(object.Title, existing.Title)
+		object.URL = firstNonEmptyTrimmed(object.URL, existing.URL)
+		for name, value := range existing.Attributes {
+			if strings.TrimSpace(object.Attributes[name]) == "" {
+				object.Attributes[name] = value
+			}
 		}
 		assignment.RelatedObjects[index] = object
 		return
@@ -1259,7 +1274,17 @@ func pullRequestAlreadyAvailable(response integration.Response) bool {
 	if response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != "" {
 		return true
 	}
-	return response.PullRequestStatus != nil && response.PullRequestStatus.Number > 0 && strings.TrimSpace(response.PullRequestStatus.URL) != ""
+	return pullRequestStatusAlreadyExists(response)
+}
+
+func pullRequestStatusAlreadyExists(response integration.Response) bool {
+	if response.Partial || response.Failure != nil || response.PullRequestStatus == nil {
+		return false
+	}
+	status := response.PullRequestStatus
+	return strings.TrimSpace(status.State) == "already-exists" &&
+		status.Number > 0 &&
+		strings.TrimSpace(status.URL) != ""
 }
 
 func pullRequestPublishSummary(response integration.Response) string {

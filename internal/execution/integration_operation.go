@@ -259,11 +259,11 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 		"operation_result": response.OperationResult,
 		"failure":          response.Failure,
 	}
-	if mergeRequest, ok := mergeRequestFromIntegrationResponse(response); ok {
+	if integrationCreateProducesMergeRequest(operation, response) {
+		mergeRequest := mergeRequestFromPublishResponse(response, pullRequestRefFromOperation(state, operation))
 		values["merge_request"] = mergeRequest
 		values["pull_request"] = mergeRequest
-	} else if integrationCreateProducesMergeRequest(operation, response) {
-		mergeRequest = mergeRequestFromPublishResponse(response, pullRequestRef{})
+	} else if mergeRequest, ok := mergeRequestFromIntegrationResponse(response); ok {
 		values["merge_request"] = mergeRequest
 		values["pull_request"] = mergeRequest
 	}
@@ -312,7 +312,7 @@ func integrationCreateProducesMergeRequest(operation OperationSpec, response int
 		return true
 	}
 	return response.OperationResult != nil && strings.EqualFold(strings.TrimSpace(response.OperationResult.ObjectType), "merge-request") ||
-		response.PullRequestStatus != nil
+		pullRequestStatusAlreadyExists(response)
 }
 
 func integrationResponseAlreadyAvailable(operation OperationSpec, response integration.Response) bool {
@@ -327,7 +327,7 @@ func integrationResponseAlreadyAvailable(operation OperationSpec, response integ
 	}
 	// Старый статус остаётся только резервом для отказа already-exists:
 	// адаптер пока не публикует для него канонический объект или OperationResult.
-	return response.PullRequestStatus != nil && (response.PullRequestStatus.Number > 0 || strings.TrimSpace(response.PullRequestStatus.URL) != "")
+	return pullRequestStatusAlreadyExists(response)
 }
 
 func (e builtinOperationExecutor) failIntegrationOperation(state *operationExecution, operation OperationSpec, name, summary string, err error, code string) error {
