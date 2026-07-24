@@ -246,27 +246,26 @@ func addIntegrationExtra(extra map[string]any, name string, value any) map[strin
 }
 
 func writeIntegrationResponse(state *operationExecution, operation OperationSpec, response integration.Response) {
-	values := map[string]any{"response": response, "merge_request": response.MergeRequest, "pull_request": response.MergeRequest, "review_remarks": response.ReviewRemarks, "operation_result": response.OperationResult, "failure": response.Failure}
-	if pointer, ok := values["merge_request"].(*integration.MergeRequest); ok {
-		if pointer != nil {
-			values["merge_request"] = *pointer
-			values["pull_request"] = *pointer
-		} else {
-			values["merge_request"] = nil
-			values["pull_request"] = nil
-		}
+	values := map[string]any{
+		"response":         response,
+		"task":             response.Task,
+		"tasks":            response.Tasks,
+		"task_comments":    response.TaskComments,
+		"repository":       response.Repository,
+		"merge_request":    response.MergeRequest,
+		"merge_requests":   response.MergeRequests,
+		"pull_request":     response.MergeRequest,
+		"review_remarks":   response.ReviewRemarks,
+		"operation_result": response.OperationResult,
+		"failure":          response.Failure,
 	}
-	if values["merge_request"] == nil {
-		if response.PullRequestStatus != nil {
-			status := response.PullRequestStatus
-			values["merge_request"] = integration.MergeRequest{System: status.System, Repository: status.Repository, Number: status.Number, Title: status.Title, State: status.State, BaseRef: status.Base, HeadRef: status.Head, URL: status.URL}
-		} else if response.OperationResult != nil {
-			result := response.OperationResult
-			values["merge_request"] = integration.MergeRequest{System: result.System, ExternalID: result.ExternalID, State: result.Status, URL: result.URL}
-		}
-	}
-	if values["pull_request"] == nil {
-		values["pull_request"] = values["merge_request"]
+	if integrationCreateProducesMergeRequest(operation, response) {
+		mergeRequest := mergeRequestFromPublishResponse(response, pullRequestRefFromOperation(state, operation))
+		values["merge_request"] = mergeRequest
+		values["pull_request"] = mergeRequest
+	} else if mergeRequest, ok := mergeRequestFromIntegrationResponse(response); ok {
+		values["merge_request"] = mergeRequest
+		values["pull_request"] = mergeRequest
 	}
 	mergeRequest, ok := values["merge_request"].(integration.MergeRequest)
 	if !ok {
@@ -304,11 +303,31 @@ func writeIntegrationResponse(state *operationExecution, operation OperationSpec
 	}
 }
 
+func integrationCreateProducesMergeRequest(operation OperationSpec, response integration.Response) bool {
+	kind := strings.TrimSpace(string(operation.Kind))
+	if !strings.HasSuffix(kind, ".create") {
+		return false
+	}
+	if strings.Contains(kind, ".merge-request.") || strings.EqualFold(strings.TrimSpace(response.ObjectType), "merge-request") || strings.EqualFold(strings.TrimSpace(response.Resource), "merge-request") {
+		return true
+	}
+	return response.OperationResult != nil && strings.EqualFold(strings.TrimSpace(response.OperationResult.ObjectType), "merge-request") ||
+		pullRequestStatusAlreadyExists(response)
+}
+
 func integrationResponseAlreadyAvailable(operation OperationSpec, response integration.Response) bool {
 	if !strings.HasSuffix(strings.TrimSpace(string(operation.Kind)), ".create") {
 		return false
 	}
-	return response.PullRequestStatus != nil && (response.PullRequestStatus.Number > 0 || strings.TrimSpace(response.PullRequestStatus.URL) != "") || response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != ""
+	if response.MergeRequest != nil && (response.MergeRequest.Number > 0 || strings.TrimSpace(response.MergeRequest.URL) != "") {
+		return true
+	}
+	if response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != "" {
+		return true
+	}
+	// Старый статус остаётся только резервом для отказа already-exists:
+	// адаптер пока не публикует для него канонический объект или OperationResult.
+	return pullRequestStatusAlreadyExists(response)
 }
 
 func (e builtinOperationExecutor) failIntegrationOperation(state *operationExecution, operation OperationSpec, name, summary string, err error, code string) error {
