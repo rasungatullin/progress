@@ -1043,23 +1043,6 @@ func mergeRequestFromPublishResponse(response integration.Response, ref pullRequ
 	if response.OperationResult != nil {
 		return mergeRequestFromOperationResult(*response.OperationResult, fallback)
 	}
-	// Старый статус остаётся только резервом для отказа already-exists,
-	// в котором канонический результат пока отсутствует.
-	if pullRequestStatusAlreadyExists(response) {
-		status := response.PullRequestStatus
-		mergeRequest := fallback
-		mergeRequest.System = strings.TrimSpace(status.System)
-		mergeRequest.Repository = firstNonEmptyTrimmed(status.Repository, mergeRequest.Repository)
-		if status.Number > 0 {
-			mergeRequest.Number = status.Number
-		}
-		mergeRequest.State = strings.TrimSpace(status.State)
-		mergeRequest.BaseRef = firstNonEmptyTrimmed(status.Base, mergeRequest.BaseRef)
-		mergeRequest.HeadRef = firstNonEmptyTrimmed(status.Head, mergeRequest.HeadRef)
-		mergeRequest.Title = firstNonEmptyTrimmed(status.Title, mergeRequest.Title)
-		mergeRequest.URL = strings.TrimSpace(status.URL)
-		return mergeRequest
-	}
 	return fallback
 }
 
@@ -1274,17 +1257,7 @@ func pullRequestAlreadyAvailable(response integration.Response) bool {
 	if response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != "" {
 		return true
 	}
-	return pullRequestStatusAlreadyExists(response)
-}
-
-func pullRequestStatusAlreadyExists(response integration.Response) bool {
-	if response.Partial || response.Failure != nil || response.PullRequestStatus == nil {
-		return false
-	}
-	status := response.PullRequestStatus
-	return strings.TrimSpace(status.State) == "already-exists" &&
-		status.Number > 0 &&
-		strings.TrimSpace(status.URL) != ""
+	return false
 }
 
 func pullRequestPublishSummary(response integration.Response) string {
@@ -1293,9 +1266,6 @@ func pullRequestPublishSummary(response integration.Response) string {
 	}
 	if response.OperationResult != nil {
 		return fmt.Sprintf("pull-request=%s url=%s status=%s", response.OperationResult.ExternalID, response.OperationResult.URL, response.OperationResult.Status)
-	}
-	if response.PullRequestStatus != nil {
-		return fmt.Sprintf("pull-request=%d url=%s state=%s", response.PullRequestStatus.Number, response.PullRequestStatus.URL, response.PullRequestStatus.State)
 	}
 	return "pull-request=published"
 }

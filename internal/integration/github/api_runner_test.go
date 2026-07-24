@@ -677,9 +677,6 @@ func TestAPITransportPRGetPreservesHTTPFailureKind(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected permission error")
 	}
-	if response.PullRequestStatus == nil || response.PullRequestStatus.State != model.FailureKindPermissionDenied {
-		t.Fatalf("unexpected pull request status: %#v", response.PullRequestStatus)
-	}
 	if response.Failure == nil || response.Failure.Kind != model.FailureKindPermissionDenied {
 		t.Fatalf("unexpected failure: %#v", response.Failure)
 	}
@@ -1384,12 +1381,10 @@ func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
-		body           map[string]any
-		expectedCode   string
-		expectedState  string
-		expectedURL    string
-		expectedNumber int
+		name         string
+		body         map[string]any
+		expectedCode string
+		idempotent   bool
 	}{
 		{
 			name: "already exists",
@@ -1399,10 +1394,7 @@ func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
 					{"message": "A pull request already exists for branch feature into branch main: https://github.com/owner/name/pull/15"},
 				},
 			},
-			expectedCode:   ErrorCodeAlreadyExists,
-			expectedState:  ErrorCodeAlreadyExists,
-			expectedURL:    "https://github.com/owner/name/pull/15",
-			expectedNumber: 15,
+			idempotent: true,
 		},
 		{
 			name: "branch not found",
@@ -1412,8 +1404,7 @@ func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
 					{"message": "Head ref must be a branch"},
 				},
 			},
-			expectedCode:  ErrorCodeNotFound,
-			expectedState: ErrorCodeNotFound,
+			expectedCode: ErrorCodeNotFound,
 		},
 	}
 
@@ -1449,18 +1440,21 @@ func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
 				Title:      "Title",
 				Body:       "Body",
 			})
-			assertGitHubErrorCode(t, err, tt.expectedCode)
-			if response.PullRequestStatus == nil {
-				t.Fatal("expected pull request status")
-			}
-			if response.PullRequestStatus.State != tt.expectedState {
-				t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
-			}
-			if response.PullRequestStatus.URL != tt.expectedURL {
-				t.Fatalf("unexpected url: %q", response.PullRequestStatus.URL)
-			}
-			if response.PullRequestStatus.Number != tt.expectedNumber {
-				t.Fatalf("unexpected number: %d", response.PullRequestStatus.Number)
+			if tt.idempotent {
+				if err != nil {
+					t.Fatalf("already existing pull request must be idempotent: %v", err)
+				}
+				if response.MergeRequest == nil || response.MergeRequest.Number != 15 || response.MergeRequest.URL != "https://github.com/owner/name/pull/15" {
+					t.Fatalf("unexpected merge request: %#v", response.MergeRequest)
+				}
+				if response.OperationResult == nil || !response.OperationResult.Idempotent {
+					t.Fatalf("unexpected operation result: %#v", response.OperationResult)
+				}
+			} else {
+				assertGitHubErrorCode(t, err, tt.expectedCode)
+				if response.Failure == nil || response.Failure.Kind != model.FailureKindNotFound {
+					t.Fatalf("unexpected failure: %#v", response.Failure)
+				}
 			}
 		})
 	}

@@ -2,7 +2,6 @@ package execution
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution/model"
@@ -82,100 +81,6 @@ func TestExecuteIntegrationPreservesMergeRequestCreateInput(t *testing.T) {
 				object.Attributes["head_ref"] != "feature/canonical" || object.Attributes["body"] != "Описание запроса" ||
 				object.Attributes["custom"] != "сохранить" {
 				t.Fatalf("invocation must preserve complete merge request data: %#v", object)
-			}
-		})
-	}
-}
-
-func TestExecuteIntegrationAcceptsOnlyCompleteAlreadyExistsStatus(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		response integration.Response
-		accepted bool
-	}{
-		{
-			name: "полный already-exists",
-			response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{
-				State:  "already-exists",
-				Number: 17,
-				URL:    "https://github.com/owner/name/pull/17",
-			}},
-			accepted: true,
-		},
-		{
-			name: "внешний отказ только с URL",
-			response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{
-				State: "external-failure",
-				URL:   "https://github.com/owner/name/pull/17",
-			}},
-		},
-		{
-			name: "already-exists только с номером",
-			response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{
-				State:  "already-exists",
-				Number: 17,
-			}},
-		},
-		{
-			name: "другое состояние",
-			response: integration.Response{PullRequestStatus: &integration.PullRequestStatus{
-				State:  "external-failure",
-				Number: 17,
-				URL:    "https://github.com/owner/name/pull/17",
-			}},
-		},
-		{
-			name: "нормализованный отказ",
-			response: integration.Response{
-				Failure: &integration.Failure{Kind: "external-failure", Message: "GitHub отказал в операции"},
-				PullRequestStatus: &integration.PullRequestStatus{
-					State:  "already-exists",
-					Number: 17,
-					URL:    "https://github.com/owner/name/pull/17",
-				},
-			},
-		},
-		{
-			name: "частичный ответ",
-			response: integration.Response{
-				Partial: true,
-				PullRequestStatus: &integration.PullRequestStatus{
-					State:  "already-exists",
-					Number: 17,
-					URL:    "https://github.com/owner/name/pull/17",
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			operation := mergeRequestCreateIntegrationOperation()
-			state := mergeRequestCreateIntegrationState(operation)
-			service := &Service{integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
-				return tt.response, errors.New("GitHub merge request create failed")
-			}}}
-
-			err := (builtinOperationExecutor{service: service}).executeIntegration(context.Background(), state, operation)
-			if tt.accepted {
-				if err != nil {
-					t.Fatalf("complete already-exists status must be accepted: %v", err)
-				}
-				mergeRequest, ok := state.data["merge_request"].(integration.MergeRequest)
-				if !ok || mergeRequest.Number != 17 || mergeRequest.URL != "https://github.com/owner/name/pull/17" {
-					t.Fatalf("unexpected accepted merge request: %#v", state.data["merge_request"])
-				}
-				return
-			}
-			if err == nil {
-				t.Fatalf("invalid fallback must preserve integration failure: %#v", tt.response)
-			}
-			if _, exists := state.data["merge_request"]; exists {
-				t.Fatalf("failed integration must not publish a merge request: %#v", state.data["merge_request"])
 			}
 		})
 	}
@@ -320,12 +225,6 @@ func TestMergeRequestFromPublishResponseUsesCanonicalOperationResult(t *testing.
 		Status:     "ok",
 		ExternalID: "27",
 		URL:        "https://github.com/owner/name/pull/27",
-	}, PullRequestStatus: &integration.PullRequestStatus{
-		System:     "legacy",
-		Repository: "wrong/repository",
-		Number:     999,
-		State:      "WRONG",
-		URL:        "https://example.invalid/pull/999",
 	}}
 
 	mergeRequest := mergeRequestFromPublishResponse(response, pullRequestRef{

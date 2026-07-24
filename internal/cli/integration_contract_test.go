@@ -425,51 +425,41 @@ func TestIntegrationTextOutputUsesCanonicalResponseFields(t *testing.T) {
 			name: "single task",
 			response: integration.Response{
 				System: "tracker", Resource: "issue", Operation: "get", Status: model.ResponseStatusOK,
-				Task:  &integration.CanonicalTask{ID: "canonical-task", Title: "Каноническая задача", State: "open"},
-				Issue: &integration.TrackerIssue{ID: "legacy-task", Title: "Переходная задача", State: "closed"},
+				Task: &integration.CanonicalTask{ID: "canonical-task", Title: "Каноническая задача", State: "open"},
 			},
-			want:    []string{"id=canonical-task\n", "title=Каноническая задача\n", "state=open\n"},
-			notWant: []string{"legacy-task", "Переходная задача"},
+			want: []string{"id=canonical-task\n", "title=Каноническая задача\n", "state=open\n"},
 		},
 		{
 			name: "task collection",
 			response: integration.Response{
 				System: "tracker", Resource: "issue", Operation: "search", Status: model.ResponseStatusOK,
-				Tasks:         []integration.CanonicalTask{{ID: "canonical-task", Title: "Каноническая задача", State: "open", URL: "https://example.test/tasks/canonical-task"}},
-				SearchResults: []integration.TrackerSearchResult{{ID: "legacy-task", Title: "Переходная задача"}},
+				Tasks: []integration.CanonicalTask{{ID: "canonical-task", Title: "Каноническая задача", State: "open", URL: "https://example.test/tasks/canonical-task"}},
 			},
-			want:    []string{"issue_count=1\n", "id=canonical-task\n", "url=https://example.test/tasks/canonical-task\n"},
-			notWant: []string{"legacy-task", "Переходная задача"},
+			want: []string{"issue_count=1\n", "id=canonical-task\n", "url=https://example.test/tasks/canonical-task\n"},
 		},
 		{
 			name: "task comments",
 			response: integration.Response{
 				System: "tracker", Resource: "issue", Operation: "comments", Status: model.ResponseStatusOK,
 				TaskComments: []integration.TaskComment{{ExternalID: "canonical-comment", Body: "Канонический комментарий"}},
-				Comments:     []integration.TrackerComment{{TaskID: "legacy-comment", Body: "Переходный комментарий"}},
 			},
-			want:    []string{"comment_count=1\n", "comment_id=canonical-comment\n", "comment_body=Канонический комментарий\n"},
-			notWant: []string{"legacy-comment", "Переходный комментарий"},
+			want: []string{"comment_count=1\n", "comment_id=canonical-comment\n", "comment_body=Канонический комментарий\n"},
 		},
 		{
 			name: "repository",
 			response: integration.Response{
 				Resource: "repo", Operation: "get", Status: model.ResponseStatusOK,
-				Repository:    &integration.Repository{System: "repo-system", FullName: "canonical/repository"},
-				RepositoryRef: &integration.TrackerRepository{System: "repo-system", FullName: "legacy/repository"},
+				Repository: &integration.Repository{System: "repo-system", FullName: "canonical/repository"},
 			},
-			want:    []string{"system=repo-system\n", "full_name=canonical/repository\n"},
-			notWant: []string{"legacy/repository"},
+			want: []string{"system=repo-system\n", "full_name=canonical/repository\n"},
 		},
 		{
 			name: "merge request",
 			response: integration.Response{
 				Resource: "merge-request", Operation: "get", Status: model.ResponseStatusOK,
 				MergeRequest: &integration.MergeRequest{System: "repo-system", Repository: "owner/repository", Number: 17, Title: "Канонический запрос"},
-				PullRequest:  &integration.TrackerPullRequest{System: "repo-system", Repository: "owner/repository", Number: 18, Title: "Переходный запрос"},
 			},
-			want:    []string{"number=17\n", "title=Канонический запрос\n"},
-			notWant: []string{"number=18", "Переходный запрос"},
+			want: []string{"number=17\n", "title=Канонический запрос\n"},
 		},
 		{
 			name: "merge request collection",
@@ -484,10 +474,8 @@ func TestIntegrationTextOutputUsesCanonicalResponseFields(t *testing.T) {
 			response: integration.Response{
 				System: "repo-system", Resource: "review-remark", Operation: "list", Status: model.ResponseStatusOK,
 				ReviewRemarks: []integration.ReviewRemark{{ExternalID: "canonical-remark", Body: "Каноническое замечание"}},
-				Reviews:       []integration.TrackerReview{{Body: "Переходная ревизия"}},
 			},
-			want:    []string{"remark_count=1\n", "remark_id=canonical-remark\n", "remark_body=Каноническое замечание\n"},
-			notWant: []string{"Переходная ревизия"},
+			want: []string{"remark_count=1\n", "remark_id=canonical-remark\n", "remark_body=Каноническое замечание\n"},
 		},
 		{
 			name: "operation result",

@@ -311,8 +311,7 @@ func integrationCreateProducesMergeRequest(operation OperationSpec, response int
 	if strings.Contains(kind, ".merge-request.") || strings.EqualFold(strings.TrimSpace(response.ObjectType), "merge-request") || strings.EqualFold(strings.TrimSpace(response.Resource), "merge-request") {
 		return true
 	}
-	return response.OperationResult != nil && strings.EqualFold(strings.TrimSpace(response.OperationResult.ObjectType), "merge-request") ||
-		pullRequestStatusAlreadyExists(response)
+	return response.OperationResult != nil && strings.EqualFold(strings.TrimSpace(response.OperationResult.ObjectType), "merge-request")
 }
 
 func integrationResponseAlreadyAvailable(operation OperationSpec, response integration.Response) bool {
@@ -325,9 +324,7 @@ func integrationResponseAlreadyAvailable(operation OperationSpec, response integ
 	if response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != "" {
 		return true
 	}
-	// Старый статус остаётся только резервом для отказа already-exists:
-	// адаптер пока не публикует для него канонический объект или OperationResult.
-	return pullRequestStatusAlreadyExists(response)
+	return false
 }
 
 func (e builtinOperationExecutor) failIntegrationOperation(state *operationExecution, operation OperationSpec, name, summary string, err error, code string) error {

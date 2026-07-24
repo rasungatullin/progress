@@ -355,7 +355,7 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	service := NewService(logging.New(io.Discard))
 	service.RegisterProvider("github", stubProvider{
 		response: Response{
-			Issue: &TrackerIssue{ID: "42", Title: "Example"},
+			Task: &CanonicalTask{ID: "42", Title: "Example"},
 		},
 	})
 
@@ -369,8 +369,8 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	if !result.Route.ProviderAvailable {
 		t.Fatal("provider must be available")
 	}
-	if result.Issue == nil || result.Issue.ID != "42" {
-		t.Fatalf("unexpected issue payload: %#v", result.Issue)
+	if result.Task == nil || result.Task.ID != "42" {
+		t.Fatalf("unexpected task payload: %#v", result.Task)
 	}
 	if result.System != "github" {
 		t.Fatalf("unexpected result system: %q", result.System)
@@ -383,7 +383,7 @@ func TestExecuteUsesRegisteredProvider(t *testing.T) {
 	}
 }
 
-func TestExecuteDerivesTransitionalSearchResultsFromCanonicalTasks(t *testing.T) {
+func TestExecuteMapsCanonicalTaskSearchResults(t *testing.T) {
 	t.Parallel()
 
 	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
@@ -412,74 +412,80 @@ func TestExecuteDerivesTransitionalSearchResultsFromCanonicalTasks(t *testing.T)
 	if len(result.Tasks) != 1 || result.Tasks[0].System != "github" || result.Tasks[0].Traits[0] != "ready" {
 		t.Fatalf("unexpected canonical tasks: %#v", result.Tasks)
 	}
-	if len(result.SearchResults) != 1 || result.SearchResults[0].ID != "42" || result.SearchResults[0].Labels[0] != "ready" {
-		t.Fatalf("unexpected transitional search results: %#v", result.SearchResults)
+}
+
+func TestExecuteGitHubPRCreateAlreadyExistsReturnsCanonicalIdempotentResult(t *testing.T) {
+	t.Parallel()
+
+	command := filepath.Join(t.TempDir(), "gh-already-exists")
+	if err := os.WriteFile(command, []byte("#!/bin/sh\nprintf '%s\\n' 'a pull request for branch \"feature\" into branch \"main\" already exists:' 'https://github.com/owner/name/pull/15' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write GitHub command: %v", err)
+	}
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepository: "github"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github", Command: command, IntegrationTypes: []string{model.IntegrationTypeRepository}},
+		},
+	})
+	result, err := service.Execute(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "create",
+		Repository:      "owner/name",
+		Base:            "main",
+		Head:            "feature",
+		Title:           "Канонический запрос",
+	})
+	if err != nil {
+		t.Fatalf("already existing pull request must be idempotent: %v", err)
+	}
+	if result.Failure != nil || result.Status != model.ResponseStatusOK {
+		t.Fatalf("unexpected failure: %#v", result)
+	}
+	if result.MergeRequest == nil || result.MergeRequest.Number != 15 || result.MergeRequest.URL != "https://github.com/owner/name/pull/15" {
+		t.Fatalf("unexpected merge request: %#v", result.MergeRequest)
+	}
+	if result.OperationResult == nil || !result.OperationResult.Idempotent || result.OperationResult.Status != model.ResponseStatusOK {
+		t.Fatalf("unexpected operation result: %#v", result.OperationResult)
 	}
 }
 
-func TestNormalizeDerivedObjectsPreservesEmptyCollections(t *testing.T) {
+func TestExecuteGitHubPRCreateDoesNotMaskExternalFailureContainingURL(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name                  string
-		response              Response
-		wantTasks             bool
-		wantMergeRequests     bool
-		wantSearchResults     bool
-		wantTaskCount         int
-		wantMergeRequestCount int
-		wantSearchResultCount int
-	}{
-		{
-			name:              "canonical tasks",
-			response:          Response{Tasks: []CanonicalTask{}},
-			wantTasks:         true,
-			wantSearchResults: true,
-		},
-		{
-			name:                  "canonical merge requests",
-			response:              Response{MergeRequests: []MergeRequest{}},
-			wantMergeRequests:     true,
-			wantSearchResults:     true,
-			wantMergeRequestCount: 0,
-		},
-		{
-			name:              "transitional search results",
-			response:          Response{SearchResults: []TrackerSearchResult{}},
-			wantTasks:         true,
-			wantSearchResults: true,
-		},
-		{
-			name:                  "explicit empty transitional results",
-			response:              Response{Tasks: []CanonicalTask{{ID: "42"}}, SearchResults: []TrackerSearchResult{}},
-			wantTasks:             true,
-			wantSearchResults:     true,
-			wantTaskCount:         1,
-			wantSearchResultCount: 0,
-		},
-		{
-			name:     "absent collections",
-			response: Response{},
-		},
+	command := filepath.Join(t.TempDir(), "gh-external-failure")
+	if err := os.WriteFile(command, []byte("#!/bin/sh\nprintf '%s\\n' 'request failed; details: https://github.com/owner/name/pull/15' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write GitHub command: %v", err)
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			normalizeDerivedObjects(&tt.response)
-
-			if (tt.response.Tasks != nil) != tt.wantTasks || len(tt.response.Tasks) != tt.wantTaskCount {
-				t.Fatalf("unexpected tasks: %#v", tt.response.Tasks)
-			}
-			if (tt.response.MergeRequests != nil) != tt.wantMergeRequests || len(tt.response.MergeRequests) != tt.wantMergeRequestCount {
-				t.Fatalf("unexpected merge requests: %#v", tt.response.MergeRequests)
-			}
-			if (tt.response.SearchResults != nil) != tt.wantSearchResults || len(tt.response.SearchResults) != tt.wantSearchResultCount {
-				t.Fatalf("unexpected transitional search results: %#v", tt.response.SearchResults)
-			}
-		})
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepository: "github"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {Type: "github", Command: command, IntegrationTypes: []string{model.IntegrationTypeRepository}},
+		},
+	})
+	result, err := service.Execute(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "create",
+		Repository:      "owner/name",
+		Base:            "main",
+		Head:            "feature",
+		Title:           "Канонический запрос",
+	})
+	if err == nil {
+		t.Fatal("external failure containing URL must remain a failure")
+	}
+	if result.Failure == nil || result.Status != model.ResponseStatusFailed {
+		t.Fatalf("unexpected response: %#v", result)
+	}
+	if result.MergeRequest != nil || result.OperationResult != nil {
+		t.Fatalf("failed response must not publish a canonical result: %#v", result)
 	}
 }
 
@@ -517,14 +523,6 @@ func TestExecuteAppliesRouteSystemToMergeRequestList(t *testing.T) {
 			t.Fatalf("expected merge request to use route name: %#v", mergeRequest)
 		}
 	}
-	if len(result.SearchResults) != 2 {
-		t.Fatalf("unexpected transitional search results: %#v", result.SearchResults)
-	}
-	for _, searchResult := range result.SearchResults {
-		if searchResult.System != "enterprise" || searchResult.Author.System != "enterprise" {
-			t.Fatalf("expected transitional result to use route name: %#v", searchResult)
-		}
-	}
 }
 
 func TestExecuteMapsExternalTaskLabelsToCanonical(t *testing.T) {
@@ -543,8 +541,8 @@ func TestExecuteMapsExternalTaskLabelsToCanonical(t *testing.T) {
 	})
 	service.RegisterProvider("github", stubProvider{
 		response: Response{
-			Issue: &TrackerIssue{
-				Labels: []string{"external-bug", "noise", "plain"},
+			Task: &CanonicalTask{
+				Traits: []string{"external-bug", "noise", "plain"},
 			},
 		},
 	})
@@ -552,9 +550,6 @@ func TestExecuteMapsExternalTaskLabelsToCanonical(t *testing.T) {
 	result, err := service.Execute(context.Background(), Request{System: "github", Resource: "issue", Operation: "get"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
-	}
-	if result.Issue == nil || len(result.Issue.Labels) != 2 || result.Issue.Labels[0] != "bug" || result.Issue.Labels[1] != "plain" {
-		t.Fatalf("unexpected canonical issue labels: %#v", result.Issue)
 	}
 	if result.Task == nil || len(result.Task.Traits) != 2 || result.Task.Traits[0] != "bug" || result.Task.Traits[1] != "plain" {
 		t.Fatalf("unexpected canonical task traits: %#v", result.Task)
@@ -640,26 +635,21 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 	})
 	service.RegisterProvider("enterprise", stubProvider{
 		response: Response{
-			System:            "github",
-			AuthStatus:        &AuthStatus{System: "github"},
-			RepositoryStatus:  &RepositoryStatus{System: "github"},
-			IssueStatus:       &IssueStatus{System: "github"},
-			PullRequestStatus: &PullRequestStatus{System: "github"},
-			Issue: &TrackerIssue{
+			System:           "github",
+			AuthStatus:       &AuthStatus{System: "github"},
+			RepositoryStatus: &RepositoryStatus{System: "github"},
+			IssueStatus:      &IssueStatus{System: "github"},
+			Task: &CanonicalTask{
 				System:    "github",
-				Author:    TrackerUser{System: "github"},
-				Assignees: []TrackerUser{{System: "github"}},
+				Author:    User{System: "github"},
+				Assignees: []User{{System: "github"}},
 			},
-			PullRequest: &TrackerPullRequest{System: "github", Author: TrackerUser{System: "github"}},
-			Comments:    []TrackerComment{{System: "github", Author: TrackerUser{System: "github"}}},
-			Reviews:     []TrackerReview{{System: "github", Author: TrackerUser{System: "github"}}},
-			RepositoryRef: &TrackerRepository{
-				System: "github",
-			},
-			SearchResults: []TrackerSearchResult{{
-				System:    "github",
-				Author:    TrackerUser{System: "github"},
-				Assignees: []TrackerUser{{System: "github"}},
+			MergeRequest:  &MergeRequest{System: "github", Author: User{System: "github"}},
+			TaskComments:  []TaskComment{{System: "github", Author: User{System: "github"}}},
+			ReviewRemarks: []ReviewRemark{{System: "github", Author: User{System: "github"}}},
+			Repository:    &Repository{System: "github"},
+			Tasks: []CanonicalTask{{
+				System: "github", Author: User{System: "github"}, Assignees: []User{{System: "github"}},
 			}},
 			Artifacts: []Artifact{{System: "github"}},
 		},
@@ -670,26 +660,26 @@ func TestExecuteOverwritesSystemFromRouteForNestedObjects(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	if result.System != "enterprise" || result.AuthStatus.System != "enterprise" || result.RepositoryStatus.System != "enterprise" || result.IssueStatus.System != "enterprise" || result.PullRequestStatus.System != "enterprise" {
+	if result.System != "enterprise" || result.AuthStatus.System != "enterprise" || result.RepositoryStatus.System != "enterprise" || result.IssueStatus.System != "enterprise" {
 		t.Fatalf("expected top-level status systems to use route name, got %#v", result)
 	}
-	if result.Issue == nil || result.Issue.System != "enterprise" || result.Issue.Author.System != "enterprise" || result.Issue.Assignees[0].System != "enterprise" {
-		t.Fatalf("expected issue payload systems to use route name, got %#v", result.Issue)
+	if result.Task == nil || result.Task.System != "enterprise" || result.Task.Author.System != "enterprise" || result.Task.Assignees[0].System != "enterprise" {
+		t.Fatalf("expected task payload systems to use route name, got %#v", result.Task)
 	}
-	if result.PullRequest == nil || result.PullRequest.System != "enterprise" || result.PullRequest.Author.System != "enterprise" {
-		t.Fatalf("expected pull request payload systems to use route name, got %#v", result.PullRequest)
+	if result.MergeRequest == nil || result.MergeRequest.System != "enterprise" || result.MergeRequest.Author.System != "enterprise" {
+		t.Fatalf("expected merge request payload systems to use route name, got %#v", result.MergeRequest)
 	}
-	if result.Comments[0].System != "enterprise" || result.Comments[0].Author.System != "enterprise" {
-		t.Fatalf("expected comment payload systems to use route name, got %#v", result.Comments)
+	if result.TaskComments[0].System != "enterprise" || result.TaskComments[0].Author.System != "enterprise" {
+		t.Fatalf("expected comment payload systems to use route name, got %#v", result.TaskComments)
 	}
-	if result.Reviews[0].System != "enterprise" || result.Reviews[0].Author.System != "enterprise" {
-		t.Fatalf("expected review payload systems to use route name, got %#v", result.Reviews)
+	if result.ReviewRemarks[0].System != "enterprise" || result.ReviewRemarks[0].Author.System != "enterprise" {
+		t.Fatalf("expected review payload systems to use route name, got %#v", result.ReviewRemarks)
 	}
-	if result.RepositoryRef == nil || result.RepositoryRef.System != "enterprise" {
-		t.Fatalf("expected repository payload system to use route name, got %#v", result.RepositoryRef)
+	if result.Repository == nil || result.Repository.System != "enterprise" {
+		t.Fatalf("expected repository payload system to use route name, got %#v", result.Repository)
 	}
-	if result.SearchResults[0].System != "enterprise" || result.SearchResults[0].Author.System != "enterprise" || result.SearchResults[0].Assignees[0].System != "enterprise" || result.Artifacts[0].System != "enterprise" {
-		t.Fatalf("expected search results and artifacts to use route name, got %#v %#v", result.SearchResults, result.Artifacts)
+	if result.Tasks[0].System != "enterprise" || result.Tasks[0].Author.System != "enterprise" || result.Tasks[0].Assignees[0].System != "enterprise" || result.Artifacts[0].System != "enterprise" {
+		t.Fatalf("expected tasks and artifacts to use route name, got %#v %#v", result.Tasks, result.Artifacts)
 	}
 }
 
