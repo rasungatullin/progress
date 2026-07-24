@@ -367,7 +367,7 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 
 func applyExistingPullRequest(response *model.Response, config resolvedConfig, result CommandResult, repository string, request PRCreateRequest, diagnostics []string, extra string) bool {
 	pullRequestURL := extractFirstURL(strings.Join([]string{result.Stdout, result.Stderr, extra}, "\n"))
-	number, valid := pullRequestNumberForRepository(pullRequestURL, repository)
+	number, valid := pullRequestNumberForRepository(pullRequestURL, repository, config.WebHost)
 	if !valid {
 		return false
 	}
@@ -2362,9 +2362,10 @@ func pullRequestNumberFromURL(value string) int {
 	return number
 }
 
-func pullRequestNumberForRepository(value string, repository string) (int, bool) {
+func pullRequestNumberForRepository(value string, repository string, expectedHost string) (int, bool) {
 	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") ||
+		!strings.EqualFold(parsed.Hostname(), firstNonEmpty(strings.TrimSpace(expectedHost), "github.com")) {
 		return 0, false
 	}
 	repositoryParts := strings.Split(strings.Trim(strings.TrimSpace(repository), "/"), "/")
@@ -2380,6 +2381,17 @@ func pullRequestNumberForRepository(value string, repository string) (int, bool)
 		return 0, false
 	}
 	return number, true
+}
+
+func githubWebHost(baseURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsed.Hostname() == "" {
+		return "github.com"
+	}
+	if strings.EqualFold(parsed.Hostname(), "api.github.com") {
+		return "github.com"
+	}
+	return parsed.Hostname()
 }
 
 func maskCommandValue(value string) string {

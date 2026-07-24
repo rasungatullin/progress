@@ -453,6 +453,47 @@ func TestExecuteGitHubPRCreateAlreadyExistsReturnsCanonicalIdempotentResult(t *t
 	}
 }
 
+func TestExecuteGitHubPRCreateAlreadyExistsAcceptsConfiguredEnterpriseHost(t *testing.T) {
+	t.Parallel()
+
+	command := filepath.Join(t.TempDir(), "gh-enterprise-already-exists")
+	if err := os.WriteFile(command, []byte("#!/bin/sh\nprintf '%s\\n' 'a pull request for branch \"feature\" into branch \"main\" already exists:' 'https://github.enterprise.test/owner/name/pull/15' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write GitHub command: %v", err)
+	}
+
+	service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+		DefaultSystems: map[string]string{model.IntegrationTypeRepository: "github"},
+		Systems: map[string]model.IntegrationSystemConfig{
+			"github": {
+				Type:             "github",
+				Command:          command,
+				BaseURL:          "https://github.enterprise.test/api/v3",
+				IntegrationTypes: []string{model.IntegrationTypeRepository},
+			},
+		},
+	})
+	result, err := service.Execute(context.Background(), Request{
+		IntegrationType: model.IntegrationTypeRepository,
+		System:          "github",
+		Resource:        "merge-request",
+		ObjectType:      "merge-request",
+		Operation:       "create",
+		Repository:      "owner/name",
+		Base:            "main",
+		Head:            "feature",
+		Title:           "Канонический запрос",
+	})
+	if err != nil {
+		t.Fatalf("already existing enterprise pull request must be idempotent: %v", err)
+	}
+	if result.MergeRequest == nil || result.MergeRequest.Number != 15 || result.MergeRequest.URL != "https://github.enterprise.test/owner/name/pull/15" {
+		t.Fatalf("unexpected merge request: %#v", result.MergeRequest)
+	}
+	if result.OperationResult == nil || !result.OperationResult.Idempotent || result.OperationResult.Status != model.ResponseStatusOK {
+		t.Fatalf("unexpected operation result: %#v", result.OperationResult)
+	}
+}
+
 func TestExecuteGitHubPRCreateDoesNotMaskExternalFailureContainingURL(t *testing.T) {
 	t.Parallel()
 
@@ -501,6 +542,7 @@ func TestExecuteGitHubPRCreateRejectsInvalidAlreadyExistsURL(t *testing.T) {
 		{name: "неполный путь", url: "https://github.com/owner/name/pull"},
 		{name: "нулевой номер", url: "https://github.com/owner/name/pull/0"},
 		{name: "ссылка на документацию", url: "https://docs.example.test/pull/15"},
+		{name: "другой хост с полным путём", url: "https://example.test/owner/name/pull/15"},
 	}
 
 	for _, tt := range tests {

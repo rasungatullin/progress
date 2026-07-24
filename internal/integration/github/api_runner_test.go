@@ -1413,14 +1413,25 @@ func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			body := tt.body
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost || r.URL.Path != "/repos/owner/name/pulls" {
 					t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 				}
 				w.WriteHeader(http.StatusUnprocessableEntity)
-				_ = json.NewEncoder(w).Encode(tt.body)
+				_ = json.NewEncoder(w).Encode(body)
 			}))
 			defer server.Close()
+			expectedURL := ""
+			if tt.idempotent {
+				expectedURL = server.URL + "/owner/name/pull/15"
+				body = map[string]any{
+					"message": "Validation Failed",
+					"errors": []map[string]string{
+						{"message": "A pull request already exists for branch feature into branch main: " + expectedURL},
+					},
+				}
+			}
 
 			service := NewServiceWithConfig(model.IntegrationSystemConfig{
 				Transport:  "api",
@@ -1444,7 +1455,7 @@ func TestAPITransportPRCreateMapsValidationFailures(t *testing.T) {
 				if err != nil {
 					t.Fatalf("already existing pull request must be idempotent: %v", err)
 				}
-				if response.MergeRequest == nil || response.MergeRequest.Number != 15 || response.MergeRequest.URL != "https://github.com/owner/name/pull/15" {
+				if response.MergeRequest == nil || response.MergeRequest.Number != 15 || response.MergeRequest.URL != expectedURL {
 					t.Fatalf("unexpected merge request: %#v", response.MergeRequest)
 				}
 				if response.OperationResult == nil || !response.OperationResult.Idempotent {

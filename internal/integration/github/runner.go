@@ -53,6 +53,7 @@ type resolvedConfig struct {
 	Command     string
 	Timeout     time.Duration
 	DefaultRepo string
+	WebHost     string
 }
 
 type CommandResult struct {
@@ -1039,7 +1040,7 @@ func (r *Runner) runCommandWithResolvedConfig(ctx context.Context, config resolv
 }
 
 func (r *Runner) loadConfig(ctx context.Context) (resolvedConfig, error) {
-	config := resolvedConfig{Command: defaultCommand, Timeout: defaultTimeout}
+	config := resolvedConfig{Command: defaultCommand, Timeout: defaultTimeout, WebHost: "github.com"}
 	if r.systemConfig != nil {
 		return resolveSystemConfig(*r.systemConfig)
 	}
@@ -1084,7 +1085,7 @@ func (r *Runner) loadConfig(ctx context.Context) (resolvedConfig, error) {
 }
 
 func resolveSystemConfig(raw integrationmodel.IntegrationSystemConfig) (resolvedConfig, error) {
-	config := resolvedConfig{Command: defaultCommand, Timeout: defaultTimeout}
+	config := resolvedConfig{Command: defaultCommand, Timeout: defaultTimeout, WebHost: githubWebHost(raw.BaseURL)}
 	config.Command = firstNonEmpty(strings.TrimSpace(raw.Path), strings.TrimSpace(raw.Command), defaultCommand)
 	config.DefaultRepo = firstNonEmpty(strings.TrimSpace(raw.Repository), strings.TrimSpace(raw.DefaultRepo))
 

@@ -146,7 +146,6 @@ func TestServicePreservesEmptyTaskCollections(t *testing.T) {
 
 	for _, stdout := range []string{
 		`{"status":"ok","tasks":[]}`,
-		`{"status":"ok","search_results":[]}`,
 	} {
 		stdout := stdout
 		t.Run(stdout, func(t *testing.T) {

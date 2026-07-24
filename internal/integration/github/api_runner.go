@@ -1296,7 +1296,12 @@ func graphqlErrorsMessage(errors []graphqlError) string {
 }
 
 func apiResolvedConfig(config apiConfig) resolvedConfig {
-	return resolvedConfig{Command: "http", Timeout: config.Timeout, DefaultRepo: config.DefaultRepo}
+	return resolvedConfig{
+		Command:     "http",
+		Timeout:     config.Timeout,
+		DefaultRepo: config.DefaultRepo,
+		WebHost:     githubWebHost(config.BaseURL),
+	}
 }
 
 func apiErrorResult(command string, config apiConfig, err error) (CommandResult, resolvedConfig, error) {
