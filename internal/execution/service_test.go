@@ -85,6 +85,35 @@ func TestServiceLaunchPreservesExistingPromptBehaviorWithoutProfileAdditions(t *
 	}
 }
 
+func TestPullRequestPublicationUsesCanonicalTaskBodyAttribute(t *testing.T) {
+	t.Parallel()
+
+	input := publishMergeRequestInput{
+		invocation: invocation{Assignment: &ExecutionAssignment{
+			CanonicalTask: &ObjectRef{
+				Type:       "task",
+				Repository: "owner/name",
+				Number:     299,
+				Title:      "Canonical task",
+				Attributes: map[string]string{"body": "Canonical body"},
+			},
+			RelatedObjects: []ObjectRef{{
+				Type:       "merge-request",
+				Attributes: map[string]string{"body": "Related body"},
+			}},
+		}},
+	}
+
+	ref := pullRequestRefFromPublishMergeRequestInput(input)
+	if ref.Body != "Canonical body" {
+		t.Fatalf("pull request reference must use canonical task body, got %q", ref.Body)
+	}
+	body := pullRequestBodyFromPublishMergeRequestInput(input)
+	if !strings.Contains(body, "Canonical body") || strings.Contains(body, "Related body") {
+		t.Fatalf("pull request body must use canonical task body, got %q", body)
+	}
+}
+
 func TestServiceStartRecordsProfileFailureInHistory(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDirectory(t, root)

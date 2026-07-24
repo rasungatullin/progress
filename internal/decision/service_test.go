@@ -177,6 +177,66 @@ func TestServiceStartPreservesCanonicalTaskState(t *testing.T) {
 	}
 }
 
+func TestExecutionObjectRefFromCanonicalTaskPrioritizesCanonicalFields(t *testing.T) {
+	t.Parallel()
+
+	task := integration.CanonicalTask{
+		ID:         "299",
+		Repository: " owner/name ",
+		Body:       " Canonical body ",
+		State:      " OPEN ",
+		Attributes: map[string]string{
+			"body":       "stale body",
+			"state":      "closed",
+			"repository": "legacy/name",
+			"priority":   " high ",
+		},
+	}
+
+	object := executionObjectRefFromCanonicalTask(task)
+	if object == nil {
+		t.Fatal("expected execution object")
+	}
+	if object.Repository != "owner/name" {
+		t.Fatalf("unexpected repository: %q", object.Repository)
+	}
+	if object.Attributes["body"] != "Canonical body" || object.Attributes["state"] != "OPEN" || object.Attributes["repository"] != "owner/name" {
+		t.Fatalf("canonical fields must replace conflicting attributes: %#v", object.Attributes)
+	}
+	if object.Attributes["priority"] != "high" {
+		t.Fatalf("additional attribute was not preserved: %#v", object.Attributes)
+	}
+	if task.Attributes["body"] != "stale body" || task.Attributes["repository"] != "legacy/name" {
+		t.Fatalf("source attributes were modified: %#v", task.Attributes)
+	}
+}
+
+func TestExecutionObjectRefFromCanonicalTaskRemovesEmptyCanonicalFields(t *testing.T) {
+	t.Parallel()
+
+	object := executionObjectRefFromCanonicalTask(integration.CanonicalTask{
+		ID: "299",
+		Attributes: map[string]string{
+			"body":       "stale body",
+			"state":      "closed",
+			"repository": "legacy/name",
+			"priority":   "high",
+		},
+	})
+
+	if object == nil {
+		t.Fatal("expected execution object")
+	}
+	for _, key := range []string{"body", "state", "repository"} {
+		if _, exists := object.Attributes[key]; exists {
+			t.Fatalf("empty canonical field must remove attribute %q: %#v", key, object.Attributes)
+		}
+	}
+	if object.Attributes["priority"] != "high" {
+		t.Fatalf("additional attribute was not preserved: %#v", object.Attributes)
+	}
+}
+
 func TestServiceStartRecoversMergeRequestForReviewRoute(t *testing.T) {
 	t.Parallel()
 

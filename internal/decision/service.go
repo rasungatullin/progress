@@ -801,20 +801,17 @@ func executionObjectRefFromCanonicalTask(task integration.CanonicalTask) *execut
 	if attributes == nil {
 		attributes = map[string]string{}
 	}
+	delete(attributes, "state")
+	delete(attributes, "repository")
+	delete(attributes, "body")
 	if state := strings.TrimSpace(task.State); state != "" {
-		if _, exists := attributes["state"]; !exists {
-			attributes["state"] = state
-		}
+		attributes["state"] = state
 	}
 	if repository := strings.TrimSpace(task.Repository); repository != "" {
-		if _, exists := attributes["repository"]; !exists {
-			attributes["repository"] = repository
-		}
+		attributes["repository"] = repository
 	}
 	if body := strings.TrimSpace(task.Body); body != "" {
-		if _, exists := attributes["body"]; !exists {
-			attributes["body"] = body
-		}
+		attributes["body"] = body
 	}
 	if len(attributes) == 0 {
 		attributes = nil
