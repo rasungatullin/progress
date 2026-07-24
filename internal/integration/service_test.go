@@ -489,6 +489,60 @@ func TestExecuteGitHubPRCreateDoesNotMaskExternalFailureContainingURL(t *testing
 	}
 }
 
+func TestExecuteGitHubPRCreateRejectsInvalidAlreadyExistsURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{name: "ссылка на задачу", url: "https://github.com/owner/name/issues/15"},
+		{name: "другой репозиторий", url: "https://github.com/other/name/pull/15"},
+		{name: "неполный путь", url: "https://github.com/owner/name/pull"},
+		{name: "нулевой номер", url: "https://github.com/owner/name/pull/0"},
+		{name: "ссылка на документацию", url: "https://docs.example.test/pull/15"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			command := filepath.Join(t.TempDir(), "gh-invalid-already-exists")
+			script := "#!/bin/sh\nprintf '%s\\n' 'a pull request for branch \"feature\" into branch \"main\" already exists:' '" + tt.url + "' >&2\nexit 1\n"
+			if err := os.WriteFile(command, []byte(script), 0o755); err != nil {
+				t.Fatalf("write GitHub command: %v", err)
+			}
+
+			service := NewServiceFromConfig(logging.New(io.Discard), model.IntegrationConfigFile{
+				DefaultSystems: map[string]string{model.IntegrationTypeRepository: "github"},
+				Systems: map[string]model.IntegrationSystemConfig{
+					"github": {Type: "github", Command: command, IntegrationTypes: []string{model.IntegrationTypeRepository}},
+				},
+			})
+			result, err := service.Execute(context.Background(), Request{
+				IntegrationType: model.IntegrationTypeRepository,
+				System:          "github",
+				Resource:        "merge-request",
+				ObjectType:      "merge-request",
+				Operation:       "create",
+				Repository:      "owner/name",
+				Base:            "main",
+				Head:            "feature",
+				Title:           "Канонический запрос",
+			})
+			if err == nil {
+				t.Fatalf("invalid already-exists URL must remain a failure: %s", tt.url)
+			}
+			if result.Failure == nil || result.Status != model.ResponseStatusFailed {
+				t.Fatalf("unexpected response: %#v", result)
+			}
+			if result.MergeRequest != nil || result.OperationResult != nil {
+				t.Fatalf("failed response must not publish a canonical result: %#v", result)
+			}
+		})
+	}
+}
+
 func TestExecuteAppliesRouteSystemToMergeRequestList(t *testing.T) {
 	t.Parallel()
 
@@ -739,7 +793,7 @@ func TestNewServiceRegistersGitHubProvider(t *testing.T) {
 	}
 }
 
-func TestDispatchPRCreateUsesStatusResultContract(t *testing.T) {
+func TestDispatchPRCreateUsesCanonicalMergeRequestContract(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(logging.New(io.Discard))
@@ -748,8 +802,39 @@ func TestDispatchPRCreateUsesStatusResultContract(t *testing.T) {
 		t.Fatalf("dispatch: %v", err)
 	}
 
-	if route.ExpectedResult != "integration-pull-request-status" {
+	if route.ExpectedResult != "canonical-merge-request" {
 		t.Fatalf("unexpected expected result: %q", route.ExpectedResult)
+	}
+}
+
+func TestExpectedResultDoesNotAdvertiseRemovedContract(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		integrationType string
+		objectType      string
+		resource        string
+		operation       string
+		expected        string
+	}{
+		{name: "задача", integrationType: "tracker", resource: "issue", operation: "get", expected: "canonical-task"},
+		{name: "поиск задач", integrationType: "tracker", resource: "issue", operation: "search", expected: "canonical-task[]"},
+		{name: "комментарии задачи", integrationType: "tracker", resource: "issue", operation: "comments", expected: "task-comment[]"},
+		{name: "создание запроса на слияние", integrationType: "repository", resource: "pr", operation: "create", expected: "canonical-merge-request"},
+		{name: "запрос на слияние", integrationType: "repository", resource: "pull-request", operation: "get", expected: "canonical-merge-request"},
+		{name: "поиск запросов на слияние", integrationType: "repository", resource: "pr", operation: "search", expected: "canonical-merge-request[]"},
+		{name: "репозиторий", integrationType: "repository", resource: "repo", operation: "get", expected: "canonical-repository"},
+		{name: "типизированное создание", integrationType: "repository", objectType: "merge-request", resource: "merge-request", operation: "create", expected: "canonical-merge-request"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if actual := expectedResult(tt.integrationType, tt.objectType, tt.resource, tt.operation); actual != tt.expected {
+				t.Fatalf("unexpected expected result: got %q, want %q", actual, tt.expected)
+			}
+		})
 	}
 }
 

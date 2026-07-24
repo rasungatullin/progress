@@ -901,13 +901,8 @@ func expectedResult(integrationType string, objectType string, resource string, 
 			if operation == "search" || operation == "list" {
 				return "canonical-merge-request[]"
 			}
-			if resource == "pr" || resource == "pull-request" {
-				if operation == "create" {
-					return "integration-pull-request-status"
-				}
-			}
 			if operation == "create" {
-				return "integration-operation-result"
+				return "canonical-merge-request"
 			}
 			return "canonical-merge-request"
 		case "comment", "review", "review-remark", "merge-request-comment":
@@ -941,24 +936,24 @@ func expectedResult(integrationType string, objectType string, resource string, 
 	switch resource {
 	case "issue":
 		if operation == "comments" {
-			return "tracker-comment[]"
+			return "task-comment[]"
 		}
 		if operation == "search" {
 			return "canonical-task[]"
 		}
-		return "tracker-issue"
+		return "canonical-task"
 	case "pull-request", "pr":
 		if operation == "search" {
-			return "merge-request[]"
+			return "canonical-merge-request[]"
 		}
 		if operation == "create" {
-			return "integration-pull-request-status"
+			return "canonical-merge-request"
 		}
-		return "tracker-pull-request"
+		return "canonical-merge-request"
 	case "auth":
 		return "integration-auth-status"
 	case "repository", "repo":
-		return "tracker-repository"
+		return "canonical-repository"
 	default:
 		return "normalized-response"
 	}

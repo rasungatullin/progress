@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/rasungatullin/progress/internal/execution/model"
@@ -81,6 +82,71 @@ func TestExecuteIntegrationPreservesMergeRequestCreateInput(t *testing.T) {
 				object.Attributes["head_ref"] != "feature/canonical" || object.Attributes["body"] != "Описание запроса" ||
 				object.Attributes["custom"] != "сохранить" {
 				t.Fatalf("invocation must preserve complete merge request data: %#v", object)
+			}
+		})
+	}
+}
+
+func TestExecuteIntegrationDoesNotAcceptCanonicalPayloadWhenExecutorReturnsError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		response integration.Response
+	}{
+		{
+			name: "отказ и запрос на слияние",
+			response: integration.Response{
+				Status:       "failed",
+				Failure:      &integration.Failure{Kind: "external-failure", Message: "GitHub отказал в операции"},
+				MergeRequest: &integration.MergeRequest{Number: 17, URL: "https://github.com/owner/name/pull/17"},
+			},
+		},
+		{
+			name: "неуспешный результат операции с URL",
+			response: integration.Response{OperationResult: &integration.OperationResult{
+				ObjectType: "merge-request", Operation: "create", Status: "failed", URL: "https://github.com/owner/name/pull/17",
+			}},
+		},
+		{
+			name: "вложенный отказ результата операции",
+			response: integration.Response{OperationResult: &integration.OperationResult{
+				ObjectType: "merge-request", Operation: "create", Status: "ok", URL: "https://github.com/owner/name/pull/17",
+				Failure: &integration.Failure{Kind: "external-failure", Message: "GitHub отказал в операции"},
+			}},
+		},
+		{
+			name: "частичный ответ",
+			response: integration.Response{
+				Status: "partial", Partial: true,
+				MergeRequest: &integration.MergeRequest{Number: 17, URL: "https://github.com/owner/name/pull/17"},
+			},
+		},
+		{
+			name: "неуспешный статус ответа",
+			response: integration.Response{
+				Status:       "failed",
+				MergeRequest: &integration.MergeRequest{Number: 17, URL: "https://github.com/owner/name/pull/17"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			operation := mergeRequestCreateIntegrationOperation()
+			state := mergeRequestCreateIntegrationState(operation)
+			service := &Service{integrations: &stubIntegrationExecutor{execute: func(context.Context, integration.Request) (integration.Response, error) {
+				return tt.response, errors.New("GitHub merge request create failed")
+			}}}
+
+			err := (builtinOperationExecutor{service: service}).executeIntegration(context.Background(), state, operation)
+			if err == nil {
+				t.Fatalf("executor error must not be accepted: %#v", tt.response)
+			}
+			if _, exists := state.data["merge_request"]; exists {
+				t.Fatalf("failed integration must not publish a merge request: %#v", state.data["merge_request"])
 			}
 		})
 	}
@@ -240,9 +306,6 @@ func TestMergeRequestFromPublishResponseUsesCanonicalOperationResult(t *testing.
 		mergeRequest.Title != "Канонический результат" || mergeRequest.Body != "Описание" ||
 		mergeRequest.URL != "https://github.com/owner/name/pull/27" {
 		t.Fatalf("unexpected merge request from canonical operation result: %#v", mergeRequest)
-	}
-	if !pullRequestAlreadyAvailable(response) {
-		t.Fatal("canonical operation result with URL must make the published merge request available")
 	}
 	if summary := pullRequestPublishSummary(response); summary != "pull-request=27 url=https://github.com/owner/name/pull/27 status=ok" {
 		t.Fatalf("unexpected canonical publication summary: %q", summary)

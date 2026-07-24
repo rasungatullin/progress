@@ -97,7 +97,7 @@ func (e builtinOperationExecutor) publishMergeRequest(ctx context.Context, state
 		Body:            ref.Body,
 		Draft:           ref.Draft,
 	})
-	if err != nil && !pullRequestAlreadyAvailable(response) {
+	if err != nil {
 		return e.failPublishMergeRequestOperation(ctx, state, operation, input, name, "Запрос на слияние не открыт.", err, "pull_request_publish_failed")
 	}
 
@@ -1248,16 +1248,6 @@ func pullRequestBodyFromPublishMergeRequestInput(input publishMergeRequestInput)
 		return ""
 	}
 	return strings.Join(parts, "\n\n")
-}
-
-func pullRequestAlreadyAvailable(response integration.Response) bool {
-	if response.MergeRequest != nil && response.MergeRequest.Number > 0 && strings.TrimSpace(response.MergeRequest.URL) != "" {
-		return true
-	}
-	if response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != "" {
-		return true
-	}
-	return false
 }
 
 func pullRequestPublishSummary(response integration.Response) string {

@@ -59,7 +59,7 @@ func (e builtinOperationExecutor) executeIntegration(ctx context.Context, state 
 	}
 
 	response, err := executor.Execute(ctx, request)
-	if err != nil && !integrationResponseAlreadyAvailable(operation, response) {
+	if err != nil {
 		return e.failIntegrationOperation(state, operation, name, "Интеграционная операция завершилась отказом.", err, "integration_operation_failed")
 	}
 	writeIntegrationResponse(state, operation, response)
@@ -312,19 +312,6 @@ func integrationCreateProducesMergeRequest(operation OperationSpec, response int
 		return true
 	}
 	return response.OperationResult != nil && strings.EqualFold(strings.TrimSpace(response.OperationResult.ObjectType), "merge-request")
-}
-
-func integrationResponseAlreadyAvailable(operation OperationSpec, response integration.Response) bool {
-	if !strings.HasSuffix(strings.TrimSpace(string(operation.Kind)), ".create") {
-		return false
-	}
-	if response.MergeRequest != nil && (response.MergeRequest.Number > 0 || strings.TrimSpace(response.MergeRequest.URL) != "") {
-		return true
-	}
-	if response.OperationResult != nil && strings.TrimSpace(response.OperationResult.URL) != "" {
-		return true
-	}
-	return false
 }
 
 func (e builtinOperationExecutor) failIntegrationOperation(state *operationExecution, operation OperationSpec, name, summary string, err error, code string) error {

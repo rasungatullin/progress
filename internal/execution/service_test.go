@@ -1750,6 +1750,58 @@ func TestPublishMergeRequestFillsOnlyActionData(t *testing.T) {
 	}
 }
 
+func TestPublishMergeRequestDoesNotAcceptPayloadWhenExecutorReturnsError(t *testing.T) {
+	t.Parallel()
+
+	operation := publishMergeRequestOperationSpec()
+	state := &operationExecution{
+		action: model.Action{Operations: []model.OperationSpec{operation}},
+		data: map[string]any{
+			"invocation": model.Invocation{
+				Task: "task-132",
+				Assignment: &ExecutionAssignment{
+					CanonicalTask: &ObjectRef{Type: "task", Repository: "owner/name", Number: 132, Title: "Поддержать действие"},
+				},
+				Workplace: model.WorkplaceSpec{Name: "feature"},
+			},
+			"profile":           model.Profile{Name: "coder"},
+			"allocation":        model.Allocation{Model: "gpt-5"},
+			"workplace":         model.Workplace{Name: "/tmp/work", RepositoryRoot: "/tmp/work", Ready: true},
+			"result":            model.LaunchResult{Status: "completed", Summary: "launch complete"},
+			"structured_output": &model.StructuredOutput{Summary: "Done.", CommitMessage: "Apply change"},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	integrations := &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		if req.Operation == "search" {
+			return integration.Response{}, nil
+		}
+		return integration.Response{
+			Status:       "failed",
+			Failure:      &integration.Failure{Kind: "external-failure", Message: "GitHub отказал в операции"},
+			MergeRequest: &integration.MergeRequest{Repository: "owner/name", Number: 17, URL: "https://github.com/owner/name/pull/17"},
+		}, errors.New("GitHub merge request create failed")
+	}}
+	service := &Service{
+		logger:       log.Default(),
+		integrations: integrations,
+		runGitOutput: func(context.Context, string, ...string) (string, error) {
+			return "refs/remotes/origin/main\n", nil
+		},
+	}
+
+	err := builtinOperationExecutor{service: service}.publishMergeRequest(context.Background(), state, operation, OperationKindPublishMergeRequest)
+	if err == nil {
+		t.Fatal("executor error must not be accepted")
+	}
+	if _, exists := state.data["merge_request"]; exists {
+		t.Fatalf("failed integration must not publish a merge request: %#v", state.data["merge_request"])
+	}
+	if result, ok := state.data["result"].(model.LaunchResult); !ok || result.Status != "failed" {
+		t.Fatalf("failed integration must publish failed execution result: %#v", state.data["result"])
+	}
+}
+
 func TestPublishMergeRequestFailureFillsOnlyActionData(t *testing.T) {
 	t.Parallel()
 

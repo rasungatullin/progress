@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -365,20 +366,20 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 }
 
 func applyExistingPullRequest(response *model.Response, config resolvedConfig, result CommandResult, repository string, request PRCreateRequest, diagnostics []string, extra string) bool {
-	url := extractFirstURL(strings.Join([]string{result.Stdout, result.Stderr, extra}, "\n"))
-	number := pullRequestNumberFromURL(url)
-	if url == "" || number <= 0 {
+	pullRequestURL := extractFirstURL(strings.Join([]string{result.Stdout, result.Stderr, extra}, "\n"))
+	number, valid := pullRequestNumberForRepository(pullRequestURL, repository)
+	if !valid {
 		return false
 	}
 	message := fmt.Sprintf("GitHub pull request already exists for %s %s -> %s", repository, request.Head, request.Base)
 	mergeRequest := model.MergeRequest{
 		System: "github", Repository: repository, Number: number, ExternalID: strconv.Itoa(number),
-		Title: request.Title, Body: request.Body, State: "open", BaseRef: request.Base, HeadRef: request.Head, URL: url,
+		Title: request.Title, Body: request.Body, State: "open", BaseRef: request.Base, HeadRef: request.Head, URL: pullRequestURL,
 	}
 	response.MergeRequest = &mergeRequest
 	response.OperationResult = &model.OperationResult{
 		System: "github", ObjectType: "merge-request", Operation: "create", Status: model.ResponseStatusOK,
-		ExternalID: strconv.Itoa(number), URL: url, Method: methodFromConfig(config), Endpoint: "pr create",
+		ExternalID: strconv.Itoa(number), URL: pullRequestURL, Method: methodFromConfig(config), Endpoint: "pr create",
 		Idempotent: true, Message: message, Diagnostics: append(append([]string(nil), diagnostics...), "GitHub reported an existing pull request between the requested branches"),
 	}
 	response.Status = model.ResponseStatusOK
@@ -2359,6 +2360,26 @@ func pullRequestNumberFromURL(value string) int {
 	}
 
 	return number
+}
+
+func pullRequestNumberForRepository(value string, repository string) (int, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
+		return 0, false
+	}
+	repositoryParts := strings.Split(strings.Trim(strings.TrimSpace(repository), "/"), "/")
+	pathParts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(repositoryParts) != 2 || len(pathParts) != 4 ||
+		!strings.EqualFold(pathParts[0], repositoryParts[0]) ||
+		!strings.EqualFold(pathParts[1], repositoryParts[1]) ||
+		pathParts[2] != "pull" {
+		return 0, false
+	}
+	number, err := strconv.Atoi(pathParts[3])
+	if err != nil || number <= 0 {
+		return 0, false
+	}
+	return number, true
 }
 
 func maskCommandValue(value string) string {
