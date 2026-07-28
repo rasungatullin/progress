@@ -178,42 +178,35 @@ type IntegrationOperationConfig struct {
 }
 
 type Response struct {
-	IntegrationType   string
-	System            string
-	Resource          string
-	ObjectType        string
-	Operation         string
-	Status            string
-	Partial           bool
-	Failure           *Failure
-	Route             Route
-	Task              *CanonicalTask
-	Tasks             []CanonicalTask
-	TaskComments      []TaskComment
-	Repository        *Repository
-	MergeRequest      *MergeRequest
-	MergeRequests     []MergeRequest
-	ReviewRemarks     []ReviewRemark
-	Conversation      *MessageThread
-	Messages          []Message
-	Pagination        *Pagination
-	Message           *Message
-	WikiPage          *WikiPage
-	WikiPages         []WikiPage
-	OperationResult   *OperationResult
-	AuthStatus        *AuthStatus
-	RepositoryStatus  *RepositoryStatus
-	IssueStatus       *IssueStatus
-	PullRequestStatus *PullRequestStatus
-	Issue             *TrackerIssue
-	PullRequest       *TrackerPullRequest
-	Comments          []TrackerComment
-	Reviews           []TrackerReview
-	RepositoryRef     *TrackerRepository
-	SearchResults     []TrackerSearchResult
-	Artifacts         []Artifact
-	Metadata          map[string]string
-	Data              map[string]any
+	IntegrationType  string
+	System           string
+	Resource         string
+	ObjectType       string
+	Operation        string
+	Status           string
+	Partial          bool
+	Failure          *Failure
+	Route            Route
+	Task             *CanonicalTask
+	Tasks            []CanonicalTask
+	TaskComments     []TaskComment
+	Repository       *Repository
+	MergeRequest     *MergeRequest
+	MergeRequests    []MergeRequest
+	ReviewRemarks    []ReviewRemark
+	Conversation     *MessageThread
+	Messages         []Message
+	Pagination       *Pagination
+	Message          *Message
+	WikiPage         *WikiPage
+	WikiPages        []WikiPage
+	OperationResult  *OperationResult
+	AuthStatus       *AuthStatus
+	RepositoryStatus *RepositoryStatus
+	IssueStatus      *IssueStatus
+	Artifacts        []Artifact
+	Metadata         map[string]string
+	Data             map[string]any
 }
 
 type Failure struct {
@@ -279,25 +272,6 @@ type IssueStatus struct {
 	Repository  string
 	ID          string
 	State       string
-	Command     string
-	Path        string
-	ExitCode    int
-	Message     string
-	Diagnostics []string
-	Stdout      string
-	Stderr      string
-}
-
-type PullRequestStatus struct {
-	System      string
-	Repository  string
-	Base        string
-	Head        string
-	Title       string
-	Draft       bool
-	Number      int
-	State       string
-	URL         string
 	Command     string
 	Path        string
 	ExitCode    int
@@ -507,97 +481,6 @@ type ObjectLink struct {
 	ExternalID string
 	URL        string
 	Relation   string
-}
-
-type TrackerIssue struct {
-	System     string
-	Repository string
-	ID         string
-	ExternalID string
-	Title      string
-	Body       string
-	State      string
-	Labels     []string
-	Assignees  []TrackerUser
-	Author     TrackerUser
-	URL        string
-	CreatedAt  string
-	UpdatedAt  string
-}
-
-type TrackerPullRequest struct {
-	System         string
-	Repository     string
-	Number         int
-	Title          string
-	Body           string
-	State          string
-	Author         TrackerUser
-	ReviewDecision string
-	BaseRef        string
-	HeadRef        string
-	Labels         []string
-	URL            string
-	CreatedAt      string
-	UpdatedAt      string
-}
-
-type TrackerComment struct {
-	System     string
-	Repository string
-	TaskID     string
-	Author     TrackerUser
-	Body       string
-	URL        string
-	CreatedAt  string
-	UpdatedAt  string
-}
-
-type TrackerReview struct {
-	System     string
-	Repository string
-	Number     int
-	Author     TrackerUser
-	State      string
-	Body       string
-	URL        string
-	CreatedAt  string
-	UpdatedAt  string
-}
-
-type TrackerRepository struct {
-	System        string
-	FullName      string
-	Owner         string
-	Name          string
-	Description   string
-	DefaultBranch string
-	URL           string
-}
-
-type TrackerUser struct {
-	System   string
-	Login    string
-	Name     string
-	Email    string
-	URL      string
-	IsBot    bool
-	IsActive bool
-}
-
-type TrackerSearchResult struct {
-	System     string
-	Repository string
-	Kind       string
-	ID         string
-	Title      string
-	State      string
-	Labels     []string
-	Author     TrackerUser
-	Assignees  []TrackerUser
-	URL        string
-	CreatedAt  string
-	UpdatedAt  string
 }
 
 type Artifact struct {

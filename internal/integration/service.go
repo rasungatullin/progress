@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	bitbucketprovider "github.com/rasungatullin/progress/internal/integration/bitbucket"
@@ -37,19 +36,11 @@ type WikiPage = model.WikiPage
 type OperationResult = model.OperationResult
 type User = model.User
 type ObjectLink = model.ObjectLink
-type TrackerIssue = model.TrackerIssue
-type TrackerPullRequest = model.TrackerPullRequest
-type TrackerComment = model.TrackerComment
-type TrackerReview = model.TrackerReview
-type TrackerRepository = model.TrackerRepository
-type TrackerUser = model.TrackerUser
-type TrackerSearchResult = model.TrackerSearchResult
 type Artifact = model.Artifact
 type ProviderRequest = model.ProviderRequest
 type AuthStatus = model.AuthStatus
 type RepositoryStatus = model.RepositoryStatus
 type IssueStatus = model.IssueStatus
-type PullRequestStatus = model.PullRequestStatus
 type OperationFilter = model.OperationFilter
 type OperationDescriptor = model.OperationDescriptor
 type OperationInputContract = model.OperationInputContract
@@ -442,7 +433,6 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 		result.Failure = failureFromError(model.FailureKindExternalFailure, false, err)
 		result.Status = model.ResponseStatusFailed
 	}
-	normalizeDerivedObjects(&result)
 	if err != nil {
 		return result, err
 	}
@@ -911,13 +901,8 @@ func expectedResult(integrationType string, objectType string, resource string, 
 			if operation == "search" || operation == "list" {
 				return "canonical-merge-request[]"
 			}
-			if resource == "pr" || resource == "pull-request" {
-				if operation == "create" {
-					return "integration-pull-request-status"
-				}
-			}
 			if operation == "create" {
-				return "integration-operation-result"
+				return "canonical-merge-request"
 			}
 			return "canonical-merge-request"
 		case "comment", "review", "review-remark", "merge-request-comment":
@@ -951,24 +936,24 @@ func expectedResult(integrationType string, objectType string, resource string, 
 	switch resource {
 	case "issue":
 		if operation == "comments" {
-			return "tracker-comment[]"
+			return "task-comment[]"
 		}
 		if operation == "search" {
 			return "canonical-task[]"
 		}
-		return "tracker-issue"
+		return "canonical-task"
 	case "pull-request", "pr":
 		if operation == "search" {
-			return "merge-request[]"
+			return "canonical-merge-request[]"
 		}
 		if operation == "create" {
-			return "integration-pull-request-status"
+			return "canonical-merge-request"
 		}
-		return "tracker-pull-request"
+		return "canonical-merge-request"
 	case "auth":
 		return "integration-auth-status"
 	case "repository", "repo":
-		return "tracker-repository"
+		return "canonical-repository"
 	default:
 		return "normalized-response"
 	}
@@ -1067,111 +1052,13 @@ func applyResponseSystem(result *Response, system string) {
 	if result.IssueStatus != nil {
 		result.IssueStatus.System = system
 	}
-	if result.PullRequestStatus != nil {
-		result.PullRequestStatus.System = system
-	}
-	if result.Issue != nil {
-		result.Issue.System = system
-		result.Issue.Author.System = system
-		for i := range result.Issue.Assignees {
-			result.Issue.Assignees[i].System = system
-		}
-	}
-	if result.PullRequest != nil {
-		result.PullRequest.System = system
-		result.PullRequest.Author.System = system
-	}
-	for i := range result.Comments {
-		result.Comments[i].System = system
-		result.Comments[i].Author.System = system
-	}
-	for i := range result.Reviews {
-		result.Reviews[i].System = system
-		result.Reviews[i].Author.System = system
-	}
-	if result.RepositoryRef != nil {
-		result.RepositoryRef.System = system
-	}
-	for i := range result.SearchResults {
-		result.SearchResults[i].System = system
-		result.SearchResults[i].Author.System = system
-		for j := range result.SearchResults[i].Assignees {
-			result.SearchResults[i].Assignees[j].System = system
-		}
-	}
 	for i := range result.Artifacts {
 		result.Artifacts[i].System = system
 	}
 }
 
-func normalizeDerivedObjects(result *Response) {
-	if result == nil {
-		return
-	}
-	if result.Task == nil && result.Issue != nil {
-		result.Task = canonicalTaskFromTrackerIssue(*result.Issue)
-	}
-	if result.Issue == nil && result.Task != nil {
-		issue := trackerIssueFromCanonicalTask(*result.Task)
-		result.Issue = &issue
-	}
-	if result.Tasks == nil && result.SearchResults != nil && result.MergeRequests == nil {
-		result.Tasks = make([]CanonicalTask, 0, len(result.SearchResults))
-		for _, item := range result.SearchResults {
-			result.Tasks = append(result.Tasks, canonicalTaskFromTrackerSearchResult(item))
-		}
-	}
-	if result.SearchResults == nil && result.Tasks != nil {
-		result.SearchResults = make([]TrackerSearchResult, 0, len(result.Tasks))
-		for _, task := range result.Tasks {
-			result.SearchResults = append(result.SearchResults, trackerSearchResultFromCanonicalTask(task))
-		}
-	}
-	if result.SearchResults == nil && result.MergeRequests != nil {
-		result.SearchResults = make([]TrackerSearchResult, 0, len(result.MergeRequests))
-		for _, mergeRequest := range result.MergeRequests {
-			result.SearchResults = append(result.SearchResults, trackerSearchResultFromMergeRequest(mergeRequest))
-		}
-	}
-	if len(result.TaskComments) == 0 && len(result.Comments) > 0 {
-		result.TaskComments = make([]TaskComment, 0, len(result.Comments))
-		for _, comment := range result.Comments {
-			result.TaskComments = append(result.TaskComments, taskCommentFromTrackerComment(comment))
-		}
-	}
-	if len(result.Comments) == 0 && len(result.TaskComments) > 0 {
-		result.Comments = make([]TrackerComment, 0, len(result.TaskComments))
-		for _, comment := range result.TaskComments {
-			result.Comments = append(result.Comments, trackerCommentFromTaskComment(comment))
-		}
-	}
-	if result.Repository == nil && result.RepositoryRef != nil {
-		result.Repository = repositoryFromTrackerRepository(*result.RepositoryRef)
-	}
-	if result.RepositoryRef == nil && result.Repository != nil {
-		repository := trackerRepositoryFromRepository(*result.Repository)
-		result.RepositoryRef = &repository
-	}
-	if result.MergeRequest == nil && result.PullRequest != nil {
-		result.MergeRequest = mergeRequestFromTrackerPullRequest(*result.PullRequest)
-	}
-	if result.PullRequest == nil && result.MergeRequest != nil {
-		pr := trackerPullRequestFromMergeRequest(*result.MergeRequest)
-		result.PullRequest = &pr
-	}
-}
-
 func applyTaskLabelMapping(result *Response, mapping map[string]string) {
 	if result == nil {
-		return
-	}
-	if result.Issue != nil {
-		externalLabels := append([]string(nil), result.Issue.Labels...)
-		canonicalLabels := mapExternalLabelsToCanonical(result.Issue.Labels, mapping)
-		result.Issue.Labels = canonicalLabels
-		if result.Task != nil && (len(result.Task.Traits) == 0 || sameStrings(result.Task.Traits, externalLabels)) {
-			result.Task.Traits = append([]string(nil), canonicalLabels...)
-		}
 		return
 	}
 	if result.Task != nil {
@@ -1180,229 +1067,6 @@ func applyTaskLabelMapping(result *Response, mapping map[string]string) {
 	for i := range result.Tasks {
 		result.Tasks[i].Traits = mapExternalLabelsToCanonical(result.Tasks[i].Traits, mapping)
 	}
-	for i := range result.SearchResults {
-		result.SearchResults[i].Labels = mapExternalLabelsToCanonical(result.SearchResults[i].Labels, mapping)
-	}
-}
-
-func canonicalTaskFromTrackerSearchResult(item TrackerSearchResult) CanonicalTask {
-	return CanonicalTask{
-		System:     item.System,
-		Repository: item.Repository,
-		ID:         item.ID,
-		ExternalID: item.ID,
-		Title:      item.Title,
-		State:      item.State,
-		Traits:     append([]string(nil), item.Labels...),
-		Author:     userFromTrackerUser(item.Author),
-		Assignees:  usersFromTrackerUsers(item.Assignees),
-		URL:        item.URL,
-		CreatedAt:  item.CreatedAt,
-		UpdatedAt:  item.UpdatedAt,
-	}
-}
-
-func trackerSearchResultFromCanonicalTask(task CanonicalTask) TrackerSearchResult {
-	return TrackerSearchResult{
-		System:     task.System,
-		Repository: task.Repository,
-		Kind:       "issue",
-		ID:         task.ID,
-		Title:      task.Title,
-		State:      task.State,
-		Labels:     append([]string(nil), task.Traits...),
-		Author:     trackerUserFromUser(task.Author),
-		Assignees:  trackerUsersFromUsers(task.Assignees),
-		URL:        task.URL,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-	}
-}
-
-func trackerSearchResultFromMergeRequest(mergeRequest MergeRequest) TrackerSearchResult {
-	return TrackerSearchResult{
-		System:     mergeRequest.System,
-		Repository: mergeRequest.Repository,
-		Kind:       "merge-request",
-		ID:         strconv.Itoa(mergeRequest.Number),
-		Title:      mergeRequest.Title,
-		State:      mergeRequest.State,
-		Labels:     append([]string(nil), mergeRequest.Traits...),
-		Author:     trackerUserFromUser(mergeRequest.Author),
-		URL:        mergeRequest.URL,
-		CreatedAt:  mergeRequest.CreatedAt,
-		UpdatedAt:  mergeRequest.UpdatedAt,
-	}
-}
-
-func canonicalTaskFromTrackerIssue(issue TrackerIssue) *CanonicalTask {
-	return &CanonicalTask{
-		System:     issue.System,
-		Repository: issue.Repository,
-		ID:         firstNonEmpty(issue.ID, issue.ExternalID),
-		ExternalID: issue.ExternalID,
-		Title:      issue.Title,
-		Body:       issue.Body,
-		State:      issue.State,
-		Traits:     append([]string(nil), issue.Labels...),
-		Assignees:  usersFromTrackerUsers(issue.Assignees),
-		Author:     userFromTrackerUser(issue.Author),
-		URL:        issue.URL,
-		CreatedAt:  issue.CreatedAt,
-		UpdatedAt:  issue.UpdatedAt,
-	}
-}
-
-func trackerIssueFromCanonicalTask(task CanonicalTask) TrackerIssue {
-	return TrackerIssue{
-		System:     task.System,
-		Repository: task.Repository,
-		ID:         task.ID,
-		ExternalID: task.ExternalID,
-		Title:      task.Title,
-		Body:       task.Body,
-		State:      task.State,
-		Labels:     append([]string(nil), task.Traits...),
-		Assignees:  trackerUsersFromUsers(task.Assignees),
-		Author:     trackerUserFromUser(task.Author),
-		URL:        task.URL,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-	}
-}
-
-func taskCommentFromTrackerComment(comment TrackerComment) TaskComment {
-	return TaskComment{
-		System:     comment.System,
-		Repository: comment.Repository,
-		TaskID:     comment.TaskID,
-		Author:     userFromTrackerUser(comment.Author),
-		Body:       comment.Body,
-		URL:        comment.URL,
-		CreatedAt:  comment.CreatedAt,
-		UpdatedAt:  comment.UpdatedAt,
-	}
-}
-
-func trackerCommentFromTaskComment(comment TaskComment) TrackerComment {
-	return TrackerComment{
-		System:     comment.System,
-		Repository: comment.Repository,
-		TaskID:     comment.TaskID,
-		Author:     trackerUserFromUser(comment.Author),
-		Body:       comment.Body,
-		URL:        comment.URL,
-		CreatedAt:  comment.CreatedAt,
-		UpdatedAt:  comment.UpdatedAt,
-	}
-}
-
-func repositoryFromTrackerRepository(repository TrackerRepository) *Repository {
-	return &Repository{
-		System:        repository.System,
-		FullName:      repository.FullName,
-		Owner:         repository.Owner,
-		Name:          repository.Name,
-		Description:   repository.Description,
-		DefaultBranch: repository.DefaultBranch,
-		URL:           repository.URL,
-	}
-}
-
-func trackerRepositoryFromRepository(repository Repository) TrackerRepository {
-	return TrackerRepository{
-		System:        repository.System,
-		FullName:      repository.FullName,
-		Owner:         repository.Owner,
-		Name:          repository.Name,
-		Description:   repository.Description,
-		DefaultBranch: repository.DefaultBranch,
-		URL:           repository.URL,
-	}
-}
-
-func mergeRequestFromTrackerPullRequest(pr TrackerPullRequest) *MergeRequest {
-	return &MergeRequest{
-		System:         pr.System,
-		Repository:     pr.Repository,
-		Number:         pr.Number,
-		Title:          pr.Title,
-		Body:           pr.Body,
-		State:          pr.State,
-		Traits:         append([]string(nil), pr.Labels...),
-		Author:         userFromTrackerUser(pr.Author),
-		ReviewDecision: pr.ReviewDecision,
-		BaseRef:        pr.BaseRef,
-		HeadRef:        pr.HeadRef,
-		URL:            pr.URL,
-		CreatedAt:      pr.CreatedAt,
-		UpdatedAt:      pr.UpdatedAt,
-	}
-}
-
-func trackerPullRequestFromMergeRequest(pr MergeRequest) TrackerPullRequest {
-	return TrackerPullRequest{
-		System:         pr.System,
-		Repository:     pr.Repository,
-		Number:         pr.Number,
-		Title:          pr.Title,
-		Body:           pr.Body,
-		State:          pr.State,
-		Author:         trackerUserFromUser(pr.Author),
-		ReviewDecision: pr.ReviewDecision,
-		BaseRef:        pr.BaseRef,
-		HeadRef:        pr.HeadRef,
-		Labels:         append([]string(nil), pr.Traits...),
-		URL:            pr.URL,
-		CreatedAt:      pr.CreatedAt,
-		UpdatedAt:      pr.UpdatedAt,
-	}
-}
-
-func userFromTrackerUser(user TrackerUser) User {
-	return User{
-		System:   user.System,
-		Login:    user.Login,
-		Name:     user.Name,
-		Email:    user.Email,
-		URL:      user.URL,
-		IsBot:    user.IsBot,
-		IsActive: user.IsActive,
-	}
-}
-
-func trackerUserFromUser(user User) TrackerUser {
-	return TrackerUser{
-		System:   user.System,
-		Login:    user.Login,
-		Name:     user.Name,
-		Email:    user.Email,
-		URL:      user.URL,
-		IsBot:    user.IsBot,
-		IsActive: user.IsActive,
-	}
-}
-
-func usersFromTrackerUsers(users []TrackerUser) []User {
-	if len(users) == 0 {
-		return nil
-	}
-	result := make([]User, 0, len(users))
-	for _, user := range users {
-		result = append(result, userFromTrackerUser(user))
-	}
-	return result
-}
-
-func trackerUsersFromUsers(users []User) []TrackerUser {
-	if len(users) == 0 {
-		return nil
-	}
-	result := make([]TrackerUser, 0, len(users))
-	for _, user := range users {
-		result = append(result, trackerUserFromUser(user))
-	}
-	return result
 }
 
 func normalizeLabelMapping(mapping map[string]string) map[string]string {
@@ -1499,18 +1163,6 @@ func mapCanonicalLabelsToExternal(labels []string, mapping map[string]string) []
 		return nil
 	}
 	return result
-}
-
-func sameStrings(left []string, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if strings.TrimSpace(left[i]) != strings.TrimSpace(right[i]) {
-			return false
-		}
-	}
-	return true
 }
 
 func responseWithFailure(route Route, kind string, retryable bool, err error) Response {

@@ -144,23 +144,20 @@ func TestOperationNameForTaskListRequest(t *testing.T) {
 func TestServicePreservesEmptyTaskCollections(t *testing.T) {
 	t.Parallel()
 
-	for _, stdout := range []string{
-		`{"status":"ok","tasks":[]}`,
-		`{"status":"ok","search_results":[]}`,
-	} {
-		stdout := stdout
-		t.Run(stdout, func(t *testing.T) {
+	for _, operation := range []string{"list", "search"} {
+		operation := operation
+		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 
 			service := NewService(model.IntegrationSystemConfig{
 				IntegrationType: model.IntegrationTypeTracker,
 				Operations: map[string]model.IntegrationOperationConfig{
-					"issue.issue.search": {Script: "task-search.sh"},
+					"issue.issue." + operation: {Script: "task-" + operation + ".sh"},
 				},
 			})
 			service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
 			service.runCommand = func(context.Context, string, []string, []string, string) commandResult {
-				return commandResult{stdout: stdout}
+				return commandResult{stdout: `{"status":"ok","tasks":[]}`}
 			}
 
 			response, err := service.Execute(context.Background(), model.ProviderRequest{
@@ -168,13 +165,113 @@ func TestServicePreservesEmptyTaskCollections(t *testing.T) {
 				System:          "work-tracker",
 				Resource:        "task",
 				ObjectType:      "task",
-				Operation:       "search",
+				Operation:       operation,
 			})
 			if err != nil {
 				t.Fatalf("execute script operation: %v", err)
 			}
 			if response.Tasks == nil || len(response.Tasks) != 0 {
 				t.Fatalf("expected empty canonical task list, got %#v", response.Tasks)
+			}
+		})
+	}
+}
+
+func TestServicePreservesEmptyTaskCommentCollection(t *testing.T) {
+	t.Parallel()
+
+	requests := []model.ProviderRequest{
+		{Resource: "task", ObjectType: "task", Operation: "comments", ID: "ABC-123"},
+		{Resource: "task-comment", ObjectType: "task-comment", Operation: "list", ID: "ABC-123"},
+	}
+	for _, request := range requests {
+		request := request
+		t.Run(request.ObjectType, func(t *testing.T) {
+			t.Parallel()
+
+			service := NewService(model.IntegrationSystemConfig{
+				IntegrationType: model.IntegrationTypeTracker,
+				Operations: map[string]model.IntegrationOperationConfig{
+					"issue.issue.comment.list": {Script: "task-comments.sh"},
+				},
+			})
+			service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
+			service.runCommand = func(context.Context, string, []string, []string, string) commandResult {
+				return commandResult{stdout: `{"status":"ok","task_comments":[]}`}
+			}
+
+			request.IntegrationType = model.IntegrationTypeTracker
+			request.System = "work-tracker"
+			response, err := service.Execute(context.Background(), request)
+			if err != nil {
+				t.Fatalf("execute script operation: %v", err)
+			}
+			if response.TaskComments == nil || len(response.TaskComments) != 0 {
+				t.Fatalf("expected empty canonical task comment list, got %#v", response.TaskComments)
+			}
+		})
+	}
+}
+
+func TestServiceRejectsMissingCanonicalCollections(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		operationName string
+		request       model.ProviderRequest
+		stdout        string
+	}{
+		{
+			name:          "поиск без tasks",
+			operationName: "issue.issue.search",
+			request:       model.ProviderRequest{Resource: "task", ObjectType: "task", Operation: "search"},
+			stdout:        `{"status":"ok","search_results":[{"id":"ABC-123"}]}`,
+		},
+		{
+			name:          "список без tasks",
+			operationName: "issue.issue.list",
+			request:       model.ProviderRequest{Resource: "task", ObjectType: "task", Operation: "list"},
+			stdout:        `{"status":"ok"}`,
+		},
+		{
+			name:          "комментарии без task_comments",
+			operationName: "issue.issue.comment.list",
+			request:       model.ProviderRequest{Resource: "task", ObjectType: "task", Operation: "comments", ID: "ABC-123"},
+			stdout:        `{"status":"ok","comments":[{"body":"устаревший ответ"}]}`,
+		},
+		{
+			name:          "список task-comment без task_comments",
+			operationName: "issue.issue.comment.list",
+			request:       model.ProviderRequest{Resource: "task-comment", ObjectType: "task-comment", Operation: "list", ID: "ABC-123"},
+			stdout:        `{"status":"ok"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service := NewService(model.IntegrationSystemConfig{
+				IntegrationType: model.IntegrationTypeTracker,
+				Operations: map[string]model.IntegrationOperationConfig{
+					tt.operationName: {Script: "operation.sh"},
+				},
+			})
+			service.resolveWorkdir = func(context.Context) (string, error) { return t.TempDir(), nil }
+			service.runCommand = func(context.Context, string, []string, []string, string) commandResult {
+				return commandResult{stdout: tt.stdout}
+			}
+
+			tt.request.IntegrationType = model.IntegrationTypeTracker
+			tt.request.System = "work-tracker"
+			response, err := service.Execute(context.Background(), tt.request)
+			if err == nil {
+				t.Fatal("expected missing canonical collection error")
+			}
+			if response.Failure == nil || response.Failure.Kind != model.FailureKindExternalFailure || response.Status != model.ResponseStatusFailed {
+				t.Fatalf("unexpected failure response: %#v", response)
 			}
 		})
 	}

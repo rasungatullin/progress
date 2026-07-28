@@ -787,9 +787,6 @@ func TestServicePRGetSuccess(t *testing.T) {
 	if stub.repo != "owner/name" || stub.number != 321 {
 		t.Fatalf("unexpected requested pull request: repo=%q number=%d", stub.repo, stub.number)
 	}
-	if response.PullRequestStatus != nil {
-		t.Fatal("did not expect pull request status on success")
-	}
 }
 
 func TestServicePRGetUsesConfiguredDefaultRepository(t *testing.T) {
@@ -833,14 +830,8 @@ func TestServicePRGetRejectsExplicitEmptyRepositoryWithoutUsingDefault(t *testin
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", MergeRequestNumber: 321, RepoProvided: true})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
-	if response.PullRequestStatus == nil {
-		t.Fatal("expected pull request status")
-	}
-	if response.PullRequestStatus.State != ErrorCodeInvalidRequest {
-		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
-	}
-	if response.PullRequestStatus.Message != "GitHub repository is required" {
-		t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindInvalidRequest || response.Failure.Message != "GitHub repository is required" {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
 	}
 	if stub.prViewCalls != 0 {
 		t.Fatalf("runner must not be invoked for explicit empty repository, got %d calls", stub.prViewCalls)
@@ -864,14 +855,8 @@ func TestServicePRGetMapsMissingPullRequestToNotFound(t *testing.T) {
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "get", Repository: "owner/name", MergeRequestNumber: 321})
 	assertGitHubErrorCode(t, err, ErrorCodeNotFound)
-	if response.PullRequestStatus == nil {
-		t.Fatal("expected pull request status")
-	}
-	if response.PullRequestStatus.State != ErrorCodeNotFound {
-		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
-	}
-	if response.PullRequestStatus.Message != "GitHub pull request not found: owner/name#321" {
-		t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindNotFound || response.Failure.Message != "GitHub pull request not found: owner/name#321" {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
 	}
 	if stub.prViewCalls != 1 {
 		t.Fatalf("expected one pr view call, got %d", stub.prViewCalls)
@@ -1194,23 +1179,11 @@ func TestServicePRCreateSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.PullRequestStatus == nil {
-		t.Fatal("expected pull request status")
+	if response.MergeRequest == nil || response.MergeRequest.State != "open" || response.MergeRequest.URL != "https://github.com/owner/name/pull/42" || response.MergeRequest.Number != 42 {
+		t.Fatalf("unexpected merge request: %#v", response.MergeRequest)
 	}
-	if response.PullRequestStatus.State != "OPEN" {
-		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
-	}
-	if response.PullRequestStatus.URL != "https://github.com/owner/name/pull/42" {
-		t.Fatalf("unexpected url: %q", response.PullRequestStatus.URL)
-	}
-	if response.PullRequestStatus.Number != 42 {
-		t.Fatalf("unexpected number: %d", response.PullRequestStatus.Number)
-	}
-	if response.PullRequestStatus.Draft != true {
-		t.Fatal("expected draft status")
-	}
-	if response.MergeRequest != nil {
-		t.Fatalf("did not expect merge request payload: %#v", response.MergeRequest)
+	if response.OperationResult == nil || response.OperationResult.Status != model.ResponseStatusOK || response.OperationResult.Idempotent {
+		t.Fatalf("unexpected operation result: %#v", response.OperationResult)
 	}
 	if stub.repo != "owner/name" || stub.base != "main" || stub.head != "feature/branch" || stub.title != "Add integration" || stub.body != "Implements pr create" || !stub.draft {
 		t.Fatalf("unexpected pr create request: %#v", stub)
@@ -1234,11 +1207,8 @@ func TestServicePRCreateRejectsInvalidRepository(t *testing.T) {
 		t.Run(tt.repository, func(t *testing.T) {
 			response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: tt.repository, Base: "main", Head: "feature", Title: "Title", Body: "Body"})
 			assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
-			if response.PullRequestStatus == nil {
-				t.Fatal("expected pull request status")
-			}
-			if response.PullRequestStatus.Message != tt.message {
-				t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+			if response.Failure == nil || response.Failure.Kind != model.FailureKindInvalidRequest || response.Failure.Message != tt.message {
+				t.Fatalf("unexpected failure: %#v", response.Failure)
 			}
 		})
 	}
@@ -1266,11 +1236,8 @@ func TestServicePRCreateRejectsInvalidFields(t *testing.T) {
 
 			response, err := service.Execute(context.Background(), tt.request)
 			assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
-			if response.PullRequestStatus == nil {
-				t.Fatal("expected pull request status")
-			}
-			if response.PullRequestStatus.Message != tt.message {
-				t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+			if response.Failure == nil || response.Failure.Kind != model.FailureKindInvalidRequest || response.Failure.Message != tt.message {
+				t.Fatalf("unexpected failure: %#v", response.Failure)
 			}
 		})
 	}
@@ -1295,11 +1262,8 @@ func TestServicePRCreateAcceptsEmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if response.PullRequestStatus == nil {
-		t.Fatal("expected pull request status")
-	}
-	if response.PullRequestStatus.State != "OPEN" {
-		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+	if response.MergeRequest == nil || response.MergeRequest.State != "open" {
+		t.Fatalf("unexpected merge request: %#v", response.MergeRequest)
 	}
 	if stub.body != "" {
 		t.Fatalf("expected empty body to pass through, got %q", stub.body)
@@ -1315,8 +1279,8 @@ func TestServicePRCreateMapsAuthRequired(t *testing.T) {
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", Body: "Body"})
 	assertGitHubErrorCode(t, err, ErrorCodeAuthRequired)
-	if response.PullRequestStatus == nil || response.PullRequestStatus.State != ErrorCodeAuthRequired {
-		t.Fatalf("unexpected status: %#v", response.PullRequestStatus)
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindAuthRequired {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
 	}
 }
 
@@ -1328,18 +1292,14 @@ func TestServicePRCreateMapsAlreadyExists(t *testing.T) {
 	service.runner = stub
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", Body: "Body"})
-	assertGitHubErrorCode(t, err, ErrorCodeAlreadyExists)
-	if response.PullRequestStatus == nil {
-		t.Fatal("expected pull request status")
+	if err != nil {
+		t.Fatalf("already existing pull request must be idempotent: %v", err)
 	}
-	if response.PullRequestStatus.State != ErrorCodeAlreadyExists {
-		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
+	if response.MergeRequest == nil || response.MergeRequest.URL != "https://github.com/owner/name/pull/15" || response.MergeRequest.Number != 15 {
+		t.Fatalf("unexpected merge request: %#v", response.MergeRequest)
 	}
-	if response.PullRequestStatus.URL != "https://github.com/owner/name/pull/15" {
-		t.Fatalf("unexpected url: %q", response.PullRequestStatus.URL)
-	}
-	if response.PullRequestStatus.Number != 15 {
-		t.Fatalf("unexpected number: %d", response.PullRequestStatus.Number)
+	if response.OperationResult == nil || !response.OperationResult.Idempotent || response.OperationResult.Status != model.ResponseStatusOK {
+		t.Fatalf("unexpected operation result: %#v", response.OperationResult)
 	}
 }
 
@@ -1352,14 +1312,8 @@ func TestServicePRCreateMapsNoCommitsBetweenBranches(t *testing.T) {
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", Body: "Body"})
 	assertGitHubErrorCode(t, err, ErrorCodeInvalidRequest)
-	if response.PullRequestStatus == nil {
-		t.Fatal("expected pull request status")
-	}
-	if response.PullRequestStatus.State != ErrorCodeInvalidRequest {
-		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
-	}
-	if response.PullRequestStatus.Message != "GitHub pull request cannot be created because feature has no commits ahead of main" {
-		t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindInvalidRequest || response.Failure.Message != "GitHub pull request cannot be created because feature has no commits ahead of main" {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
 	}
 }
 
@@ -1380,20 +1334,8 @@ func TestServicePRCreateRejectsSuccessfulResponseWithoutParseablePRURL(t *testin
 
 	response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", Body: "Body"})
 	assertGitHubErrorCode(t, err, ErrorCodeExternalFailure)
-	if response.PullRequestStatus == nil {
-		t.Fatal("expected pull request status")
-	}
-	if response.PullRequestStatus.State != StateExternalFailure {
-		t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
-	}
-	if response.PullRequestStatus.Message != "unexpected GitHub CLI response: missing pull request URL or number" {
-		t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
-	}
-	if response.PullRequestStatus.URL != "" {
-		t.Fatalf("unexpected url: %q", response.PullRequestStatus.URL)
-	}
-	if response.PullRequestStatus.Number != 0 {
-		t.Fatalf("unexpected number: %d", response.PullRequestStatus.Number)
+	if response.Failure == nil || response.Failure.Kind != model.FailureKindExternalFailure || response.Failure.Message != "unexpected GitHub CLI response: missing pull request URL or number" {
+		t.Fatalf("unexpected failure: %#v", response.Failure)
 	}
 }
 
@@ -1418,14 +1360,8 @@ func TestServicePRCreateMapsMissingRepositoryOrBranchToNotFound(t *testing.T) {
 
 			response, err := service.Execute(context.Background(), model.ProviderRequest{System: "github", Resource: "pr", Operation: "create", Repository: "owner/name", Base: "main", Head: "feature", Title: "Title", Body: "Body"})
 			assertGitHubErrorCode(t, err, ErrorCodeNotFound)
-			if response.PullRequestStatus == nil {
-				t.Fatal("expected pull request status")
-			}
-			if response.PullRequestStatus.State != ErrorCodeNotFound {
-				t.Fatalf("unexpected state: %q", response.PullRequestStatus.State)
-			}
-			if response.PullRequestStatus.Message != "GitHub repository or branch not found for pull request creation: owner/name feature -> main" {
-				t.Fatalf("unexpected message: %q", response.PullRequestStatus.Message)
+			if response.Failure == nil || response.Failure.Kind != model.FailureKindNotFound || response.Failure.Message != "GitHub repository or branch not found for pull request creation: owner/name feature -> main" {
+				t.Fatalf("unexpected failure: %#v", response.Failure)
 			}
 		})
 	}

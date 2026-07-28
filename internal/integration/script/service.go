@@ -47,8 +47,6 @@ type scriptResponse struct {
 	Task            *scriptTask            `json:"task"`
 	Tasks           []scriptTask           `json:"tasks"`
 	TaskComments    []scriptComment        `json:"task_comments"`
-	Comments        []scriptComment        `json:"comments"`
-	SearchResults   []scriptSearchResult   `json:"search_results"`
 	OperationResult *scriptOperationResult `json:"operation_result"`
 }
 
@@ -93,19 +91,6 @@ type scriptUser struct {
 	URL      string `json:"url"`
 	IsBot    bool   `json:"is_bot"`
 	IsActive bool   `json:"is_active"`
-}
-
-type scriptSearchResult struct {
-	System     string `json:"system"`
-	Repository string `json:"repository"`
-	Kind       string `json:"kind"`
-	ID         string `json:"id"`
-	Number     int    `json:"number"`
-	ExternalID string `json:"external_id"`
-	Title      string `json:"title"`
-	State      string `json:"state"`
-	URL        string `json:"url"`
-	UpdatedAt  string `json:"updated_at"`
 }
 
 type scriptOperationResult struct {
@@ -334,16 +319,16 @@ func decodeScriptResponse(response model.Response, stdout string) (model.Respons
 		task := raw.Task.toCanonicalTask()
 		response.Task = &task
 	}
-	if raw.Tasks != nil || raw.SearchResults != nil {
-		response.Tasks = make([]model.CanonicalTask, 0, len(raw.Tasks)+len(raw.SearchResults))
+	if raw.Tasks != nil {
+		response.Tasks = make([]model.CanonicalTask, 0, len(raw.Tasks))
 	}
 	for _, task := range raw.Tasks {
 		response.Tasks = append(response.Tasks, task.toCanonicalTask())
 	}
-	for _, item := range raw.SearchResults {
-		response.Tasks = append(response.Tasks, item.toCanonicalTask())
+	if raw.TaskComments != nil {
+		response.TaskComments = make([]model.TaskComment, 0, len(raw.TaskComments))
 	}
-	for _, item := range append(raw.TaskComments, raw.Comments...) {
+	for _, item := range raw.TaskComments {
 		comment := item.toTaskComment()
 		response.TaskComments = append(response.TaskComments, comment)
 	}
@@ -377,20 +362,38 @@ func decodeScriptResponse(response model.Response, stdout string) (model.Respons
 func validateSuccessfulResponsePayload(response model.Response) error {
 	integrationType := normalizeIntegrationType(firstNonEmpty(response.IntegrationType, model.IntegrationTypeTracker))
 	objectType := normalizeObjectType(firstNonEmpty(response.ObjectType, response.Resource))
+	rawOperation := strings.TrimSpace(strings.ToLower(response.Operation))
 	operation := normalizeOperation(response.Operation)
 	switch integrationType {
 	case model.IntegrationTypeTracker:
 		switch objectType {
 		case "task":
+			if rawOperation == "comments" || rawOperation == "list-comments" {
+				if response.TaskComments == nil {
+					return fmt.Errorf("script operation %s.%s.%s returned ok without task comments payload", integrationType, objectType, operation)
+				}
+				return nil
+			}
 			switch operation {
 			case "create", "get", "update":
 				if response.Task == nil {
 					return fmt.Errorf("script operation %s.%s.%s returned ok without task payload", integrationType, objectType, operation)
 				}
+			case "list", "search":
+				if response.Tasks == nil {
+					return fmt.Errorf("script operation %s.%s.%s returned ok without tasks payload", integrationType, objectType, operation)
+				}
 			}
 		case "comment":
-			if operation == "create" && response.OperationResult == nil && len(response.TaskComments) == 0 {
-				return fmt.Errorf("script operation %s.%s.%s returned ok without comment payload", integrationType, objectType, operation)
+			switch operation {
+			case "create":
+				if response.OperationResult == nil && len(response.TaskComments) == 0 {
+					return fmt.Errorf("script operation %s.%s.%s returned ok without comment payload", integrationType, objectType, operation)
+				}
+			case "list":
+				if response.TaskComments == nil {
+					return fmt.Errorf("script operation %s.%s.%s returned ok without task comments payload", integrationType, objectType, operation)
+				}
 			}
 		case "label":
 			if (operation == "add" || operation == "remove") && response.OperationResult == nil {
@@ -576,19 +579,6 @@ func (user scriptUser) toUser() model.User {
 	}
 }
 
-func (result scriptSearchResult) toCanonicalTask() model.CanonicalTask {
-	return model.CanonicalTask{
-		System:     result.System,
-		Repository: result.Repository,
-		ID:         firstNonEmpty(result.ID, result.ExternalID, positiveIntString(result.Number)),
-		ExternalID: result.ExternalID,
-		Title:      result.Title,
-		State:      result.State,
-		URL:        result.URL,
-		UpdatedAt:  result.UpdatedAt,
-	}
-}
-
 func (result scriptOperationResult) toOperationResult(response model.Response) *model.OperationResult {
 	status := strings.TrimSpace(result.Status)
 	if status == "" {
@@ -625,9 +615,9 @@ func normalizeObjectType(value string) string {
 	switch value {
 	case "issue":
 		return "task"
-	case "task-comment":
+	case "task-comment", "issue.comment", "issue-comment":
 		return "comment"
-	case "task-label":
+	case "task-label", "issue.label", "issue-label":
 		return "label"
 	default:
 		return value

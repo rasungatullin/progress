@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -265,22 +266,16 @@ func (s *Service) Execute(ctx context.Context, req model.ProviderRequest) (model
 func (s *Service) executePRCreate(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
 	repository, err := normalizeRepository(req.Repository)
 	if err != nil {
-		status := prErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Base, req.Head, req.Title, req.Body, req.Draft)
-		status.State = ErrorCodeInvalidRequest
-		status.Message = err.Error()
-		status.Diagnostics = append(status.Diagnostics, "pull request create request rejected before invoking gh")
-		response.PullRequestStatus = &status
-		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+		diagnostics := append(prCreateDiagnostics(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.Base, req.Head, req.Title, req.Body, req.Draft), "pull request create request rejected before invoking gh")
+		applyGitHubFailure(&response, ErrorCodeInvalidRequest, err.Error(), diagnostics)
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error(), Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
 	}
 
 	prRequest, err := normalizePRCreateRequest(PRCreateRequest{Base: req.Base, Head: req.Head, Title: req.Title, Body: req.Body, Draft: req.Draft})
 	if err != nil {
-		status := prErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Base, req.Head, req.Title, req.Body, req.Draft)
-		status.State = ErrorCodeInvalidRequest
-		status.Message = err.Error()
-		status.Diagnostics = append(status.Diagnostics, "pull request create request rejected before invoking gh")
-		response.PullRequestStatus = &status
-		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+		diagnostics := append(prCreateDiagnostics(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.Base, req.Head, req.Title, req.Body, req.Draft), "pull request create request rejected before invoking gh")
+		applyGitHubFailure(&response, ErrorCodeInvalidRequest, err.Error(), diagnostics)
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error(), Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
 	}
 
 	result, config, err := s.runner.RunPRCreate(ctx, repository, prRequest)
@@ -291,88 +286,105 @@ func (s *Service) executePRCreate(ctx context.Context, response model.Response, 
 		config.Command = defaultCommand
 	}
 
-	status := prErrorStatus(config, result, repository, prRequest.Base, prRequest.Head, prRequest.Title, prRequest.Body, prRequest.Draft)
+	diagnostics := prCreateDiagnostics(config, result, repository, prRequest.Base, prRequest.Head, prRequest.Title, prRequest.Body, prRequest.Draft)
 	if err != nil {
 		var ghErr *Error
 		if errors.As(err, &ghErr) {
-			status.State = prStateForErrorCode(ghErr.Code)
-			status.Message = ghErr.Message
-			status.Diagnostics = append(status.Diagnostics, "gh pr create failed before returning a pull request payload")
-			response.PullRequestStatus = &status
+			if ghErr.Code == ErrorCodeAlreadyExists && applyExistingPullRequest(&response, config, result, repository, prRequest, diagnostics, ghErr.Message) {
+				return response, nil
+			}
+			diagnostics = append(diagnostics, "gh pr create failed before returning a pull request payload")
+			applyGitHubFailure(&response, ghErr.Code, ghErr.Message, diagnostics)
 			return response, ghErr
 		}
 
-		status.State = StateExternalFailure
-		status.Message = err.Error()
-		status.Diagnostics = append(status.Diagnostics, "gh pr create failed before returning a pull request payload")
-		response.PullRequestStatus = &status
-		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+		diagnostics = append(diagnostics, "gh pr create failed before returning a pull request payload")
+		applyGitHubFailure(&response, ErrorCodeExternalFailure, err.Error(), diagnostics)
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: err.Error(), Result: result, Err: err}
 	}
 
 	if result.ExitCode != 0 {
+		code := ErrorCodeExternalFailure
+		message := fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
+		diagnostic := "gh pr create exited with a non-zero code"
 		switch {
 		case isAuthRequired(result):
-			status.State = ErrorCodeAuthRequired
-			status.Message = "GitHub authentication is required"
-			status.Diagnostics = append(status.Diagnostics, "gh pr create reported that no GitHub login is configured")
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
+			code = ErrorCodeAuthRequired
+			message = "GitHub authentication is required"
+			diagnostic = "gh pr create reported that no GitHub login is configured"
 		case isPRCreateNoCommits(result):
-			status.State = ErrorCodeInvalidRequest
-			status.Message = fmt.Sprintf("GitHub pull request cannot be created because %s has no commits ahead of %s", prRequest.Head, prRequest.Base)
-			status.Diagnostics = append(status.Diagnostics, "gh pr create reported no commits between the requested branches")
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: result}
+			code = ErrorCodeInvalidRequest
+			message = fmt.Sprintf("GitHub pull request cannot be created because %s has no commits ahead of %s", prRequest.Head, prRequest.Base)
+			diagnostic = "gh pr create reported no commits between the requested branches"
 		case isRepoNotFound(result), isPRCreateBranchNotFound(result):
-			status.State = ErrorCodeNotFound
-			status.Message = fmt.Sprintf("GitHub repository or branch not found for pull request creation: %s %s -> %s", repository, prRequest.Head, prRequest.Base)
-			status.Diagnostics = append(status.Diagnostics, "gh pr create could not resolve the requested repository or branch")
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeNotFound, Message: status.Message, Result: result}
+			code = ErrorCodeNotFound
+			message = fmt.Sprintf("GitHub repository or branch not found for pull request creation: %s %s -> %s", repository, prRequest.Head, prRequest.Base)
+			diagnostic = "gh pr create could not resolve the requested repository or branch"
 		case isPRAlreadyExists(result):
-			status.State = ErrorCodeAlreadyExists
-			status.Message = fmt.Sprintf("GitHub pull request already exists for %s %s -> %s", repository, prRequest.Head, prRequest.Base)
-			status.Diagnostics = append(status.Diagnostics, "gh pr create reported an existing pull request between the requested branches")
-			status.URL = extractFirstURL(result.Stdout + "\n" + result.Stderr)
-			status.Number = pullRequestNumberFromURL(status.URL)
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeAlreadyExists, Message: status.Message, Result: result}
-		default:
-			status.State = StateExternalFailure
-			status.Message = fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
-			status.Diagnostics = append(status.Diagnostics, "gh pr create exited with a non-zero code")
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+			if applyExistingPullRequest(&response, config, result, repository, prRequest, diagnostics, "") {
+				return response, nil
+			}
+			code = ErrorCodeAlreadyExists
+			message = fmt.Sprintf("GitHub pull request already exists for %s %s -> %s, but its URL could not be determined", repository, prRequest.Head, prRequest.Base)
+			diagnostic = "gh pr create reported an existing pull request without a parseable pull request URL"
 		}
+		diagnostics = append(diagnostics, diagnostic)
+		applyGitHubFailure(&response, code, message, diagnostics)
+		return response, &Error{Code: code, Message: message, Result: result}
 	}
 
-	status.URL = extractFirstURL(result.Stdout)
-	status.Number = pullRequestNumberFromURL(status.URL)
-	if status.URL == "" || status.Number <= 0 {
-		status.State = StateExternalFailure
-		status.Message = "unexpected GitHub CLI response: missing pull request URL or number"
-		status.Diagnostics = append(status.Diagnostics, "gh pr create returned a success exit code without a parseable pull request URL")
-		response.PullRequestStatus = &status
-		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+	url := extractFirstURL(result.Stdout)
+	number := pullRequestNumberFromURL(url)
+	if url == "" || number <= 0 {
+		message := "unexpected GitHub CLI response: missing pull request URL or number"
+		diagnostics = append(diagnostics, "gh pr create returned a success exit code without a parseable pull request URL")
+		applyGitHubFailure(&response, ErrorCodeExternalFailure, message, diagnostics)
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: message, Result: result}
 	}
 
-	status.State = "OPEN"
-	status.Message = fmt.Sprintf("GitHub pull request created for %s %s -> %s", repository, prRequest.Head, prRequest.Base)
-	status.Diagnostics = append(status.Diagnostics, "gh pr create completed successfully")
-	response.PullRequestStatus = &status
+	message := fmt.Sprintf("GitHub pull request created for %s %s -> %s", repository, prRequest.Head, prRequest.Base)
+	mergeRequest := model.MergeRequest{
+		System: "github", Repository: repository, Number: number, ExternalID: strconv.Itoa(number),
+		Title: prRequest.Title, Body: prRequest.Body, State: "open", BaseRef: prRequest.Base, HeadRef: prRequest.Head, URL: url,
+	}
+	response.MergeRequest = &mergeRequest
 	response.OperationResult = &model.OperationResult{
 		System:     "github",
 		ObjectType: "merge-request",
 		Operation:  "create",
 		Status:     model.ResponseStatusOK,
-		ExternalID: strconv.Itoa(status.Number),
-		URL:        status.URL,
+		ExternalID: strconv.Itoa(number),
+		URL:        url,
 		Method:     methodFromConfig(config),
 		Endpoint:   "pr create",
-		Message:    status.Message,
+		Message:    message,
+		Diagnostics: append(diagnostics,
+			"gh pr create completed successfully"),
 	}
 	response.Status = model.ResponseStatusOK
 	return response, nil
+}
+
+func applyExistingPullRequest(response *model.Response, config resolvedConfig, result CommandResult, repository string, request PRCreateRequest, diagnostics []string, extra string) bool {
+	pullRequestURL := extractFirstURL(strings.Join([]string{result.Stdout, result.Stderr, extra}, "\n"))
+	number, valid := pullRequestNumberForRepository(pullRequestURL, repository, config.WebHost)
+	if !valid {
+		return false
+	}
+	message := fmt.Sprintf("GitHub pull request already exists for %s %s -> %s", repository, request.Head, request.Base)
+	mergeRequest := model.MergeRequest{
+		System: "github", Repository: repository, Number: number, ExternalID: strconv.Itoa(number),
+		Title: request.Title, Body: request.Body, State: "open", BaseRef: request.Base, HeadRef: request.Head, URL: pullRequestURL,
+	}
+	response.MergeRequest = &mergeRequest
+	response.OperationResult = &model.OperationResult{
+		System: "github", ObjectType: "merge-request", Operation: "create", Status: model.ResponseStatusOK,
+		ExternalID: strconv.Itoa(number), URL: pullRequestURL, Method: methodFromConfig(config), Endpoint: "pr create",
+		Idempotent: true, Message: message, Diagnostics: append(append([]string(nil), diagnostics...), "GitHub reported an existing pull request between the requested branches"),
+	}
+	response.Status = model.ResponseStatusOK
+	response.Failure = nil
+	return true
 }
 
 func (s *Service) executePRList(ctx context.Context, response model.Response, req model.ProviderRequest) (model.Response, error) {
@@ -1510,23 +1522,17 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 		var err error
 		repository, err = normalizeRepository(repository)
 		if err != nil {
-			status := prGetErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.MergeRequestNumber)
-			status.State = ErrorCodeInvalidRequest
-			status.Message = err.Error()
-			status.Diagnostics = append(status.Diagnostics, "pull request get request rejected before invoking gh")
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+			diagnostics := append(prGetDiagnostics(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, strings.TrimSpace(req.Repository), req.MergeRequestNumber), "pull request get request rejected before invoking gh")
+			applyGitHubFailure(&response, ErrorCodeInvalidRequest, err.Error(), diagnostics)
+			return response, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error(), Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
 		}
 	}
 
 	number, err := normalizePullRequestNumber(req.MergeRequestNumber)
 	if err != nil {
-		status := prGetErrorStatus(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.MergeRequestNumber)
-		status.State = ErrorCodeInvalidRequest
-		status.Message = err.Error()
-		status.Diagnostics = append(status.Diagnostics, "pull request get request rejected before invoking gh")
-		response.PullRequestStatus = &status
-		return response, &Error{Code: ErrorCodeInvalidRequest, Message: status.Message, Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
+		diagnostics := append(prGetDiagnostics(resolvedConfig{Command: defaultCommand}, CommandResult{Command: defaultCommand, ExitCode: -1}, repository, req.MergeRequestNumber), "pull request get request rejected before invoking gh")
+		applyGitHubFailure(&response, ErrorCodeInvalidRequest, err.Error(), diagnostics)
+		return response, &Error{Code: ErrorCodeInvalidRequest, Message: err.Error(), Result: CommandResult{Command: defaultCommand, ExitCode: -1}}
 	}
 
 	result, config, err := s.runner.RunPRView(ctx, repository, number)
@@ -1538,63 +1544,52 @@ func (s *Service) executePRGet(ctx context.Context, response model.Response, req
 		config.Command = defaultCommand
 	}
 
-	status := prGetErrorStatus(config, result, repository, number)
+	diagnostics := prGetDiagnostics(config, result, repository, number)
 	if err != nil {
 		var ghErr *Error
 		if errors.As(err, &ghErr) {
-			status.State = repositoryStateForErrorCode(ghErr.Code)
-			status.Message = ghErr.Message
-			status.Diagnostics = append(status.Diagnostics, "gh pr view failed before returning a pull request payload")
-			response.PullRequestStatus = &status
-			applyGitHubFailure(&response, ghErr.Code, status.Message, status.Diagnostics)
+			diagnostics = append(diagnostics, "gh pr view failed before returning a pull request payload")
+			applyGitHubFailure(&response, ghErr.Code, ghErr.Message, diagnostics)
 			return response, ghErr
 		}
 
-		status.State = StateExternalFailure
-		status.Message = err.Error()
-		status.Diagnostics = append(status.Diagnostics, "gh pr view failed before returning a pull request payload")
-		response.PullRequestStatus = &status
-		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+		diagnostics = append(diagnostics, "gh pr view failed before returning a pull request payload")
+		applyGitHubFailure(&response, ErrorCodeExternalFailure, err.Error(), diagnostics)
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: err.Error(), Result: result, Err: err}
 	}
 
 	if result.ExitCode != 0 {
+		code := ErrorCodeExternalFailure
+		message := fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
+		diagnostic := "gh pr view exited with a non-zero code"
 		switch {
 		case isAuthRequired(result):
-			status.State = ErrorCodeAuthRequired
-			status.Message = "GitHub authentication is required"
-			status.Diagnostics = append(status.Diagnostics, "gh pr view reported that no GitHub login is configured")
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeAuthRequired, Message: status.Message, Result: result}
+			code = ErrorCodeAuthRequired
+			message = "GitHub authentication is required"
+			diagnostic = "gh pr view reported that no GitHub login is configured"
 		case isPRNotFound(result), isRepoNotFound(result):
-			status.State = ErrorCodeNotFound
-			status.Message = fmt.Sprintf("GitHub pull request not found: %s#%d", repository, number)
-			status.Diagnostics = append(status.Diagnostics, "gh pr view could not resolve the requested pull request")
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeNotFound, Message: status.Message, Result: result}
-		default:
-			status.State = StateExternalFailure
-			status.Message = fmt.Sprintf("GitHub CLI returned exit code %d", result.ExitCode)
-			status.Diagnostics = append(status.Diagnostics, "gh pr view exited with a non-zero code")
-			response.PullRequestStatus = &status
-			return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+			code = ErrorCodeNotFound
+			message = fmt.Sprintf("GitHub pull request not found: %s#%d", repository, number)
+			diagnostic = "gh pr view could not resolve the requested pull request"
 		}
+		diagnostics = append(diagnostics, diagnostic)
+		applyGitHubFailure(&response, code, message, diagnostics)
+		return response, &Error{Code: code, Message: message, Result: result}
 	}
 
 	var raw ghPRView
 	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
-		status.State = StateExternalFailure
-		status.Message = fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err)
-		status.Diagnostics = append(status.Diagnostics, "gh pr view returned malformed JSON")
-		response.PullRequestStatus = &status
-		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result, Err: err}
+		message := fmt.Sprintf("unexpected GitHub CLI JSON response: %v", err)
+		diagnostics = append(diagnostics, "gh pr view returned malformed JSON")
+		applyGitHubFailure(&response, ErrorCodeExternalFailure, message, diagnostics)
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: message, Result: result, Err: err}
 	}
 
 	if raw.Number <= 0 || strings.TrimSpace(raw.Title) == "" {
-		status.State = StateExternalFailure
-		status.Message = "unexpected GitHub CLI JSON response: missing pull request number or title"
-		status.Diagnostics = append(status.Diagnostics, "gh pr view returned an incomplete pull request payload")
-		response.PullRequestStatus = &status
-		return response, &Error{Code: ErrorCodeExternalFailure, Message: status.Message, Result: result}
+		message := "unexpected GitHub CLI JSON response: missing pull request number or title"
+		diagnostics = append(diagnostics, "gh pr view returned an incomplete pull request payload")
+		applyGitHubFailure(&response, ErrorCodeExternalFailure, message, diagnostics)
+		return response, &Error{Code: ErrorCodeExternalFailure, Message: message, Result: result}
 	}
 
 	mergeRequest := mergeRequestFromGHPR(repository, raw)
@@ -2080,33 +2075,6 @@ func repositoryStateForErrorCode(code string) string {
 	}
 }
 
-func prStateForErrorCode(code string) string {
-	switch code {
-	case ErrorCodeInvalidRequest:
-		return ErrorCodeInvalidRequest
-	case ErrorCodeNotInstalled:
-		return StateNotInstalled
-	case ErrorCodeAuthRequired:
-		return ErrorCodeAuthRequired
-	case ErrorCodeNotFound:
-		return ErrorCodeNotFound
-	case ErrorCodeAlreadyExists:
-		return ErrorCodeAlreadyExists
-	case ErrorCodeTimeout:
-		return StateTimeout
-	case ErrorCodePermissionDenied:
-		return ErrorCodePermissionDenied
-	case ErrorCodeTemporaryUnavailable:
-		return model.FailureKindTemporaryUnavailable
-	case ErrorCodeUnsupportedOperation:
-		return model.FailureKindUnsupportedOperation
-	case ErrorCodeInternalIntegration:
-		return ErrorCodeInternalIntegration
-	default:
-		return StateExternalFailure
-	}
-}
-
 func issueErrorStatus(config resolvedConfig, result CommandResult, repository string, number int) model.IssueStatus {
 	id := ""
 	if number > 0 {
@@ -2226,71 +2194,52 @@ func issueCommentsErrorStatus(config resolvedConfig, result CommandResult, repos
 	return status
 }
 
-func prGetErrorStatus(config resolvedConfig, result CommandResult, repository string, number int) model.PullRequestStatus {
-	status := model.PullRequestStatus{
-		System:     "github",
-		Repository: repository,
-		Number:     number,
-		State:      StateExternalFailure,
-		Command:    config.Command,
-		Path:       result.Path,
-		ExitCode:   result.ExitCode,
-		Stdout:     result.Stdout,
-		Stderr:     result.Stderr,
+func prGetDiagnostics(config resolvedConfig, result CommandResult, repository string, number int) []string {
+	command := config.Command
+	if command == "" {
+		command = defaultCommand
 	}
-
-	if status.Command == "" {
-		status.Command = defaultCommand
-	}
-	if status.ExitCode == 0 {
-		status.ExitCode = -1
-	}
-
+	diagnostics := make([]string, 0, 5)
 	if repository != "" {
-		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("repository=%s", repository))
+		diagnostics = append(diagnostics, fmt.Sprintf("repository=%s", repository))
 	}
 	if number > 0 {
-		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("number=%d", number))
+		diagnostics = append(diagnostics, fmt.Sprintf("number=%d", number))
 	}
-	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s pr view %d --repo %s --json number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt", status.Command, number, repository))
-	return status
+	diagnostics = append(diagnostics, fmt.Sprintf("command=%s pr view %d --repo %s --json number,title,body,state,mergeable,mergeStateStatus,author,labels,reviewDecision,baseRefName,headRefName,url,createdAt,updatedAt", command, number, repository))
+	if result.Path != "" {
+		diagnostics = append(diagnostics, "path="+result.Path)
+	}
+	if result.ExitCode != 0 {
+		diagnostics = append(diagnostics, fmt.Sprintf("exit-code=%d", result.ExitCode))
+	}
+	return diagnostics
 }
 
-func prErrorStatus(config resolvedConfig, result CommandResult, repository string, base string, head string, title string, body string, draft bool) model.PullRequestStatus {
-	status := model.PullRequestStatus{
-		System:     "github",
-		Repository: repository,
-		Base:       strings.TrimSpace(base),
-		Head:       strings.TrimSpace(head),
-		Title:      strings.TrimSpace(title),
-		Draft:      draft,
-		State:      StateExternalFailure,
-		Command:    config.Command,
-		Path:       result.Path,
-		ExitCode:   result.ExitCode,
-		Stdout:     result.Stdout,
-		Stderr:     result.Stderr,
+func prCreateDiagnostics(config resolvedConfig, result CommandResult, repository string, base string, head string, title string, body string, draft bool) []string {
+	command := config.Command
+	if command == "" {
+		command = defaultCommand
 	}
-
-	if status.Command == "" {
-		status.Command = defaultCommand
-	}
-	if status.ExitCode == 0 {
-		status.ExitCode = -1
-	}
-
+	diagnostics := make([]string, 0, 8)
 	if repository != "" {
-		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("repository=%s", repository))
+		diagnostics = append(diagnostics, fmt.Sprintf("repository=%s", repository))
 	}
-	if status.Base != "" {
-		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("base=%s", status.Base))
+	if strings.TrimSpace(base) != "" {
+		diagnostics = append(diagnostics, fmt.Sprintf("base=%s", strings.TrimSpace(base)))
 	}
-	if status.Head != "" {
-		status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("head=%s", status.Head))
+	if strings.TrimSpace(head) != "" {
+		diagnostics = append(diagnostics, fmt.Sprintf("head=%s", strings.TrimSpace(head)))
 	}
-	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("draft=%t", status.Draft))
-	status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("command=%s pr create --repo %s --base %s --head %s --title %s --body %s", status.Command, repository, status.Base, status.Head, maskCommandValue(status.Title), maskCommandValue(body)))
-	return status
+	diagnostics = append(diagnostics, fmt.Sprintf("draft=%t", draft))
+	diagnostics = append(diagnostics, fmt.Sprintf("command=%s pr create --repo %s --base %s --head %s --title %s --body %s", command, repository, strings.TrimSpace(base), strings.TrimSpace(head), maskCommandValue(strings.TrimSpace(title)), maskCommandValue(body)))
+	if result.Path != "" {
+		diagnostics = append(diagnostics, "path="+result.Path)
+	}
+	if result.ExitCode != 0 {
+		diagnostics = append(diagnostics, fmt.Sprintf("exit-code=%d", result.ExitCode))
+	}
+	return diagnostics
 }
 
 func normalizeUser(raw ghIssueUser) model.User {
@@ -2411,6 +2360,38 @@ func pullRequestNumberFromURL(value string) int {
 	}
 
 	return number
+}
+
+func pullRequestNumberForRepository(value string, repository string, expectedHost string) (int, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") ||
+		!strings.EqualFold(parsed.Hostname(), firstNonEmpty(strings.TrimSpace(expectedHost), "github.com")) {
+		return 0, false
+	}
+	repositoryParts := strings.Split(strings.Trim(strings.TrimSpace(repository), "/"), "/")
+	pathParts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(repositoryParts) != 2 || len(pathParts) != 4 ||
+		!strings.EqualFold(pathParts[0], repositoryParts[0]) ||
+		!strings.EqualFold(pathParts[1], repositoryParts[1]) ||
+		pathParts[2] != "pull" {
+		return 0, false
+	}
+	number, err := strconv.Atoi(pathParts[3])
+	if err != nil || number <= 0 {
+		return 0, false
+	}
+	return number, true
+}
+
+func githubWebHost(baseURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsed.Hostname() == "" {
+		return "github.com"
+	}
+	if strings.EqualFold(parsed.Hostname(), "api.github.com") {
+		return "github.com"
+	}
+	return parsed.Hostname()
 }
 
 func maskCommandValue(value string) string {
