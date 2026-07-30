@@ -1760,12 +1760,20 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 			state.tracker.fail(name, "Исполнительная директива не согласована со схемой структурированного вывода.", fmt.Errorf("previous review remarks require structured output field %q", "remarks"), "review_remarks_field_not_allowed", false, true)
 			return fmt.Errorf("previous review remarks require structured output field %q", "remarks")
 		}
-		payload, err := json.Marshal(canonicalReviewRemarks(reviewRemarks))
+		canonicalRemarks := canonicalReviewRemarks(reviewRemarks)
+		for index, remark := range canonicalRemarks {
+			if strings.TrimSpace(remark.ID) == "" {
+				err := fmt.Errorf("review remark %d has no uniquely resolvable response identifier", index)
+				state.tracker.fail(name, "Замечания ревизии не включены в исполнительную директиву.", err, "review_remarks_identifier_unavailable", false, true)
+				return err
+			}
+		}
+		payload, err := json.Marshal(canonicalRemarks)
 		if err != nil {
 			state.tracker.fail(name, "Замечания ревизии не включены в исполнительную директиву.", err, "review_remarks_not_encoded", false, true)
 			return err
 		}
-		prompt = joinExecutionSummaries(prompt, "Use the canonical review remarks below as execution context. Return new findings with a new id. When a finding continues or reopens an existing remark, preserve its external_id and thread_id in that remarks element. Do not return review_responses unless that field is explicitly allowed by the structured output schema. When review_responses is allowed, preserve ExternalID, ReplyToID and Type as remark_id, thread_id and type. For type inline, provide thread_id; for type comment, publish a new related comment; for type local, do not publish an external response.", string(payload))
+		prompt = joinExecutionSummaries(prompt, "Используй канонические замечания ревизии ниже как контекст исполнения. Для каждого ответа в review_responses.remark_id возвращай устойчивый идентификатор из поля id. Для нового замечания возвращай новый id. Если замечание продолжает или повторно открывает существующее, сохраняй его external_id и thread_id в элементе remarks. Не возвращай review_responses, если это поле явно не разрешено схемой структурированного вывода. Для inline указывай thread_id; для comment публикуется новый связанный общий комментарий; для local внешний ответ не публикуется.", string(payload))
 	}
 	writeOperationData(state, operation.Out, "prompt", prompt)
 	state.tracker.completeIO(name, operationIOSummary(operation.In, map[string]string{
@@ -1779,9 +1787,15 @@ func (e builtinOperationExecutor) buildPrompt(state *operationExecution, operati
 // canonicalReviewRemarks переводит поля интеграционного замечания в
 // словарь структурированного вывода до передачи данных исполнителю.
 func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.StructuredRemark {
+	index := newReviewRemarkIndex(reviewRemarks)
 	remarks := make([]model.StructuredRemark, 0, len(reviewRemarks))
-	for _, remark := range reviewRemarks {
+	for remarkIndex, remark := range reviewRemarks {
+		id := ""
+		if remarkIndex < len(index.responseIDs) {
+			id = index.responseIDs[remarkIndex].id
+		}
 		remarks = append(remarks, model.StructuredRemark{
+			ID:         id,
 			ExternalID: strings.TrimSpace(remark.ExternalID),
 			ThreadID:   strings.TrimSpace(remark.ReplyToID),
 			Status:     strings.TrimSpace(remark.State),
@@ -1793,6 +1807,82 @@ func canonicalReviewRemarks(reviewRemarks []integration.ReviewRemark) []model.St
 		})
 	}
 	return remarks
+}
+
+// reviewRemarkResponseID выбирает идентификатор, который исполнитель должен
+// вернуть в review_responses.remark_id. Проектное имя используется только
+// когда индекс однозначно разрешает его в это же каноническое замечание.
+func reviewRemarkResponseID(remark integration.ReviewRemark, index reviewRemarkIndex) string {
+	projectID := reviewRemarkProjectID(remark.Body)
+	if projectID != "" && !index.hasAmbiguous(projectID) {
+		if resolved, ok := index.resolve(projectID); ok && sameReviewRemark(resolved, remark) {
+			return projectID
+		}
+	}
+
+	// При коллизии проектных имён передаём отдельную ссылку на внешнее
+	// замечание. Она сохраняет возможность безопасного разрешения ответа.
+	if externalID := strings.TrimSpace(remark.ExternalID); externalID != "" {
+		stableID := "remark-ref:" + externalID
+		if reviewRemarkResponseIDAvailable(stableID, remark, index) {
+			return stableID
+		}
+		if resolved, ok := index.resolve(externalID); ok && sameReviewRemark(resolved, remark) {
+			return externalID
+		}
+		// При повторяющемся внешнем идентификаторе выдаём суффиксированную
+		// ссылку, которая регистрируется как отдельный устойчивый идентификатор.
+		// Кандидаты могут конфликтовать с любым каноническим замечанием,
+		// а не только с повтором этого external_id.
+		maxAttempts := index.remarkCount + 1
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			stableID := fmt.Sprintf("remark-ref:%s#%d", externalID, attempt)
+			if reviewRemarkResponseIDAvailable(stableID, remark, index) {
+				return stableID
+			}
+		}
+	}
+	return ""
+}
+
+func reviewRemarkResponseIDAvailable(id string, remark integration.ReviewRemark, index reviewRemarkIndex) bool {
+	if strings.HasPrefix(id, "remark-ref:") && strings.Contains(id, "#") {
+		base := strings.TrimPrefix(id, "remark-ref:")
+		if separator := strings.LastIndexByte(base, '#'); separator > 0 {
+			if _, err := strconv.Atoi(base[separator+1:]); err != nil || len(base[separator+1:]) == 0 {
+				return false
+			}
+			baseExternalID := base[:separator]
+			if len(index.external[baseExternalID]) == 0 {
+				return false
+			}
+		}
+	}
+	for _, entry := range index.responseIDs {
+		if entry.id == id {
+			return false
+		}
+	}
+	for _, candidate := range index.external[id] {
+		if !sameReviewRemark(candidate, remark) {
+			return false
+		}
+	}
+	for _, candidate := range index.project[id] {
+		if !sameReviewRemark(candidate, remark) {
+			return false
+		}
+	}
+	stableMatches := index.stableMatches(id)
+	if len(stableMatches) == 0 {
+		stableMatches = index.stableReserved[id]
+	}
+	for _, candidate := range stableMatches {
+		if !sameReviewRemark(candidate, remark) {
+			return false
+		}
+	}
+	return true
 }
 
 func (e builtinOperationExecutor) launchSynthesis(ctx context.Context, state *operationExecution, operation OperationSpec, name string) error {

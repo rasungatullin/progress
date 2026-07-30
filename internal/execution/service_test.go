@@ -2123,10 +2123,11 @@ func TestPublishReviewResponsesFillsOnlyActionData(t *testing.T) {
 					Number:     17,
 				}},
 			}},
-			"profile":    model.Profile{Name: "coder"},
-			"allocation": model.Allocation{Model: "gpt-5"},
-			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
-			"result":     model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"profile":        model.Profile{Name: "coder"},
+			"allocation":     model.Allocation{Model: "gpt-5"},
+			"workplace":      model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":         model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-1", ReplyToID: "thread-1"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
 				ThreadID: "thread-1",
@@ -2192,8 +2193,9 @@ func TestPublishReviewResponsesSupportsCommentAndInlineRemarks(t *testing.T) {
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
 		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-			"result":     model.LaunchResult{Status: "completed"},
+			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":         model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-3", Type: "comment", URL: "https://example.test/comment"}, {ExternalID: "remark-1", ReplyToID: "thread-1"}, {ExternalID: "remark-2", ReplyToID: "thread-2"}, {ExternalID: "local-1", Type: "local"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
 				{RemarkID: "remark-3", Type: "comment", Status: "fixed", Summary: "Ответ на общий комментарий."},
 				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
@@ -2236,8 +2238,9 @@ func TestPublishReviewResponsesRestoresKindFromCanonicalRemark(t *testing.T) {
 			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
 			"result":     model.LaunchResult{Status: "completed"},
 			"review_remarks": []integration.ReviewRemark{{
-				ExternalID: "remark-3",
-				Type:       "comment",
+				ExternalID: "comment-3",
+				Body:       "Идентификатор: remark-3\nОбщий комментарий.",
+				URL:        "https://example.test/comment",
 			}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-3",
@@ -2258,6 +2261,403 @@ func TestPublishReviewResponsesRestoresKindFromCanonicalRemark(t *testing.T) {
 	}
 	if len(calls) != 1 || calls[0].Operation != "create" || calls[0].ThreadID != "" {
 		t.Fatalf("canonical comment kind must select explicit create policy: %#v", calls)
+	}
+}
+
+func TestReviewResponsesResolveProjectRemarkID(t *testing.T) {
+	t.Parallel()
+
+	responses := reviewResponsesFromOutput(&model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+		{RemarkID: "remark-4", Status: "resolved", Summary: "Исправлено."},
+		{RemarkID: "remark-5", Status: "resolved", Summary: "Исправлено."},
+	}}, []integration.ReviewRemark{
+		{ExternalID: "comment-4", Body: "Идентификатор: remark-4\nОбщий комментарий.", URL: "https://example.test/comment"},
+		{ExternalID: "comment-5", Body: "Идентификатор: remark-5\nПострочное замечание.", ReplyToID: "thread-5"},
+	})
+
+	if len(responses) != 2 || responses[0].Type != "comment" || responses[0].ThreadID != "" || responses[1].Type != "inline" || responses[1].ThreadID != "thread-5" {
+		t.Fatalf("project identifiers must restore canonical response kinds: %#v", responses)
+	}
+	if err := validateReviewResponses(responses); err != nil {
+		t.Fatalf("resolved project identifiers must validate: %v", err)
+	}
+}
+
+func TestCanonicalReviewRemarksUseUniqueResponseIDs(t *testing.T) {
+	t.Parallel()
+
+	remarks := canonicalReviewRemarks([]integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание."},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание."},
+		{ExternalID: "comment-3", Body: "Идентификатор: remark-5\nОднозначное замечание."},
+	})
+
+	if len(remarks) != 3 || remarks[0].ID != "remark-ref:comment-1" || remarks[1].ID != "remark-ref:comment-2" || remarks[2].ID != "remark-5" {
+		t.Fatalf("canonical remarks must contain unique stable response identifiers: %#v", remarks)
+	}
+}
+
+func TestCanonicalReviewRemarksAvoidExternalProjectIDCollision(t *testing.T) {
+	t.Parallel()
+
+	canonical := []integration.ReviewRemark{
+		{ExternalID: "remark-4", Body: "Обычное замечание без проектного идентификатора."},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nПострочное замечание.", ReplyToID: "thread-2"},
+	}
+	remarks := canonicalReviewRemarks(canonical)
+	if len(remarks) != 2 || remarks[0].ID != "remark-ref:remark-4" || remarks[1].ID != "remark-ref:comment-2" {
+		t.Fatalf("canonical remarks must avoid external/project identifier collisions: %#v", remarks)
+	}
+	for _, remark := range remarks {
+		if _, ok := newReviewRemarkIndex(canonical).resolve(remark.ID); !ok {
+			t.Fatalf("canonical response identifier must resolve uniquely: %#v", remark)
+		}
+	}
+}
+
+func TestCanonicalReviewRemarksAvoidStableExternalIDCollision(t *testing.T) {
+	t.Parallel()
+
+	canonical := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Обычное замечание без проектного идентификатора."},
+		{ExternalID: "remark-ref:comment-1", Body: "Другое замечание без проектного идентификатора."},
+	}
+	remarks := canonicalReviewRemarks(canonical)
+	if len(remarks) != 2 || remarks[0].ID != "comment-1" || remarks[1].ID != "remark-ref:remark-ref:comment-1" {
+		t.Fatalf("canonical response identifiers must avoid stable/external collisions: %#v", remarks)
+	}
+	for i, remark := range remarks {
+		resolved, ok := newReviewRemarkIndex(canonical).resolve(remark.ID)
+		if !ok || !sameReviewRemark(resolved, canonical[i]) {
+			t.Fatalf("canonical response identifier must resolve to its remark: %#v", remark)
+		}
+	}
+}
+
+func TestCanonicalReviewRemarksAvoidSequentialStableExternalIDCollision(t *testing.T) {
+	t.Parallel()
+
+	canonical := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Первое замечание."},
+		{ExternalID: "remark-ref:comment-1", Body: "Второе замечание."},
+		{ExternalID: "remark-ref:remark-ref:comment-1", Body: "Третье замечание."},
+	}
+	remarks := canonicalReviewRemarks(canonical)
+	if len(remarks) != 3 || remarks[0].ID != "comment-1" || remarks[1].ID != "remark-ref:remark-ref:comment-1#1" || remarks[2].ID != "remark-ref:remark-ref:remark-ref:comment-1" {
+		t.Fatalf("canonical response identifiers must avoid sequential collisions: %#v", remarks)
+	}
+	index := newReviewRemarkIndex(canonical)
+	for i, remark := range remarks {
+		resolved, ok := index.resolve(remark.ID)
+		if !ok || !sameReviewRemark(resolved, canonical[i]) {
+			t.Fatalf("canonical response identifier must resolve to its remark: %#v", remark)
+		}
+	}
+}
+
+func TestCanonicalReviewRemarksRejectRepeatedExternalID(t *testing.T) {
+	t.Parallel()
+
+	remarks := canonicalReviewRemarks([]integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Первое замечание."},
+		{ExternalID: "comment-1", Body: "Второе замечание."},
+	})
+	if len(remarks) != 2 || remarks[0].ID != "remark-ref:comment-1#1" || remarks[1].ID != "remark-ref:comment-1#2" {
+		t.Fatalf("repeated external identifiers must produce unique stable response targets: %#v", remarks)
+	}
+	index := newReviewRemarkIndex([]integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Первое замечание."},
+		{ExternalID: "comment-1", Body: "Второе замечание."},
+	})
+	for i, remark := range remarks {
+		resolved, ok := index.resolve(remark.ID)
+		if !ok || !sameReviewRemark(resolved, index.responseIDs[i].remark) {
+			t.Fatalf("stable response identifier must resolve to its remark: %#v", remark)
+		}
+	}
+}
+
+func TestCanonicalReviewRemarksRejectDuplicateRemarksWithoutSharedResponseID(t *testing.T) {
+	t.Parallel()
+
+	canonical := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Одинаковое замечание."},
+		{ExternalID: "comment-1", Body: "Одинаковое замечание."},
+	}
+	remarks := canonicalReviewRemarks(canonical)
+	if len(remarks) != 2 || remarks[0].ID == "" || remarks[0].ID == remarks[1].ID {
+		t.Fatalf("duplicate canonical remarks must receive distinct response identifiers: %#v", remarks)
+	}
+}
+
+func TestReviewResponsesRejectUnknownLocalTarget(t *testing.T) {
+	t.Parallel()
+
+	responses := []model.StructuredResponse{{
+		RemarkID: "local-unknown", Type: "local", Status: "fixed", Summary: "Не публиковать.",
+	}}
+	if err := validateReviewResponseTargets(responses, nil, nil); err == nil || !strings.Contains(err.Error(), "canonical remark is unknown") {
+		t.Fatalf("unknown local target must be rejected diagnostically: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectStableExternalIDCollision(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Первое замечание."},
+		{ExternalID: "remark-ref:comment-1", Body: "Второе замечание."},
+	}
+	responses := []model.StructuredResponse{{
+		RemarkID: "remark-ref:comment-1",
+		Type:     "comment",
+		Status:   "resolved",
+		Summary:  "Не публиковать.",
+	}}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("stable/external identifier collision must be rejected diagnostically: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectNeverIssuedStableRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{ExternalID: "comment-1", Type: "comment"}}
+	responses := []model.StructuredResponse{
+		{RemarkID: "remark-ref:comment-1#999", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+		{RemarkID: "remark-ref:comment-1#", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+	}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil {
+		t.Fatal("never-issued stable identifiers must be rejected")
+	}
+}
+
+func TestReviewResponsesRejectNeverIssuedBaseStableRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{
+		ExternalID: "comment-1",
+		Body:       "Идентификатор: remark-4\nПострочное замечание.",
+		ReplyToID:  "thread-4",
+	}}
+	responses := []model.StructuredResponse{{
+		RemarkID: "remark-ref:comment-1",
+		Type:     "inline",
+		ThreadID: "thread-4",
+		Status:   "resolved",
+		Summary:  "Не публиковать.",
+	}}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil {
+		t.Fatal("base stable identifier not issued by canonical remarks must be rejected")
+	}
+}
+
+func TestReviewResponsesRejectAliasForAmbiguousAliasTarget(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-2\nПервое замечание."},
+		{ExternalID: "remark-2", Body: "Идентификатор: remark-3\nВторое замечание."},
+	}
+	output := &model.StructuredOutput{
+		Remarks: []model.StructuredRemark{{ID: "remark-alias", ExternalID: "remark-2"}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-alias", Type: "comment", Status: "resolved", Summary: "Не публиковать.",
+		}},
+	}
+	responses := reviewResponsesFromOutput(output, remarks)
+	if err := validateReviewResponseTargets(responses, remarks, output); err == nil || !strings.Contains(err.Error(), "remark-alias") {
+		t.Fatalf("alias with an ambiguous target must be rejected diagnostically: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectAmbiguousOrUnknownProjectRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание.", URL: "https://example.test/2"},
+	}
+	responses := reviewResponsesFromOutput(&model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+		{RemarkID: "remark-4", Status: "resolved", Summary: "Не публиковать."},
+		{RemarkID: "remark-unknown", Status: "resolved", Summary: "Не публиковать."},
+	}}, remarks)
+
+	if err := validateReviewResponses(responses); err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "remark-unknown") {
+		t.Fatalf("ambiguous and unknown project identifiers must be rejected diagnostically: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectExplicitTypeForAmbiguousOrUnknownRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание.", URL: "https://example.test/2"},
+	}
+	responses := []model.StructuredResponse{
+		{RemarkID: "remark-4", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+		{RemarkID: "remark-unknown", Type: "inline", ThreadID: "thread-unknown", Status: "resolved", Summary: "Не публиковать."},
+	}
+
+	err := validateReviewResponseTargets(responses, remarks, nil)
+	if err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "remark-unknown") {
+		t.Fatalf("explicit response types must not bypass target validation: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectExplicitTypeForUnknownCanonicalKind(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{{ExternalID: "comment-1", Body: "Каноническое замечание без вида."}}
+	responses := []model.StructuredResponse{{RemarkID: "comment-1", Type: "comment", Status: "resolved", Summary: "Не публиковать."}}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil || !strings.Contains(err.Error(), "unknown response type") {
+		t.Fatalf("explicit type must not bypass unknown canonical kind: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectConflictingOrRepeatedAliases(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nКаноническое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-5\nДругое замечание.", URL: "https://example.test/2"},
+	}
+	output := &model.StructuredOutput{Remarks: []model.StructuredRemark{
+		{ID: "remark-4", ExternalID: "comment-2"},
+		{ID: "remark-6", ExternalID: "comment-1"},
+		{ID: "remark-6", ExternalID: "comment-2"},
+	}, ReviewResponses: []model.StructuredResponse{
+		{RemarkID: "remark-4", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+		{RemarkID: "remark-6", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+	}}
+
+	responses := reviewResponsesFromOutput(output, remarks)
+	err := validateReviewResponseTargets(responses, remarks, output)
+	if err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "remark-6") {
+		t.Fatalf("conflicting and repeated aliases must be rejected diagnostically: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectAliasForAmbiguousProjectRemarkID(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание.", URL: "https://example.test/2"},
+	}
+	output := &model.StructuredOutput{
+		Remarks: []model.StructuredRemark{{ID: "remark-4", ExternalID: "comment-1"}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-4",
+			Type:     "comment",
+			Status:   "resolved",
+			Summary:  "Не публиковать.",
+		}},
+	}
+
+	responses := reviewResponsesFromOutput(output, remarks)
+	err := validateReviewResponseTargets(responses, remarks, output)
+	if err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "conflicting or ambiguous") {
+		t.Fatalf("alias must not resolve an ambiguous project identifier: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectAliasForExternalProjectIDCollision(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "remark-4", Body: "Идентификатор: remark-5\nВнешний идентификатор."},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nПроектное замечание.", URL: "https://example.test/2"},
+	}
+	output := &model.StructuredOutput{
+		Remarks: []model.StructuredRemark{{ID: "remark-4", ExternalID: "remark-4"}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-4",
+			Type:     "comment",
+			Status:   "resolved",
+			Summary:  "Не публиковать.",
+		}},
+	}
+
+	responses := reviewResponsesFromOutput(output, remarks)
+	err := validateReviewResponseTargets(responses, remarks, output)
+	if err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "conflicting or ambiguous") {
+		t.Fatalf("alias must not resolve an external/project identifier collision: %v", err)
+	}
+}
+
+func TestReviewResponsesRejectAliasForAmbiguousExternalTarget(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nОбычное замечание.", URL: "https://example.test/1"},
+		{ExternalID: "remark-ref:comment-1", Body: "Идентификатор: remark-5\nДругое замечание.", URL: "https://example.test/2"},
+	}
+	output := &model.StructuredOutput{
+		Remarks: []model.StructuredRemark{{ID: "remark-alias", ExternalID: "remark-ref:comment-1"}},
+		ReviewResponses: []model.StructuredResponse{{
+			RemarkID: "remark-alias",
+			Type:     "comment",
+			Status:   "resolved",
+			Summary:  "Не публиковать.",
+		}},
+	}
+
+	responses := reviewResponsesFromOutput(output, remarks)
+	err := validateReviewResponseTargets(responses, remarks, output)
+	if err == nil || !strings.Contains(err.Error(), "remark-alias") || !strings.Contains(err.Error(), "conflicting or ambiguous") {
+		t.Fatalf("alias must not resolve an ambiguous external target: %v", err)
+	}
+}
+
+func TestPublishReviewResponsesRejectsUnknownTargetWithEmptyCanonicalRemarks(t *testing.T) {
+	t.Parallel()
+
+	operation := publishReviewResponsesOperationSpec()
+	state := &operationExecution{
+		data: map[string]any{
+			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":     model.LaunchResult{Status: "completed"},
+			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
+				{RemarkID: "remark-unknown-comment", Type: "comment", Status: "resolved", Summary: "Не публиковать."},
+				{RemarkID: "remark-unknown-inline", Type: "inline", ThreadID: "thread-unknown", Status: "resolved", Summary: "Не публиковать."},
+			}},
+		},
+		tracker: newOperationTracker(model.Action{Operations: []model.OperationSpec{operation}}),
+	}
+	var calls []integration.Request
+	service := &Service{logger: log.Default(), integrations: &stubIntegrationExecutor{execute: func(_ context.Context, req integration.Request) (integration.Response, error) {
+		calls = append(calls, req)
+		return integration.Response{Status: "ok"}, nil
+	}}}
+
+	err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses)
+	if err == nil || !strings.Contains(err.Error(), "canonical remark is unknown") {
+		t.Fatalf("unknown targets must fail with a diagnostic: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("unknown targets must not be published externally: %#v", calls)
+	}
+}
+
+func TestReviewResponsesRejectExternalProjectIDCollision(t *testing.T) {
+	t.Parallel()
+
+	remarks := []integration.ReviewRemark{
+		{ExternalID: "remark-4", Body: "Идентификатор: remark-9\nТочное замечание.", URL: "https://example.test/exact"},
+		{ExternalID: "comment-1", Body: "Идентификатор: remark-4\nПервое замечание.", URL: "https://example.test/1"},
+		{ExternalID: "comment-2", Body: "Идентификатор: remark-4\nВторое замечание.", URL: "https://example.test/2"},
+	}
+	responses := reviewResponsesFromOutput(&model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
+		RemarkID: "remark-4", Status: "resolved", Summary: "Исправлено."},
+	}}, remarks)
+
+	if len(responses) != 1 || responses[0].Type != "" {
+		t.Fatalf("colliding identifier must not restore a response kind: %#v", responses)
+	}
+	if err := validateReviewResponseTargets(responses, remarks, nil); err == nil || !strings.Contains(err.Error(), "remark-4") || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("external/project identifier collision must be rejected diagnostically: %v", err)
 	}
 }
 
@@ -2411,8 +2811,9 @@ func TestPublishReviewResponsesCommentIgnoresThreadID(t *testing.T) {
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
 		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-			"result":     model.LaunchResult{Status: "completed"},
+			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":         model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-3", Type: "comment", URL: "https://example.test/comment"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-3",
 				Type:     "comment",
@@ -2496,11 +2897,11 @@ func TestPublishReviewResponsesKeepsExplicitThreadKindWhenRemarkKindIsUnknown(t 
 		return integration.Response{Status: "ok"}, nil
 	}}}
 
-	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err != nil {
-		t.Fatalf("publish review responses: %v", err)
+	if err := (builtinOperationExecutor{service: service}).publishReviewResponses(context.Background(), state, operation, OperationKindPublishReviewResponses); err == nil || !strings.Contains(err.Error(), "unknown response type") {
+		t.Fatalf("unknown canonical response kind must fail diagnostically: %v", err)
 	}
-	if len(calls) != 2 || calls[0].Operation != "reply" || calls[0].ThreadID != "thread-1" || calls[1].Operation != "resolve" {
-		t.Fatalf("explicit thread_id must preserve inline response policy: %#v", calls)
+	if len(calls) != 0 {
+		t.Fatalf("unknown canonical response kind must not be published: %#v", calls)
 	}
 }
 
@@ -2604,8 +3005,9 @@ func TestPublishReviewResponsesKeepsPartialDiagnostics(t *testing.T) {
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
 		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-			"result":     model.LaunchResult{Status: "completed"},
+			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":         model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-3", Type: "comment", URL: "https://example.test/comment"}, {ExternalID: "remark-1", ReplyToID: "thread-1"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{
 				{RemarkID: "remark-3", Type: "comment", Status: "fixed", Summary: "Ответ."},
 				{RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено."},
@@ -2638,8 +3040,9 @@ func TestPublishReviewResponsesDoesNotResolveUnpublishedInlineResponse(t *testin
 	operation := publishReviewResponsesOperationSpec()
 	state := &operationExecution{
 		data: map[string]any{
-			"invocation": model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
-			"result":     model.LaunchResult{Status: "completed"},
+			"invocation":     model.Invocation{Assignment: &ExecutionAssignment{RelatedObjects: []ObjectRef{{Type: "merge-request", Repository: "owner/name", Number: 17}}}},
+			"result":         model.LaunchResult{Status: "completed"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-1", ReplyToID: "thread-1"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1", Type: "inline", ThreadID: "thread-1", Status: "resolved", Summary: "Исправлено.",
 			}}},
@@ -2705,10 +3108,11 @@ func TestPublishReviewResponsesFailureFillsOnlyActionData(t *testing.T) {
 					}},
 				},
 			},
-			"profile":    model.Profile{Name: "coder"},
-			"allocation": model.Allocation{Model: "gpt-5"},
-			"workplace":  model.Workplace{Name: "/tmp/work", Ready: true},
-			"result":     model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"profile":        model.Profile{Name: "coder"},
+			"allocation":     model.Allocation{Model: "gpt-5"},
+			"workplace":      model.Workplace{Name: "/tmp/work", Ready: true},
+			"result":         model.LaunchResult{Status: "completed", Summary: "apply complete"},
+			"review_remarks": []integration.ReviewRemark{{ExternalID: "remark-1", ReplyToID: "thread-1"}},
 			"structured_output": &model.StructuredOutput{ReviewResponses: []model.StructuredResponse{{
 				RemarkID: "remark-1",
 				ThreadID: "thread-1",
@@ -4314,16 +4718,26 @@ func TestServiceExecuteApplyReviewCommentsLoadsRemarksAndPublishesResponses(t *t
 			case "get":
 				return integration.Response{MergeRequest: &integration.MergeRequest{Repository: req.Repository, Number: req.MergeRequestNumber, State: "OPEN", BaseRef: "main", HeadRef: "feature/fixes"}}, nil
 			case "list":
-				return integration.Response{ReviewRemarks: []integration.ReviewRemark{{
-					Repository:         req.Repository,
-					MergeRequestNumber: req.MergeRequestNumber,
-					ExternalID:         "thread-1",
-					ReplyToID:          "thread-1",
-					State:              "unresolved",
-					Body:               "Нужно добавить проверку.",
-					Path:               "internal/execution/service.go",
-					Line:               12,
-				}}}, nil
+				return integration.Response{ReviewRemarks: []integration.ReviewRemark{
+					{
+						Repository:         req.Repository,
+						MergeRequestNumber: req.MergeRequestNumber,
+						ExternalID:         "thread-1",
+						ReplyToID:          "thread-1",
+						State:              "unresolved",
+						Body:               "Нужно добавить проверку.",
+						Path:               "internal/execution/service.go",
+						Line:               12,
+					},
+					{
+						Repository:         req.Repository,
+						MergeRequestNumber: req.MergeRequestNumber,
+						ExternalID:         "thread-2",
+						ReplyToID:          "thread-2",
+						State:              "unresolved",
+						Body:               "Нужно добавить ещё одну проверку.",
+					},
+				}}, nil
 			case "create":
 				return integration.Response{OperationResult: &integration.OperationResult{Status: "ok", URL: "https://github.com/owner/name/pull/17#issuecomment-1"}}, nil
 			case "reply":
